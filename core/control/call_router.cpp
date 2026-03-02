@@ -17,6 +17,11 @@ void CallRouter::set_mode_manager(automation::ModeManager* mode_manager, const s
     manual_gating_policy_ = gating_policy;
 }
 
+CallRouter::ProviderLock CallRouter::get_or_create_provider_lock(const std::string& provider_id) {
+    std::lock_guard<std::mutex> map_lock(provider_locks_mutex_);
+    return provider_locks_.try_emplace(provider_id, std::make_shared<std::mutex>()).first->second;
+}
+
 CallResult CallRouter::execute_call(const CallRequest& request, provider::ProviderRegistry& provider_registry) {
     CallResult result;
     result.success = false;
@@ -92,16 +97,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         return result;
     }
 
-    // Per-provider serialization (v0: prevent concurrent calls to same provider)
-    // Step 1: Safely get reference to provider's mutex (map access must be synchronized)
-    std::mutex* provider_mutex = nullptr;
-    {
-        std::lock_guard<std::mutex> map_lock(map_mutex_);
-        provider_mutex = &provider_locks_[provider_id];  // Creates entry if needed
-    }
-
-    // Step 2: Lock the provider-specific mutex (outside map_mutex_ scope)
-    std::lock_guard<std::mutex> provider_lock(*provider_mutex);
+    // Per-provider serialization (v0): lock-table lookup is synchronized and lock lifetime is explicit.
+    ProviderLock provider_lock_handle = get_or_create_provider_lock(provider_id);
+    std::lock_guard<std::mutex> provider_lock(*provider_lock_handle);
 
     // Forward call to provider
     anolis::deviceprovider::v1::CallResponse call_response;

@@ -57,14 +57,17 @@ public:
     bool validate_call(const CallRequest &request, std::string &error) const;
 
 private:
+    using ProviderLock = std::shared_ptr<std::mutex>;
+
     const registry::DeviceRegistry &registry_;
     state::StateCache &state_cache_;
     automation::ModeManager *mode_manager_ = nullptr;  // optional
     std::string manual_gating_policy_ = "BLOCK";
 
-    // Per-provider mutexes for serialized access (v0: prevent concurrent calls to same provider)
-    std::map<std::string, std::mutex> provider_locks_;
-    std::mutex map_mutex_;  // Protects provider_locks_ map access
+    // Per-provider lock table for serialized access (v0: prevent concurrent calls to same provider).
+    // Callers hold a shared_ptr copy so lock lifetime is independent of lock-table mutation scope.
+    std::map<std::string, ProviderLock> provider_locks_;
+    std::mutex provider_locks_mutex_;
 
     // Validation helpers
     bool validate_device_exists(const std::string &device_handle, std::string &error) const;
@@ -85,6 +88,7 @@ private:
     // Helper: Parse device_handle into provider_id and device_id
     bool parse_device_handle(const std::string &device_handle, std::string &provider_id, std::string &device_id,
                              std::string &error) const;
+    ProviderLock get_or_create_provider_lock(const std::string &provider_id);
 };
 
 }  // namespace control
