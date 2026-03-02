@@ -107,4 +107,3 @@ private:
 
 }  // namespace registry
 }  // namespace anolis
-
