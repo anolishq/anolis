@@ -1,5 +1,4 @@
-#ifndef ANOLIS_CONTROL_CALL_ROUTER_HPP
-#define ANOLIS_CONTROL_CALL_ROUTER_HPP
+#pragma once
 
 #include <map>
 #include <memory>
@@ -94,4 +93,3 @@ private:
 }  // namespace control
 }  // namespace anolis
 
-#endif  // ANOLIS_CONTROL_CALL_ROUTER_HPP

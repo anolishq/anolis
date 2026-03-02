@@ -290,14 +290,6 @@ target_include_directories(anolis-runtime SYSTEM PRIVATE
 
 target_link_libraries(anolis-runtime PRIVATE
     anolis_runtime
-    anolis_provider
-    anolis_registry
-    anolis_state
-    anolis_control
-    anolis_http
-    anolis_proto
-    yaml-cpp::yaml-cpp
-    protobuf::libprotobuf
 )
 anolis_apply_warnings(anolis-runtime)
 

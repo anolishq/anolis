@@ -1,5 +1,4 @@
-#ifndef ANOLIS_REGISTRY_DEVICE_REGISTRY_HPP
-#define ANOLIS_REGISTRY_DEVICE_REGISTRY_HPP
+#pragma once
 
 #include <memory>
 #include <optional>
@@ -109,4 +108,3 @@ private:
 }  // namespace registry
 }  // namespace anolis
 
-#endif  // ANOLIS_REGISTRY_DEVICE_REGISTRY_HPP

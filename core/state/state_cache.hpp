@@ -1,5 +1,4 @@
-#ifndef ANOLIS_STATE_STATE_CACHE_HPP
-#define ANOLIS_STATE_STATE_CACHE_HPP
+#pragma once
 
 #include <atomic>
 #include <chrono>
@@ -158,4 +157,3 @@ private:
 }  // namespace state
 }  // namespace anolis
 
-#endif  // ANOLIS_STATE_STATE_CACHE_HPP

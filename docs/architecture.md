@@ -194,3 +194,15 @@ Future layers plug in via:
 - **Registry**: `get_device()`, `get_all_devices()`
 
 HTTP gateway, Behavior Trees, and CLI will use these APIs only.
+
+## Deferred SDK Layout (L11)
+
+`include/` vs `src/` repository split is intentionally deferred out of Phase 35 to avoid mixing packaging churn with
+runtime correctness hardening.
+
+Entry criteria for that dedicated SDK-surface phase:
+
+1. Public API boundary is explicitly versioned (consumer-facing headers and compatibility policy documented).
+2. Export/install model is defined in CMake (`install(TARGETS ...)`, header install roots, package config strategy).
+3. External consumer use-case is present (at least one out-of-tree build consuming installed headers).
+4. Include path migration plan is prepared with compatibility shims for one transition window.
