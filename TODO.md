@@ -2,6 +2,7 @@
 
 ## CI / Quality
 
+- [ ] Setup precommit hooks for relevant tooling
 - [ ] Add fuzzing targets for ADPP/protocol and runtime config parsing surfaces.
 
 ## Security / Production Hardening
