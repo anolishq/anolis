@@ -265,8 +265,8 @@ bool Runtime::init_http(std::string &error) {
         dependencies.event_emitter = event_emitter_;  // optional: SSE emitter
 #if ANOLIS_ENABLE_AUTOMATION
         dependencies.mode_manager = mode_manager_.get();            // optional: automation mode
-        dependencies.parameter_manager = parameter_manager_.get();   // optional: runtime parameters
-        dependencies.bt_runtime = bt_runtime_.get();                 // optional: automation runtime
+        dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters
+        dependencies.bt_runtime = bt_runtime_.get();                // optional: automation runtime
 #endif
         http_server_ =
             std::make_unique<http::HttpServer>(config_.http, config_.polling.interval_ms, std::move(dependencies));

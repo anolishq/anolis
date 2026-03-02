@@ -59,8 +59,7 @@ struct HttpServerDependencies {
     provider::ProviderRegistry &provider_registry;
 
     HttpServerDependencies(registry::DeviceRegistry &registry_ref, state::StateCache &state_cache_ref,
-                           control::CallRouter &call_router_ref,
-                           provider::ProviderRegistry &provider_registry_ref)
+                           control::CallRouter &call_router_ref, provider::ProviderRegistry &provider_registry_ref)
         : registry(registry_ref),
           state_cache(state_cache_ref),
           call_router(call_router_ref),
@@ -152,7 +151,7 @@ private:
     std::shared_ptr<events::EventEmitter> event_emitter_;
     automation::ModeManager *mode_manager_;  // optional
 #if ANOLIS_ENABLE_AUTOMATION
-    automation::BTRuntime *bt_runtime_;      // optional
+    automation::BTRuntime *bt_runtime_;  // optional
 #endif
 
     // SSE client tracking

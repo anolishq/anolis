@@ -354,8 +354,7 @@ void HttpServer::handle_get_automation_tree(const httplib::Request &, httplib::R
 
     send_json(res, StatusCode::OK, response);
 #else
-    nlohmann::json response =
-        make_error_response(StatusCode::UNAVAILABLE, "Automation layer disabled at build time");
+    nlohmann::json response = make_error_response(StatusCode::UNAVAILABLE, "Automation layer disabled at build time");
     send_json(res, StatusCode::UNAVAILABLE, response);
 #endif
 }
@@ -434,8 +433,7 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
 
     send_json(res, StatusCode::OK, response);
 #else
-    nlohmann::json response =
-        make_error_response(StatusCode::UNAVAILABLE, "Automation layer disabled at build time");
+    nlohmann::json response = make_error_response(StatusCode::UNAVAILABLE, "Automation layer disabled at build time");
     send_json(res, StatusCode::UNAVAILABLE, response);
 #endif
 }
