@@ -97,7 +97,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         return result;
     }
 
-    // Per-provider serialization (v0): lock-table lookup is synchronized and lock lifetime is explicit.
+    // Per-provider serialization: lock-table lookup is synchronized and lock lifetime is explicit.
     ProviderLock provider_lock_handle = get_or_create_provider_lock(provider_id);
     std::lock_guard<std::mutex> provider_lock(*provider_lock_handle);
 

@@ -59,7 +59,7 @@ bool ProviderHandle::start() {
                          << ready_response.diagnostics().at("init_time_ms") << "ms");
         }
     } else {
-        LOG_INFO("[" << process_.provider_id() << "] Provider does not support WaitReady (v0 backward compat)");
+        LOG_INFO("[" << process_.provider_id() << "] Provider does not support WaitReady");
     }
 
     return true;
@@ -85,6 +85,12 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
     }
 
     response = resp.hello();
+    if (response.protocol_version() != "v1") {
+        error_ = "Protocol version mismatch: runtime expects v1, provider reported " +
+                 response.protocol_version();
+        return false;
+    }
+
     return true;
 }
 

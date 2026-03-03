@@ -29,7 +29,7 @@ The automation layer is a **consumer of kernel services**, NOT a replacement for
 | ----------------------------------------- | ---------------------------------------------------------------- |
 | **BT nodes read via StateCache**          | No direct provider access; kernel remains single source of truth |
 | **BT nodes act via CallRouter**           | All device calls go through validated control path               |
-| **No new provider protocol features**     | Automation uses existing ADPP v0 capabilities                    |
+| **No new provider protocol features**     | Automation uses existing ADPP v1 capabilities                    |
 | **No device-specific logic in BT engine** | BT runtime is capability-agnostic                                |
 
 The BT engine sits **above** the kernel, not beneath it.

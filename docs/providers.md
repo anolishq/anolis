@@ -24,13 +24,20 @@ Runtime ────┐
 Runtime ◄───┘
 ```
 
-### Five Operations
+### ADPP Operations
+
+Required for baseline runtime integration:
 
 1. **Hello**: Provider identifies itself
 2. **ListDevices**: Returns device IDs
 3. **DescribeDevice**: Returns capabilities (signals, functions)
 4. **ReadSignals**: Returns current signal values
 5. **Call**: Executes function (e.g., set_relay, move_motor)
+
+Optional but recommended for production providers:
+
+1. **GetHealth**: Reports provider and per-device health
+2. **WaitReady**: Signals provider initialization readiness
 
 See `external/anolis-protocol/spec/device-provider/protocol.proto` for schema.
 
@@ -55,7 +62,7 @@ Key files:
 
 1. **Pick a language**: C++, Rust, Python - anything that can do stdio + protobuf
 2. **Implement framing**: Read/write uint32_le length prefix
-3. **Implement 5 ADPP handlers**: Hello, ListDevices, DescribeDevice, ReadSignals, Call
+3. **Implement ADPP handlers used by runtime**: Hello, ListDevices, DescribeDevice, ReadSignals, Call (plus WaitReady/GetHealth when supported)
 4. **Handle hardware**: Your code, your protocol (Modbus, SPI, etc.)
 
 ### Provider Template (pseudocode)
