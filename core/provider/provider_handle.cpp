@@ -86,8 +86,7 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
 
     response = resp.hello();
     if (response.protocol_version() != "v1") {
-        error_ = "Protocol version mismatch: runtime expects v1, provider reported " +
-                 response.protocol_version();
+        error_ = "Protocol version mismatch: runtime expects v1, provider reported " + response.protocol_version();
         return false;
     }
 
