@@ -23,6 +23,4 @@ devices:
 
 simulation:
   mode: non_interacting
-  noise_enabled: true
-  noise_amplitude: 0.1
   tick_rate_hz: 10
