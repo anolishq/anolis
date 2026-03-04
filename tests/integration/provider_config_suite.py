@@ -27,6 +27,31 @@ def get_fixture_path(filename: str) -> Path:
     return Path(__file__).parent / "fixtures" / filename
 
 
+REMOVED_SIMULATION_KEYS = ("noise_enabled", "noise_amplitude", "update_rate_hz")
+FIXTURE_CONFIGS = ("provider-sim-default.yaml", "provider-minimal.yaml", "provider-multi-tempctl.yaml")
+
+
+def test_fixture_configs_use_supported_simulation_keys(runtime_path: Path, provider_path: Path, port: int) -> None:
+    """Fail fast if fixtures reintroduce removed provider-sim simulation keys."""
+
+    del runtime_path
+    del provider_path
+    del port
+
+    violations: list[str] = []
+    for fixture_name in FIXTURE_CONFIGS:
+        fixture_path = get_fixture_path(fixture_name)
+        assert fixture_path.exists(), f"Fixture config not found: {fixture_path}"
+
+        content = fixture_path.read_text(encoding="utf-8")
+        for key in REMOVED_SIMULATION_KEYS:
+            token = f"{key}:"
+            if token in content:
+                violations.append(f"{fixture_name}: contains removed key simulation.{key}")
+
+    assert not violations, "\n".join(violations)
+
+
 def create_invalid_yaml_config() -> Path:
     """Create a temporary file with invalid YAML syntax."""
     fd, path = tempfile.mkstemp(suffix=".yaml", prefix="invalid-config-")

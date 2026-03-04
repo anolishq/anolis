@@ -11,6 +11,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     http_handlers_test.cpp
     parameter_types_test.cpp
     provider_process_test.cpp
+    provider_handle_test.cpp
     provider_registry_test.cpp
     provider_supervisor_test.cpp
     device_registry_concurrency_test.cpp
@@ -26,6 +27,18 @@ if(ANOLIS_ENABLE_AUTOMATION)
     )
 endif()
 
+add_executable(provider_hello_mismatch_helper
+    helpers/hello_protocol_mismatch_provider.cpp
+)
+target_include_directories(provider_hello_mismatch_helper SYSTEM PRIVATE
+    ${CMAKE_BINARY_DIR}/core
+)
+target_link_libraries(provider_hello_mismatch_helper PRIVATE
+    anolis_proto
+    protobuf::libprotobuf
+)
+anolis_apply_warnings(provider_hello_mismatch_helper)
+
 # Test executable
 add_executable(anolis_unit_tests
     ${ANOLIS_UNIT_TEST_SOURCES}
@@ -38,6 +51,11 @@ target_include_directories(anolis_unit_tests PRIVATE
 target_include_directories(anolis_unit_tests SYSTEM PRIVATE
     ${CMAKE_BINARY_DIR}/core  # Access to generated proto headers
 )
+
+target_compile_definitions(anolis_unit_tests PRIVATE
+    PROVIDER_HELLO_MISMATCH_HELPER_PATH="$<TARGET_FILE:provider_hello_mismatch_helper>"
+)
+add_dependencies(anolis_unit_tests provider_hello_mismatch_helper)
 
 target_link_libraries(anolis_unit_tests PRIVATE
     GTest::gtest

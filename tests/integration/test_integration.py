@@ -140,6 +140,7 @@ def test_provider_supervision_suite(
         provider_config_suite.test_minimal_config,
         provider_config_suite.test_invalid_yaml_handling,
         provider_config_suite.test_unknown_device_type,
+        provider_config_suite.test_fixture_configs_use_supported_simulation_keys,
     ],
 )
 def test_provider_config_suite(runtime_exe: Path, provider_exe: Path, unique_port: int, check) -> None:
