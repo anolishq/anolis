@@ -14,6 +14,7 @@
 #include "provider/provider_handle.hpp"  // Required for instantiation
 #include "provider/provider_supervisor.hpp"
 #include "signal_handler.hpp"
+#include "ownership_validation.hpp"
 
 namespace anolis {
 namespace runtime {
@@ -146,6 +147,14 @@ bool Runtime::init_providers(std::string &error) {
         provider_registry_.add_provider(provider_config.id, provider);
     }
 
+    std::string ownership_error;
+    if (!validate_i2c_ownership_claims(registry_->get_all_devices(), ownership_error)) {
+        LOG_ERROR("[Runtime] " << ownership_error);
+        error = ownership_error;
+        return false;
+    }
+
+    LOG_INFO("[Runtime] Ownership validation passed for discovered I2C devices");
     LOG_INFO("[Runtime] All providers started");
     return true;
 }

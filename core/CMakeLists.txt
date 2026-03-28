@@ -250,6 +250,7 @@ find_package(yaml-cpp CONFIG REQUIRED)
 add_library(anolis_runtime STATIC
     runtime/config.cpp
     runtime/runtime.cpp
+    runtime/ownership_validation.cpp
     runtime/signal_handler.cpp
 )
 
