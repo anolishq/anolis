@@ -128,39 +128,32 @@ Examples:
 
 ## Quick Start
 
-### Setup (First Time)
+### Preset Quickstart
 
 Install host prerequisites (including Ninja and vcpkg) first: [docs/getting-started.md](docs/getting-started.md).
 
+Linux/macOS:
+
 ```bash
-# Clone repositories
 git clone https://github.com/FEASTorg/anolis.git
 cd anolis
-
-# Run setup script
-./scripts/setup.sh      # Linux/macOS
-.\scripts\setup.ps1     # Windows
+git submodule update --init --recursive
+cmake --preset dev-release
+cmake --build --preset dev-release --parallel
+ctest --preset dev-release
+./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
 ```
 
-### Build
+Windows (PowerShell):
 
-```bash
-bash ./scripts/build.sh --preset dev-release   # Linux/macOS
-.\scripts\build.ps1 -Preset dev-windows-release # Windows
-```
-
-### Run
-
-```bash
-./scripts/run.sh        # Linux/macOS
-.\scripts\run.ps1       # Windows
-```
-
-### Test
-
-```bash
-bash ./scripts/test.sh --preset dev-release   # Linux/macOS
-.\scripts\test.ps1 -Preset dev-windows-release # Windows
+```powershell
+git clone https://github.com/FEASTorg/anolis.git
+Set-Location anolis
+git submodule update --init --recursive
+cmake --preset dev-windows-release
+cmake --build --preset dev-windows-release --parallel
+ctest --preset dev-windows-release
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
 ```
 
 ### Validation & Acceptance Testing

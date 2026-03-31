@@ -63,7 +63,10 @@ Old files preserved as:
 
 **To test the new UI:**
 
-1. Start dev environment: `.\scripts\dev.ps1`
+1. Start runtime from repo root:
+   - `cmake --preset dev-windows-release`
+   - `cmake --build --preset dev-windows-release --parallel`
+   - `.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml`
 2. Open browser: <http://localhost:3000>
 3. Verify:
    - Automation Control panel shows mode, parameters, BT

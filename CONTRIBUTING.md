@@ -25,24 +25,26 @@ Thank you for your interest in contributing to Anolis!
    git submodule update --init --recursive
    ```
 
-3. Run the setup script (preset-first):
+3. Configure and build:
 
    ```bash
    # Linux/macOS
-   bash ./scripts/setup.sh --preset dev-release
+   cmake --preset dev-release
+   cmake --build --preset dev-release --parallel
 
    # Windows (PowerShell)
-   .\scripts\setup.ps1 -Preset dev-windows-release
+   cmake --preset dev-windows-release
+   cmake --build --preset dev-windows-release --parallel
    ```
 
 4. Run the tests:
 
    ```bash
    # Linux/macOS
-   bash ./scripts/test.sh --preset dev-release
+   ctest --preset dev-release
 
    # Windows
-   .\scripts\test.ps1 -Preset dev-windows-release
+   ctest --preset dev-windows-release
    ```
 
 ## Development Workflow
@@ -51,31 +53,40 @@ Thank you for your interest in contributing to Anolis!
 
 ```bash
 # Linux/macOS
-bash ./scripts/build.sh --preset dev-release
+cmake --preset dev-release
+cmake --build --preset dev-release --parallel
 
 # Windows
-.\scripts\build.ps1 -Preset dev-windows-release
+cmake --preset dev-windows-release
+cmake --build --preset dev-windows-release --parallel
 
 # Clean build
-bash ./scripts/build.sh --preset dev-release --clean
+# Linux/macOS:
+rm -rf build/dev-release
+cmake --preset dev-release
+cmake --build --preset dev-release --parallel
+# Windows (PowerShell):
+#   Remove-Item -Recurse -Force .\build\dev-windows-release
+#   cmake --preset dev-windows-release
+#   cmake --build --preset dev-windows-release --parallel
 ```
 
 ### Running
 
 ```bash
 # Linux/macOS
-bash ./scripts/run.sh --preset dev-release
+./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
 
 # Windows
-.\scripts\run.ps1 -Preset dev-windows-release
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
 ```
 
 ### Testing
 
 ```bash
 # Run all tests (includes unit + integration)
-bash ./scripts/test.sh --preset dev-release          # Linux/macOS
-.\scripts\test.ps1 -Preset dev-windows-release       # Windows
+ctest --preset dev-release                           # Linux/macOS
+ctest --preset dev-windows-release                   # Windows
 
 # Or run pytest suites directly
 python -m pytest tests/integration/test_integration.py -m "not stress and not slow"
@@ -366,17 +377,20 @@ Use the dedicated `ci-tsan` preset to keep TSAN cache/toolchain isolated.
 
 ```bash
 # Linux/WSL only (uses x64-linux-tsan vcpkg triplet for consistent instrumentation)
-bash ./scripts/build.sh --preset ci-tsan
+cmake --preset ci-tsan
+cmake --build --preset ci-tsan --parallel
 
 # Clean rebuild recommended when switching to/from TSAN
-bash ./scripts/build.sh --preset ci-tsan --clean
+rm -rf build/ci-tsan
+cmake --preset ci-tsan
+cmake --build --preset ci-tsan --parallel
 ```
 
 **Running Tests with TSAN:**
 
 ```bash
 # Run all tests (unit + integration)
-bash ./scripts/test.sh --preset ci-tsan
+ctest --preset ci-tsan
 
 # TSAN is NOT supported on Windows MSVC - use WSL or Linux
 ```
@@ -423,7 +437,6 @@ anolis/
 │   ├── src/            # Main entry point
 │   └── state/          # State cache
 ├── docs/               # Documentation
-├── scripts/            # Build and test scripts
 ├── sdk/                # Language SDKs
 ├── spec/               # Protocol specifications
 └── tools/              # Developer tools
@@ -778,15 +791,17 @@ This prevents false positives from uninstrumented libraries.
    **Linux/macOS:**
 
    ```bash
-   bash ./scripts/build.sh --preset ci-tsan --clean
-   bash ./scripts/test.sh --preset ci-tsan
+   rm -rf build/ci-tsan
+   cmake --preset ci-tsan
+   cmake --build --preset ci-tsan --parallel
+   ctest --preset ci-tsan
    ```
 
    **Windows (via WSL):**
 
    ```powershell
    # From Windows PowerShell - launches WSL
-   wsl bash -c "cd /mnt/d/repos_feast/anolis && bash ./scripts/build.sh --preset ci-tsan --clean && bash ./scripts/test.sh --preset ci-tsan"
+   wsl bash -lc "cd /mnt/d/repos_feast/anolis && rm -rf build/ci-tsan && cmake --preset ci-tsan && cmake --build --preset ci-tsan --parallel && ctest --preset ci-tsan"
    ```
 
    **Manual CMake (Linux/macOS only):**

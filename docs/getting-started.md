@@ -50,25 +50,28 @@ Test-Path "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 
 ## Quick Start (Preset-First)
 
+Linux/macOS:
+
 ```bash
-# Clone
 git clone https://github.com/FEASTorg/anolis.git
 cd anolis
-
-# Pull required protocol submodule
 git submodule update --init --recursive
+cmake --preset dev-release
+cmake --build --preset dev-release --parallel
+ctest --preset dev-release
+./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
+```
 
-# Setup + build
-bash ./scripts/setup.sh --preset dev-release      # Linux/macOS
-# .\scripts\setup.ps1 -Preset dev-windows-release # Windows
+Windows (PowerShell):
 
-# Test
-bash ./scripts/test.sh --preset dev-release       # Linux/macOS
-# .\scripts\test.ps1 -Preset dev-windows-release  # Windows
-
-# Run runtime
-bash ./scripts/run.sh --preset dev-release        # Linux/macOS
-# .\scripts\run.ps1 -Preset dev-windows-release   # Windows
+```powershell
+git clone https://github.com/FEASTorg/anolis.git
+Set-Location anolis
+git submodule update --init --recursive
+cmake --preset dev-windows-release
+cmake --build --preset dev-windows-release --parallel
+ctest --preset dev-windows-release
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
 ```
 
 Use presets directly when needed:

@@ -56,13 +56,14 @@ fi
 echo -e "${GREEN}[OK] Docker Compose available${NC}"
 
 # Check if runtime is built
-RUNTIME_PATH="../../build/core/anolis-runtime"
+RUNTIME_PATH="../../build/dev-release/core/anolis-runtime"
 if [ ! -f "$RUNTIME_PATH" ]; then
     echo -e "${YELLOW}[WARN] Runtime not built at $RUNTIME_PATH${NC}"
     if [ "$SKIP_BUILD" = false ]; then
         echo -e "${CYAN}> Building runtime...${NC}"
         cd ../..
-        ./scripts/build.sh
+        cmake --preset dev-release
+        cmake --build --preset dev-release --parallel
         cd tools/docker
     else
         echo -e "${RED}[FAIL] Runtime not found and --skip-build specified${NC}"
@@ -72,10 +73,10 @@ fi
 echo -e "${GREEN}[OK] Runtime executable found${NC}"
 
 # Check provider-sim
-PROVIDER_PATH="../../../anolis-provider-sim/build/anolis-provider-sim"
+PROVIDER_PATH="../../../anolis-provider-sim/build/dev-release/anolis-provider-sim"
 if [ ! -f "$PROVIDER_PATH" ]; then
     echo -e "${RED}[FAIL] Provider-sim not found at $PROVIDER_PATH${NC}"
-    echo "Run: cd ../anolis-provider-sim && ./scripts/build.sh"
+    echo "Run: cd ../anolis-provider-sim && cmake --preset dev-release && cmake --build --preset dev-release --parallel"
     exit 1
 fi
 echo -e "${GREEN}[OK] Provider-sim found${NC}"
@@ -125,7 +126,7 @@ echo ""
 
 # Start runtime in background
 cd ../..
-./build/core/anolis-runtime --config=./anolis-runtime-telemetry.yaml &
+./build/dev-release/core/anolis-runtime --config=./anolis-runtime-telemetry.yaml &
 RUNTIME_PID=$!
 cd tools/docker
 
