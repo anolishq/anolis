@@ -1,0 +1,17 @@
+provider:
+  name: ezo0
+
+hardware:
+  bus_path: mock://mixed-bus-conflict
+  query_delay_us: 300000
+  timeout_ms: 300
+  retry_count: 2
+
+discovery:
+  mode: manual
+
+devices:
+  - id: ph_conflict
+    type: ph
+    label: Conflict Ownership pH
+    address: 0x63

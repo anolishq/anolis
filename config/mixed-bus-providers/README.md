@@ -1,41 +1,48 @@
-# Mixed-Bus Config Pack
+# Mixed-Bus Validation and Scenario Pack
 
-This directory contains canonical runtime/provider config sets for running `bread0` + `ezo0` together.
+This directory is a validation/scenario pack for `bread0` + `ezo0`.
+It is not the canonical application profile.
+
+Canonical bioreactor runtime profile:
+
+1. `config/bioreactor/anolis-runtime.bioreactor.manual.yaml`
+2. `config/bioreactor/README.md`
 
 ## Runtime Profiles
 
 1. `anolis-runtime.mixed.win.mock.yaml`
-   - Windows local validation without EZO hardware.
+   - Windows mock baseline.
    - Uses `provider-bread.mock.yaml` + `provider-ezo.mock.yaml`.
    - HTTP port `18080`.
    - Expected inventory: 6 devices (`rlht0`, `dcmt0`, `dcmt1`, `ph0`, `do0`, `ec0`).
 
-2. `anolis-runtime.mixed.yaml`
-   - Linux real-hardware validation profile.
+2. `anolis-runtime.mixed.win.mock.conflict.yaml`
+   - Windows mock ownership-conflict negative test.
+   - Uses `provider-bread.conflict.mock.yaml` + `provider-ezo.conflict.mock.yaml`.
+   - Intentionally duplicates ownership of `(bus_path, i2c_address)` at
+     `mock://mixed-bus-conflict`, `0x63`.
+   - Expected result: runtime startup fails fast with duplicate ownership error.
+
+3. `anolis-runtime.mixed.yaml`
+   - Linux hardware validation/support profile.
    - Uses `provider-bread.yaml` + `provider-ezo.yaml`.
-   - Address map aligns with CRUMBS `mixed_bus_lab_validation`: RLHT `0x0A`, DCMT `0x14`, DCMT `0x15`, EZO pH `0x63`, EZO DO `0x61`.
-   - Bosch `0x76`/`0x77` checks from CRUMBS are optional and intentionally outside provider mixed-bus scope.
-   - Requires `anolis-provider-bread` built with `dev-linux-hardware-release`.
-   - Requires `anolis-provider-ezo` built with `dev-linux-hardware-release`.
-   - `provider-bread.yaml` sets `hardware.require_live_session: true` to fail fast on non-hardware bread builds.
-   - Polling interval is tuned to `2500ms` to avoid state-cache overruns with serialized EZO reads.
+   - Address map: RLHT `0x0A`, DCMT `0x14`, DCMT `0x15`, EZO pH `0x63`, EZO DO `0x61`.
+   - Polling interval `2500ms`.
    - HTTP port `8080`.
    - Expected inventory: 5 devices (`rlht0`, `dcmt0`, `dcmt1`, `ph0`, `do0`).
 
 ## Provider Configs
 
-1. `provider-bread.yaml` (BREAD Linux hardware profile, requires live session)
-2. `provider-bread.mock.yaml` (BREAD Windows mock profile)
-3. `provider-ezo.yaml` (EZO Linux hardware profile: `ph0`, `do0`)
-4. `provider-ezo.mock.yaml` (EZO Windows mock profile: `ph0`, `do0`, `ec0`)
+1. `provider-bread.yaml` (Linux hardware support profile)
+2. `provider-ezo.yaml` (Linux hardware support profile)
+3. `provider-bread.mock.yaml` (Windows mock baseline)
+4. `provider-ezo.mock.yaml` (Windows mock baseline)
+5. `provider-bread.conflict.mock.yaml` (Windows mock negative test)
+6. `provider-ezo.conflict.mock.yaml` (Windows mock negative test)
 
-## Run Commands
+## Build Prerequisites (Preset-Based)
 
-Use these exact commands.
-
-## 0) Build Prerequisites (Preset-Based)
-
-Build all three repos before validation so executable paths in the runtime configs exist.
+Build all three repos before validation so runtime command paths exist.
 
 ### Linux/macOS
 
@@ -53,8 +60,6 @@ cmake --preset dev-linux-hardware-release
 cmake --build --preset dev-linux-hardware-release
 ```
 
-Note: in `anolis-provider-ezo`, `dev-linux-hardware-*` are cross-provider naming aliases.
-
 ### Windows (PowerShell)
 
 ```powershell
@@ -71,9 +76,9 @@ cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release
 ```
 
-## A) Windows Mock Validation (PowerShell)
+## A) Windows Mock Baseline Validation
 
-### 1) Start runtime (Terminal A)
+Start runtime:
 
 ```powershell
 Set-Location D:\repos_feast\anolis
@@ -81,7 +86,7 @@ Get-NetTCPConnection -LocalPort 18080 -ErrorAction SilentlyContinue
 .\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\mixed-bus-providers\anolis-runtime.mixed.win.mock.yaml
 ```
 
-### 2) Validate endpoints (Terminal B)
+Validate endpoints:
 
 ```powershell
 $base = 'http://127.0.0.1:18080'
@@ -95,25 +100,37 @@ Expected:
 
 1. Runtime stays up.
 2. `bread0` and `ezo0` are present.
-3. Inventory includes 6 devices (`rlht0`, `dcmt0`, `dcmt1`, `ph0`, `do0`, `ec0`).
+3. Inventory includes 6 devices.
 
-Note:
+## B) Windows Mock Ownership-Conflict Negative Test
 
-1. On Windows mock path, `bread0` may log `no hardware session`; that is expected.
+Run conflict profile:
 
-## B) Linux Hardware Validation
+```powershell
+Set-Location D:\repos_feast\anolis
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\mixed-bus-providers\anolis-runtime.mixed.win.mock.conflict.yaml
+$LASTEXITCODE
+```
 
-This profile is aligned to the current lab hardware map:
-RLHT `0x0A`, DCMT `0x14`, DCMT `0x15`, EZO pH `0x63`, EZO DO `0x61`.
+Expected:
 
-### 1) Start runtime (Terminal A)
+1. Runtime startup fails before steady state.
+2. Error includes:
+   - `I2C ownership validation failed`
+   - `duplicate ownership for bus='mock://mixed-bus-conflict' addr='0x63'`
+   - conflicting owners `bread0/rlht_conflict` and `ezo0/ph_conflict`
+3. Exit code is non-zero.
+
+## C) Linux Hardware Support Validation
+
+Start runtime:
 
 ```bash
 cd /path/to/anolis
 ./build/dev-release/core/anolis-runtime --config ./config/mixed-bus-providers/anolis-runtime.mixed.yaml
 ```
 
-### 2) Validate endpoints (Terminal B)
+Capture validation artifacts:
 
 ```bash
 cd /path/to/anolis
@@ -127,16 +144,5 @@ cd /path/to/anolis
 Expected:
 
 1. Runtime and both providers are `AVAILABLE`.
-2. Inventory includes 5 devices (`rlht0`, `dcmt0`, `dcmt1`, `ph0`, `do0`).
+2. Inventory includes 5 devices.
 3. Script exits `0` and writes artifacts.
-4. Repeated `Poll took longer than interval` warnings should not appear with `interval_ms: 2500`.
-
-If `bread0` fails startup with
-`hardware.require_live_session=true but provider was built without hardware support`,
-rebuild `anolis-provider-bread` with `dev-linux-hardware-release` and rerun.
-
-If runtime fails to spawn `ezo0` due to missing binary path,
-rebuild `anolis-provider-ezo` with `dev-linux-hardware-release`.
-
-If `ezo0` hello times out during startup, the Linux profile uses `hello_timeout_ms: 5000`
-to absorb normal sensor startup latency.

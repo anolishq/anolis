@@ -1,0 +1,21 @@
+provider:
+  name: ezo0
+
+hardware:
+  bus_path: /dev/i2c-1
+  query_delay_us: 300000
+  timeout_ms: 300
+  retry_count: 2
+
+discovery:
+  mode: manual
+
+devices:
+  - id: ph0
+    type: ph
+    label: Reactor pH
+    address: 0x63
+  - id: do0
+    type: do
+    label: Reactor Dissolved Oxygen
+    address: 0x61

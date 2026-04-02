@@ -1,0 +1,18 @@
+provider:
+  name: bread0
+
+hardware:
+  bus_path: mock://mixed-bus-conflict
+  query_delay_us: 10000
+  timeout_ms: 100
+  retry_count: 2
+
+discovery:
+  mode: manual
+  addresses: [0x63]
+
+devices:
+  - id: rlht_conflict
+    type: rlht
+    label: Conflict Ownership RLHT
+    address: 0x63
