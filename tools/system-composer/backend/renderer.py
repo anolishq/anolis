@@ -63,7 +63,7 @@ def render(system: dict, project_name: str) -> dict[str, str]:
     for p in rt.get("providers", []):
         pid = p["id"]
         config_arg = (
-            f"tools/system-composer/systems/{project_name}/providers/{pid}.yaml"
+            f"systems/{project_name}/providers/{pid}.yaml"
         )
         entry: dict = {
             "id": pid,

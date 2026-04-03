@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 
 _CATALOG_PATH = pathlib.Path("tools/system-composer/catalog/providers.json")
-_SYSTEMS_DIR = pathlib.Path("tools/system-composer/systems")
+_SYSTEMS_DIR = pathlib.Path("systems")
 
 _state: dict = {
     "project": None,    # active project name
@@ -293,7 +293,7 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
 
     # Build command
     runtime_exe = str(system["paths"]["runtime_executable"])
-    runtime_config = f"tools/system-composer/systems/{name}/anolis-runtime.yaml"
+    runtime_config = f"systems/{name}/anolis-runtime.yaml"
     cmd = [runtime_exe, "--config", runtime_config]
 
     proc = subprocess.Popen(
@@ -364,7 +364,7 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     log_file = open(log_path, "w", buffering=1, encoding="utf-8")  # noqa: WPS515
 
     runtime_exe = str(system["paths"]["runtime_executable"])
-    runtime_config = f"tools/system-composer/systems/{name}/anolis-runtime.yaml"
+    runtime_config = f"systems/{name}/anolis-runtime.yaml"
     cmd = [runtime_exe, "--config", runtime_config]
 
     proc = subprocess.Popen(

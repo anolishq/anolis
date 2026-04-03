@@ -263,7 +263,8 @@ working/
 *_old/
 
 # System Composer user projects (machine-specific, not committed)
-tools/system-composer/systems/
+systems/
+!systems/.gitkeep
 
 # vcpkg manifest-mode artifacts (machine-local)
 vcpkg_installed/

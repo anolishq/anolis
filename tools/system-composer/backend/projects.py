@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from backend import renderer
 
-SYSTEMS_ROOT = pathlib.Path("tools/system-composer/systems")
+SYSTEMS_ROOT = pathlib.Path("systems")
 TEMPLATES_ROOT = pathlib.Path("tools/system-composer/templates")
 
 NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
