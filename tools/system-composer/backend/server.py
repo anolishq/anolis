@@ -67,6 +67,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._not_found()
         elif path == "/api/status":
             self._status()
+        elif path == "/api/catalog":
+            self._serve_catalog()
+        elif path == "/api/templates":
+            self._serve_templates()
         else:
             self._serve_static(path)
 
@@ -220,6 +224,32 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _status(self) -> None:
         self._json(200, {"version": 1, "active_project": None, "running": False})
+
+    def _serve_catalog(self) -> None:
+        path = pathlib.Path("tools/system-composer/catalog/providers.json")
+        if not path.exists():
+            self._json(404, {"error": "Catalog not found"})
+            return
+        self._json(200, json.loads(path.read_text(encoding="utf-8")))
+
+    def _serve_templates(self) -> None:
+        tpl_root = pathlib.Path("tools/system-composer/templates")
+        if not tpl_root.exists():
+            self._json(200, [])
+            return
+        result = []
+        for d in sorted(tpl_root.iterdir()):
+            if not d.is_dir():
+                continue
+            sj = d / "system.json"
+            if not sj.exists():
+                continue
+            try:
+                data = json.loads(sj.read_text(encoding="utf-8"))
+                result.append({"id": d.name, "meta": data.get("meta", {})})
+            except (json.JSONDecodeError, OSError):
+                pass
+        self._json(200, result)
 
     # ------------------------------------------------------------------
     # Static file serving
