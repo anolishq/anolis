@@ -9,6 +9,7 @@ import * as Automation from "./automation.js";
 import * as DeviceOverview from "./device-overview.js";
 import * as DeviceDetail from "./device-detail.js";
 import * as Telemetry from "./telemetry.js";
+import { CONFIG } from "./config.js";
 
 // DOM elements
 const elements = {
@@ -128,6 +129,15 @@ function handleRouting() {
  * Initialize application
  */
 async function init() {
+  // Allow runtime API base override via ?api= query parameter.
+  // Used by system-composer to point operator-ui at the correct runtime port.
+  const params = new URLSearchParams(window.location.search);
+  const apiOverride = params.get('api');
+  if (apiOverride) {
+    CONFIG.API_BASE = apiOverride;
+    console.log(`[App] API base overridden via URL param: ${CONFIG.API_BASE}`);
+  }
+
   console.log("Anolis Control Dashboard starting...");
 
   // Initialize modules

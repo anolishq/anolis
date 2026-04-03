@@ -13,6 +13,7 @@
 int main(int argc, char **argv) {
     // Parse CLI arguments
     std::string config_path = "anolis-runtime.yaml";  // Default
+    bool check_config_only = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -21,11 +22,15 @@ int main(int argc, char **argv) {
             config_path = argv[++i];
         } else if (arg.substr(0, 9) == "--config=") {
             config_path = arg.substr(9);
+        } else if (arg == "--check-config" && i + 1 < argc) {
+            config_path = argv[++i];
+            check_config_only = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cerr << "Usage: anolis-runtime [OPTIONS]\n\n";
             std::cerr << "Options:\n";
-            std::cerr << "  --config=PATH    Path to config file (default: anolis-runtime.yaml)\n";
-            std::cerr << "  --help, -h       Show this help\n";
+            std::cerr << "  --config=PATH         Path to config file (default: anolis-runtime.yaml)\n";
+            std::cerr << "  --check-config PATH   Validate config file and exit (0=ok, 1=error)\n";
+            std::cerr << "  --help, -h            Show this help\n";
             return 0;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
@@ -42,16 +47,29 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    LOG_INFO("Anolis Core Runtime v0 starting...");
-    LOG_INFO("Loading config: " + config_path);
+    if (!check_config_only) {
+        LOG_INFO("Anolis Core Runtime v0 starting...");
+        LOG_INFO("Loading config: " + config_path);
+    }
 
     // Load configuration
     anolis::runtime::RuntimeConfig config;
     std::string error;
 
     if (!anolis::runtime::load_config(config_path, config, error)) {
-        LOG_ERROR("Failed to load config: " + error);
+        if (check_config_only) {
+            std::cerr << "ERROR: " << error << "\n";
+        } else {
+            LOG_ERROR("Failed to load config: " + error);
+        }
         return 1;
+    }
+
+    if (check_config_only) {
+        std::cout << "Config valid: " << config.runtime.name
+                  << ", " << config.providers.size() << " provider(s)"
+                  << ", port " << config.http.port << "\n";
+        return 0;
     }
 
     // Initialize logger level

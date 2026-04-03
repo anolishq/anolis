@@ -262,5 +262,8 @@ working/
 *-old/
 *_old/
 
+# System Composer user projects (machine-specific, not committed)
+tools/system-composer/systems/
+
 # vcpkg manifest-mode artifacts (machine-local)
 vcpkg_installed/
