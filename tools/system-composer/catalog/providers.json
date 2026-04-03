@@ -33,7 +33,11 @@
       ],
       "path_fields": [
         { "key": "executable", "type": "path", "required": true }
-      ]
+      ],
+      "composer_notes": {
+        "sim_mode": "not_supported_v1",
+        "sim_mode_rationale": "The 'sim' simulation_mode requires an external physics engine (physics_config_path, ambient_temp_c, ambient_signal_path). These are not part of the v1 composer form. Only 'non_interacting' and 'inert' modes are exposed in v1."
+      }
     },
     {
       "kind": "bread",

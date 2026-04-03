@@ -146,6 +146,9 @@ def _hex_to_int(addr) -> int:
 def _render_sim(pdata: dict) -> dict:
     doc: dict = {}
 
+    if "provider_name" in pdata:
+        doc["provider"] = {"name": pdata["provider_name"]}
+
     if "startup_policy" in pdata:
         doc["startup_policy"] = pdata["startup_policy"]
 
