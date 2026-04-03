@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
-# Stub — full content added in Phase 2
-echo "start.sh not yet implemented"
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+python3 tools/system-composer/backend/server.py

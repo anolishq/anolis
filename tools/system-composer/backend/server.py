@@ -1,2 +1,303 @@
-# Stub — full content added in Phase 2
-# Entry point for the system-composer backend HTTP server.
+"""Anolis System Composer — local HTTP backend.
+
+Run from the anolis repo root:
+    python tools/system-composer/backend/server.py
+"""
+import json
+import pathlib
+import sys
+import threading
+import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Add tools/system-composer/ to sys.path so 'backend' is importable as a package.
+_SC_DIR = str(pathlib.Path(__file__).parent.parent)
+if _SC_DIR not in sys.path:
+    sys.path.insert(0, _SC_DIR)
+
+from backend import projects as projects_module  # noqa: E402
+
+HOST = "127.0.0.1"
+PORT = 3002
+FRONTEND_DIR = pathlib.Path("tools/system-composer/frontend")
+
+_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
+
+
+def verify_repo_root() -> None:
+    marker = pathlib.Path("tools/system-composer")
+    if not marker.is_dir():
+        print("ERROR: Must be run from the anolis repo root.", file=sys.stderr)
+        print("  Expected to find: tools/system-composer/", file=sys.stderr)
+        print("  Current CWD: " + str(pathlib.Path.cwd()), file=sys.stderr)
+        sys.exit(1)
+
+
+def _open_browser(url: str) -> None:
+    time.sleep(0.3)
+    webbrowser.open(url)
+
+
+class _Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):  # suppress noisy per-request logs
+        pass
+
+    # ------------------------------------------------------------------
+    # HTTP verb dispatch
+    # ------------------------------------------------------------------
+
+    def do_GET(self) -> None:
+        path = self.path.split("?")[0]
+        if path == "/api/projects":
+            self._list_projects()
+        elif path.startswith("/api/projects/"):
+            name, sub = self._parse_project_path(path)
+            if sub is None:
+                self._get_project(name)
+            else:
+                self._not_found()
+        elif path == "/api/status":
+            self._status()
+        else:
+            self._serve_static(path)
+
+    def do_POST(self) -> None:
+        path = self.path.split("?")[0]
+        if path == "/api/projects":
+            self._create_project()
+        elif path.startswith("/api/projects/"):
+            name, sub = self._parse_project_path(path)
+            if sub == "rename":
+                self._rename_project(name)
+            elif sub == "duplicate":
+                self._duplicate_project(name)
+            else:
+                self._not_found()
+        else:
+            self._not_found()
+
+    def do_PUT(self) -> None:
+        path = self.path.split("?")[0]
+        if path.startswith("/api/projects/"):
+            name, sub = self._parse_project_path(path)
+            if sub is None:
+                self._save_project(name)
+            else:
+                self._not_found()
+        else:
+            self._not_found()
+
+    def do_DELETE(self) -> None:
+        path = self.path.split("?")[0]
+        if path.startswith("/api/projects/"):
+            name, sub = self._parse_project_path(path)
+            if sub is None:
+                self._delete_project(name)
+            else:
+                self._not_found()
+        else:
+            self._not_found()
+
+    # ------------------------------------------------------------------
+    # API handlers
+    # ------------------------------------------------------------------
+
+    def _list_projects(self) -> None:
+        self._json(200, projects_module.list_projects())
+
+    def _create_project(self) -> None:
+        body = self._body_json()
+        if body is None:
+            return
+        name = body.get("name") or ""
+        template = body.get("template") or ""
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        if not template:
+            self._json(400, {"error": "template required"})
+            return
+        try:
+            system = projects_module.create_project_from_template(name, template)
+            self._json(201, system)
+        except FileNotFoundError as e:
+            self._json(404, {"error": str(e)})
+        except ValueError as e:
+            self._json(409, {"error": str(e)})
+
+    def _get_project(self, name: str) -> None:
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        try:
+            self._json(200, projects_module.get_project(name))
+        except FileNotFoundError:
+            self._json(404, {"error": f"Project '{name}' not found"})
+
+    def _save_project(self, name: str) -> None:
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        system = self._body_json()
+        if system is None:
+            return
+        try:
+            projects_module.save_project(name, system)
+            self._json(200, {"ok": True})
+        except Exception as e:
+            self._json(500, {"error": str(e)})
+
+    def _rename_project(self, name: str) -> None:
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        body = self._body_json()
+        if body is None:
+            return
+        new_name = body.get("new_name") or ""
+        err = projects_module.validate_name(new_name)
+        if err:
+            self._json(400, {"error": err or "new_name required"})
+            return
+        if projects_module.is_running(name):
+            self._json(409, {"error": "Cannot rename a running project"})
+            return
+        try:
+            projects_module.rename_project(name, new_name)
+            self._json(200, {"ok": True})
+        except FileNotFoundError:
+            self._json(404, {"error": f"Project '{name}' not found"})
+        except ValueError as e:
+            self._json(409, {"error": str(e)})
+
+    def _duplicate_project(self, name: str) -> None:
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        body = self._body_json()
+        if body is None:
+            return
+        new_name = body.get("new_name") or ""
+        err = projects_module.validate_name(new_name)
+        if err:
+            self._json(400, {"error": err or "new_name required"})
+            return
+        try:
+            system = projects_module.duplicate_project(name, new_name)
+            self._json(201, system)
+        except FileNotFoundError as e:
+            self._json(404, {"error": str(e)})
+        except ValueError as e:
+            self._json(409, {"error": str(e)})
+
+    def _delete_project(self, name: str) -> None:
+        err = projects_module.validate_name(name)
+        if err:
+            self._json(400, {"error": err})
+            return
+        if projects_module.is_running(name):
+            self._json(409, {"error": "Cannot delete a running project"})
+            return
+        try:
+            projects_module.delete_project(name)
+            self._json(200, {"ok": True})
+        except FileNotFoundError:
+            self._json(404, {"error": f"Project '{name}' not found"})
+
+    def _status(self) -> None:
+        self._json(200, {"version": 1, "active_project": None, "running": False})
+
+    # ------------------------------------------------------------------
+    # Static file serving
+    # ------------------------------------------------------------------
+
+    def _serve_static(self, path: str) -> None:
+        if path == "/":
+            path = "/index.html"
+        rel = path.lstrip("/")
+        # Reject path traversal
+        if ".." in rel:
+            self._json(400, {"error": "Bad request"})
+            return
+        file_path = FRONTEND_DIR / rel
+        if not file_path.is_file():
+            self._json(404, {"error": "Not found"})
+            return
+        content_type = _MIME.get(file_path.suffix.lower(), "application/octet-stream")
+        data = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_project_path(path: str):
+        """Return (name, sub) from /api/projects/<name>[/<sub>], sub may be None."""
+        tail = path[len("/api/projects/"):]
+        parts = tail.split("/", 1)
+        name = parts[0]
+        sub = parts[1] if len(parts) > 1 else None
+        return name, sub
+
+    def _body_json(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._json(400, {"error": "Empty body"})
+            return None
+        if length > 1_048_576:  # 1 MiB max
+            self._json(400, {"error": "Request body too large"})
+            return None
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            self._json(400, {"error": "Invalid JSON"})
+            return None
+
+    def _json(self, status: int, data) -> None:
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _not_found(self) -> None:
+        self._json(404, {"error": "Not found"})
+
+
+def main() -> None:
+    verify_repo_root()
+    projects_module.cleanup_stale_running_files()
+    server = HTTPServer((HOST, PORT), _Handler)
+    url = f"http://localhost:{PORT}"
+    print(f"Anolis System Composer is running at {url}")
+    print("Close this window to stop.")
+    threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
+if __name__ == "__main__":
+    main()
