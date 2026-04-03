@@ -56,7 +56,11 @@
       "path_fields": [
         { "key": "executable", "type": "path",   "required": true },
         { "key": "bus_path",   "type": "string", "required": true, "placeholder": "/dev/i2c-1 or mock://name" }
-      ]
+      ],
+      "composer_notes": {
+        "scan_mode": "not_supported_v1",
+        "scan_mode_rationale": "Scan discovery output can vary across runs depending on bus state at startup. The composer requires a stable, committed device list at save-time. Manual address entry is used in v1. A future version may add a scan-then-import flow once scan output is proven stable."
+      }
     },
     {
       "kind": "ezo",

@@ -7,7 +7,9 @@ All public functions are called from server.py HTTP handlers.
 import json
 import pathlib
 import queue
+import socket
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -95,7 +97,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     # Check 1: Runtime binary
     runtime_exe = pathlib.Path(system["paths"]["runtime_executable"])
     _exists_check(checks, "Runtime binary exists", runtime_exe,
-                  hint="See anolis/docs/ for build instructions.")
+                  hint=_build_binary_hint(runtime_exe, kind="runtime", repo="anolis", docs="docs/"))
 
     # Check 2: Provider binaries
     providers = system.get("topology", {}).get("providers", {})
@@ -105,11 +107,16 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         kind_info = catalog.get(kind, {})
         repo = kind_info.get("repo")
         docs = kind_info.get("build_docs")
-        hint = f"See {repo}/{docs}" if repo and docs else None
-        _exists_check(checks, f"Provider {pid} binary exists", exe, hint=hint)
+        _exists_check(checks, f"Provider {pid} binary exists", exe,
+                      hint=_build_binary_hint(exe, kind=kind, repo=repo, docs=docs))
 
     # Check 3: Output paths writable
     checks.append(_check_writable(project_dir))
+
+    # Check 3b: Runtime port in use
+    rt_port = system.get("topology", {}).get("runtime", {}).get("http_port")
+    if rt_port is not None:
+        checks.append(_check_port(rt_port))
 
     # Check 4: System-level validation
     errors = validator.validate_system(system)
@@ -143,6 +150,70 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     return {"ok": ok, "checks": checks}
 
 
+# ---------------------------------------------------------------------------
+# Platform-aware build hints
+# ---------------------------------------------------------------------------
+
+# Preset names per kind, keyed by platform ('win32' or 'other')
+_PRESETS: dict[str, dict[str, str]] = {
+    "win32": {
+        "runtime": "dev-windows-release",
+        "sim":     "dev-windows-release",
+        "bread":   "dev-linux-hardware-release",
+        "ezo":     "dev-linux-hardware-release",
+        "custom":  "dev-release",
+    },
+    "other": {
+        "runtime": "dev-release",
+        "sim":     "dev-release",
+        "bread":   "dev-linux-hardware-release",
+        "ezo":     "dev-linux-hardware-release",
+        "custom":  "dev-release",
+    },
+}
+
+
+def _build_binary_hint(exe: pathlib.Path, kind: str,
+                       repo: str | None, docs: str | None) -> str:
+    """Return an actionable build hint for a missing binary."""
+    platform_key = "win32" if sys.platform == "win32" else "other"
+    preset = _PRESETS.get(platform_key, {}).get(kind, "dev-release")
+
+    # Detect whether the sibling repo directory exists
+    if repo:
+        sibling = pathlib.Path("..") / repo
+        if sibling.is_dir():
+            repo_note = f"Repo '{repo}' found but not built."
+        else:
+            repo_note = f"Repo not found — clone '{repo}' as a sibling of this repo."
+    else:
+        repo_note = ""
+
+    parts = []
+    if repo_note:
+        parts.append(repo_note)
+    if docs and repo:
+        parts.append(f"Build docs: {repo}/{docs}")
+    parts.append(f"CMake preset: {preset}")
+    return "  ".join(parts)
+
+
+def _check_port(port: int) -> dict:
+    """Check whether a TCP port is already occupied."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        in_use = s.connect_ex(("127.0.0.1", port)) == 0
+    if in_use:
+        return {
+            "name": f"Runtime port {port} available",
+            "ok": False,
+            "error": f"Port {port} is already in use.",
+            "hint": "Stop the existing process or change the runtime port in the config.",
+        }
+    return {"name": f"Runtime port {port} available", "ok": True,
+            "error": None, "hint": None}
+
+
 def _exists_check(checks: list, name: str, path: pathlib.Path,
                   hint: str | None = None) -> None:
     exists = path.exists()
@@ -163,7 +234,12 @@ def _check_writable(project_dir: pathlib.Path) -> dict:
         test_file.unlink()
         return {"name": name, "ok": True, "error": None, "hint": None}
     except OSError as exc:
-        return {"name": name, "ok": False, "error": str(exc), "hint": None}
+        return {
+            "name": name,
+            "ok": False,
+            "error": f"{exc} (path: {project_dir})",
+            "hint": "Check directory permissions or available disk space.",
+        }
 
 
 def _check_config_binary(check_name: str, exe: pathlib.Path,
