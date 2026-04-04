@@ -66,8 +66,7 @@ int main(int argc, char **argv) {
     }
 
     if (check_config_only) {
-        std::cout << "Config valid: " << config.runtime.name
-                  << ", " << config.providers.size() << " provider(s)"
+        std::cout << "Config valid: " << config.runtime.name << ", " << config.providers.size() << " provider(s)"
                   << ", port " << config.http.port << "\n";
         return 0;
     }
