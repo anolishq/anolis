@@ -82,3 +82,34 @@ TEST(RuntimeOwnershipValidationTest, RejectsInvalidI2cAddressTagValue) {
     EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
     EXPECT_NE(error.find("invalid tag 'hw.i2c_address'"), std::string::npos);
 }
+
+TEST(RuntimeOwnershipValidationTest, AllowsProviderReplacementWhenOwnershipRemainsUnique) {
+    const std::vector<anolis::registry::RegisteredDevice> current_devices = {
+        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x08"}}),
+        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}})};
+
+    const std::vector<anolis::registry::RegisteredDevice> replacement_devices = {
+        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}}),
+        make_device("ezo", "orp_0", {{"hw.bus_path", "/dev/i2c-2"}, {"hw.i2c_address", "0x62"}})};
+
+    std::string error;
+    EXPECT_TRUE(anolis::runtime::validate_i2c_ownership_claims_after_provider_replacement(
+        current_devices, "ezo", replacement_devices, error));
+    EXPECT_TRUE(error.empty());
+}
+
+TEST(RuntimeOwnershipValidationTest, RejectsProviderReplacementWithDuplicateOwnership) {
+    const std::vector<anolis::registry::RegisteredDevice> current_devices = {
+        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}}),
+        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}})};
+
+    const std::vector<anolis::registry::RegisteredDevice> replacement_devices = {
+        make_device("ezo", "do_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}})};
+
+    std::string error;
+    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims_after_provider_replacement(
+        current_devices, "ezo", replacement_devices, error));
+    EXPECT_NE(error.find("Restart-time ownership validation failed for provider 'ezo'"), std::string::npos);
+    EXPECT_NE(error.find("bread/dcmt_0"), std::string::npos);
+    EXPECT_NE(error.find("ezo/do_0"), std::string::npos);
+}

@@ -475,14 +475,13 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     LOG_INFO("[Runtime] Provider " << provider_id << " process started");
 
-    // Rediscover devices and atomically replace provider-owned device inventory
-    // only after successful discovery.
-    if (!registry_->discover_provider(provider_id, *provider, true)) {
+    std::vector<registry::RegisteredDevice> replacement_devices;
+    if (!registry_->inspect_provider_devices(provider_id, *provider, replacement_devices)) {
         LOG_ERROR("[Runtime] Discovery failed for provider '" << provider_id << "': " << registry_->last_error());
         return false;
     }
 
-    // Check timeout after discover_provider()
+    // Check timeout after device inspection.
     elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - restart_start_time)
             .count();
@@ -491,6 +490,15 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
                                                                       << elapsed_ms << "ms >= " << timeout_ms << "ms)");
         return false;
     }
+
+    std::string ownership_error;
+    if (!validate_i2c_ownership_claims_after_provider_replacement(registry_->get_all_devices(), provider_id,
+                                                                  replacement_devices, ownership_error)) {
+        LOG_ERROR("[Runtime] " << ownership_error);
+        return false;
+    }
+
+    registry_->commit_provider_devices(provider_id, std::move(replacement_devices), true);
 
     // Rebuild poll configs for this provider (Sprint 1.3: reconcile changed capabilities)
     state_cache_->rebuild_poll_configs(provider_id);
