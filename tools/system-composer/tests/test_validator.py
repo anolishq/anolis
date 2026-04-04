@@ -41,6 +41,13 @@ def test_clean_bioreactor_is_valid():
     assert validator.validate_system(system) == []
 
 
+def test_runtime_executable_path_required():
+    system = load_template("sim-quickstart")
+    system["paths"]["runtime_executable"] = ""
+    errors = validator.validate_system(system)
+    assert any("Runtime executable path" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # Duplicate provider IDs
 # ---------------------------------------------------------------------------
@@ -119,6 +126,78 @@ def test_provider_in_topology_missing_from_runtime():
 
 
 # ---------------------------------------------------------------------------
+# Provider path and device checks
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_device_id_within_provider():
+    system = load_template("mixed-bus-mock")
+    dup = dict(system["topology"]["providers"]["bread0"]["devices"][0])
+    system["topology"]["providers"]["bread0"]["devices"].append(dup)
+    errors = validator.validate_system(system)
+    assert any("duplicate device IDs" in e for e in errors), errors
+
+
+def test_bread_provider_requires_bus_path():
+    system = load_template("mixed-bus-mock")
+    system["paths"]["providers"]["bread0"]["bus_path"] = ""
+    errors = validator.validate_system(system)
+    assert any("bus_path" in e for e in errors), errors
+
+
+def test_provider_requires_executable_path():
+    system = load_template("sim-quickstart")
+    system["paths"]["providers"]["sim0"]["executable"] = ""
+    errors = validator.validate_system(system)
+    assert any("executable" in e for e in errors), errors
+
+
+def test_missing_paths_entry_is_rejected():
+    system = load_template("sim-quickstart")
+    del system["paths"]["providers"]["sim0"]
+    errors = validator.validate_system(system)
+    assert any("paths.providers entry" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# Restart policy and automation checks
+# ---------------------------------------------------------------------------
+
+
+def test_restart_policy_backoff_length_must_match_attempts():
+    system = load_template("mixed-bus-mock")
+    rp = system["topology"]["runtime"]["providers"][0]["restart_policy"]
+    rp["max_attempts"] = 3
+    rp["backoff_ms"] = [200, 500]
+    errors = validator.validate_system(system)
+    assert any("backoff_ms length" in e for e in errors), errors
+
+
+def test_restart_policy_backoff_must_be_non_negative_ints():
+    system = load_template("mixed-bus-mock")
+    rp = system["topology"]["runtime"]["providers"][0]["restart_policy"]
+    rp["backoff_ms"] = [200, -1, 1000]
+    errors = validator.validate_system(system)
+    assert any("backoff_ms values" in e for e in errors), errors
+
+
+def test_restart_policy_requires_timeout():
+    system = load_template("mixed-bus-mock")
+    rp = system["topology"]["runtime"]["providers"][0]["restart_policy"]
+    rp["timeout_ms"] = 500
+    errors = validator.validate_system(system)
+    assert any("timeout_ms" in e for e in errors), errors
+
+
+def test_automation_enabled_requires_behavior_tree_path():
+    system = load_template("bioreactor-manual")
+    system["topology"]["runtime"]["automation_enabled"] = True
+    system["topology"]["runtime"]["behavior_tree_path"] = None
+    errors = validator.validate_system(system)
+    assert any("Automation is enabled" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
 # Run standalone
 # ---------------------------------------------------------------------------
 
@@ -127,12 +206,21 @@ if __name__ == "__main__":
         test_clean_sim_is_valid,
         test_clean_mixed_is_valid,
         test_clean_bioreactor_is_valid,
+        test_runtime_executable_path_required,
         test_duplicate_provider_id,
         test_composer_port_conflict,
         test_shared_bus_address_conflict,
         test_same_address_different_bus_no_conflict,
         test_provider_in_runtime_but_missing_from_topology,
         test_provider_in_topology_missing_from_runtime,
+        test_duplicate_device_id_within_provider,
+        test_bread_provider_requires_bus_path,
+        test_provider_requires_executable_path,
+        test_missing_paths_entry_is_rejected,
+        test_restart_policy_backoff_length_must_match_attempts,
+        test_restart_policy_backoff_must_be_non_negative_ints,
+        test_restart_policy_requires_timeout,
+        test_automation_enabled_requires_behavior_tree_path,
     ]
     passed = 0
     for t in tests:

@@ -59,6 +59,16 @@ def test_clean_mixed_bus_mock():
     assert errors == [], f"Expected no errors but got: {errors}"
 
 
+def test_runtime_executable_required():
+    system = _make_system(
+        providers={"sim0": {"kind": "sim"}},
+        runtime_providers=[{"id": "sim0", "kind": "sim"}],
+    )
+    system["paths"]["runtime_executable"] = ""
+    errors = validator.validate_system(system)
+    assert any("Runtime executable path" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # Test: duplicate provider IDs
 # ---------------------------------------------------------------------------
@@ -180,6 +190,65 @@ def test_provider_in_topology_missing_from_runtime():
     assert any("orphan0" in e and "runtime list" in e for e in errors), errors
 
 
+def test_duplicate_device_ids_within_provider():
+    system = _make_system(
+        providers={"sim0": {"kind": "sim", "devices": [{"id": "dev0"}, {"id": "dev0"}]}},
+        runtime_providers=[{"id": "sim0", "kind": "sim"}],
+    )
+    errors = validator.validate_system(system)
+    assert any("duplicate device IDs" in e for e in errors), errors
+
+
+def test_missing_executable_path():
+    system = _make_system(
+        providers={"sim0": {"kind": "sim"}},
+        runtime_providers=[{"id": "sim0", "kind": "sim"}],
+    )
+    system["paths"]["providers"]["sim0"] = {}
+    errors = validator.validate_system(system)
+    assert any("executable" in e for e in errors), errors
+
+
+def test_missing_bus_path_for_hardware_provider():
+    system = _make_system(
+        providers={"bread0": {"kind": "bread", "devices": []}},
+        runtime_providers=[{"id": "bread0", "kind": "bread"}],
+    )
+    system["paths"]["providers"]["bread0"] = {"executable": "..."}
+    errors = validator.validate_system(system)
+    assert any("bus_path" in e for e in errors), errors
+
+
+def test_restart_policy_requires_matching_backoff_length():
+    system = _make_system(
+        providers={"sim0": {"kind": "sim"}},
+        runtime_providers=[
+            {
+                "id": "sim0",
+                "kind": "sim",
+                "restart_policy": {
+                    "enabled": True,
+                    "max_attempts": 3,
+                    "backoff_ms": [100, 200],
+                    "timeout_ms": 30000,
+                },
+            }
+        ],
+    )
+    errors = validator.validate_system(system)
+    assert any("backoff_ms length" in e for e in errors), errors
+
+
+def test_automation_enabled_requires_behavior_tree_path():
+    system = _make_system(
+        providers={"sim0": {"kind": "sim"}},
+        runtime_providers=[{"id": "sim0", "kind": "sim"}],
+    )
+    system["topology"]["runtime"]["automation_enabled"] = True
+    errors = validator.validate_system(system)
+    assert any("Automation is enabled" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # Run directly
 # ---------------------------------------------------------------------------
@@ -188,12 +257,18 @@ if __name__ == "__main__":
     tests = [
         test_clean_sim_quickstart,
         test_clean_mixed_bus_mock,
+        test_runtime_executable_required,
         test_duplicate_provider_ids,
         test_port_3002_collision,
         test_duplicate_i2c_address,
         test_same_address_different_bus_is_ok,
         test_provider_in_runtime_missing_from_topology,
         test_provider_in_topology_missing_from_runtime,
+        test_duplicate_device_ids_within_provider,
+        test_missing_executable_path,
+        test_missing_bus_path_for_hardware_provider,
+        test_restart_policy_requires_matching_backoff_length,
+        test_automation_enabled_requires_behavior_tree_path,
     ]
     passed = 0
     for t in tests:
