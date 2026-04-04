@@ -96,7 +96,11 @@ def render(system: dict, project_name: str) -> dict[str, str]:
     runtime_doc["telemetry"] = {"enabled": rt.get("telemetry_enabled", False)}
 
     # automation
-    runtime_doc["automation"] = {"enabled": rt.get("automation_enabled", False)}
+    bt_path = rt.get("behavior_tree_path")
+    if bt_path:
+        runtime_doc["automation"] = {"enabled": True, "behavior_tree_path": bt_path}
+    else:
+        runtime_doc["automation"] = {"enabled": rt.get("automation_enabled", False)}
 
     # logging
     runtime_doc["logging"] = {"level": rt.get("log_level", "info")}

@@ -104,6 +104,11 @@ export function renderRuntimeForm(container, system, onChanged) {
     [['debug','debug'],['info','info'],['warn','warn'],['error','error']]);
   _checkbox('Telemetry enabled',    () => rt.telemetry_enabled,   v => { rt.telemetry_enabled = v; });
   _checkbox('Automation enabled',   () => rt.automation_enabled,  v => { rt.automation_enabled = v; });
+  _text('Behavior tree path',
+    () => rt.behavior_tree_path ?? '',
+    v  => { rt.behavior_tree_path = v.trim() || null; },
+    { mono: true, placeholder: 'systems/<name>/behaviors/main.xml', note: 'Optional. Author BT XMLs with Groot2. Leave blank to disable automation.' }
+  );
   _text('Runtime executable path',
     () => paths.runtime_executable,
     v  => { paths.runtime_executable = v; },

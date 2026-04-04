@@ -38,8 +38,9 @@
             "startup_timeout_ms":  { "type": "integer", "minimum": 5000 },
             "polling_interval_ms": { "type": "integer", "minimum": 100 },
             "log_level":           { "type": "string", "enum": ["debug", "info", "warn", "error"] },
-            "telemetry_enabled":   { "type": "boolean" },
-            "automation_enabled":  { "type": "boolean" },
+            "telemetry_enabled":      { "type": "boolean" },
+            "automation_enabled":     { "type": "boolean" },
+            "behavior_tree_path":     { "type": ["string", "null"], "description": "Path to BT XML relative to repo root. null means no BT. Edit with Groot2." },
             "providers": {
               "type": "array",
               "items": {

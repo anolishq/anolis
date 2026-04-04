@@ -17,6 +17,7 @@
       "log_level": "info",
       "telemetry_enabled": false,
       "automation_enabled": false,
+      "behavior_tree_path": null,
       "providers": [
         {
           "id": "bread0",

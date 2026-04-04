@@ -125,6 +125,24 @@ def test_provider_yaml_has_command_field():
         assert "args" in p, f"Provider entry missing 'args': {p}"
 
 
+def test_behavior_tree_path_renders():
+    """When behavior_tree_path is set, automation section is enabled with the path."""
+    system = load_template("bioreactor-manual")
+    system["topology"]["runtime"]["behavior_tree_path"] = "systems/my-bioreactor/behaviors/main.xml"
+    rt_doc = yaml.safe_load(renderer.render(system, "my-bioreactor")["anolis-runtime.yaml"])
+    assert rt_doc["automation"]["enabled"] is True
+    assert rt_doc["automation"]["behavior_tree_path"] == "systems/my-bioreactor/behaviors/main.xml"
+
+
+def test_no_behavior_tree_path_renders_disabled():
+    """When behavior_tree_path is null/absent, automation section respects automation_enabled."""
+    system = load_template("bioreactor-manual")
+    assert system["topology"]["runtime"].get("behavior_tree_path") is None
+    rt_doc = yaml.safe_load(renderer.render(system, "my-bioreactor")["anolis-runtime.yaml"])
+    assert rt_doc["automation"]["enabled"] is False
+    assert "behavior_tree_path" not in rt_doc["automation"]
+
+
 # ---------------------------------------------------------------------------
 # Run standalone
 # ---------------------------------------------------------------------------
@@ -137,6 +155,8 @@ if __name__ == "__main__":
         test_bioreactor_manual_renders,
         test_runtime_yaml_has_required_sections,
         test_provider_yaml_has_command_field,
+        test_behavior_tree_path_renders,
+        test_no_behavior_tree_path_renders_disabled,
     ]
     passed = 0
     skipped = 0
