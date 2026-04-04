@@ -1,0 +1,78 @@
+# Local Doxygen configuration for Anolis C++ API docs.
+# Invoke from the repo root with:
+#   doxygen docs/Doxyfile
+
+PROJECT_NAME           = "anolis"
+PROJECT_BRIEF          = "Modular control runtime for heterogeneous machines"
+OUTPUT_DIRECTORY       = build/docs/doxygen
+CREATE_SUBDIRS         = NO
+ALLOW_UNICODE_NAMES    = NO
+
+OUTPUT_LANGUAGE        = English
+BRIEF_MEMBER_DESC      = YES
+REPEAT_BRIEF           = NO
+ALWAYS_DETAILED_SEC    = NO
+INLINE_INHERITED_MEMB  = NO
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = .
+SHORT_NAMES            = NO
+
+JAVADOC_AUTOBRIEF      = NO
+MULTILINE_CPP_IS_BRIEF = NO
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 2
+USE_MDFILE_AS_MAINPAGE = README.md
+
+INPUT                  = README.md \
+                         docs/cpp-documentation-standard.md \
+                         core
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.md \
+                         *.hpp \
+                         *.cpp
+RECURSIVE              = YES
+EXCLUDE                =
+EXCLUDE_PATTERNS       = */build/* \
+                         */tests/* \
+                         */docs/assets/*
+EXAMPLE_PATH           =
+IMAGE_PATH             = docs/assets
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_PRIV_VIRTUAL   = NO
+EXTRACT_PACKAGE        = NO
+EXTRACT_STATIC         = NO
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+HIDE_FRIEND_COMPOUNDS  = YES
+HIDE_IN_BODY_DOCS      = YES
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+HTML_COLORSTYLE        = AUTO_LIGHT
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_XML           = NO
+GENERATE_DOCBOOK       = NO
+
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+SORT_BY_SCOPE_NAME     = YES
+
+SHOW_INCLUDE_FILES     = YES
+VERBATIM_HEADERS       = YES
+BUILTIN_STL_SUPPORT    = YES

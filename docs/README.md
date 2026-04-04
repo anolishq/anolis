@@ -16,4 +16,7 @@ Minimal living documentation for Anolis Core.
 - [local-verification.md](local-verification.md) - Focused local verification workflow
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - Development guide and common pitfalls
 
+Local C++ API docs: run `doxygen docs/Doxyfile` from the repo root.
+Generated output goes to `build/docs/doxygen/html/` and remains untracked.
+
 Keep docs short and to-the-point. Update as system evolves.

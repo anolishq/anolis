@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file device_registry.hpp
+ * @brief Live device inventory and immutable capability snapshots.
+ */
+
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -13,90 +18,158 @@
 namespace anolis {
 namespace registry {
 
-// Signal specification for quick lookup
+/**
+ * @brief Flattened signal metadata used for polling and validation.
+ */
 struct SignalSpec {
     std::string signal_id;
     std::string label;
     anolis::deviceprovider::v1::ValueType type;
     bool readable;
     bool writable;
-    bool is_default;  // Polled automatically
+    bool is_default;  // Included in the default periodic poll plan
 };
 
-// Function specification for quick lookup
+/**
+ * @brief Flattened function metadata used for selector resolution and arg validation.
+ */
 struct FunctionSpec {
     uint32_t function_id;
     std::string function_name;
     std::string label;
-    std::vector<anolis::deviceprovider::v1::ArgSpec> args;  // Full ArgSpec for validation
+    std::vector<anolis::deviceprovider::v1::ArgSpec> args;  // Full ArgSpec retained for validation
 };
 
-// Immutable device capabilities (populated from DescribeDevice)
-// Named DeviceCapabilitySet to avoid Windows macro collision with DeviceCapabilities
+/**
+ * @brief Immutable capability snapshot for a discovered device.
+ *
+ * Stores the original protobuf plus lookup maps keyed by signal ID and
+ * function name so validation paths do not need to rescan protobuf fields on
+ * every read or call.
+ *
+ * The distinct name avoids the Windows `DeviceCapabilities` macro collision.
+ */
 struct DeviceCapabilitySet {
-    // Raw protobuf (for serialization/inspection)
     anolis::deviceprovider::v1::Device proto;
-
-    // Lookup maps (for fast validation)
     std::unordered_map<std::string, SignalSpec> signals_by_id;
     std::unordered_map<std::string, FunctionSpec> functions_by_id;
 };
 
-// Registered device (provider + device metadata)
+/**
+ * @brief Registry entry for a single discovered device.
+ */
 struct RegisteredDevice {
     std::string provider_id;  // Configured name (e.g., "sim0")
     std::string device_id;    // Provider-local ID (e.g., "tempctl0")
     DeviceCapabilitySet capabilities;
 
-    // Composite key for global device handle
+    /** @brief Return the canonical `provider_id/device_id` handle. */
     std::string get_handle() const { return provider_id + "/" + device_id; }
 };
 
-// Device Registry - Thread-safe immutable inventory after discovery
 /**
- * Thread Safety:
- * - All read methods use shared_lock (concurrent reads safe)
- * - All write methods use unique_lock (exclusive access)
- * - Returns by-value to prevent dangling pointers after clear_provider_devices()
+ * @brief Live inventory of discovered devices and their immutable capabilities.
  *
- * Migration from raw pointers:
- * - Old: get_device() returned const RegisteredDevice* (could dangle)
- * - New: get_device_copy() returns std::optional<RegisteredDevice> (safe copy)
- * - get_all_devices() now returns vector<RegisteredDevice> by value
+ * DeviceRegistry separates discovery from publication. Provider I/O happens in
+ * `inspect_provider_devices()`, which builds a temporary provider-local
+ * inventory without mutating the published registry. The caller can then make a
+ * single exclusive update via `commit_provider_devices()`.
+ *
+ * Threading:
+ * Published inventory reads and commits are synchronized. Lookup APIs return
+ * copies so callers can safely use results after later registry updates.
+ *
+ * Invariants:
+ * Device handles are globally unique by `provider_id/device_id`.
+ * Capability snapshots are treated as immutable after commit.
  */
 class DeviceRegistry {
 public:
     DeviceRegistry() = default;
 
-    // Discovery without commit: perform ListDevices + DescribeDevice and return
-    // the resulting provider-local inventory.
+    /**
+     * @brief Discover a provider's devices without publishing them.
+     *
+     * Performs `ListDevices` followed by `DescribeDevice` for each device and
+     * builds a temporary inventory in `discovered_devices`.
+     *
+     * Error handling:
+     * Devices that fail `DescribeDevice` or capability parsing are skipped.
+     * Returns false if discovery fails outright or no devices can be
+     * registered.
+     *
+     * @param provider_id Configured provider identifier
+     * @param provider Connected provider handle used for discovery RPCs
+     * @param discovered_devices Output vector populated with discovered devices
+     * @return true if at least one device was successfully discovered
+     */
     bool inspect_provider_devices(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
                                   std::vector<RegisteredDevice> &discovered_devices);
 
-    // Commit a previously discovered provider-local inventory to the live registry.
+    /**
+     * @brief Publish a previously discovered provider inventory.
+     *
+     * When `replace_existing` is true, all existing devices for the provider
+     * are removed before the new inventory is installed and reindexed.
+     *
+     * @param provider_id Configured provider identifier
+     * @param discovered_devices Provider-local inventory to publish
+     * @param replace_existing Whether to replace existing devices for the same provider
+     */
     void commit_provider_devices(const std::string &provider_id, std::vector<RegisteredDevice> discovered_devices,
                                  bool replace_existing = false);
 
-    // Discovery: Perform Hello -> ListDevices -> DescribeDevice for each device
-    // Thread-safe: Uses unique_lock
+    /**
+     * @brief Discover a provider and immediately publish the resulting inventory.
+     *
+     * This is a convenience wrapper around `inspect_provider_devices()` plus
+     * `commit_provider_devices()`.
+     *
+     * @param provider_id Configured provider identifier
+     * @param provider Connected provider handle used for discovery RPCs
+     * @param replace_existing Whether to replace the provider's existing published devices
+     * @return true if discovery produced at least one publishable device
+     */
     bool discover_provider(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
                            bool replace_existing = false);
 
-    // Lookup - Thread-safe by-value returns
-    // Returns copy to prevent dangling pointers when registry is mutated
+    /**
+     * @brief Look up a device by provider ID and device ID.
+     *
+     * Returns a copy so callers remain insulated from later registry mutation.
+     */
     std::optional<RegisteredDevice> get_device_copy(const std::string &provider_id, const std::string &device_id) const;
+
+    /**
+     * @brief Look up a device by its canonical `provider/device` handle.
+     *
+     * Returns a copy so callers can safely use the result after later registry
+     * mutation or provider restart.
+     */
     std::optional<RegisteredDevice> get_device_by_handle_copy(const std::string &handle) const;
 
-    // Iteration - Thread-safe by-value returns
-    // Returns copies to prevent iterator invalidation during concurrent mutations
+    /** @brief Get a snapshot copy of all published devices. */
     std::vector<RegisteredDevice> get_all_devices() const;
+
+    /** @brief Get a snapshot copy of all published devices for one provider. */
     std::vector<RegisteredDevice> get_devices_for_provider(const std::string &provider_id) const;
 
-    // Management - Thread-safe: Uses unique_lock
+    /**
+     * @brief Remove all published devices belonging to one provider.
+     *
+     * The handle index is rebuilt before the method returns.
+     */
     void clear_provider_devices(const std::string &provider_id);
 
-    // Status - Thread-safe
+    /** @brief Get the current published device count. */
     size_t device_count() const;
+
+    /**
+     * @brief Get the most recent discovery or capability-build error string.
+     *
+     * This is primarily intended for diagnostics after a failed discovery
+     * attempt.
+     */
     std::string last_error() const;
 
 private:

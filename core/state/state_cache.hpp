@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file state_cache.hpp
+ * @brief Polled device-state cache used as the runtime read path.
+ */
+
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -24,22 +29,39 @@ class EventEmitter;
 namespace anolis {
 namespace state {
 
-// Cached signal value with metadata
+/**
+ * @brief Cached signal value plus timestamp and provider-reported quality.
+ *
+ * Staleness is derived from both age and quality. A signal can therefore be
+ * stale even when its timestamp is recent if the provider explicitly reports a
+ * degraded quality level.
+ */
 struct CachedSignalValue {
     anolis::deviceprovider::v1::Value value;
     std::chrono::system_clock::time_point timestamp;
     anolis::deviceprovider::v1::SignalValue_Quality quality;
 
-    // Staleness: true if time-based or quality-based staleness detected
-    // Optional 'now' parameter for testing time-based staleness
+    /**
+     * @brief Check whether the cached value should be treated as stale.
+     *
+     * @param timeout Maximum allowed age before time-based staleness applies
+     * @param now Optional current time override, mainly for tests
+     * @return true if quality or age marks the value stale
+     */
     bool is_stale(std::chrono::milliseconds timeout,
                   std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) const;
 
-    // Time since last update
+    /** @brief Return the elapsed time since the cached timestamp. */
     std::chrono::milliseconds age(std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) const;
 };
 
-// Device state snapshot
+/**
+ * @brief Snapshot of one device's cached state.
+ *
+ * `provider_available` reflects whether polling could currently reach the
+ * provider for this device. It does not guarantee that every signal in the
+ * snapshot is present or healthy.
+ */
 struct DeviceState {
     std::string device_handle;                                   // "provider_id/device_id"
     std::unordered_map<std::string, CachedSignalValue> signals;  // signal_id -> value
@@ -47,12 +69,34 @@ struct DeviceState {
     bool provider_available;
 };
 
-// State Cache - Single source of truth for device state
+/**
+ * @brief Background-polled snapshot cache for live device state.
+ *
+ * StateCache builds a poll plan from the registry's default signals, executes
+ * periodic `ReadSignals` calls, and publishes copy-on-read snapshots for HTTP
+ * handlers, automation, and other runtime consumers.
+ *
+ * Threading:
+ * Polling runs on a dedicated background thread when started. Read APIs return
+ * copies owned by the caller so readers are isolated from concurrent cache
+ * updates.
+ *
+ * Invariants:
+ * Only signals marked as default are included in the periodic poll plan.
+ * Successful control calls may trigger a best-effort immediate refresh through
+ * `poll_device_now()`.
+ */
 class StateCache {
 public:
+    /**
+     * @brief Construct the cache against a published device registry.
+     *
+     * @param registry Device registry used to build the poll plan
+     * @param poll_interval_ms Period between poll cycles
+     */
     StateCache(const registry::DeviceRegistry &registry, int poll_interval_ms = 500);
 
-    // Destructor
+    /** @brief Stop polling on destruction if the background thread is active. */
     ~StateCache();
 
     /**
@@ -65,34 +109,69 @@ public:
      */
     void set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter);
 
-    // Initialize the cache (build polling configs from registry)
-    // Must be called before poll_once() or start_polling().
+    /**
+     * @brief Build poll configuration and empty device snapshots from the registry.
+     *
+     * Must be called before `poll_once()` or `start_polling()`.
+     *
+     * @return true if initialization completed
+     */
     bool initialize();
 
-    // Rebuild polling configs for a provider (called after restart/rediscovery)
+    /**
+     * @brief Rebuild cached poll configuration for one provider.
+     *
+     * This is used after provider restart or rediscovery when the published
+     * device set may have changed.
+     *
+     * @param provider_id Provider whose poll plan should be rebuilt
+     */
     void rebuild_poll_configs(const std::string &provider_id);
 
-    // Start polling thread.
-    // Requires initialize() to have completed successfully.
+    /**
+     * @brief Start the background polling thread.
+     *
+     * Requires `initialize()` to have completed successfully. If polling is
+     * already active, the call is ignored.
+     */
     void start_polling(provider::ProviderRegistry &provider_registry);
 
-    // Stop polling
+    /** @brief Stop the background polling thread and wait for it to exit. */
     void stop_polling();
 
-    // Poll once (for testing or manual control).
-    // Requires initialize() to have completed successfully.
+    /**
+     * @brief Execute one best-effort poll pass immediately.
+     *
+     * Requires `initialize()` to have completed successfully.
+     */
     void poll_once(provider::ProviderRegistry &provider_registry);
 
-    // Read API - Thread-safe snapshots
+    /**
+     * @brief Get a snapshot copy of a device's cached state.
+     *
+     * @return Shared pointer to a copied snapshot, or `nullptr` if unknown
+     */
     std::shared_ptr<DeviceState> get_device_state(const std::string &device_handle) const;
+
+    /**
+     * @brief Get a snapshot copy of one cached signal value.
+     *
+     * @return Shared pointer to a copied signal value, or `nullptr` if unknown
+     */
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::shared_ptr<CachedSignalValue> get_signal_value(const std::string &device_handle,
                                                         const std::string &signal_id) const;
 
-    // Immediate poll of specific device (post-call update)
+    /**
+     * @brief Trigger an immediate best-effort refresh for one device.
+     *
+     * This is primarily used after a successful control call so the cache can
+     * observe any resulting state change without waiting for the next full poll
+     * cycle.
+     */
     void poll_device_now(const std::string &device_handle, provider::ProviderRegistry &provider_registry);
 
-    // Status
+    /** @brief Get the number of devices currently represented in the cache. */
     size_t device_count() const;
     const std::string &last_error() const { return error_; }
 

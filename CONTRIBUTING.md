@@ -112,6 +112,7 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 - Prefer documenting contracts, ownership, lifetime, threading, invariants, and error handling over narrating obvious code
 - Put structured API comments on declarations in headers by default; keep `.cpp` documentation selective and focused on tricky behavior
 - Do not add boilerplate comments that only restate symbol names, types, or obvious units
+- Generate local API docs with `doxygen docs/Doxyfile`; output goes to `build/docs/doxygen/html/` and should not be committed
 
 ### Commits
 

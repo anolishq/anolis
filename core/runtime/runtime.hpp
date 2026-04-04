@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file runtime.hpp
+ * @brief Top-level runtime orchestrator for provider startup, polling, HTTP, and supervision.
+ */
+
 #include <atomic>
 #include <memory>
 #include <unordered_map>
@@ -26,30 +31,65 @@ class BTRuntime;
 }  // namespace automation
 namespace runtime {
 
+/**
+ * @brief The top-level Anolis runtime kernel instance.
+ *
+ * Runtime owns the core service graph: provider registry, device registry,
+ * state cache, call router, optional HTTP/automation/telemetry services, and
+ * provider supervision.
+ *
+ * Lifecycle:
+ * `initialize()` constructs services, starts providers, performs discovery,
+ * validates shared-bus ownership, and primes the initial state snapshot.
+ * `run()` then starts background activity and enters the main supervision loop
+ * until `stop()` or an external shutdown signal requests exit.
+ */
 class Runtime {
 public:
+    /**
+     * @brief Construct a runtime from an already-loaded configuration.
+     */
     Runtime(const RuntimeConfig &config);
+
+    /**
+     * @brief Stop owned services on destruction.
+     */
     ~Runtime();
 
-    // Initialize all components (providers, registry, state cache, HTTP)
+    /**
+     * @brief Initialize the runtime and all configured services.
+     *
+     * Error handling:
+     * Returns false on startup timeout, provider launch failure, discovery
+     * failure, ownership-validation failure, automation initialization failure,
+     * or HTTP startup failure.
+     */
     bool initialize(std::string &error);
 
-    // Main runtime loop (blocking)
+    /**
+     * @brief Enter the blocking main loop.
+     *
+     * Starts background polling, optionally starts automation ticking, and then
+     * supervises provider health/restart policy until shutdown is requested.
+     */
     void run();
 
-    // Triggers the main loop to exit
+    /** @brief Request that the main loop exit at its next shutdown check. */
     void stop() { running_ = false; }
 
-    // Shutdown all providers gracefully
+    /**
+     * @brief Stop owned runtime services and clear registered providers.
+     *
+     * Safe to call more than once.
+     */
     void shutdown();
 
-    // Access to core components (for future HTTP/BT layers)
+    // Access to core components (for HTTP and automation integration points)
     registry::DeviceRegistry &get_registry() { return *registry_; }
     state::StateCache &get_state_cache() { return *state_cache_; }
     control::CallRouter &get_call_router() { return *call_router_; }
     events::EventEmitter &get_event_emitter() { return *event_emitter_; }
 
-    // Provider registry access (for HTTP layer)
     provider::ProviderRegistry &get_provider_registry() { return provider_registry_; }
 
 private:
@@ -60,7 +100,13 @@ private:
     bool init_http(std::string &error);
     bool init_telemetry(std::string &error);
 
-    // Provider restart helpers
+    /**
+     * @brief Restart one provider and atomically publish its replacement inventory.
+     *
+     * The existing registry entry is only replaced after the new provider
+     * process starts, discovery succeeds, ownership validation passes, and the
+     * state cache poll plan is rebuilt.
+     */
     bool restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config);
 
     RuntimeConfig config_;

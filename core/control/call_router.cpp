@@ -1,3 +1,12 @@
+/**
+ * @file call_router.cpp
+ * @brief Implementation of the validated device control path.
+ *
+ * CallRouter combines static registry-based validation with dynamic runtime
+ * checks such as mode gating, provider availability, per-provider call
+ * serialization, and best-effort post-call state refresh.
+ */
+
 #include "call_router.hpp"
 
 #include <sstream>
@@ -26,6 +35,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     CallResult result;
     result.success = false;
 
+    // Dynamic gating lives here, not in validate_call(). That keeps the
+    // validation-only path useful for static checks while reserving runtime
+    // mode/provider availability enforcement for real execution.
     // Block control operations in IDLE mode
     if (mode_manager_ != nullptr && mode_manager_->is_idle()) {
         result.error_message = "Control operations blocked in IDLE mode";
@@ -183,6 +195,9 @@ bool CallRouter::resolve_function_spec(const registry::RegisteredDevice& device,
     out_spec = nullptr;
     out_function_name.clear();
 
+    // If the caller supplied a numeric selector, resolve that first and require
+    // any accompanying name to agree. This catches stale UI/client mappings
+    // without forcing all callers to send both selectors.
     if (request.function_id != 0) {
         for (const auto& [name, spec] : device.capabilities.functions_by_id) {
             if (spec.function_id == request.function_id) {

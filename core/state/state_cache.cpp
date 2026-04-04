@@ -1,3 +1,12 @@
+/**
+ * @file state_cache.cpp
+ * @brief Implementation of polling, outage tracking, and change-driven cache updates.
+ *
+ * The cache favors short lock hold times: poll plans are copied before I/O,
+ * provider outages are tracked per provider, and emitted events are collected
+ * under lock but published after the critical section ends.
+ */
+
 #include "state_cache.hpp"
 
 #include <algorithm>
@@ -219,6 +228,9 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
         configs_copy = poll_configs_;
     }
 
+    // Group poll targets by provider so one availability decision can cover all
+    // devices exposed by the same provider process and outage logging stays
+    // provider-scoped instead of repeating per device.
     std::unordered_map<std::string, std::vector<const PollConfig *>> configs_by_provider;
     configs_by_provider.reserve(configs_copy.size());
     for (const auto &config : configs_copy) {
@@ -354,7 +366,9 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
     if (!provider.read_signals(device_id, signal_ids, response)) {
         LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
 
-        // Mark device as unavailable and clear signals
+        // A failed read invalidates the last successful snapshot for this
+        // device. Clearing the signal set prevents consumers from interpreting
+        // stale values as current while the provider is unavailable.
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = device_states_.find(device_handle);

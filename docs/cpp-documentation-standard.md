@@ -131,6 +131,17 @@ Code comments explain local contracts close to the code that enforces them.
 Do not copy long architecture explanations into headers. Summarize the local
 contract and let the higher-level docs carry the broader system narrative.
 
+## Local API Docs
+
+Generate local API docs from the repo root with:
+
+```bash
+doxygen docs/Doxyfile
+```
+
+Generated HTML goes to `build/docs/doxygen/html/` and should never be
+committed.
+
 ## Examples
 
 Good:

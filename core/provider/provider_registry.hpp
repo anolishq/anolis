@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file provider_registry.hpp
+ * @brief Thread-safe registry of live provider handles.
+ */
+
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -12,36 +17,19 @@ namespace anolis {
 namespace provider {
 
 /**
- * @brief Thread-safe registry for provider handles
+ * @brief Thread-safe registry of provider instances known to the runtime.
  *
- * ProviderRegistry wraps the provider map with std::shared_mutex to enable:
- * - Concurrent reads from multiple threads (StateCache polling, HTTP handlers, BT ticks)
- * - Exclusive writes during provider lifecycle operations (start, stop, restart)
+ * ProviderRegistry is the shared lookup point for long-lived provider handles
+ * used by polling, HTTP handlers, automation, and supervision code.
  *
- * This is a critical concurrency primitive that prevents data races during
- * provider supervision and restart scenarios.
+ * Threading:
+ * Concurrent reads are allowed via shared locking. Writes serialize provider
+ * add, remove, and clear operations.
  *
- * Thread Safety:
- * - All methods are thread-safe
- * - get_provider() and get_all_providers() allow concurrent reads
- * - add_provider(), remove_provider(), clear() require exclusive access
- *
- * Design Constraints:
- * - Maintains shared_ptr semantics for provider ownership
- * - Minimal performance impact (shared_mutex for read-heavy workload)
- * - Compatible with existing consumer APIs (StateCache, CallRouter, HttpServer)
- *
- * Usage Pattern:
- * ```cpp
- * // Read path (concurrent-safe)
- * auto provider = registry.get_provider("provider_id");
- * if (provider && provider->is_available()) {
- *     // use provider
- * }
- *
- * // Write path (exclusive)
- * registry.add_provider("provider_id", std::move(provider_handle));
- * ```
+ * Ownership:
+ * The registry stores shared ownership of each provider handle. Readers receive
+ * copied `std::shared_ptr` instances, so an in-flight user can finish safely
+ * even if the registry entry is replaced or removed later.
  */
 class ProviderRegistry {
 public:
@@ -55,10 +43,10 @@ public:
     ProviderRegistry& operator=(ProviderRegistry&&) = delete;
 
     /**
-     * @brief Add or replace a provider
+     * @brief Add or replace a provider handle by ID.
      *
-     * If a provider with the same ID already exists, it is replaced.
-     * This operation requires exclusive access and will block readers.
+     * Replacing an existing entry does not invalidate `std::shared_ptr`
+     * instances that were already handed out to readers.
      *
      * @param provider_id Unique provider identifier
      * @param provider Shared pointer to provider handle (must not be null)
@@ -66,10 +54,12 @@ public:
     void add_provider(const std::string& provider_id, std::shared_ptr<IProviderHandle> provider);
 
     /**
-     * @brief Remove a provider
+     * @brief Remove a provider entry from the registry.
      *
-     * If the provider does not exist, this is a no-op.
-     * This operation requires exclusive access and will block readers.
+     * Ownership:
+     * Removing the entry only drops the registry's ownership. Existing shared
+     * pointers returned earlier remain valid until their last holder releases
+     * them.
      *
      * @param provider_id Unique provider identifier
      * @return true if provider was removed, false if not found
@@ -77,15 +67,10 @@ public:
     bool remove_provider(const std::string& provider_id);
 
     /**
-     * @brief Get a provider by ID
-     *
-     * Returns a shared_ptr to the provider if found, nullptr otherwise.
-     * This operation allows concurrent access with other readers.
+     * @brief Get a provider handle by ID.
      *
      * Thread Safety:
-     * - The returned shared_ptr keeps the provider alive even if removed later
-     * - Multiple threads can call this simultaneously
-     * - Safe to call during provider restart (may return old or new instance)
+     * Multiple threads may call this concurrently.
      *
      * @param provider_id Unique provider identifier
      * @return Shared pointer to provider (nullptr if not found)
@@ -93,29 +78,21 @@ public:
     std::shared_ptr<IProviderHandle> get_provider(const std::string& provider_id) const;
 
     /**
-     * @brief Get all providers as a snapshot
+     * @brief Get all providers as a point-in-time snapshot.
      *
-     * Returns a copy of the provider map at the time of the call.
-     * This is safe for iteration even if the registry is modified concurrently.
-     *
-     * Thread Safety:
-     * - Returns by value to avoid iterator invalidation
-     * - Safe to iterate while registry is modified
-     * - Shared_ptr keeps providers alive during iteration
+     * The returned map can be iterated safely after later registry mutations
+     * because both the container and the provider handles are copied by value.
      *
      * Performance:
-     * - O(n) copy, but necessary for thread safety
-     * - Avoid calling in tight loops (cache result when possible)
+     * O(n) copy. Prefer caching the result when a caller needs repeated
+     * iteration over a stable provider set.
      *
      * @return Copy of provider map (provider_id -> IProviderHandle)
      */
     std::unordered_map<std::string, std::shared_ptr<IProviderHandle>> get_all_providers() const;
 
     /**
-     * @brief Get list of provider IDs
-     *
-     * Returns a snapshot of all provider IDs at the time of the call.
-     * This is more efficient than get_all_providers() when only IDs are needed.
+     * @brief Get provider IDs as a snapshot.
      *
      * @return Vector of provider IDs
      */
@@ -131,18 +108,13 @@ public:
      */
     bool has_provider(const std::string& provider_id) const;
 
-    /**
-     * @brief Get number of registered providers
-     *
-     * @return Count of providers
-     */
+    /** @brief Get the current provider count. */
     size_t provider_count() const;
 
     /**
-     * @brief Remove all providers
+     * @brief Remove all provider entries.
      *
-     * This operation requires exclusive access and will block readers.
-     * Used during shutdown.
+     * This is primarily used during shutdown or full runtime teardown.
      */
     void clear();
 
