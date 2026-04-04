@@ -106,6 +106,13 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 - Prefer RAII for resource management
 - Use `std::unique_ptr` / `std::shared_ptr` appropriately
 
+### C++ Documentation
+
+- Follow [docs/cpp-documentation-standard.md](docs/cpp-documentation-standard.md) for new or modified C++ APIs
+- Prefer documenting contracts, ownership, lifetime, threading, invariants, and error handling over narrating obvious code
+- Put structured API comments on declarations in headers by default; keep `.cpp` documentation selective and focused on tricky behavior
+- Do not add boilerplate comments that only restate symbol names, types, or obvious units
+
 ### Commits
 
 - Write clear, concise commit messages
