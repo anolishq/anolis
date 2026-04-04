@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file config.hpp
+ * @brief Runtime configuration types and YAML load/validation entry points.
+ */
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -10,24 +15,36 @@
 namespace anolis {
 namespace runtime {
 
-// Configuration enums
+/**
+ * @brief Policy for manual calls while automation owns the runtime.
+ */
 enum class GatingPolicy { BLOCK, OVERRIDE };
 
+/** @brief Polling scheduler settings for background state refresh. */
 struct PollingConfig {
     int interval_ms = 500;  // Default 500ms
 };
 
+/** @brief Runtime logging settings. */
 struct LoggingConfig {
     std::string level = "info";  // debug, info, warn, error
 };
 
-// Runtime section configuration (runtime: in YAML)
+/**
+ * @brief Core runtime lifecycle settings from the `runtime` YAML section.
+ *
+ * The current runtime mode is intentionally not configurable here. Startup
+ * always begins in IDLE and mode transitions happen through the control plane.
+ */
 struct RuntimeModeConfig {
     std::string name;                // Instance identifier (optional, for multi-runtime deployments)
     int shutdown_timeout_ms = 2000;  // Provider graceful shutdown timeout (500-30000ms)
     int startup_timeout_ms = 30000;  // Overall startup timeout for fail-fast (5000-300000ms)
 };
 
+/**
+ * @brief HTTP adapter settings for the runtime's REST surface.
+ */
 struct HttpConfig {
     bool enabled = true;                                 // HTTP server enabled
     std::string bind = "127.0.0.1";                      // Bind address
@@ -37,6 +54,12 @@ struct HttpConfig {
     int thread_pool_size = 40;                           // Worker thread pool size
 };
 
+/**
+ * @brief Telemetry sink settings after YAML parsing.
+ *
+ * The canonical YAML shape uses nested `telemetry.influxdb.*` keys. The runtime
+ * stores the resolved values in this flat struct for simpler downstream use.
+ */
 struct TelemetryConfig {
     bool enabled = false;  // Enable telemetry sink
 
@@ -55,7 +78,9 @@ struct TelemetryConfig {
     size_t max_retry_buffer_size = 1000;  // Max events to buffer on write failure
 };
 
-// Parameter definition
+/**
+ * @brief Runtime-defined automation parameter with optional validation rules.
+ */
 struct ParameterConfig {
     std::string name;
     automation::ParameterType type = automation::ParameterType::DOUBLE;
@@ -67,7 +92,13 @@ struct ParameterConfig {
     std::vector<std::string> allowed_values;  // For string enums
 };
 
-// Automation configuration
+/**
+ * @brief Automation subsystem settings from the `automation` YAML section.
+ *
+ * `behavior_tree` is the canonical config key. The loader may accept a small
+ * set of deprecated aliases for backward compatibility, but the in-memory
+ * representation uses this normalized form.
+ */
 struct AutomationConfig {
     bool enabled = false;
     std::string behavior_tree;                                // Path to BT XML file
@@ -76,6 +107,9 @@ struct AutomationConfig {
     std::vector<ParameterConfig> parameters;                  // Runtime parameters
 };
 
+/**
+ * @brief Fully resolved runtime configuration with defaults applied.
+ */
 struct RuntimeConfig {
     RuntimeModeConfig runtime;  // Runtime section (IDLE mode hardcoded, not configurable)
     HttpConfig http;
@@ -86,10 +120,31 @@ struct RuntimeConfig {
     AutomationConfig automation;
 };
 
-// Loads configuration from a YAML file
+/**
+ * @brief Load, normalize, and validate runtime configuration from YAML.
+ *
+ * Starts from `RuntimeConfig` defaults on every call so omitted sections do not
+ * retain stale values from a previous load. The loader also accepts a limited
+ * set of deprecated keys and malformed-shape diagnostics are reported through
+ * `error`.
+ *
+ * @param config_path Path to the YAML file to load
+ * @param config Output configuration populated on success
+ * @param error Output error string on parse or validation failure
+ * @return true if the file was parsed and the resulting configuration is valid
+ */
 bool load_config(const std::string &config_path, RuntimeConfig &config, std::string &error);
 
-// Validates the configuration
+/**
+ * @brief Validate an already-populated runtime configuration.
+ *
+ * This checks value ranges, required sections, restart-policy consistency, and
+ * cross-field constraints such as automation requiring a behavior tree path.
+ *
+ * @param config Configuration instance to validate
+ * @param error Output error string on failure
+ * @return true if the configuration is valid
+ */
 bool validate_config(const RuntimeConfig &config, std::string &error);
 
 }  // namespace runtime

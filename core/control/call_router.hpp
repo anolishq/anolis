@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file call_router.hpp
+ * @brief Validated control-path entry point for device function calls.
+ */
+
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,7 +25,12 @@ class ModeManager;
 
 namespace control {
 
-// Call request - High-level API for executing device functions
+/**
+ * @brief High-level request for executing a device function.
+ *
+ * Callers may identify the target function by `function_id`, `function_name`,
+ * or both. When both are supplied they must resolve to the same function.
+ */
 struct CallRequest {
     std::string device_handle;  // "provider_id/device_id"
     uint32_t function_id = 0;   // Optional selector used by HTTP API
@@ -29,7 +39,12 @@ struct CallRequest {
     bool is_automated = false;  // true if called from BT automation, false if manual (HTTP/UI)
 };
 
-// Call result - Status and optional return values
+/**
+ * @brief Result of a routed device call.
+ *
+ * On failure, `success` is false and `status_code` / `error_message` describe
+ * the reason. On success, `results` contains any provider-returned outputs.
+ */
 struct CallResult {
     bool success;
     std::string error_message;
@@ -37,22 +52,57 @@ struct CallResult {
     anolis::deviceprovider::v1::Status_Code status_code = anolis::deviceprovider::v1::Status_Code_CODE_OK;
 };
 
-// CallRouter - Unified control path with validation and state management
+/**
+ * @brief Unified control path for validated device function calls.
+ *
+ * CallRouter resolves device and function selectors against the registry,
+ * enforces runtime mode gating, serializes calls per provider, forwards the
+ * provider RPC, and triggers a best-effort post-call cache refresh.
+ *
+ * Threading:
+ * `execute_call()` is safe for concurrent use. Calls to the same provider are
+ * serialized; calls to different providers may proceed concurrently.
+ *
+ * Invariants:
+ * Control actions should enter the runtime through CallRouter rather than
+ * direct `provider->call()` use so validation and mode enforcement are not
+ * bypassed.
+ */
 class CallRouter {
 public:
+    /**
+     * @brief Construct the router against the live device registry and state cache.
+     */
     CallRouter(const registry::DeviceRegistry &registry, state::StateCache &state_cache);
 
     /**
-     * Set mode manager for manual/auto gating
-     * Must be called before execute_call if automation is enabled.
+     * @brief Attach the runtime mode manager used for gating manual calls.
+     *
+     * `gating_policy` is expected to be the string form of the configured
+     * manual gating policy, typically `BLOCK` or `OVERRIDE`.
      */
     void set_mode_manager(automation::ModeManager *mode_manager, const std::string &gating_policy);
 
-    // Execute a function call
-    // This is the ONLY way to execute control actions in Anolis
+    /**
+     * @brief Execute a validated device function call.
+     *
+     * Error handling:
+     * The returned `CallResult` is the full status channel for execution
+     * failures, including mode gating, missing providers, validation errors,
+     * provider RPC failures, and unavailable providers.
+     *
+     * On success, the router issues a best-effort immediate cache refresh for
+     * the affected device.
+     */
     CallResult execute_call(const CallRequest &request, provider::ProviderRegistry &provider_registry);
 
-    // Validation only (no execution)
+    /**
+     * @brief Validate device existence, selector resolution, and argument shape.
+     *
+     * This does not check runtime mode, provider availability, or provider RPC
+     * success. It is therefore useful for static validation, but not a full
+     * execution preflight.
+     */
     bool validate_call(const CallRequest &request, std::string &error) const;
 
 private:
