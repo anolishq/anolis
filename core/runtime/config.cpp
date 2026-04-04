@@ -1,8 +1,8 @@
 #include "config.hpp"
 
-#include <algorithm>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <initializer_list>
@@ -70,8 +70,7 @@ void warn_unknown_keys(const YAML::Node &node, const std::string &path,
     for (const auto &entry : node) {
         const std::string key = entry.first.as<std::string>();
         const bool known = std::find_if(valid_keys.begin(), valid_keys.end(),
-                                        [&key](const char *candidate) { return key == candidate; }) !=
-                           valid_keys.end();
+                                        [&key](const char *candidate) { return key == candidate; }) != valid_keys.end();
         if (!known) {
             LOG_WARN("[Config] Unknown key '" << path << "." << key << "' (will be ignored)");
         }
@@ -283,7 +282,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["runtime"], "runtime", error)) {
                 return false;
             }
-            warn_unknown_keys(yaml["runtime"], "runtime", {"name", "shutdown_timeout_ms", "startup_timeout_ms", "mode"});
+            warn_unknown_keys(yaml["runtime"], "runtime",
+                              {"name", "shutdown_timeout_ms", "startup_timeout_ms", "mode"});
 
             if (yaml["runtime"]["name"]) {
                 config.runtime.name = yaml["runtime"]["name"].as<std::string>();
@@ -309,9 +309,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["http"], "http", error)) {
                 return false;
             }
-            warn_unknown_keys(yaml["http"], "http",
-                              {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials",
-                               "thread_pool_size"});
+            warn_unknown_keys(
+                yaml["http"], "http",
+                {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials", "thread_pool_size"});
 
             if (yaml["http"]["enabled"]) {
                 config.http.enabled = yaml["http"]["enabled"].as<bool>();
@@ -365,9 +365,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     error = "'" + provider_path + "' must be a map";
                     return false;
                 }
-                warn_unknown_keys(provider_node, provider_path,
-                                  {"id", "command", "args", "timeout_ms", "hello_timeout_ms", "ready_timeout_ms",
-                                   "restart_policy"});
+                warn_unknown_keys(
+                    provider_node, provider_path,
+                    {"id", "command", "args", "timeout_ms", "hello_timeout_ms", "ready_timeout_ms", "restart_policy"});
 
                 provider::ProviderConfig provider;
 
@@ -548,8 +548,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 return false;
             }
             warn_unknown_keys(yaml["automation"], "automation",
-                              {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz",
-                               "manual_gating_policy", "parameters"});
+                              {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz", "manual_gating_policy",
+                               "parameters"});
 
             if (yaml["automation"]["enabled"]) {
                 config.automation.enabled = yaml["automation"]["enabled"].as<bool>();

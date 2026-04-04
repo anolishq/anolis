@@ -21,7 +21,8 @@ bool DeviceRegistry::discover_provider(const std::string &provider_id, anolis::p
     return true;
 }
 
-bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
+bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
+                                              anolis::provider::IProviderHandle &provider,
                                               std::vector<RegisteredDevice> &discovered_devices) {
     discovered_devices.clear();
 
@@ -90,10 +91,9 @@ void DeviceRegistry::commit_provider_devices(const std::string &provider_id,
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     if (replace_existing) {
-        auto new_end = std::remove_if(devices_.begin(), devices_.end(),
-                                      [&provider_id](const RegisteredDevice &device) {
-                                          return device.provider_id == provider_id;
-                                      });
+        auto new_end = std::remove_if(devices_.begin(), devices_.end(), [&provider_id](const RegisteredDevice &device) {
+            return device.provider_id == provider_id;
+        });
         devices_.erase(new_end, devices_.end());
     }
 
