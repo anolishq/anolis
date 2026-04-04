@@ -267,6 +267,34 @@ automation:
     EXPECT_EQ(config.automation.parameters[0].name, "test_param");
 }
 
+TEST_F(ConfigTest, AutomationBehaviorTreePathAliasAccepted) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test
+    command: /path/to/provider
+
+logging:
+  level: info
+
+automation:
+  enabled: true
+  behavior_tree_path: /path/to/tree.xml
+)";
+
+    std::string config_path = create_config_file("automation_alias.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_TRUE(config.automation.enabled);
+    EXPECT_EQ(config.automation.behavior_tree, "/path/to/tree.xml");
+}
+
 TEST_F(ConfigTest, ValidLogLevels) {
     const std::vector<std::string> valid_levels = {"debug", "info", "warn", "error"};
 

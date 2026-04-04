@@ -436,6 +436,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (yaml["automation"]["behavior_tree"]) {
                 config.automation.behavior_tree = yaml["automation"]["behavior_tree"].as<std::string>();
+            } else if (yaml["automation"]["behavior_tree_path"]) {
+                LOG_WARN("[Config] Deprecated automation key 'automation.behavior_tree_path' - use "
+                         "'automation.behavior_tree' instead");
+                config.automation.behavior_tree = yaml["automation"]["behavior_tree_path"].as<std::string>();
             }
             if (yaml["automation"]["tick_rate_hz"]) {
                 config.automation.tick_rate_hz = yaml["automation"]["tick_rate_hz"].as<int>();
