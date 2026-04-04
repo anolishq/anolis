@@ -141,7 +141,7 @@ git submodule update --init --recursive
 cmake --preset dev-release
 cmake --build --preset dev-release --parallel
 ctest --preset dev-release
-./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
 ```
 
 Windows (PowerShell):
@@ -153,10 +153,20 @@ git submodule update --init --recursive
 cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release --parallel
 ctest --preset dev-windows-release
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
 ```
 
+Use `config/anolis-runtime.yaml` for the checked-in sample config, or point the
+runtime at `systems/<project>/anolis-runtime.yaml` for a System Composer generated
+system.
+
 ### Validation & Acceptance Testing
+
+For the shortest high-signal local verification bundle, run:
+
+```bash
+bash tools/verify-local.sh
+```
 
 Run pytest integration/scenario suites directly:
 

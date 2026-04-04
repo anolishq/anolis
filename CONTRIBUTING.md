@@ -75,15 +75,18 @@ cmake --build --preset dev-release --parallel
 
 ```bash
 # Linux/macOS
-./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
 
 # Windows
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
 ```
 
 ### Testing
 
 ```bash
+# Focused local drift check (composer + key runtime tests)
+bash tools/verify-local.sh
+
 # Run all tests (includes unit + integration)
 ctest --preset dev-release                           # Linux/macOS
 ctest --preset dev-windows-release                   # Windows
@@ -690,7 +693,7 @@ Run with ThreadSanitizer when available to detect data races:
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DSANITIZER=thread
 cmake --build build
-python -m pytest tests/integration/test_integration.py -k signal_handling --runtime=build/core/anolis-runtime --provider=/path/to/anolis-provider-sim
+python -m pytest tests/integration/test_integration.py -k signal_handling --runtime=build/dev-release/core/anolis-runtime --provider=/path/to/anolis-provider-sim
 ```
 
 ---
@@ -858,8 +861,8 @@ Tests should verify runtime behavior through the HTTP API, not by parsing log ou
 from tests.support.api_helpers import assert_provider_available, assert_device_count
 
 runtime = RuntimeFixture(
-    runtime_path="build/core/anolis-runtime",
-    provider_path="build/anolis-provider-sim"
+    runtime_path="build/dev-release/core/anolis-runtime",
+    provider_path="/path/to/anolis-provider-sim"
 )
 runtime.start()
 
@@ -918,11 +921,8 @@ from tests.support.api_helpers import assert_http_available, assert_provider_ava
 def test_my_feature():
     """Test description here."""
     runtime = RuntimeFixture(
-        runtime_path="build/core/anolis-runtime",
-        provider_path="build/anolis-provider-sim",
-        config_dict={  # Optional: override default config
-            "runtime": {"mode": "AUTO"}
-        }
+        runtime_path="build/dev-release/core/anolis-runtime",
+        provider_path="/path/to/anolis-provider-sim"
     )
 
     try:
@@ -955,8 +955,8 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 
 # Run with custom paths
 python -m pytest tests/integration/test_integration.py \
-  --runtime=build/core/anolis-runtime \
-  --provider=build/anolis-provider-sim
+  --runtime=build/dev-release/core/anolis-runtime \
+  --provider=/path/to/anolis-provider-sim
 ```
 
 ---
