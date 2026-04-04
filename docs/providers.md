@@ -244,7 +244,7 @@ Example: CRUMBS provider may buffer staged reads internally, but Anolis core rem
 Use `anolis-runtime`:
 
 ```yaml
-# anolis-runtime.yaml
+# config/anolis-runtime.yaml
 providers:
   - id: my_provider
     command: /path/to/my-provider

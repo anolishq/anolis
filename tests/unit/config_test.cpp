@@ -573,6 +573,192 @@ logging:
     EXPECT_FALSE(error.empty());
     EXPECT_NE(error.find("max_attempts must be >= 1"), std::string::npos);
 }
+
+TEST_F(ConfigTest, ProvidersSectionMustBeSequence) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  id: test_provider
+  command: /path/to/provider
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("providers_not_sequence.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'providers' must be a sequence");
+}
+
+TEST_F(ConfigTest, ProviderArgsMustBeSequence) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+    args: --bad
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("provider_args_not_sequence.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'providers[0].args' must be a sequence");
+}
+
+TEST_F(ConfigTest, RestartPolicyMustBeMap) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+    restart_policy: true
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("restart_policy_not_map.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'providers[0].restart_policy' must be a map");
+}
+
+TEST_F(ConfigTest, RestartPolicyBackoffMustBeSequence) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+    restart_policy:
+      enabled: true
+      max_attempts: 1
+      backoff_ms: 100
+      timeout_ms: 30000
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("restart_policy_backoff_not_sequence.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'providers[0].restart_policy.backoff_ms' must be a sequence");
+}
+
+TEST_F(ConfigTest, TelemetryInfluxdbMustBeMap) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+logging:
+  level: info
+
+telemetry:
+  enabled: true
+  influxdb: http://localhost:8086
+)";
+
+    std::string config_path = create_config_file("telemetry_influxdb_not_map.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'telemetry.influxdb' must be a map");
+}
+
+TEST_F(ConfigTest, AutomationParametersMustBeSequence) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+logging:
+  level: info
+
+automation:
+  enabled: true
+  behavior_tree: /path/to/tree.xml
+  parameters: bad
+)";
+
+    std::string config_path = create_config_file("automation_parameters_not_sequence.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'automation.parameters' must be a sequence");
+}
+
+TEST_F(ConfigTest, AutomationAllowedValuesMustBeSequence) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+logging:
+  level: info
+
+automation:
+  enabled: true
+  behavior_tree: /path/to/tree.xml
+  parameters:
+    - name: mode
+      type: string
+      default: "normal"
+      allowed_values: normal
+)";
+
+    std::string config_path = create_config_file("automation_allowed_values_not_sequence.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_EQ(error, "'automation.parameters[0].allowed_values' must be a sequence");
+}
 // Sprint 2.1.3: Negative configuration tests for idempotency and strict validation
 
 TEST_F(ConfigTest, InvalidRuntimeMode) {
@@ -720,6 +906,65 @@ logging:
     EXPECT_EQ(config.providers[0].id, "provider_new");
     EXPECT_EQ(config.automation.parameters.size(), 1) << "Old parameters should be cleared";
     EXPECT_EQ(config.automation.parameters[0].name, "param_new");
+}
+
+TEST_F(ConfigTest, OmittedSectionsResetToDefaultsOnReload) {
+    std::string config_content = R"(
+runtime:
+  name: first
+
+http:
+  enabled: true
+  port: 9090
+
+providers:
+  - id: provider1
+    command: /path/to/provider1
+
+telemetry:
+  enabled: true
+  influxdb:
+    url: http://localhost:8086
+    org: anolis
+    bucket: anolis
+    token: secret
+
+automation:
+  enabled: true
+  behavior_tree: test.xml
+
+logging:
+  level: debug
+)";
+
+    std::string config_path = create_config_file("reload_with_sections.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_TRUE(config.telemetry.enabled);
+    EXPECT_TRUE(config.automation.enabled);
+    EXPECT_EQ(config.http.port, 9090);
+    EXPECT_EQ(config.runtime.name, "first");
+
+    std::string config_content2 = R"(
+providers:
+  - id: provider2
+    command: /path/to/provider2
+
+logging:
+  level: info
+)";
+
+    std::string config_path2 = create_config_file("reload_without_sections.yaml", config_content2);
+    ASSERT_TRUE(load_config(config_path2, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.runtime.name, "");
+    EXPECT_EQ(config.http.port, 8080);
+    EXPECT_FALSE(config.telemetry.enabled);
+    EXPECT_FALSE(config.automation.enabled);
+    EXPECT_TRUE(config.automation.behavior_tree.empty());
+    ASSERT_EQ(config.providers.size(), 1);
+    EXPECT_EQ(config.providers[0].id, "provider2");
 }
 
 TEST_F(ConfigTest, MissingProviderCommand) {

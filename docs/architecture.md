@@ -168,7 +168,7 @@ Key: BTs never bypass CallRouter or StateCache.
 
 ```yaml
 runtime:
-  mode: MANUAL # MANUAL (default), AUTO, IDLE
+  name: anolis-main # Optional runtime instance identifier
 
 providers:
   - id: sim0

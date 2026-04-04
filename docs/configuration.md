@@ -1,6 +1,10 @@
 # Configuration
 
-Anolis Runtime is configured via a YAML file (default: `anolis-runtime.yaml`).
+Anolis Runtime is configured via a YAML file (sample checked in at `config/anolis-runtime.yaml`).
+
+For composer-managed systems, the generated runtime YAML lives at
+`systems/<project>/anolis-runtime.yaml` and is derived from that project's
+`system.json`.
 
 > **📖 Complete Schema Reference:**
 > See [configuration-schema.md](configuration-schema.md) for the canonical v1.0 schema with validation rules, constraints, and migration notes.
@@ -169,7 +173,7 @@ providers:
 - Provider crashes → supervisor records crash → waits backoff delay → attempts restart
 - Successful restart → crash counter resets
 - Circuit breaker opens after max_attempts → no further restarts until manual intervention
-- Devices cleared before restart, rediscovered after successful restart
+- Existing provider inventory remains in place until replacement discovery and ownership validation succeed
 
 ### Telemetry (InfluxDB)
 

@@ -18,7 +18,7 @@ This guide establishes safety procedures for operating Anolis-controlled hardwar
 **Goal**: Safely bring system from power-on to automated operation
 
 1. **System Initialization** (IDLE mode)
-   - Runtime process starts in IDLE mode (enforced at startup, not configurable via `anolis-runtime.yaml`)
+   - Runtime process starts in IDLE mode (enforced at startup, not configurable via runtime YAML)
    - Providers initialize with safe device defaults (relays off, motors stopped, heaters disabled)
    - Device discovery runs (capabilities advertised)
    - **Control operations blocked** (safety interlock active)
@@ -54,9 +54,10 @@ This guide establishes safety procedures for operating Anolis-controlled hardwar
 
 For development and testing scenarios where hardware safety is not a concern:
 
-1. Start runtime with `mode: MANUAL` in config YAML
+1. Start runtime normally (it will still enter IDLE mode by default)
 2. Verify devices discovered
-3. Proceed with testing
+3. Transition to MANUAL with `POST /v0/mode`
+4. Proceed with testing
 
 **⚠️ Warning**: Do not use quick start for:
 
@@ -156,9 +157,14 @@ curl http://localhost:8080/v0/state/{provider}/{device}
 
 ```bash
 # 1. Command all actuators to safe states manually first
-curl -X POST http://localhost:8080/v0/call/{provider}/{device}/{function} \\
+curl -X POST http://localhost:8080/v0/call \\
   -H "Content-Type: application/json" \\
-  -d '{"args": {...}}'
+  -d '{
+    "provider_id": "{provider}",
+    "device_id": "{device}",
+    "function_id": 10,
+    "args": {}
+  }'
 
 # 2. Verify safe states
 curl http://localhost:8080/v0/state/{provider}/{device}
@@ -398,25 +404,24 @@ Use this checklist when integrating new hardware with Anolis:
 
 ### Configuration Guidance
 
-**Development** (`anolis-runtime-dev.yaml`):
+**Development** (`config/anolis-runtime.yaml` or a composer-generated system):
 
 ```yaml
-runtime:
-  mode: MANUAL # Skip IDLE verification for convenience
-
 automation:
   manual_gating_policy: OVERRIDE # Allow manual calls during automation
 ```
 
-**Production** (`anolis-runtime.yaml`):
+Transition to MANUAL explicitly with `POST /v0/mode` after basic startup checks.
+
+**Production** (`systems/<project>/anolis-runtime.yaml` or validated deployment config):
 
 ```yaml
-runtime:
-  mode: IDLE # Enforce safe startup sequence
-
 automation:
   manual_gating_policy: BLOCK # Prevent manual interference
 ```
+
+Startup still enters IDLE automatically. The production distinction is that the
+operator follows the full verification path before transitioning to MANUAL or AUTO.
 
 ---
 

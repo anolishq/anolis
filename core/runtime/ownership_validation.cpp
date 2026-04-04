@@ -160,5 +160,28 @@ bool validate_i2c_ownership_claims(const std::vector<registry::RegisteredDevice>
     return false;
 }
 
+bool validate_i2c_ownership_claims_after_provider_replacement(
+    const std::vector<registry::RegisteredDevice> &current_devices, const std::string &provider_id,
+    const std::vector<registry::RegisteredDevice> &replacement_devices, std::string &error) {
+    std::vector<registry::RegisteredDevice> candidate_devices;
+    candidate_devices.reserve(current_devices.size() + replacement_devices.size());
+
+    for (const auto &device : current_devices) {
+        if (device.provider_id != provider_id) {
+            candidate_devices.push_back(device);
+        }
+    }
+
+    candidate_devices.insert(candidate_devices.end(), replacement_devices.begin(), replacement_devices.end());
+
+    std::string ownership_error;
+    if (validate_i2c_ownership_claims(candidate_devices, ownership_error)) {
+        return true;
+    }
+
+    error = "Restart-time ownership validation failed for provider '" + provider_id + "': " + ownership_error;
+    return false;
+}
+
 }  // namespace runtime
 }  // namespace anolis

@@ -22,7 +22,8 @@ The server includes CORS headers for browser-based clients:
 
 This allows the Operator UI (`tools/operator-ui/`) to connect from any origin by default.
 
-> **Note**: For production/validation, restrict `http.cors_allowed_origins` in `anolis-runtime.yaml`.
+> **Note**: For production/validation, restrict `http.cors_allowed_origins` in your runtime YAML
+> (`config/anolis-runtime.yaml` or `systems/<project>/anolis-runtime.yaml`).
 
 ## Response Format
 
@@ -581,7 +582,8 @@ All errors follow the same format:
 
 ## Configuration
 
-HTTP server is configured in `anolis-runtime.yaml`:
+HTTP server is configured in the runtime YAML (`config/anolis-runtime.yaml` or
+`systems/<project>/anolis-runtime.yaml`):
 
 ```yaml
 http:

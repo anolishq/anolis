@@ -546,7 +546,7 @@ automation:
 # Anolis Runtime Configuration v1.0
 
 runtime:
-  mode: MANUAL
+  name: anolis-main
 
 http:
   enabled: true
@@ -641,5 +641,5 @@ If `telemetry.influxdb.token` is not specified in config file, the runtime will 
 
 ```bash
 export INFLUXDB_TOKEN="your-secret-token"
-./anolis-runtime --config=anolis-runtime.yaml
+./anolis-runtime --config=config/anolis-runtime.yaml
 ```

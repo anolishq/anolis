@@ -68,6 +68,15 @@ class DeviceRegistry {
 public:
     DeviceRegistry() = default;
 
+    // Discovery without commit: perform ListDevices + DescribeDevice and return
+    // the resulting provider-local inventory.
+    bool inspect_provider_devices(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
+                                  std::vector<RegisteredDevice> &discovered_devices);
+
+    // Commit a previously discovered provider-local inventory to the live registry.
+    void commit_provider_devices(const std::string &provider_id, std::vector<RegisteredDevice> discovered_devices,
+                                 bool replace_existing = false);
+
     // Discovery: Perform Hello -> ListDevices -> DescribeDevice for each device
     // Thread-safe: Uses unique_lock
     bool discover_provider(const std::string &provider_id, anolis::provider::IProviderHandle &provider,

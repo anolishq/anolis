@@ -59,7 +59,7 @@ git submodule update --init --recursive
 cmake --preset dev-release
 cmake --build --preset dev-release --parallel
 ctest --preset dev-release
-./build/dev-release/core/anolis-runtime --config ./anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
 ```
 
 Windows (PowerShell):
@@ -71,8 +71,11 @@ git submodule update --init --recursive
 cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release --parallel
 ctest --preset dev-windows-release
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
 ```
+
+For composer-managed systems, launch the generated runtime YAML at
+`systems/<project>/anolis-runtime.yaml` instead.
 
 Use presets directly when needed:
 
@@ -92,6 +95,14 @@ curl -s http://127.0.0.1:8080/v0/state/sim0/motorctl0 | jq
 ```
 
 See [http-api.md](http-api.md) for full API details.
+
+## Local Verification
+
+Run the focused local verification bundle before lab work or branch handoff:
+
+```bash
+bash tools/verify-local.sh
+```
 
 ## Operator UI
 

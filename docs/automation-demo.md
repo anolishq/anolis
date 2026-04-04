@@ -12,7 +12,7 @@ Complete end-to-end demonstration of automation features.
 
 This walkthrough demonstrates:
 
-1. **Startup in MANUAL mode** - Safe default state
+1. **Startup in IDLE mode** - Safe default state
 2. **Parameter inspection and updates** - Runtime configuration without code changes
 3. **Mode transition to AUTO** - Enabling automated control
 4. **Behavior tree execution** - Observing automated device orchestration
@@ -26,17 +26,17 @@ Start the Anolis runtime with automation enabled:
 
 ```bash
 # Linux
-./build/core/anolis-runtime --config=./anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config=./config/anolis-runtime.yaml
 
 # Windows
-.\build\core\Release\anolis-runtime.exe --config=.\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config=.\config\anolis-runtime.yaml
 ```
 
 **Expected Output:**
 
 ```text
-[Runtime] Loading configuration from ./anolis-runtime.yaml
-[Runtime] Starting in MANUAL mode
+[Runtime] Loading configuration from ./config/anolis-runtime.yaml
+[Runtime] Starting in IDLE mode
 [Runtime] HTTP server listening on 127.0.0.1:8080
 [Runtime] Provider 'sim0' registered
 [Runtime] Automation enabled, loading behavior tree
@@ -48,7 +48,7 @@ Start the Anolis runtime with automation enabled:
 
 - Runtime starts without errors
 - HTTP server is accessible at `http://127.0.0.1:8080`
-- Default mode is MANUAL (BT not running yet)
+- Default mode is IDLE (BT not running yet)
 
 ## Step 2: Check Runtime Status
 
@@ -65,7 +65,7 @@ curl http://127.0.0.1:8080/v0/runtime/status
   "status": {
     "code": "OK"
   },
-  "mode": "MANUAL",
+  "mode": "IDLE",
   "uptime_seconds": 3600,
   "polling_interval_ms": 500,
   "device_count": 2,
@@ -81,7 +81,7 @@ curl http://127.0.0.1:8080/v0/runtime/status
 
 **Observations:**
 
-- Runtime is in `MANUAL` mode (automation not running)
+- Runtime is in `IDLE` mode (automation not running)
 - Provider `sim0` is `AVAILABLE`
 - `device_count` reports two registered devices for this provider
 
@@ -165,11 +165,17 @@ curl -X POST http://127.0.0.1:8080/v0/parameters \
 - `parameter_change` event emitted to InfluxDB (if enabled)
 - Visible as annotation in Grafana dashboards
 
-## Step 5: Transition to AUTO Mode
+## Step 5: Transition to MANUAL, then AUTO
 
-Enable automated control by switching to AUTO mode:
+Move into MANUAL for operator-approved control, then enable automation:
 
 ```bash
+# Transition to MANUAL first
+curl -X POST http://127.0.0.1:8080/v0/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "MANUAL"}'
+
+# Then transition to AUTO
 curl -X POST http://127.0.0.1:8080/v0/mode \
   -H "Content-Type: application/json" \
   -d '{"mode": "AUTO"}'
@@ -190,6 +196,7 @@ curl -X POST http://127.0.0.1:8080/v0/mode \
 **Console Output:**
 
 ```text
+[Runtime] Mode change event emitted: IDLE -> MANUAL
 [Runtime] Mode change event emitted: MANUAL -> AUTO
 [BTRuntime] Mode changed to AUTO, starting tick loop
 [BTRuntime] Tick 1: Running behavior tree
@@ -200,7 +207,7 @@ curl -X POST http://127.0.0.1:8080/v0/mode \
 
 **Observations:**
 
-- Mode transition from MANUAL → AUTO
+- Mode transitions follow the enforced path: IDLE → MANUAL → AUTO
 - Behavior tree begins execution (tick loop started)
 - BT reads current state, retrieves parameters, and calls device functions
 - `mode_change` event emitted to telemetry
@@ -294,7 +301,7 @@ curl -X POST http://127.0.0.1:8080/v0/call \
 
 Update the manual gating policy to allow overrides:
 
-**Note:** This requires modifying `anolis-runtime.yaml`:
+**Note:** This requires modifying `config/anolis-runtime.yaml`:
 
 ```yaml
 automation:
@@ -497,7 +504,7 @@ This demo demonstrated all automation features:
 ## Next Steps
 
 - **Customize Behavior Tree:** Edit `behaviors/demo.xml` to implement custom control logic
-- **Add Parameters:** Define new parameters in `anolis-runtime.yaml` for your use case
+- **Add Parameters:** Define new parameters in `config/anolis-runtime.yaml` for your use case
 - **Integrate Real Hardware:** Replace `anolis-provider-sim` with a real hardware provider
 - **Build Operator UI:** Implement web interface for mode control and parameter tuning
 

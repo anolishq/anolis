@@ -12,6 +12,20 @@ bool DeviceRegistry::discover_provider(const std::string &provider_id, anolis::p
                                        bool replace_existing) {
     LOG_INFO("[Registry] Discovering provider: " << provider_id);
 
+    std::vector<RegisteredDevice> new_devices;
+    if (!inspect_provider_devices(provider_id, provider, new_devices)) {
+        return false;
+    }
+
+    commit_provider_devices(provider_id, std::move(new_devices), replace_existing);
+    return true;
+}
+
+bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
+                                              anolis::provider::IProviderHandle &provider,
+                                              std::vector<RegisteredDevice> &discovered_devices) {
+    discovered_devices.clear();
+
     // Step 1: ListDevices
     std::vector<anolis::deviceprovider::v1::Device> device_list;
     if (!provider.list_devices(device_list)) {
@@ -23,8 +37,7 @@ bool DeviceRegistry::discover_provider(const std::string &provider_id, anolis::p
     LOG_INFO("[Registry] Found " << device_list.size() << " devices");
 
     // Build devices outside lock (discovery is network I/O)
-    std::vector<RegisteredDevice> new_devices;
-    new_devices.reserve(device_list.size());
+    discovered_devices.reserve(device_list.size());
 
     // Step 2: DescribeDevice for each
     for (const auto &device_brief : device_list) {
@@ -56,47 +69,43 @@ bool DeviceRegistry::discover_provider(const std::string &provider_id, anolis::p
                                            << " signals, " << reg_device.capabilities.functions_by_id.size()
                                            << " functions)");
 
-        new_devices.push_back(std::move(reg_device));
+        discovered_devices.push_back(std::move(reg_device));
     }
 
     // Check if ANY devices were successfully registered
-    if (new_devices.empty()) {
+    if (discovered_devices.empty()) {
         error_ = "No devices could be registered from provider " + provider_id;
         LOG_ERROR("[Registry] " << error_);
         return false;
     }
 
     // Log summary
-    LOG_INFO("[Registry] Provider " << provider_id << " registered " << new_devices.size() << "/" << device_list.size()
-                                    << " devices");
-
-    // Step 3: Commit to registry under lock.
-    // If replace_existing is true, old devices for this provider are removed in
-    // the same critical section so replacement is atomic from registry readers'
-    // perspective (no partial provider device set).
-    {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-
-        if (replace_existing) {
-            auto new_end = std::remove_if(
-                devices_.begin(), devices_.end(),
-                [&provider_id](const RegisteredDevice &device) { return device.provider_id == provider_id; });
-            devices_.erase(new_end, devices_.end());
-        }
-
-        for (auto &device : new_devices) {
-            devices_.push_back(std::move(device));
-        }
-
-        // Rebuild index so it remains correct after any erase/append sequence.
-        handle_to_index_.clear();
-        handle_to_index_.reserve(devices_.size());
-        for (size_t i = 0; i < devices_.size(); ++i) {
-            handle_to_index_[devices_[i].get_handle()] = i;
-        }
-    }
+    LOG_INFO("[Registry] Provider " << provider_id << " registered " << discovered_devices.size() << "/"
+                                    << device_list.size() << " devices");
 
     return true;
+}
+
+void DeviceRegistry::commit_provider_devices(const std::string &provider_id,
+                                             std::vector<RegisteredDevice> discovered_devices, bool replace_existing) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    if (replace_existing) {
+        auto new_end = std::remove_if(devices_.begin(), devices_.end(), [&provider_id](const RegisteredDevice &device) {
+            return device.provider_id == provider_id;
+        });
+        devices_.erase(new_end, devices_.end());
+    }
+
+    for (auto &device : discovered_devices) {
+        devices_.push_back(std::move(device));
+    }
+
+    handle_to_index_.clear();
+    handle_to_index_.reserve(devices_.size());
+    for (size_t i = 0; i < devices_.size(); ++i) {
+        handle_to_index_[devices_[i].get_handle()] = i;
+    }
 }
 
 std::optional<RegisteredDevice> DeviceRegistry::get_device_copy(const std::string &provider_id,

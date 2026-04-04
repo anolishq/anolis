@@ -2,8 +2,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <optional>
 #include <unordered_set>
@@ -34,6 +36,48 @@ std::string gating_policy_to_string(GatingPolicy policy) {
             return "UNKNOWN";
     }
 }
+
+namespace {
+
+bool ensure_mapping(const YAML::Node &node, const std::string &path, std::string &error) {
+    if (!node || node.IsNull()) {
+        return true;
+    }
+    if (!node.IsMap()) {
+        error = "'" + path + "' must be a map";
+        return false;
+    }
+    return true;
+}
+
+bool ensure_sequence(const YAML::Node &node, const std::string &path, std::string &error) {
+    if (!node || node.IsNull()) {
+        return true;
+    }
+    if (!node.IsSequence()) {
+        error = "'" + path + "' must be a sequence";
+        return false;
+    }
+    return true;
+}
+
+void warn_unknown_keys(const YAML::Node &node, const std::string &path,
+                       std::initializer_list<const char *> valid_keys) {
+    if (!node || !node.IsMap()) {
+        return;
+    }
+
+    for (const auto &entry : node) {
+        const std::string key = entry.first.as<std::string>();
+        const bool known = std::find_if(valid_keys.begin(), valid_keys.end(),
+                                        [&key](const char *candidate) { return key == candidate; }) != valid_keys.end();
+        if (!known) {
+            LOG_WARN("[Config] Unknown key '" << path << "." << key << "' (will be ignored)");
+        }
+    }
+}
+
+}  // namespace
 
 bool validate_config(const RuntimeConfig &config, std::string &error) {
     // Validate runtime parameters
@@ -207,6 +251,14 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
 bool load_config(const std::string &config_path, RuntimeConfig &config, std::string &error) {
     try {
         YAML::Node yaml = YAML::LoadFile(config_path);
+        if (!yaml.IsMap()) {
+            error = "Config root must be a map";
+            return false;
+        }
+
+        // Start from defaults on every load so omitted sections do not retain
+        // stale values from previous files.
+        config = RuntimeConfig{};
 
         // Check for unknown top-level keys
         const std::vector<std::string> valid_keys = {"runtime",   "http",    "providers", "polling",
@@ -227,6 +279,12 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load runtime params
         if (yaml["runtime"]) {
+            if (!ensure_mapping(yaml["runtime"], "runtime", error)) {
+                return false;
+            }
+            warn_unknown_keys(yaml["runtime"], "runtime",
+                              {"name", "shutdown_timeout_ms", "startup_timeout_ms", "mode"});
+
             if (yaml["runtime"]["name"]) {
                 config.runtime.name = yaml["runtime"]["name"].as<std::string>();
             }
@@ -248,6 +306,13 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load HTTP config
         if (yaml["http"]) {
+            if (!ensure_mapping(yaml["http"], "http", error)) {
+                return false;
+            }
+            warn_unknown_keys(
+                yaml["http"], "http",
+                {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials", "thread_pool_size"});
+
             if (yaml["http"]["enabled"]) {
                 config.http.enabled = yaml["http"]["enabled"].as<bool>();
             }
@@ -268,6 +333,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     }
                 } else if (origins_node.IsScalar()) {
                     config.http.cors_allowed_origins.push_back(origins_node.as<std::string>());
+                } else {
+                    error = "'http.cors_allowed_origins' must be a string or sequence";
+                    return false;
                 }
 
                 if (config.http.cors_allowed_origins.empty()) {
@@ -285,8 +353,22 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load providers
         if (yaml["providers"]) {
-            config.providers.clear();  // Ensure idempotent parsing
+            if (!ensure_sequence(yaml["providers"], "providers", error)) {
+                return false;
+            }
+
+            config.providers.clear();
+            size_t provider_index = 0;
             for (const auto &provider_node : yaml["providers"]) {
+                const std::string provider_path = "providers[" + std::to_string(provider_index) + "]";
+                if (!provider_node.IsMap()) {
+                    error = "'" + provider_path + "' must be a map";
+                    return false;
+                }
+                warn_unknown_keys(
+                    provider_node, provider_path,
+                    {"id", "command", "args", "timeout_ms", "hello_timeout_ms", "ready_timeout_ms", "restart_policy"});
+
                 provider::ProviderConfig provider;
 
                 if (provider_node["id"]) {
@@ -298,6 +380,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 }
 
                 if (provider_node["args"]) {
+                    if (!ensure_sequence(provider_node["args"], provider_path + ".args", error)) {
+                        return false;
+                    }
                     for (const auto &arg : provider_node["args"]) {
                         provider.args.push_back(arg.as<std::string>());
                     }
@@ -318,6 +403,11 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 // Parse restart policy
                 if (provider_node["restart_policy"]) {
                     const auto &rp = provider_node["restart_policy"];
+                    if (!ensure_mapping(rp, provider_path + ".restart_policy", error)) {
+                        return false;
+                    }
+                    warn_unknown_keys(rp, provider_path + ".restart_policy",
+                                      {"enabled", "max_attempts", "backoff_ms", "timeout_ms", "success_reset_ms"});
 
                     if (rp["enabled"]) {
                         provider.restart_policy.enabled = rp["enabled"].as<bool>();
@@ -328,6 +418,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     }
 
                     if (rp["backoff_ms"]) {
+                        if (!ensure_sequence(rp["backoff_ms"], provider_path + ".restart_policy.backoff_ms", error)) {
+                            return false;
+                        }
                         provider.restart_policy.backoff_ms.clear();
                         for (const auto &backoff : rp["backoff_ms"]) {
                             provider.restart_policy.backoff_ms.push_back(backoff.as<int>());
@@ -343,11 +436,15 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 }
 
                 config.providers.push_back(provider);
+                ++provider_index;
             }
         }
 
         // Load polling config
         if (yaml["polling"]) {
+            if (!ensure_mapping(yaml["polling"], "polling", error)) {
+                return false;
+            }
             if (yaml["polling"]["interval_ms"]) {
                 config.polling.interval_ms = yaml["polling"]["interval_ms"].as<int>();
             }
@@ -355,6 +452,13 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load telemetry config
         if (yaml["telemetry"]) {
+            if (!ensure_mapping(yaml["telemetry"], "telemetry", error)) {
+                return false;
+            }
+            warn_unknown_keys(yaml["telemetry"], "telemetry",
+                              {"enabled", "influxdb", "influx_url", "influx_org", "influx_bucket", "influx_token",
+                               "batch_size", "flush_interval_ms"});
+
             if (yaml["telemetry"]["enabled"]) {
                 config.telemetry.enabled = yaml["telemetry"]["enabled"].as<bool>();
             }
@@ -377,6 +481,12 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             // InfluxDB settings (canonical nested structure)
             if (yaml["telemetry"]["influxdb"]) {
                 auto influx = yaml["telemetry"]["influxdb"];
+                if (!ensure_mapping(influx, "telemetry.influxdb", error)) {
+                    return false;
+                }
+                warn_unknown_keys(influx, "telemetry.influxdb",
+                                  {"url", "org", "bucket", "token", "batch_size", "flush_interval_ms",
+                                   "max_retry_buffer_size", "queue_size"});
 
                 if (influx["url"]) {
                     config.telemetry.influx_url = influx["url"].as<std::string>();
@@ -424,6 +534,9 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load logging config
         if (yaml["logging"]) {
+            if (!ensure_mapping(yaml["logging"], "logging", error)) {
+                return false;
+            }
             if (yaml["logging"]["level"]) {
                 config.logging.level = yaml["logging"]["level"].as<std::string>();
             }
@@ -431,6 +544,13 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Load automation config
         if (yaml["automation"]) {
+            if (!ensure_mapping(yaml["automation"], "automation", error)) {
+                return false;
+            }
+            warn_unknown_keys(yaml["automation"], "automation",
+                              {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz", "manual_gating_policy",
+                               "parameters"});
+
             if (yaml["automation"]["enabled"]) {
                 config.automation.enabled = yaml["automation"]["enabled"].as<bool>();
             }
@@ -457,8 +577,21 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
             // Load parameters
             if (yaml["automation"]["parameters"]) {
-                config.automation.parameters.clear();  // Ensure idempotent parsing
+                if (!ensure_sequence(yaml["automation"]["parameters"], "automation.parameters", error)) {
+                    return false;
+                }
+
+                config.automation.parameters.clear();
+                size_t param_index = 0;
                 for (const auto &param_node : yaml["automation"]["parameters"]) {
+                    const std::string param_path = "automation.parameters[" + std::to_string(param_index) + "]";
+                    if (!param_node.IsMap()) {
+                        error = "'" + param_path + "' must be a map";
+                        return false;
+                    }
+                    warn_unknown_keys(param_node, param_path,
+                                      {"name", "type", "default", "min", "max", "allowed_values"});
+
                     ParameterConfig param;
 
                     if (param_node["name"]) {
@@ -529,12 +662,16 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
                     // Parse allowed_values (string enums)
                     if (param_node["allowed_values"]) {
+                        if (!ensure_sequence(param_node["allowed_values"], param_path + ".allowed_values", error)) {
+                            return false;
+                        }
                         for (const auto &val : param_node["allowed_values"]) {
                             param.allowed_values.push_back(val.as<std::string>());
                         }
                     }
 
                     config.automation.parameters.push_back(param);
+                    ++param_index;
                 }
             }
         }
