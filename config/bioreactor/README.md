@@ -32,6 +32,13 @@ Device map:
 
 Build all three repos before validation so runtime config executable paths exist.
 
+Linux packages required by this runbook:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl jq
+```
+
 ```bash
 cd /path/to/anolis
 cmake --preset dev-release
@@ -83,6 +90,12 @@ cp .env.example .env
 docker compose -f docker-compose.observability.yml up -d
 ```
 
+Token alignment requirement:
+
+1. The runtime telemetry profile uses Influx token `dev-token`.
+2. Ensure `tools/docker/.env` keeps `INFLUXDB_TOKEN=dev-token`, or update
+   `anolis-runtime.bioreactor.telemetry.yaml` to match your `.env` token.
+
 Start runtime with telemetry profile:
 
 ```bash
@@ -107,6 +120,17 @@ Telemetry acceptance:
 2. `check_mixed_bus_http.sh` passes and captures artifacts.
 3. InfluxDB is reachable at `http://localhost:8086`.
 4. Grafana is reachable at `http://localhost:3001`.
+5. Telemetry points are ingested in InfluxDB:
+
+```bash
+curl -sS --request POST "http://localhost:8086/api/v2/query?org=anolis" \
+  --header "Authorization: Token dev-token" \
+  --header "Accept: application/csv" \
+  --header "Content-type: application/vnd.flux" \
+  --data 'from(bucket:"anolis") |> range(start: -5m) |> filter(fn:(r) => r._measurement == "anolis_signal") |> limit(n: 1)'
+```
+
+Expected: output includes at least one data row (not only CSV headers).
 
 ## Operator UI Manual Workflow
 
