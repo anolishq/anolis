@@ -68,20 +68,8 @@ def _normalize_csv_record(header: list[str], parsed: list[str]) -> dict[str, str
 
 
 def parse_influx_csv_rows(csv_text: str) -> list[dict[str, str]]:
-    data_lines = [line for line in csv_text.splitlines() if line and not line.startswith("#")]
-    if not data_lines:
-        return []
-
-    reader = csv.DictReader(data_lines)
-    rows: list[dict[str, str]] = []
-    for row in reader:
-        normalized: dict[str, str] = {}
-        for key, value in row.items():
-            if key is None:
-                continue
-            normalized[key] = "" if value is None else value
-        rows.append(normalized)
-    return rows
+    reader = csv.reader(io.StringIO(csv_text, newline=""))
+    return list(_iter_influx_csv_rows_from_reader(reader))
 
 
 def infer_value_and_type(row: dict[str, str]) -> tuple[Any, str]:

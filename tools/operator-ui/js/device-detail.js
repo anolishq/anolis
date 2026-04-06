@@ -12,6 +12,11 @@ let allDevices = []; // Full device list from API
 let deviceStates = {}; // Map of "provider/device" -> {device, signals}
 let deviceCapabilities = {}; // Map of "provider/device" -> normalized capabilities
 let selectedDevice = null; // {provider_id, device_id, device}
+const INT64_MIN = -9223372036854775808n;
+const INT64_MAX = 9223372036854775807n;
+const UINT64_MAX = 18446744073709551615n;
+const JS_SAFE_MIN = BigInt(Number.MIN_SAFE_INTEGER);
+const JS_SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 
 /**
  * Initialize device detail module
@@ -498,8 +503,8 @@ function renderFunctionForm(func) {
   if (Array.isArray(func.args) && func.args.length > 0) {
     html += '<div class="function-args">';
 
-    for (const arg of func.args) {
-      html += renderArgInput(arg, formId);
+    for (const [argIndex, arg] of func.args.entries()) {
+      html += renderArgInput(arg, formId, argIndex);
     }
 
     html += "</div>";
@@ -520,8 +525,9 @@ function renderFunctionForm(func) {
 /**
  * Render an input field for a function argument
  */
-function renderArgInput(arg, formId = "func") {
-  const argId = `${formId}-arg-${arg.name}`;
+function renderArgInput(arg, formId = "func", argIndex = 0) {
+  const argId = `${formId}-arg-${argIndex}`;
+  const argInputName = `arg_${argIndex}`;
   const required = arg.required !== false; // Default to required
   const requiredAttr = required ? "required" : "";
   const requiredLabel = required ? ' <span class="required">*</span>' : "";
@@ -532,7 +538,7 @@ function renderArgInput(arg, formId = "func") {
 
   switch (type) {
     case "double":
-      input = `<input type="number" id="${argId}" name="${arg.name}" step="any" ${requiredAttr}`;
+      input = `<input type="number" id="${argId}" name="${argInputName}" step="any" ${requiredAttr}`;
       if (arg.min !== undefined) input += ` min="${arg.min}"`;
       if (arg.max !== undefined) input += ` max="${arg.max}"`;
       input += ">";
@@ -540,24 +546,23 @@ function renderArgInput(arg, formId = "func") {
 
     case "int64":
     case "uint64":
-      input = `<input type="number" id="${argId}" name="${arg.name}" step="1" ${requiredAttr}`;
-      if (arg.min !== undefined) input += ` min="${arg.min}"`;
-      if (arg.max !== undefined) input += ` max="${arg.max}"`;
+      // Keep as text so 64-bit values are not silently rounded by browser number inputs.
+      input = `<input type="text" id="${argId}" name="${argInputName}" inputmode="numeric" ${requiredAttr}`;
       input += ">";
       break;
 
     case "bool":
       // For checkboxes, HTML "required" means "must be checked" (wrong semantics for bool args).
-      input = `<input type="checkbox" id="${argId}" name="${arg.name}">`;
+      input = `<input type="checkbox" id="${argId}" name="${argInputName}">`;
       break;
 
     case "bytes":
-      input = `<input type="text" id="${argId}" name="${arg.name}" placeholder="Base64 encoded" ${requiredAttr}>`;
+      input = `<input type="text" id="${argId}" name="${argInputName}" placeholder="Base64 encoded" ${requiredAttr}>`;
       break;
 
     case "string":
     default:
-      input = `<input type="text" id="${argId}" name="${arg.name}" ${requiredAttr}>`;
+      input = `<input type="text" id="${argId}" name="${argInputName}" ${requiredAttr}>`;
       break;
   }
 
@@ -579,6 +584,38 @@ function renderArgInput(arg, formId = "func") {
       ${input}
     </div>
   `;
+}
+
+function parseIntegerArgument(value, argDef, valueType) {
+  const argName = argDef.name;
+  let parsedBigInt;
+  try {
+    parsedBigInt = BigInt(value);
+  } catch (_err) {
+    throw new Error(`Invalid ${valueType} argument: ${argName}`);
+  }
+
+  if (valueType === "int64") {
+    if (parsedBigInt < INT64_MIN || parsedBigInt > INT64_MAX) {
+      throw new Error(`Out-of-range int64 argument: ${argName}`);
+    }
+    if (parsedBigInt < JS_SAFE_MIN || parsedBigInt > JS_SAFE_MAX) {
+      throw new Error(
+        `int64 argument out of browser-safe range: ${argName} (use API for >53-bit values)`,
+      );
+    }
+  } else {
+    if (parsedBigInt < 0n || parsedBigInt > UINT64_MAX) {
+      throw new Error(`Out-of-range uint64 argument: ${argName}`);
+    }
+    if (parsedBigInt > JS_SAFE_MAX) {
+      throw new Error(
+        `uint64 argument out of browser-safe range: ${argName} (use API for >53-bit values)`,
+      );
+    }
+  }
+
+  return Number(parsedBigInt);
 }
 
 /**
@@ -628,8 +665,9 @@ async function handleFunctionSubmit(event) {
     const formData = new FormData(form);
 
     // Parse each argument according to its type
-    for (const argDef of funcDef.args || []) {
-      const inputElement = form.elements[argDef.name];
+    for (const [argIndex, argDef] of (funcDef.args || []).entries()) {
+      const inputName = `arg_${argIndex}`;
+      const inputElement = form.elements.namedItem(inputName);
       const argType = argDef.type || "string";
 
       if (!inputElement) {
@@ -647,7 +685,7 @@ async function handleFunctionSubmit(event) {
         continue;
       }
 
-      const rawValue = formData.get(argDef.name);
+      const rawValue = formData.get(inputName);
       const value = typeof rawValue === "string" ? rawValue.trim() : "";
       if (value === "") {
         if (argDef.required !== false) {
@@ -666,18 +704,12 @@ async function handleFunctionSubmit(event) {
           break;
         }
         case "int64": {
-          const parsed = Number(value);
-          if (!Number.isInteger(parsed)) {
-            throw new Error(`Invalid int64 argument: ${argDef.name}`);
-          }
+          const parsed = parseIntegerArgument(value, argDef, "int64");
           args[argDef.name] = { type: "int64", int64: parsed };
           break;
         }
         case "uint64": {
-          const parsed = Number(value);
-          if (!Number.isInteger(parsed) || parsed < 0) {
-            throw new Error(`Invalid uint64 argument: ${argDef.name}`);
-          }
+          const parsed = parseIntegerArgument(value, argDef, "uint64");
           args[argDef.name] = { type: "uint64", uint64: parsed };
           break;
         }

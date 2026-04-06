@@ -479,3 +479,22 @@ def test_iter_influx_csv_rows_supports_multiline_values_from_raw_stream():
     assert len(rows) == 1
     assert rows[0]["signal_id"] == "note"
     assert rows[0]["value_string"] == "line1\nline2"
+
+
+def test_parse_influx_csv_rows_supports_multiline_values():
+    module = _load_module()
+
+    csv_text = "\n".join(
+        [
+            "#group,false,false,true,true,true,true,false,false,false,false,false,false,false",
+            "#datatype,string,long,dateTime:RFC3339,string,string,string,string,string,double,long,unsignedLong,string,string",
+            ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+            ',,0,2026-04-01T00:00:01Z,bioreactor-telemetry,bread0,rlht0,note,OK,,,,,"line1',
+            'line2"',
+        ]
+    )
+
+    rows = module.parse_influx_csv_rows(csv_text)
+    assert len(rows) == 1
+    assert rows[0]["signal_id"] == "note"
+    assert rows[0]["value_string"] == "line1\nline2"
