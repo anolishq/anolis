@@ -86,7 +86,7 @@ def export_service_process() -> Generator[tuple[subprocess.Popen[str], dict[str,
         cfg_path.write_text(yaml.safe_dump(service_cfg, sort_keys=False), encoding="utf-8")
 
         process = subprocess.Popen(
-            [sys.executable, "tools/telemetry_export/export_service.py", "--config", str(cfg_path)],
+            [sys.executable, "-m", "tools.telemetry_export.export_service", "--config", str(cfg_path)],
             cwd=str(repo_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

@@ -180,7 +180,7 @@ cd /path/to/anolis
 # Optional secret overrides (preferred in shared/prod-like environments):
 # export ANOLIS_EXPORT_AUTH_TOKEN='...'
 # export ANOLIS_EXPORT_INFLUX_TOKEN='...'
-python3 tools/telemetry_export/export_service.py --config config/bioreactor/telemetry-export.bioreactor.yaml
+python3 -m tools.telemetry_export.export_service --config config/bioreactor/telemetry-export.bioreactor.yaml
 ```
 
 Health check:

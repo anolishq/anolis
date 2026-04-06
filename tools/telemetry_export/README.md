@@ -97,7 +97,7 @@ streaming to avoid assembling full exports in RAM.
 
 ```bash
 cd /path/to/anolis
-python tools/telemetry_export/export_service.py --config config/bioreactor/telemetry-export.bioreactor.yaml
+python -m tools.telemetry_export.export_service --config config/bioreactor/telemetry-export.bioreactor.yaml
 ```
 
 ## Example Query (JSON Response)
