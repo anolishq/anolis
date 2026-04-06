@@ -71,7 +71,10 @@ function applyTheme(theme) {
   if (!elements.themeToggle) return;
   const nextTheme = theme === "dark" ? "light" : "dark";
   elements.themeToggle.textContent = nextTheme === "dark" ? "Dark" : "Light";
-  elements.themeToggle.setAttribute("aria-label", `Switch to ${nextTheme} theme`);
+  elements.themeToggle.setAttribute(
+    "aria-label",
+    `Switch to ${nextTheme} theme`,
+  );
 }
 
 /**
@@ -268,7 +271,10 @@ async function init() {
         UI.updateBadge(elements.connectionBadge, "disconnected");
         elements.connectionBadge.textContent = "Disconnected";
         if (attempts > 0) {
-          showErrorBanner("Connection to runtime lost. Reconnecting...", "warning");
+          showErrorBanner(
+            "Connection to runtime lost. Reconnecting...",
+            "warning",
+          );
         }
       } else if (state === "stale") {
         UI.updateBadge(elements.connectionBadge, "stale");

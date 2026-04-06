@@ -2,14 +2,14 @@
  * UI Utilities - Shared DOM manipulation and formatting
  */
 
-import { QUALITY_LEVELS } from './config.js';
+import { QUALITY_LEVELS } from "./config.js";
 
 /**
  * Escape HTML to prevent XSS
  */
 export function escapeHtml(text) {
-  if (text == null) return '';
-  const div = document.createElement('div');
+  if (text == null) return "";
+  const div = document.createElement("div");
   div.textContent = String(text);
   return div.innerHTML;
 }
@@ -18,18 +18,18 @@ export function escapeHtml(text) {
  * Format signal value for display
  */
 export function formatValue(value) {
-  if (!value) return '--';
-  
+  if (!value) return "--";
+
   const type = value.type;
-  if (type === 'double' && value.double !== undefined) {
+  if (type === "double" && value.double !== undefined) {
     return value.double.toFixed(4);
-  } else if (type === 'int64' && value.int64 !== undefined) {
+  } else if (type === "int64" && value.int64 !== undefined) {
     return String(value.int64);
-  } else if (type === 'uint64' && value.uint64 !== undefined) {
+  } else if (type === "uint64" && value.uint64 !== undefined) {
     return String(value.uint64);
-  } else if (type === 'bool' && value.bool !== undefined) {
-    return value.bool ? 'true' : 'false';
-  } else if (type === 'string' && value.string !== undefined) {
+  } else if (type === "bool" && value.bool !== undefined) {
+    return value.bool ? "true" : "false";
+  } else if (type === "string" && value.string !== undefined) {
     return value.string;
   }
   return JSON.stringify(value);
@@ -39,7 +39,7 @@ export function formatValue(value) {
  * Validate and normalize quality level
  */
 export function normalizeQuality(quality) {
-  return QUALITY_LEVELS.includes(quality) ? quality : 'UNKNOWN';
+  return QUALITY_LEVELS.includes(quality) ? quality : "UNKNOWN";
 }
 
 /**
@@ -54,11 +54,11 @@ export function updateBadge(element, status) {
  * Show/hide element
  */
 export function show(element) {
-  element.classList.remove('hidden');
+  element.classList.remove("hidden");
 }
 
 export function hide(element) {
-  element.classList.add('hidden');
+  element.classList.add("hidden");
 }
 
 /**

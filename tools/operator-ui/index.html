@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta
+      http-equiv="Cache-Control"
+      content="no-cache, no-store, must-revalidate"
+    />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Anolis Control Dashboard</title>
@@ -17,18 +20,43 @@
       <div id="error-banner" class="error-banner hidden">
         <span class="error-icon">[!]</span>
         <span id="error-banner-message"></span>
-        <button id="error-banner-dismiss" class="btn-dismiss" type="button">x</button>
+        <button id="error-banner-dismiss" class="btn-dismiss" type="button">
+          x
+        </button>
       </div>
 
       <div class="header-main">
         <h1>Anolis Control Dashboard</h1>
-        <span class="header-subtitle">Runtime Automation and Device Monitoring</span>
+        <span class="header-subtitle"
+          >Runtime Automation and Device Monitoring</span
+        >
       </div>
 
       <nav class="header-tabs">
-        <button id="tab-dashboard" class="tab-button active" data-view="dashboard" type="button">Dashboard</button>
-        <button id="tab-devices" class="tab-button" data-view="devices" type="button">Devices</button>
-        <button id="tab-telemetry" class="tab-button" data-view="telemetry" type="button">Telemetry</button>
+        <button
+          id="tab-dashboard"
+          class="tab-button active"
+          data-view="dashboard"
+          type="button"
+        >
+          Dashboard
+        </button>
+        <button
+          id="tab-devices"
+          class="tab-button"
+          data-view="devices"
+          type="button"
+        >
+          Devices
+        </button>
+        <button
+          id="tab-telemetry"
+          class="tab-button"
+          data-view="telemetry"
+          type="button"
+        >
+          Telemetry
+        </button>
       </nav>
 
       <div class="header-status">
@@ -42,7 +70,14 @@
         </div>
         <div class="status-item theme-control">
           <span class="label">Theme:</span>
-          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color theme">Light</button>
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            type="button"
+            aria-label="Switch color theme"
+          >
+            Light
+          </button>
         </div>
         <div id="last-update" class="last-update">--</div>
       </div>
@@ -66,7 +101,9 @@
               <option value="AUTO">AUTO</option>
               <option value="IDLE">IDLE</option>
             </select>
-            <button id="set-mode-button" class="btn-primary" type="button">Set Mode</button>
+            <button id="set-mode-button" class="btn-primary" type="button">
+              Set Mode
+            </button>
             <span id="mode-feedback" class="feedback"></span>
           </div>
         </div>
@@ -138,7 +175,9 @@
     <!-- Devices View -->
     <main id="view-devices" class="devices-view view-hidden">
       <div class="device-selector-panel">
-        <label for="device-selector" class="selector-label">Select Device:</label>
+        <label for="device-selector" class="selector-label"
+          >Select Device:</label
+        >
         <select id="device-selector" class="device-selector">
           <option value="">Loading devices...</option>
         </select>
@@ -156,7 +195,12 @@
       <div class="telemetry-controls">
         <p class="telemetry-notice">
           <strong>Note:</strong> If the embedded view is blocked,
-          <a href="http://localhost:3001" target="_blank" rel="noopener noreferrer" class="external-link">
+          <a
+            href="http://localhost:3001"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="external-link"
+          >
             open Grafana in a new tab ->
           </a>
         </p>

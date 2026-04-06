@@ -51,7 +51,8 @@ html[data-theme="light"] {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--color-bg-0);
   color: var(--color-text-strong);
   min-height: 100vh;
@@ -137,7 +138,9 @@ a {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .error-banner .btn-dismiss:hover {
@@ -182,7 +185,10 @@ header {
   font-size: 1rem;
   font-weight: 500;
   cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .tab-button:hover {
@@ -226,7 +232,10 @@ header {
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .theme-toggle:hover {
@@ -568,7 +577,10 @@ header {
 
 .device-card.clickable {
   cursor: pointer;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .device-card.clickable:hover {
@@ -758,7 +770,10 @@ button {
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 button:hover {

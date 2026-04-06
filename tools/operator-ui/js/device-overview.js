@@ -43,7 +43,8 @@ function getDeviceHealth(signals) {
     return { status: "unknown", staleness_ms: 0 };
   }
 
-  const qualityOf = (signal) => String(signal?.quality || "UNKNOWN").toUpperCase();
+  const qualityOf = (signal) =>
+    String(signal?.quality || "UNKNOWN").toUpperCase();
 
   // Check worst quality among all signals
   const hasUnavailable = signals.some((s) => qualityOf(s) === "UNAVAILABLE");

@@ -37,7 +37,7 @@ export function init(elementIds) {
 
   // Event listeners
   elements.setModeButton.addEventListener("click", handleSetMode);
-  
+
   // Track when user manually changes dropdown (dirty state)
   elements.modeSelector.addEventListener("change", () => {
     modeSelectorDirty = true;
@@ -77,12 +77,12 @@ async function refreshMode() {
       currentMode = data.mode;
       elements.modeDisplay.textContent = currentMode;
       elements.modeDisplay.className = `badge ${currentMode.toLowerCase()}`;
-      
+
       // Only update dropdown if user hasn't manually changed it
       if (!modeSelectorDirty) {
         elements.modeSelector.value = currentMode;
       }
-      
+
       UI.show(elements.automationSection);
     }
   } catch (err) {
@@ -97,7 +97,7 @@ function handleModeChange(data) {
   currentMode = data.new_mode;
   elements.modeDisplay.textContent = currentMode;
   elements.modeDisplay.className = `badge ${currentMode.toLowerCase()}`;
-  
+
   // Only update dropdown if user hasn't manually changed it
   if (!modeSelectorDirty) {
     elements.modeSelector.value = currentMode;
@@ -181,10 +181,10 @@ async function handleSetMode() {
     if (result.status?.code === "OK") {
       elements.modeFeedback.textContent = "Mode set";
       elements.modeFeedback.className = "feedback success";
-      
+
       // Reset dirty flag - mode change successful
       modeSelectorDirty = false;
-      
+
       setTimeout(() => {
         elements.modeFeedback.textContent = "";
         elements.modeFeedback.className = "feedback";
@@ -353,9 +353,10 @@ function renderBTOutline(xmlDoc, node = null, indent = 0, isLast = true) {
  */
 function addEvent(eventType, details, timestampMs) {
   const timestampValue = Number(timestampMs);
-  const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
-    ? new Date(timestampValue).toLocaleTimeString()
-    : new Date().toLocaleTimeString();
+  const timestamp =
+    Number.isFinite(timestampValue) && timestampValue > 0
+      ? new Date(timestampValue).toLocaleTimeString()
+      : new Date().toLocaleTimeString();
   eventBuffer.push({ type: eventType, details, timestamp });
 
   if (eventBuffer.length > CONFIG.MAX_EVENTS) {

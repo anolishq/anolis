@@ -331,7 +331,8 @@ async function loadDeviceCapabilities(provider, device) {
     ) {
       const container = document.getElementById("device-functions-container");
       if (container && !deviceCapabilities[capabilityKey]) {
-        container.innerHTML = '<p class="placeholder">No functions available</p>';
+        container.innerHTML =
+          '<p class="placeholder">No functions available</p>';
       }
     }
   }
@@ -366,13 +367,15 @@ function normalizeFunctions(functions) {
     const name =
       typeof func?.name === "string" && func.name.trim() !== ""
         ? func.name.trim()
-        : typeof func?.function_name === "string" && func.function_name.trim() !== ""
+        : typeof func?.function_name === "string" &&
+            func.function_name.trim() !== ""
           ? func.function_name.trim()
           : `Function ${fallbackId}`;
     const description =
       typeof func?.label === "string" && func.label.trim() !== ""
         ? func.label.trim()
-        : typeof func?.description === "string" && func.description.trim() !== ""
+        : typeof func?.description === "string" &&
+            func.description.trim() !== ""
           ? func.description.trim()
           : "";
 
@@ -475,7 +478,10 @@ function renderFunctions(capabilities) {
 function renderFunctionForm(func) {
   const formId = `func-${func.function_id}`;
   const functionName =
-    func.display_name || func.name || func.function_name || `Function ${func.function_id}`;
+    func.display_name ||
+    func.name ||
+    func.function_name ||
+    `Function ${func.function_id}`;
   const functionDescription = func.description || func.label || "";
 
   let html = `
