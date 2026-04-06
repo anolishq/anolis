@@ -27,6 +27,7 @@ Device map:
 2. `anolis-runtime.bioreactor.telemetry.yaml`
 3. `provider-bread.bioreactor.yaml`
 4. `provider-ezo.bioreactor.yaml`
+5. `telemetry-export.bioreactor.yaml`
 
 ## Build Prerequisites
 
@@ -166,6 +167,97 @@ curl -sS --request POST "http://localhost:8086/api/v2/query?org=anolis" \
 ```
 
 Expected: output includes at least one data row (not only CSV headers).
+
+## Telemetry Export MVP Service
+
+This service is the production-MVP export path. It is intentionally external to
+`anolis-runtime` control-plane APIs.
+
+Start export service:
+
+```bash
+cd /path/to/anolis
+# Optional secret overrides (preferred in shared/prod-like environments):
+# export ANOLIS_EXPORT_AUTH_TOKEN='...'
+# export ANOLIS_EXPORT_INFLUX_TOKEN='...'
+python3 tools/telemetry_export/export_service.py --config config/bioreactor/telemetry-export.bioreactor.yaml
+```
+
+Health check:
+
+```bash
+curl -sS http://127.0.0.1:8091/v1/health
+```
+
+Raw-event query (`json` response):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer export-dev-token" \
+  -H "X-Requester-Id: operator-ui" \
+  -d '{
+    "time_range": {
+      "start": "2026-04-01T00:00:00Z",
+      "end": "2026-04-01T00:30:00Z"
+    },
+    "selector": {
+      "provider_ids": ["bread0", "ezo0"],
+      "device_ids": ["rlht0", "dcmt0", "dcmt1", "ph0", "do0"]
+    },
+    "resolution": {
+      "mode": "raw_event"
+    },
+    "format": "json"
+  }'
+```
+
+Downsampled query (`csv` response):
+
+```bash
+curl -sS -D /tmp/export.headers \
+  -o /tmp/export.csv \
+  -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer export-dev-token" \
+  -d '{
+    "time_range": {
+      "start": "2026-04-01T00:00:00Z",
+      "end": "2026-04-01T00:30:00Z"
+    },
+    "resolution": {
+      "mode": "downsampled",
+      "interval": "10s",
+      "aggregation": "last"
+    },
+    "format": "csv"
+  }'
+```
+
+Programmatic example:
+
+```bash
+python3 tools/telemetry_export/examples/query_signals.py \
+  --start 2026-04-01T00:00:00Z \
+  --end 2026-04-01T00:30:00Z \
+  --provider bread0 \
+  --provider ezo0 \
+  --format json
+```
+
+MVP constraints:
+
+1. Dataset support is `signals` only.
+2. Auth is mandatory (`Authorization: Bearer ...`).
+3. Completeness is best-effort under current telemetry overflow behavior.
+4. `bytes` vs `string` fidelity remains a known MVP limitation.
+5. `X-Request-Id` is always emitted; `X-Requester-Id` is optional.
+6. Optional selector scope enforcement can return `403 permission_denied`.
+7. `timezone` request input is not supported in v1 (timestamps are always UTC).
+8. In downsample mode:
+   - numeric fields use requested aggregation (`last|mean|min|max|count`);
+   - `value_bool`, `value_string`, and `quality` use `last`;
+   - requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
 
 Stop observability stack when finished:
 
