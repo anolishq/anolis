@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
 import os
 import subprocess
 import sys
 import tempfile
 import time
+from typing import Any
 
 import pytest
 import requests
@@ -51,7 +53,7 @@ def _wait_for_http_ok(url: str, timeout_seconds: int = 30) -> None:
 
 
 @pytest.fixture()
-def export_service_process() -> tuple[subprocess.Popen[str], dict]:
+def export_service_process() -> Generator[tuple[subprocess.Popen[str], dict[str, Any]], None, None]:
     repo_root = _repo_root()
     influx_cfg = {
         "url": os.getenv("ANOLIS_EXPORT_E2E_INFLUX_URL", "http://127.0.0.1:8086"),
@@ -102,8 +104,7 @@ def export_service_process() -> tuple[subprocess.Popen[str], dict]:
                 except Exception:
                     startup_output = "<unable to read process output>"
             detail = (
-                f"export service failed to start (exit_code={exit_code}). "
-                f"startup_output={startup_output or '<none>'}"
+                f"export service failed to start (exit_code={exit_code}). startup_output={startup_output or '<none>'}"
             )
             raise RuntimeError(detail) from exc
         finally:
@@ -115,7 +116,9 @@ def export_service_process() -> tuple[subprocess.Popen[str], dict]:
                     process.kill()
 
 
-def test_export_service_e2e_paths(export_service_process: tuple[subprocess.Popen[str], dict]) -> None:
+def test_export_service_e2e_paths(
+    export_service_process: tuple[subprocess.Popen[str], dict[str, Any]],
+) -> None:
     _process, service_cfg = export_service_process
     influx_cfg = service_cfg["influxdb"]
     base_url = "http://127.0.0.1:18091"
