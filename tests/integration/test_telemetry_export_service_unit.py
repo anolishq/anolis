@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 from pathlib import Path
 
@@ -394,3 +395,87 @@ def test_execute_csv_spooled_query_writes_temp_file_and_manifest(monkeypatch: py
         assert "tc1_temp" in csv_text
     finally:
         result.path.unlink(missing_ok=True)
+
+
+def test_execute_query_from_query_does_not_revalidate(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    cfg = _test_config(module)
+    svc = module.ExportService(cfg)
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "resolution": {"mode": "raw_event"},
+        "format": "json",
+    }
+    parsed = module.validate_query_request(request, cfg.limits)
+
+    monkeypatch.setattr(module, "validate_query_request", lambda _body, _limits: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(module, "influx_query_csv", lambda _cfg, _query: _sample_csv_rows())
+
+    status, payload = svc.execute_query_from_query(parsed, request_id="req-from-query", requester_id="operator-a")
+    assert status == 200
+    assert payload["format"] == "json"
+    assert payload["manifest"]["request_id"] == "req-from-query"
+
+
+def test_execute_csv_spooled_query_from_query_does_not_revalidate(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    cfg = _test_config(module)
+    svc = module.ExportService(cfg)
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "resolution": {"mode": "raw_event"},
+        "format": "csv",
+    }
+    parsed = module.validate_query_request(request, cfg.limits)
+
+    class _FakeStreamResponse:
+        def __init__(self, lines: list[str]):
+            self._lines = lines
+
+        def iter_lines(self, decode_unicode: bool = True):
+            assert decode_unicode is True
+            for line in self._lines:
+                yield line
+
+        def close(self):
+            return None
+
+    fake_lines = [
+        ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+        ",,0,2026-04-01T00:00:01Z,bioreactor-telemetry,bread0,rlht0,tc1_temp,OK,23.5,,,,",
+    ]
+
+    monkeypatch.setattr(module, "validate_query_request", lambda _body, _limits: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(module, "influx_query_csv_stream", lambda _cfg, _query: _FakeStreamResponse(fake_lines))
+
+    result = svc.execute_csv_spooled_query_from_query(parsed, request_id="req-spooled", requester_id="operator-a")
+    try:
+        assert result.row_count == 1
+        assert result.manifest["request_id"] == "req-spooled"
+    finally:
+        result.path.unlink(missing_ok=True)
+
+
+def test_iter_influx_csv_rows_supports_multiline_values_from_raw_stream():
+    module = _load_module()
+
+    csv_text = "\n".join(
+        [
+            "#group,false,false,true,true,true,true,false,false,false,false,false,false,false",
+            "#datatype,string,long,dateTime:RFC3339,string,string,string,string,string,double,long,unsignedLong,string,string",
+            ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+            ',,0,2026-04-01T00:00:01Z,bioreactor-telemetry,bread0,rlht0,note,OK,,,,,"line1',
+            'line2"',
+        ]
+    )
+
+    class _FakeRawResponse:
+        def __init__(self, payload: str):
+            self.raw = io.BytesIO(payload.encode("utf-8"))
+
+    rows = list(module.iter_influx_csv_rows(_FakeRawResponse(csv_text)))
+    assert len(rows) == 1
+    assert rows[0]["signal_id"] == "note"
+    assert rows[0]["value_string"] == "line1\nline2"
