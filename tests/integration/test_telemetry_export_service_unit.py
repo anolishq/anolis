@@ -345,3 +345,52 @@ def test_load_config_prefers_env_over_config_tokens(monkeypatch: pytest.MonkeyPa
     assert loaded.server.auth_token == "env-auth-token"
     assert loaded.influx.token == "env-influx-token"
     assert loaded.authorization.allowed_runtime_names == ("bioreactor-telemetry",)
+
+
+def test_execute_csv_spooled_query_writes_temp_file_and_manifest(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    cfg = _test_config(module)
+    svc = module.ExportService(cfg)
+
+    class _FakeStreamResponse:
+        def __init__(self, lines: list[str]):
+            self._lines = lines
+            self.closed = False
+
+        def iter_lines(self, decode_unicode: bool = True):
+            assert decode_unicode is True
+            for line in self._lines:
+                yield line
+
+        def close(self):
+            self.closed = True
+
+    fake_lines = [
+        "#group,false,false,true,true,true,true,false,false,false,false,false,false,false",
+        "#datatype,string,long,dateTime:RFC3339,string,string,string,string,string,double,long,unsignedLong,string,string",
+        ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+        ",,0,2026-04-01T00:00:01Z,bioreactor-telemetry,bread0,rlht0,tc1_temp,OK,23.5,,,,",
+        ",,0,2026-04-01T00:00:02Z,bioreactor-telemetry,bread0,rlht0,tc1_temp,OK,23.6,,,,",
+    ]
+
+    monkeypatch.setattr(module, "influx_query_csv_stream", lambda _cfg, _query: _FakeStreamResponse(fake_lines))
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "selector": {"runtime_names": ["bioreactor-telemetry"], "provider_ids": ["bread0"]},
+        "resolution": {"mode": "raw_event"},
+        "format": "csv",
+    }
+
+    result = svc.execute_csv_spooled_query(request, request_id="req-spool", requester_id="operator-a")
+    try:
+        assert result.row_count == 2
+        assert result.content_length > 0
+        assert result.manifest["request_id"] == "req-spool"
+        assert result.manifest["requester_id"] == "operator-a"
+        csv_text = result.path.read_text(encoding="utf-8")
+        assert "runtime_name" in csv_text
+        assert "bioreactor-telemetry" in csv_text
+        assert "tc1_temp" in csv_text
+    finally:
+        result.path.unlink(missing_ok=True)

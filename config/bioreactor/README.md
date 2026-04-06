@@ -260,6 +260,7 @@ MVP constraints:
    - numeric fields use requested aggregation (`last|mean|min|max|count`);
    - `value_bool`, `value_string`, and `quality` use `last`;
    - requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
+10. `format=csv` uses a bounded-memory spool-to-file path before response streaming; limit violations still return deterministic API errors.
 
 Stop observability stack when finished:
 

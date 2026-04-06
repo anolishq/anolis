@@ -104,8 +104,9 @@ curl -sS -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
 
 ## Example Query (CSV Response)
 
-`format=csv` returns a `text/csv` body. Manifest metadata is returned in
-`X-Export-Manifest`.
+`format=csv` returns a `text/csv` body. The service writes CSV to a temporary
+spool file first (bounded memory path), enforces row/size limits, then streams
+the file to the response. Manifest metadata is returned in `X-Export-Manifest`.
 
 ```bash
 curl -sS -D /tmp/export.headers \
@@ -143,3 +144,5 @@ python tools/telemetry_export/examples/query_signals.py \
 1. MVP scope is `signals` only.
 2. Completeness is best-effort under current telemetry overflow behavior.
 3. `bytes` vs `string` fidelity remains a documented MVP limitation.
+4. `format=json` remains synchronous/in-memory and is bounded by `limits.max_rows`
+   and `limits.max_response_bytes`.
