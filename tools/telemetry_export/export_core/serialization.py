@@ -16,12 +16,19 @@ from .models import AppConfig, SignalsQuery
 def iter_influx_csv_rows(stream_response: Any) -> Any:
     raw_stream = getattr(stream_response, "raw", None)
     if raw_stream is not None:
-        text_stream = io.TextIOWrapper(raw_stream, encoding="utf-8", newline="")
         try:
-            yield from _iter_influx_csv_rows_from_reader(csv.reader(text_stream))
-        finally:
-            text_stream.detach()
-        return
+            text_stream = io.TextIOWrapper(raw_stream, encoding="utf-8", newline="")
+        except Exception:
+            text_stream = None
+        if text_stream is not None:
+            try:
+                yield from _iter_influx_csv_rows_from_reader(csv.reader(text_stream))
+            finally:
+                try:
+                    text_stream.detach()
+                except Exception:
+                    pass
+            return
 
     yield from _iter_influx_csv_rows_from_iter_lines(stream_response)
 

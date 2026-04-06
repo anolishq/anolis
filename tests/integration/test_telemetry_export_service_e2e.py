@@ -166,7 +166,7 @@ def test_export_service_e2e_paths(
         json=raw_request,
         timeout=30,
     )
-    assert raw_response.status_code == 200
+    assert raw_response.status_code == 200, raw_response.text
     raw_payload = raw_response.json()
     assert raw_payload["status"] == "ok"
     assert raw_payload["manifest"]["row_count"] > 0
