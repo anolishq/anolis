@@ -52,6 +52,42 @@ def _wait_for_http_ok(url: str, timeout_seconds: int = 30) -> None:
     raise RuntimeError(f"Timed out waiting for healthy endpoint: {url}")
 
 
+def _collect_service_output(process: subprocess.Popen[str]) -> str:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+
+    if process.stdout is None:
+        return "<service stdout unavailable>"
+
+    try:
+        output = process.stdout.read().strip()
+    except Exception as exc:
+        return f"<unable to read service stdout: {exc}>"
+    return output or "<service stdout empty>"
+
+
+def _assert_status(
+    response: requests.Response,
+    expected_status: int,
+    *,
+    process: subprocess.Popen[str],
+    label: str,
+) -> None:
+    if response.status_code == expected_status:
+        return
+    request_id = response.headers.get("X-Request-Id", "<missing>")
+    service_output = _collect_service_output(process)
+    raise AssertionError(
+        f"{label} expected HTTP {expected_status}, got {response.status_code}. "
+        f"request_id={request_id}. response_body={response.text}. service_output={service_output}"
+    )
+
+
 @pytest.fixture()
 def export_service_process() -> Generator[tuple[subprocess.Popen[str], dict[str, Any]], None, None]:
     repo_root = _repo_root()
@@ -86,7 +122,15 @@ def export_service_process() -> Generator[tuple[subprocess.Popen[str], dict[str,
         cfg_path.write_text(yaml.safe_dump(service_cfg, sort_keys=False), encoding="utf-8")
 
         process = subprocess.Popen(
-            [sys.executable, "-m", "tools.telemetry_export.export_service", "--config", str(cfg_path)],
+            [
+                sys.executable,
+                "-m",
+                "tools.telemetry_export.export_service",
+                "--config",
+                str(cfg_path),
+                "--log-level",
+                "debug",
+            ],
             cwd=str(repo_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -166,7 +210,7 @@ def test_export_service_e2e_paths(
         json=raw_request,
         timeout=30,
     )
-    assert raw_response.status_code == 200, raw_response.text
+    _assert_status(raw_response, 200, process=_process, label="raw json query")
     raw_payload = raw_response.json()
     assert raw_payload["status"] == "ok"
     assert raw_payload["manifest"]["row_count"] > 0
@@ -187,7 +231,7 @@ def test_export_service_e2e_paths(
         json=csv_request,
         timeout=30,
     )
-    assert csv_response.status_code == 200
+    _assert_status(csv_response, 200, process=_process, label="downsample csv query")
     assert csv_response.headers["Content-Type"].startswith("text/csv")
     assert "X-Export-Manifest" not in csv_response.headers
     assert csv_response.headers.get("X-Export-Id")
@@ -199,7 +243,7 @@ def test_export_service_e2e_paths(
         headers={"Authorization": "Bearer export-e2e-token"},
         timeout=10,
     )
-    assert manifest_response.status_code == 200
+    _assert_status(manifest_response, 200, process=_process, label="manifest fetch")
     manifest_payload = manifest_response.json()
     assert manifest_payload["status"] == "ok"
     assert manifest_payload["manifest"]["export_id"] == export_id
@@ -216,7 +260,7 @@ def test_export_service_e2e_paths(
         json=ndjson_request,
         timeout=30,
     )
-    assert ndjson_response.status_code == 200, ndjson_response.text
+    _assert_status(ndjson_response, 200, process=_process, label="raw ndjson query")
     assert ndjson_response.headers["Content-Type"].startswith("application/x-ndjson")
     assert len([line for line in ndjson_response.text.splitlines() if line.strip()]) > 0
 
@@ -235,7 +279,7 @@ def test_export_service_e2e_paths(
         json=large_request,
         timeout=30,
     )
-    assert large_response.status_code == 413
+    _assert_status(large_response, 413, process=_process, label="large json limit query")
 
     denied_request = {
         "time_range": {"start": "2024-04-01T00:00:00Z", "end": "2024-04-01T01:00:00Z"},
@@ -249,4 +293,4 @@ def test_export_service_e2e_paths(
         json=denied_request,
         timeout=30,
     )
-    assert denied_response.status_code == 403
+    _assert_status(denied_response, 403, process=_process, label="scope denied query")

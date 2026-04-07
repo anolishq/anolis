@@ -545,6 +545,41 @@ def test_load_config_rejects_scope_enforcement_without_allowlists(tmp_path: Path
     assert "authorization" in str(exc_info.value)
 
 
+def test_influx_query_csv_stream_enables_raw_decode_content(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    cfg = _test_config(module)
+
+    class _Raw:
+        def __init__(self) -> None:
+            self.decode_content = False
+
+    class _Response:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers = {
+                "Content-Encoding": "gzip",
+                "Content-Type": "application/csv",
+            }
+            self.raw = _Raw()
+            self.text = ""
+
+    captured_kwargs: dict[str, object] = {}
+
+    def _fake_post(*args: object, **kwargs: object) -> _Response:
+        _ = args
+        captured_kwargs.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(module.influx_query_csv_stream.__globals__["requests"], "post", _fake_post)
+
+    response = module.influx_query_csv_stream(cfg, 'from(bucket:"anolis")')
+    assert response.raw.decode_content is True
+
+    headers = captured_kwargs.get("headers")
+    assert isinstance(headers, dict)
+    assert headers.get("Accept-Encoding") == "identity"
+
+
 def test_execute_csv_spooled_query_writes_temp_file_and_manifest(monkeypatch: pytest.MonkeyPatch):
     module = _load_module()
     cfg = _test_config(module)
@@ -814,6 +849,40 @@ def test_execute_spooled_query_json_enforces_max_response_bytes(monkeypatch: pyt
 
     assert exc_info.value.status == 413
     assert exc_info.value.code == "limit_exceeded"
+
+
+def test_execute_spooled_query_maps_stream_decode_errors_to_upstream_error(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    cfg = _test_config(module)
+    svc = module.ExportService(cfg)
+
+    class _FakeBinaryStreamResponse:
+        def __init__(self, payload: bytes):
+            self.raw = io.BytesIO(payload)
+            self.headers = {"Content-Encoding": "gzip"}
+
+        def close(self):
+            return None
+
+    gzip_magic_prefix = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
+    monkeypatch.setattr(
+        module,
+        "influx_query_csv_stream",
+        lambda _cfg, _query: _FakeBinaryStreamResponse(gzip_magic_prefix + b"not-decoded"),
+    )
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "resolution": {"mode": "raw_event"},
+        "format": "ndjson",
+    }
+
+    with pytest.raises(module.ApiError) as exc_info:
+        svc.execute_spooled_query(request, request_id="req-decode", requester_id="operator-a")
+
+    assert exc_info.value.status == 502
+    assert exc_info.value.code == "upstream_error"
+    assert "content_encoding=gzip" in exc_info.value.message
 
 
 def test_iter_influx_csv_rows_supports_multiline_values_from_raw_stream():

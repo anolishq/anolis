@@ -327,6 +327,12 @@ class ExportService:
         content_length = 0
 
         try:
+            LOGGER.debug(
+                "request_id=%s starting spooled export format=%s columns=%s",
+                request_id,
+                query.fmt,
+                ",".join(query.columns),
+            )
             if query.fmt == "csv":
                 csv_writer = csv.DictWriter(tmp_file, fieldnames=query.columns)
                 csv_writer.writeheader()
@@ -337,28 +343,48 @@ class ExportService:
             else:
                 json_first = False
 
-            for raw_row in iter_influx_csv_rows(response):
-                row_count += 1
-                if row_count > self.config.limits.max_rows:
-                    raise ApiError(
-                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                        "limit_exceeded",
-                        f"row count exceeds max_rows={self.config.limits.max_rows}",
-                    )
+            try:
+                for raw_row in iter_influx_csv_rows(response):
+                    row_count += 1
+                    if row_count > self.config.limits.max_rows:
+                        raise ApiError(
+                            HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                            "limit_exceeded",
+                            f"row count exceeds max_rows={self.config.limits.max_rows}",
+                        )
 
-                normalized = normalize_row(raw_row, query.columns)
+                    normalized = normalize_row(raw_row, query.columns)
 
-                if query.fmt == "csv":
-                    csv_writer.writerow(normalized)
-                elif query.fmt == "json":
-                    assert bounded_writer is not None
-                    if not json_first:
-                        bounded_writer.write(",")
-                    bounded_writer.write(json.dumps(normalized, separators=(",", ":")))
-                    json_first = False
-                else:
-                    tmp_file.write(json.dumps(normalized, separators=(",", ":")))
-                    tmp_file.write("\n")
+                    if query.fmt == "csv":
+                        csv_writer.writerow(normalized)
+                    elif query.fmt == "json":
+                        assert bounded_writer is not None
+                        if not json_first:
+                            bounded_writer.write(",")
+                        bounded_writer.write(json.dumps(normalized, separators=(",", ":")))
+                        json_first = False
+                    else:
+                        tmp_file.write(json.dumps(normalized, separators=(",", ":")))
+                        tmp_file.write("\n")
+            except UnicodeDecodeError as exc:
+                content_encoding = ""
+                headers = getattr(response, "headers", None)
+                if headers is not None:
+                    try:
+                        content_encoding = str(headers.get("Content-Encoding", "")).strip()
+                    except Exception:
+                        content_encoding = ""
+                LOGGER.exception(
+                    "request_id=%s stream decode failure format=%s content_encoding=%s",
+                    request_id,
+                    query.fmt,
+                    content_encoding or "<none>",
+                )
+                raise ApiError(
+                    HTTPStatus.BAD_GATEWAY,
+                    "upstream_error",
+                    f"failed to decode Influx CSV stream as UTF-8 (content_encoding={content_encoding or 'unknown'})",
+                ) from exc
 
             manifest = build_manifest(
                 query,
@@ -385,6 +411,15 @@ class ExportService:
             response.close()
             if query.fmt != "json":
                 content_length = tmp_path.stat().st_size
+
+            LOGGER.debug(
+                "request_id=%s completed spooled export format=%s rows=%d bytes=%d export_id=%s",
+                request_id,
+                query.fmt,
+                row_count,
+                content_length,
+                export_id,
+            )
 
             return SpoolResult(
                 path=tmp_path,
