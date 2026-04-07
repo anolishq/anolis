@@ -1,0 +1,482 @@
+2026-04-07T00:41:27.1589588Z Current runner version: '2.333.1'
+2026-04-07T00:41:27.1613921Z ##[group]Runner Image Provisioner
+2026-04-07T00:41:27.1614764Z Hosted Compute Agent
+2026-04-07T00:41:27.1615393Z Version: 20260213.493
+2026-04-07T00:41:27.1615955Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-04-07T00:41:27.1616625Z Build Date: 2026-02-13T00:28:41Z
+2026-04-07T00:41:27.1617254Z Worker ID: {eed54552-2d85-457b-804a-97ab5b48b225}
+2026-04-07T00:41:27.1617956Z Azure Region: westus3
+2026-04-07T00:41:27.1618443Z ##[endgroup]
+2026-04-07T00:41:27.1620314Z ##[group]Operating System
+2026-04-07T00:41:27.1620934Z Ubuntu
+2026-04-07T00:41:27.1621350Z 24.04.4
+2026-04-07T00:41:27.1622185Z LTS
+2026-04-07T00:41:27.1622686Z ##[endgroup]
+2026-04-07T00:41:27.1623181Z ##[group]Runner Image
+2026-04-07T00:41:27.1623664Z Image: ubuntu-24.04
+2026-04-07T00:41:27.1624223Z Version: 20260329.72.1
+2026-04-07T00:41:27.1625345Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260329.72/images/ubuntu/Ubuntu2404-Readme.md
+2026-04-07T00:41:27.1626831Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260329.72
+2026-04-07T00:41:27.1627742Z ##[endgroup]
+2026-04-07T00:41:27.1630482Z ##[group]GITHUB_TOKEN Permissions
+2026-04-07T00:41:27.1632744Z Actions: write
+2026-04-07T00:41:27.1633271Z ArtifactMetadata: write
+2026-04-07T00:41:27.1634267Z Attestations: write
+2026-04-07T00:41:27.1634778Z Checks: write
+2026-04-07T00:41:27.1635215Z Contents: write
+2026-04-07T00:41:27.1635747Z Deployments: write
+2026-04-07T00:41:27.1636234Z Discussions: write
+2026-04-07T00:41:27.1636678Z Issues: write
+2026-04-07T00:41:27.1637217Z Metadata: read
+2026-04-07T00:41:27.1637649Z Models: read
+2026-04-07T00:41:27.1638110Z Packages: write
+2026-04-07T00:41:27.1638581Z Pages: write
+2026-04-07T00:41:27.1639161Z PullRequests: write
+2026-04-07T00:41:27.1639711Z RepositoryProjects: write
+2026-04-07T00:41:27.1640261Z SecurityEvents: write
+2026-04-07T00:41:27.1640785Z Statuses: write
+2026-04-07T00:41:27.1641250Z ##[endgroup]
+2026-04-07T00:41:27.1643736Z Secret source: Actions
+2026-04-07T00:41:27.1644677Z Prepare workflow directory
+2026-04-07T00:41:27.2092699Z Prepare all required actions
+2026-04-07T00:41:27.2130577Z Getting action download info
+2026-04-07T00:41:27.6128525Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-04-07T00:41:27.7440440Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-04-07T00:41:27.9785354Z Complete job name: Python Export E2E (Influx fixture)
+2026-04-07T00:41:28.0264226Z ##[group]Checking docker version
+2026-04-07T00:41:28.0276677Z ##[command]/usr/bin/docker version --format '{{.Server.APIVersion}}'
+2026-04-07T00:41:28.0659658Z '1.48'
+2026-04-07T00:41:28.0676071Z Docker daemon API version: '1.48'
+2026-04-07T00:41:28.0676795Z ##[command]/usr/bin/docker version --format '{{.Client.APIVersion}}'
+2026-04-07T00:41:28.0824951Z '1.48'
+2026-04-07T00:41:28.0836226Z Docker client API version: '1.48'
+2026-04-07T00:41:28.0840874Z ##[endgroup]
+2026-04-07T00:41:28.0844327Z ##[group]Clean up resources from previous jobs
+2026-04-07T00:41:28.0849719Z ##[command]/usr/bin/docker ps --all --quiet --no-trunc --filter "label=442f26"
+2026-04-07T00:41:28.0977714Z ##[command]/usr/bin/docker network prune --force --filter "label=442f26"
+2026-04-07T00:41:28.1098818Z ##[endgroup]
+2026-04-07T00:41:28.1099268Z ##[group]Create local container network
+2026-04-07T00:41:28.1108888Z ##[command]/usr/bin/docker network create --label 442f26 github_network_b51f7c9a48b24067b0a7b7a4c1365c4c
+2026-04-07T00:41:28.1735160Z bf2d3c095e930e9744ed70dc58c74d531d6c26e0bb0214217474e7a7e58914b5
+2026-04-07T00:41:28.1751198Z ##[endgroup]
+2026-04-07T00:41:28.1776052Z ##[group]Starting influxdb service container
+2026-04-07T00:41:28.1797141Z ##[command]/usr/bin/docker pull influxdb:2.7
+2026-04-07T00:41:29.0628100Z 2.7: Pulling from library/influxdb
+2026-04-07T00:41:29.3319363Z 6db0909c4473: Pulling fs layer
+2026-04-07T00:41:29.3321464Z 6df5fe2f66ea: Pulling fs layer
+2026-04-07T00:41:29.3323209Z 67415bd2cacb: Pulling fs layer
+2026-04-07T00:41:29.3324047Z 3655afae3b0a: Pulling fs layer
+2026-04-07T00:41:29.3324870Z e99c43b7ddd4: Pulling fs layer
+2026-04-07T00:41:29.3325703Z 31d8332b04e3: Pulling fs layer
+2026-04-07T00:41:29.3326529Z b4184ff9cbff: Pulling fs layer
+2026-04-07T00:41:29.3327351Z a3d563cfbbc4: Pulling fs layer
+2026-04-07T00:41:29.3328164Z 738d59e72883: Pulling fs layer
+2026-04-07T00:41:29.3328974Z 958f45fbade6: Pulling fs layer
+2026-04-07T00:41:29.3329753Z 738d59e72883: Waiting
+2026-04-07T00:41:29.3330486Z b4184ff9cbff: Waiting
+2026-04-07T00:41:29.3331246Z 958f45fbade6: Waiting
+2026-04-07T00:41:29.3332328Z a3d563cfbbc4: Waiting
+2026-04-07T00:41:29.3333111Z 31d8332b04e3: Waiting
+2026-04-07T00:41:29.3333890Z e99c43b7ddd4: Waiting
+2026-04-07T00:41:29.7223341Z 6df5fe2f66ea: Verifying Checksum
+2026-04-07T00:41:29.7226019Z 6df5fe2f66ea: Download complete
+2026-04-07T00:41:29.7317222Z 67415bd2cacb: Verifying Checksum
+2026-04-07T00:41:29.7317972Z 67415bd2cacb: Download complete
+2026-04-07T00:41:29.9687601Z 6db0909c4473: Download complete
+2026-04-07T00:41:30.0033461Z 3655afae3b0a: Verifying Checksum
+2026-04-07T00:41:30.0034066Z 3655afae3b0a: Download complete
+2026-04-07T00:41:30.0239360Z e99c43b7ddd4: Verifying Checksum
+2026-04-07T00:41:30.0242366Z e99c43b7ddd4: Download complete
+2026-04-07T00:41:30.3008369Z a3d563cfbbc4: Verifying Checksum
+2026-04-07T00:41:30.3009116Z a3d563cfbbc4: Download complete
+2026-04-07T00:41:30.5250280Z b4184ff9cbff: Verifying Checksum
+2026-04-07T00:41:30.5252755Z b4184ff9cbff: Download complete
+2026-04-07T00:41:30.6220188Z 738d59e72883: Verifying Checksum
+2026-04-07T00:41:30.6223332Z 738d59e72883: Download complete
+2026-04-07T00:41:30.9904724Z 958f45fbade6: Verifying Checksum
+2026-04-07T00:41:30.9905924Z 958f45fbade6: Download complete
+2026-04-07T00:41:31.2136661Z 6db0909c4473: Pull complete
+2026-04-07T00:41:31.4135251Z 31d8332b04e3: Verifying Checksum
+2026-04-07T00:41:31.4135896Z 31d8332b04e3: Download complete
+2026-04-07T00:41:34.8648304Z 6df5fe2f66ea: Pull complete
+2026-04-07T00:41:34.9358399Z 67415bd2cacb: Pull complete
+2026-04-07T00:41:34.9490889Z 3655afae3b0a: Pull complete
+2026-04-07T00:41:34.9774732Z e99c43b7ddd4: Pull complete
+2026-04-07T00:41:36.2505218Z 31d8332b04e3: Pull complete
+2026-04-07T00:41:36.3815674Z b4184ff9cbff: Pull complete
+2026-04-07T00:41:36.3947551Z a3d563cfbbc4: Pull complete
+2026-04-07T00:41:36.4054716Z 738d59e72883: Pull complete
+2026-04-07T00:41:36.4144258Z 958f45fbade6: Pull complete
+2026-04-07T00:41:36.4192770Z Digest: sha256:5355c90249dac331bbcd1fdf3c31c7782400cd0ec5225145fc50b9aa026e9342
+2026-04-07T00:41:36.4206805Z Status: Downloaded newer image for influxdb:2.7
+2026-04-07T00:41:36.4215042Z docker.io/library/influxdb:2.7
+2026-04-07T00:41:36.4273408Z ##[command]/usr/bin/docker create --name 1d7138b346194c22b5803f953ac2f5ac_influxdb27_66d3c4 --label 442f26 --network github_network_b51f7c9a48b24067b0a7b7a4c1365c4c --network-alias influxdb -p 8086:8086 --health-cmd "curl -f http://localhost:8086/health || exit 1" --health-interval 5s --health-timeout 3s --health-retries 20 -e "DOCKER_INFLUXDB_INIT_MODE=setup" -e "DOCKER_INFLUXDB_INIT_USERNAME=admin" -e "DOCKER_INFLUXDB_INIT_PASSWORD=admin-password-change-me" -e "DOCKER_INFLUXDB_INIT_ORG=anolis" -e "DOCKER_INFLUXDB_INIT_BUCKET=anolis" -e "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=dev-token" -e GITHUB_ACTIONS=true -e CI=true influxdb:2.7
+2026-04-07T00:41:36.4550208Z ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:36.4570273Z ##[command]/usr/bin/docker start ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:36.6248336Z ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:36.6268502Z ##[command]/usr/bin/docker ps --all --filter id=ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+2026-04-07T00:41:36.6410336Z ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d Up Less than a second (health: starting)
+2026-04-07T00:41:36.6435433Z ##[command]/usr/bin/docker port ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:36.6572460Z 8086/tcp -> 0.0.0.0:8086
+2026-04-07T00:41:36.6572976Z 8086/tcp -> [::]:8086
+2026-04-07T00:41:36.6613618Z ##[endgroup]
+2026-04-07T00:41:36.6622509Z ##[group]Waiting for all services to be ready
+2026-04-07T00:41:36.6635704Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:36.6773450Z starting
+2026-04-07T00:41:36.6792895Z influxdb service is starting, waiting 2 seconds before checking again.
+2026-04-07T00:41:38.6800031Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:38.6917418Z starting
+2026-04-07T00:41:38.6929520Z influxdb service is starting, waiting 4 seconds before checking again.
+2026-04-07T00:41:43.0511144Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:43.0636151Z healthy
+2026-04-07T00:41:43.0651969Z influxdb service is healthy.
+2026-04-07T00:41:43.0652616Z ##[endgroup]
+2026-04-07T00:41:43.0915685Z ##[group]Run actions/checkout@v4
+2026-04-07T00:41:43.0916210Z with:
+2026-04-07T00:41:43.0916386Z   submodules: recursive
+2026-04-07T00:41:43.0916601Z   repository: FEASTorg/anolis
+2026-04-07T00:41:43.0916956Z   token: ***
+2026-04-07T00:41:43.0917124Z   ssh-strict: true
+2026-04-07T00:41:43.0917303Z   ssh-user: git
+2026-04-07T00:41:43.0917482Z   persist-credentials: true
+2026-04-07T00:41:43.0917691Z   clean: true
+2026-04-07T00:41:43.0917875Z   sparse-checkout-cone-mode: true
+2026-04-07T00:41:43.0918109Z   fetch-depth: 1
+2026-04-07T00:41:43.0918276Z   fetch-tags: false
+2026-04-07T00:41:43.0918455Z   show-progress: true
+2026-04-07T00:41:43.0918630Z   lfs: false
+2026-04-07T00:41:43.0918817Z   set-safe-directory: true
+2026-04-07T00:41:43.0919183Z env:
+2026-04-07T00:41:43.0919399Z   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+2026-04-07T00:41:43.0919675Z ##[endgroup]
+2026-04-07T00:41:43.1988477Z Syncing repository: FEASTorg/anolis
+2026-04-07T00:41:43.1989772Z ##[group]Getting Git version info
+2026-04-07T00:41:43.1990120Z Working directory is '/home/runner/work/anolis/anolis'
+2026-04-07T00:41:43.1990626Z [command]/usr/bin/git version
+2026-04-07T00:41:43.2039707Z git version 2.53.0
+2026-04-07T00:41:43.2066172Z ##[endgroup]
+2026-04-07T00:41:43.2080578Z Temporarily overriding HOME='/home/runner/work/_temp/d0ddc82a-46f9-4b07-9635-0dccf6d90111' before making global git config changes
+2026-04-07T00:41:43.2081489Z Adding repository directory to the temporary git global config as a safe directory
+2026-04-07T00:41:43.2093631Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/anolis/anolis
+2026-04-07T00:41:43.2124294Z Deleting the contents of '/home/runner/work/anolis/anolis'
+2026-04-07T00:41:43.2127861Z ##[group]Initializing the repository
+2026-04-07T00:41:43.2132037Z [command]/usr/bin/git init /home/runner/work/anolis/anolis
+2026-04-07T00:41:43.2241111Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-04-07T00:41:43.2242268Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-04-07T00:41:43.2243119Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-04-07T00:41:43.2243755Z hint: call:
+2026-04-07T00:41:43.2243951Z hint:
+2026-04-07T00:41:43.2244253Z hint: 	git config --global init.defaultBranch <name>
+2026-04-07T00:41:43.2244554Z hint:
+2026-04-07T00:41:43.2244838Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-04-07T00:41:43.2245331Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-04-07T00:41:43.2245708Z hint:
+2026-04-07T00:41:43.2245880Z hint: 	git branch -m <name>
+2026-04-07T00:41:43.2246310Z hint:
+2026-04-07T00:41:43.2246618Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-04-07T00:41:43.2247152Z Initialized empty Git repository in /home/runner/work/anolis/anolis/.git/
+2026-04-07T00:41:43.2254040Z [command]/usr/bin/git remote add origin https://github.com/FEASTorg/anolis
+2026-04-07T00:41:43.2282592Z ##[endgroup]
+2026-04-07T00:41:43.2282964Z ##[group]Disabling automatic garbage collection
+2026-04-07T00:41:43.2287053Z [command]/usr/bin/git config --local gc.auto 0
+2026-04-07T00:41:43.2313531Z ##[endgroup]
+2026-04-07T00:41:43.2313859Z ##[group]Setting up auth
+2026-04-07T00:41:43.2320501Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-04-07T00:41:43.2349638Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-04-07T00:41:43.2633907Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-04-07T00:41:43.2662245Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-04-07T00:41:43.2876403Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-04-07T00:41:43.2904858Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-04-07T00:41:43.3130616Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-04-07T00:41:43.3163831Z ##[endgroup]
+2026-04-07T00:41:43.3164203Z ##[group]Fetching the repository
+2026-04-07T00:41:43.3172639Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +34def79997f35a5fdafbfc8d3cdbb97c43d1f82e:refs/remotes/origin/main
+2026-04-07T00:41:44.3841166Z From https://github.com/FEASTorg/anolis
+2026-04-07T00:41:44.3842056Z  * [new ref]         34def79997f35a5fdafbfc8d3cdbb97c43d1f82e -> origin/main
+2026-04-07T00:41:44.3869009Z ##[endgroup]
+2026-04-07T00:41:44.3869363Z ##[group]Determining the checkout info
+2026-04-07T00:41:44.3872455Z ##[endgroup]
+2026-04-07T00:41:44.3877372Z [command]/usr/bin/git sparse-checkout disable
+2026-04-07T00:41:44.3915646Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-04-07T00:41:44.3942330Z ##[group]Checking out the ref
+2026-04-07T00:41:44.3956421Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-04-07T00:41:44.4220074Z Switched to a new branch 'main'
+2026-04-07T00:41:44.4221946Z branch 'main' set up to track 'origin/main'.
+2026-04-07T00:41:44.4230244Z ##[endgroup]
+2026-04-07T00:41:44.4230644Z ##[group]Setting up auth for fetching submodules
+2026-04-07T00:41:44.4236359Z [command]/usr/bin/git config --global http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-04-07T00:41:44.4274125Z [command]/usr/bin/git config --global --unset-all url.https://github.com/.insteadOf
+2026-04-07T00:41:44.4304138Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf git@github.com:
+2026-04-07T00:41:44.4333600Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf org-181131557@github.com:
+2026-04-07T00:41:44.4426887Z ##[endgroup]
+2026-04-07T00:41:44.4427490Z ##[group]Fetching submodules
+2026-04-07T00:41:44.4427989Z [command]/usr/bin/git submodule sync --recursive
+2026-04-07T00:41:44.4590984Z [command]/usr/bin/git -c protocol.version=2 submodule update --init --force --depth=1 --recursive
+2026-04-07T00:41:44.4798235Z Submodule 'external/anolis-protocol' (https://github.com/FEASTOrg/anolis-protocol.git) registered for path 'external/anolis-protocol'
+2026-04-07T00:41:44.4823068Z Cloning into '/home/runner/work/anolis/anolis/external/anolis-protocol'...
+2026-04-07T00:41:46.0622506Z From https://github.com/FEASTOrg/anolis-protocol
+2026-04-07T00:41:46.0623231Z  * branch            62905b686ea0e62cf178f50b468bd81b4e8c4db4 -> FETCH_HEAD
+2026-04-07T00:41:46.0676071Z Submodule path 'external/anolis-protocol': checked out '62905b686ea0e62cf178f50b468bd81b4e8c4db4'
+2026-04-07T00:41:46.0706940Z [command]/usr/bin/git submodule foreach --recursive git config --local gc.auto 0
+2026-04-07T00:41:46.0910915Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:46.0956471Z ##[endgroup]
+2026-04-07T00:41:46.0956825Z ##[group]Persisting credentials for submodules
+2026-04-07T00:41:46.0965188Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'url\.https\:\/\/github\.com\/\.insteadOf' && git config --local --unset-all 'url.https://github.com/.insteadOf' || :"
+2026-04-07T00:41:46.1179121Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:46.1234316Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local 'http.https://github.com/.extraheader' 'AUTHORIZATION: basic ***' && git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-04-07T00:41:46.1435782Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:46.1473940Z file:/home/runner/work/anolis/anolis/.git/modules/external/anolis-protocol/config	remote.origin.url
+2026-04-07T00:41:46.1513866Z [command]/usr/bin/git submodule foreach --recursive git config --local --add 'url.https://github.com/.insteadOf' 'git@github.com:'
+2026-04-07T00:41:46.1717526Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:46.1765288Z [command]/usr/bin/git submodule foreach --recursive git config --local --add 'url.https://github.com/.insteadOf' 'org-181131557@github.com:'
+2026-04-07T00:41:46.1966123Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:46.2008962Z ##[endgroup]
+2026-04-07T00:41:46.2045991Z [command]/usr/bin/git log -1 --format=%H
+2026-04-07T00:41:46.2069181Z 34def79997f35a5fdafbfc8d3cdbb97c43d1f82e
+2026-04-07T00:41:46.2286720Z ##[group]Run actions/setup-python@v5
+2026-04-07T00:41:46.2286995Z with:
+2026-04-07T00:41:46.2287170Z   python-version: 3.12
+2026-04-07T00:41:46.2287353Z   cache: pip
+2026-04-07T00:41:46.2287564Z   cache-dependency-path: requirements-lock.txt
+2026-04-07T00:41:46.2287845Z   check-latest: false
+2026-04-07T00:41:46.2288145Z   token: ***
+2026-04-07T00:41:46.2288324Z   update-environment: true
+2026-04-07T00:41:46.2288542Z   allow-prereleases: false
+2026-04-07T00:41:46.2288743Z   freethreaded: false
+2026-04-07T00:41:46.2288918Z env:
+2026-04-07T00:41:46.2289126Z   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+2026-04-07T00:41:46.2289400Z ##[endgroup]
+2026-04-07T00:41:46.3937013Z ##[group]Installed versions
+2026-04-07T00:41:46.4387121Z Successfully set up CPython (3.12.13)
+2026-04-07T00:41:46.4387882Z ##[endgroup]
+2026-04-07T00:41:46.4851985Z [command]/opt/hostedtoolcache/Python/3.12.13/x64/bin/pip cache dir
+2026-04-07T00:41:47.8163029Z /home/runner/.cache/pip
+2026-04-07T00:41:48.0732331Z Cache hit for: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.13-pip-db531bf432b9b667251fa8501fd9ebe3f7f3156118fff17382f585868ca11595
+2026-04-07T00:41:49.3402490Z Received 5642636 of 30808460 (18.3%), 5.4 MBs/sec
+2026-04-07T00:41:49.5950676Z Received 30808460 of 30808460 (100.0%), 23.4 MBs/sec
+2026-04-07T00:41:49.5951469Z Cache Size: ~29 MB (30808460 B)
+2026-04-07T00:41:49.5984316Z [command]/usr/bin/tar -xf /home/runner/work/_temp/1ae0a7a6-a54f-42f4-af6a-5c69bb9774b4/cache.tzst -P -C /home/runner/work/anolis/anolis --use-compress-program unzstd
+2026-04-07T00:41:49.6545893Z Cache restored successfully
+2026-04-07T00:41:49.6567966Z Cache restored from key: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.13-pip-db531bf432b9b667251fa8501fd9ebe3f7f3156118fff17382f585868ca11595
+2026-04-07T00:41:49.6718755Z ##[group]Run python -m pip install --upgrade pip
+2026-04-07T00:41:49.6719176Z [36;1mpython -m pip install --upgrade pip[0m
+2026-04-07T00:41:49.6719539Z [36;1mpython -m pip install -r requirements-lock.txt[0m
+2026-04-07T00:41:49.6752979Z shell: /usr/bin/bash -e {0}
+2026-04-07T00:41:49.6753440Z env:
+2026-04-07T00:41:49.6753669Z   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+2026-04-07T00:41:49.6754046Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:49.6754474Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib/pkgconfig
+2026-04-07T00:41:49.6754894Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:49.6755250Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:49.6755615Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:49.6755981Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib
+2026-04-07T00:41:49.6756288Z ##[endgroup]
+2026-04-07T00:41:50.9169217Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages (26.0.1)
+2026-04-07T00:41:51.7122367Z Collecting certifi==2026.1.4 (from -r requirements-lock.txt (line 1))
+2026-04-07T00:41:51.7135741Z   Using cached certifi-2026.1.4-py3-none-any.whl.metadata (2.5 kB)
+2026-04-07T00:41:51.8424550Z Collecting charset-normalizer==3.4.4 (from -r requirements-lock.txt (line 2))
+2026-04-07T00:41:51.8438536Z   Using cached charset_normalizer-3.4.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (37 kB)
+2026-04-07T00:41:51.8641225Z Collecting colorama==0.4.6 (from -r requirements-lock.txt (line 3))
+2026-04-07T00:41:51.8654690Z   Using cached colorama-0.4.6-py2.py3-none-any.whl.metadata (17 kB)
+2026-04-07T00:41:51.8831089Z Collecting idna==3.11 (from -r requirements-lock.txt (line 4))
+2026-04-07T00:41:51.8842899Z   Using cached idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+2026-04-07T00:41:51.9009547Z Collecting iniconfig==2.3.0 (from -r requirements-lock.txt (line 5))
+2026-04-07T00:41:51.9021595Z   Using cached iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+2026-04-07T00:41:52.0084266Z Collecting librt==0.8.1 (from -r requirements-lock.txt (line 6))
+2026-04-07T00:41:52.0097270Z   Using cached librt-0.8.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+2026-04-07T00:41:52.1208440Z Collecting mypy==1.19.1 (from -r requirements-lock.txt (line 7))
+2026-04-07T00:41:52.1222426Z   Using cached mypy-1.19.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.2 kB)
+2026-04-07T00:41:52.1374308Z Collecting mypy_extensions==1.1.0 (from -r requirements-lock.txt (line 8))
+2026-04-07T00:41:52.1386513Z   Using cached mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+2026-04-07T00:41:52.1566839Z Collecting packaging==26.0 (from -r requirements-lock.txt (line 9))
+2026-04-07T00:41:52.1578773Z   Using cached packaging-26.0-py3-none-any.whl.metadata (3.3 kB)
+2026-04-07T00:41:52.1735801Z Collecting pathspec==1.0.4 (from -r requirements-lock.txt (line 10))
+2026-04-07T00:41:52.1747420Z   Using cached pathspec-1.0.4-py3-none-any.whl.metadata (13 kB)
+2026-04-07T00:41:52.1919583Z Collecting pluggy==1.6.0 (from -r requirements-lock.txt (line 11))
+2026-04-07T00:41:52.1931178Z   Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+2026-04-07T00:41:52.3600284Z Collecting protobuf==5.29.6 (from -r requirements-lock.txt (line 12))
+2026-04-07T00:41:52.3613797Z   Using cached protobuf-5.29.6-cp38-abi3-manylinux2014_x86_64.whl.metadata (592 bytes)
+2026-04-07T00:41:52.4372610Z Collecting psutil==6.1.1 (from -r requirements-lock.txt (line 13))
+2026-04-07T00:41:52.4386032Z   Using cached psutil-6.1.1-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (22 kB)
+2026-04-07T00:41:52.4629092Z Collecting Pygments==2.19.2 (from -r requirements-lock.txt (line 14))
+2026-04-07T00:41:52.4641171Z   Using cached pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+2026-04-07T00:41:52.4924310Z Collecting pytest==8.4.2 (from -r requirements-lock.txt (line 15))
+2026-04-07T00:41:52.4935748Z   Using cached pytest-8.4.2-py3-none-any.whl.metadata (7.7 kB)
+2026-04-07T00:41:52.5106787Z Collecting pytest-timeout==2.4.0 (from -r requirements-lock.txt (line 16))
+2026-04-07T00:41:52.5118139Z   Using cached pytest_timeout-2.4.0-py3-none-any.whl.metadata (20 kB)
+2026-04-07T00:41:52.5528018Z Collecting PyYAML==6.0.3 (from -r requirements-lock.txt (line 17))
+2026-04-07T00:41:52.5539967Z   Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-04-07T00:41:52.5791439Z Collecting requests==2.32.5 (from -r requirements-lock.txt (line 18))
+2026-04-07T00:41:52.5803718Z   Using cached requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+2026-04-07T00:41:52.9586584Z Collecting ruff==0.15.2 (from -r requirements-lock.txt (line 19))
+2026-04-07T00:41:52.9601077Z   Using cached ruff-0.15.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+2026-04-07T00:41:52.9852231Z Collecting types-psutil==7.2.2.20260130 (from -r requirements-lock.txt (line 20))
+2026-04-07T00:41:52.9865141Z   Using cached types_psutil-7.2.2.20260130-py3-none-any.whl.metadata (1.7 kB)
+2026-04-07T00:41:53.0044671Z Collecting types-PyYAML==6.0.12.20250915 (from -r requirements-lock.txt (line 21))
+2026-04-07T00:41:53.0056364Z   Using cached types_pyyaml-6.0.12.20250915-py3-none-any.whl.metadata (1.7 kB)
+2026-04-07T00:41:53.0343931Z Collecting types-requests==2.32.4.20260107 (from -r requirements-lock.txt (line 22))
+2026-04-07T00:41:53.0355860Z   Using cached types_requests-2.32.4.20260107-py3-none-any.whl.metadata (2.0 kB)
+2026-04-07T00:41:53.0539341Z Collecting typing_extensions==4.15.0 (from -r requirements-lock.txt (line 23))
+2026-04-07T00:41:53.0551177Z   Using cached typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+2026-04-07T00:41:53.0776296Z Collecting urllib3==2.6.3 (from -r requirements-lock.txt (line 24))
+2026-04-07T00:41:53.0787946Z   Using cached urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+2026-04-07T00:41:53.1022091Z Using cached certifi-2026.1.4-py3-none-any.whl (152 kB)
+2026-04-07T00:41:53.1035085Z Using cached charset_normalizer-3.4.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (153 kB)
+2026-04-07T00:41:53.1046634Z Using cached colorama-0.4.6-py2.py3-none-any.whl (25 kB)
+2026-04-07T00:41:53.1058465Z Using cached idna-3.11-py3-none-any.whl (71 kB)
+2026-04-07T00:41:53.1070158Z Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+2026-04-07T00:41:53.1081753Z Using cached librt-0.8.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (224 kB)
+2026-04-07T00:41:53.1094130Z Using cached mypy-1.19.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (13.6 MB)
+2026-04-07T00:41:53.1158054Z Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+2026-04-07T00:41:53.1169355Z Using cached packaging-26.0-py3-none-any.whl (74 kB)
+2026-04-07T00:41:53.1180699Z Using cached pathspec-1.0.4-py3-none-any.whl (55 kB)
+2026-04-07T00:41:53.1192150Z Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+2026-04-07T00:41:53.1204544Z Using cached protobuf-5.29.6-cp38-abi3-manylinux2014_x86_64.whl (320 kB)
+2026-04-07T00:41:53.1221917Z Using cached psutil-6.1.1-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (287 kB)
+2026-04-07T00:41:53.1234760Z Using cached pygments-2.19.2-py3-none-any.whl (1.2 MB)
+2026-04-07T00:41:53.1252358Z Using cached pytest-8.4.2-py3-none-any.whl (365 kB)
+2026-04-07T00:41:53.1264950Z Using cached pytest_timeout-2.4.0-py3-none-any.whl (14 kB)
+2026-04-07T00:41:53.1277663Z Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-04-07T00:41:53.1292508Z Using cached requests-2.32.5-py3-none-any.whl (64 kB)
+2026-04-07T00:41:53.1304206Z Using cached urllib3-2.6.3-py3-none-any.whl (131 kB)
+2026-04-07T00:41:53.1315872Z Using cached ruff-0.15.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.1 MB)
+2026-04-07T00:41:53.1381409Z Using cached types_psutil-7.2.2.20260130-py3-none-any.whl (32 kB)
+2026-04-07T00:41:53.1392729Z Using cached types_pyyaml-6.0.12.20250915-py3-none-any.whl (20 kB)
+2026-04-07T00:41:53.1403694Z Using cached types_requests-2.32.4.20260107-py3-none-any.whl (20 kB)
+2026-04-07T00:41:53.1414634Z Using cached typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+2026-04-07T00:41:53.2302268Z Installing collected packages: urllib3, typing_extensions, types-PyYAML, types-psutil, ruff, PyYAML, Pygments, psutil, protobuf, pluggy, pathspec, packaging, mypy_extensions, librt, iniconfig, idna, colorama, charset-normalizer, certifi, types-requests, requests, pytest, mypy, pytest-timeout
+2026-04-07T00:41:56.4457333Z 
+2026-04-07T00:41:56.4484613Z Successfully installed PyYAML-6.0.3 Pygments-2.19.2 certifi-2026.1.4 charset-normalizer-3.4.4 colorama-0.4.6 idna-3.11 iniconfig-2.3.0 librt-0.8.1 mypy-1.19.1 mypy_extensions-1.1.0 packaging-26.0 pathspec-1.0.4 pluggy-1.6.0 protobuf-5.29.6 psutil-6.1.1 pytest-8.4.2 pytest-timeout-2.4.0 requests-2.32.5 ruff-0.15.2 types-PyYAML-6.0.12.20250915 types-psutil-7.2.2.20260130 types-requests-2.32.4.20260107 typing_extensions-4.15.0 urllib3-2.6.3
+2026-04-07T00:41:56.5957539Z ##[group]Run for i in $(seq 1 60); do
+2026-04-07T00:41:56.5957850Z [36;1mfor i in $(seq 1 60); do[0m
+2026-04-07T00:41:56.5958176Z [36;1m  if curl -fsS http://127.0.0.1:8086/health >/dev/null; then[0m
+2026-04-07T00:41:56.5958532Z [36;1m    echo "InfluxDB is healthy"[0m
+2026-04-07T00:41:56.5958780Z [36;1m    exit 0[0m
+2026-04-07T00:41:56.5958968Z [36;1m  fi[0m
+2026-04-07T00:41:56.5959132Z [36;1m  sleep 1[0m
+2026-04-07T00:41:56.5959312Z [36;1mdone[0m
+2026-04-07T00:41:56.5959554Z [36;1mecho "InfluxDB did not become healthy in time" >&2[0m
+2026-04-07T00:41:56.5959851Z [36;1mexit 1[0m
+2026-04-07T00:41:56.5987811Z shell: /usr/bin/bash -e {0}
+2026-04-07T00:41:56.5988046Z env:
+2026-04-07T00:41:56.5988269Z   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+2026-04-07T00:41:56.5988662Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.5989079Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib/pkgconfig
+2026-04-07T00:41:56.5989519Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.5989866Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.5990215Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.5990576Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib
+2026-04-07T00:41:56.5990871Z ##[endgroup]
+2026-04-07T00:41:56.6165729Z InfluxDB is healthy
+2026-04-07T00:41:56.6191255Z ##[group]Run python -m pytest tests/integration/test_telemetry_export_service_e2e.py -vv
+2026-04-07T00:41:56.6192238Z [36;1mpython -m pytest tests/integration/test_telemetry_export_service_e2e.py -vv[0m
+2026-04-07T00:41:56.6217155Z shell: /usr/bin/bash -e {0}
+2026-04-07T00:41:56.6217388Z env:
+2026-04-07T00:41:56.6217618Z   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+2026-04-07T00:41:56.6217982Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.6218388Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib/pkgconfig
+2026-04-07T00:41:56.6218807Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.6219177Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.6219533Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-04-07T00:41:56.6219894Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib
+2026-04-07T00:41:56.6220202Z   ANOLIS_EXPORT_E2E: 1
+2026-04-07T00:41:56.6220492Z   ANOLIS_EXPORT_E2E_INFLUX_URL: http://127.0.0.1:8086
+2026-04-07T00:41:56.6220790Z   ANOLIS_EXPORT_E2E_INFLUX_ORG: anolis
+2026-04-07T00:41:56.6221046Z   ANOLIS_EXPORT_E2E_INFLUX_BUCKET: anolis
+2026-04-07T00:41:56.6221316Z   ANOLIS_EXPORT_E2E_INFLUX_TOKEN: dev-token
+2026-04-07T00:41:56.6221821Z ##[endgroup]
+2026-04-07T00:41:57.1037094Z ============================= test session starts ==============================
+2026-04-07T00:41:57.1038154Z platform linux -- Python 3.12.13, pytest-8.4.2, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.12.13/x64/bin/python
+2026-04-07T00:41:57.1039418Z cachedir: .pytest_cache
+2026-04-07T00:41:57.1039830Z rootdir: /home/runner/work/anolis/anolis
+2026-04-07T00:41:57.1040353Z configfile: pyproject.toml
+2026-04-07T00:41:57.1040752Z plugins: timeout-2.4.0
+2026-04-07T00:41:57.1376028Z collecting ... collected 1 item
+2026-04-07T00:41:57.1376355Z 
+2026-04-07T00:41:57.5466182Z tests/integration/test_telemetry_export_service_e2e.py::test_export_service_e2e_paths PASSED [100%]
+2026-04-07T00:41:57.5466898Z 
+2026-04-07T00:41:57.5467115Z ============================== 1 passed in 0.42s ===============================
+2026-04-07T00:41:57.5785956Z Post job cleanup.
+2026-04-07T00:41:57.7438642Z Cache hit occurred on the primary key setup-python-Linux-x64-24.04-Ubuntu-python-3.12.13-pip-db531bf432b9b667251fa8501fd9ebe3f7f3156118fff17382f585868ca11595, not saving cache.
+2026-04-07T00:41:57.7578590Z Post job cleanup.
+2026-04-07T00:41:57.8516433Z [command]/usr/bin/git version
+2026-04-07T00:41:57.8556644Z git version 2.53.0
+2026-04-07T00:41:57.8600394Z Temporarily overriding HOME='/home/runner/work/_temp/ef9f0da8-985e-4663-bf1a-90b04d7911a8' before making global git config changes
+2026-04-07T00:41:57.8601696Z Adding repository directory to the temporary git global config as a safe directory
+2026-04-07T00:41:57.8615021Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/anolis/anolis
+2026-04-07T00:41:57.8648858Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-04-07T00:41:57.8680647Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-04-07T00:41:57.8886014Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:57.8944367Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-04-07T00:41:57.8964973Z http.https://github.com/.extraheader
+2026-04-07T00:41:57.8977228Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-04-07T00:41:57.9007382Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-04-07T00:41:57.9209867Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:57.9234326Z http.https://github.com/.extraheader
+2026-04-07T00:41:57.9282407Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-04-07T00:41:57.9312871Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-04-07T00:41:57.9516697Z Entering 'external/anolis-protocol'
+2026-04-07T00:41:57.9536921Z file:/home/runner/work/anolis/anolis/.git/modules/external/anolis-protocol/config	remote.origin.url
+2026-04-07T00:41:57.9573696Z [command]/usr/bin/git config --file /home/runner/work/anolis/anolis/.git/modules/external/anolis-protocol/config --name-only --get-regexp ^includeIf\.gitdir:
+2026-04-07T00:41:57.9713504Z Print service container logs: 1d7138b346194c22b5803f953ac2f5ac_influxdb27_66d3c4
+2026-04-07T00:41:57.9717814Z ##[command]/usr/bin/docker logs --details ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:57.9841887Z  2026-04-07T00:41:36.754003593Z	info	booting influxd server in the background	{"system": "docker"}
+2026-04-07T00:41:57.9842600Z  {
+2026-04-07T00:41:57.9842982Z  2026-04-07T00:41:37.756844983Z	info	pinging influxd...	{"system": "docker", "ping_attempt": "0"}
+2026-04-07T00:41:57.9843668Z  2026-04-07T00:41:37.762959560Z	info	got response from influxd, proceeding	{"system": "docker", "total_pings": "1"}
+2026-04-07T00:41:57.9844465Z  2026-04-07T00:41:37.856611516Z	info	Executing user-provided scripts	{"system": "docker", "script_dir": "/docker-entrypoint-initdb.d"}
+2026-04-07T00:41:57.9845266Z  2026-04-07T00:41:37.858479480Z	info	initialization complete, shutting down background influxd	{"system": "docker"}
+2026-04-07T00:41:57.9846373Z  2026-04-07T00:41:37.925877902Z	info	found existing boltdb file, skipping setup wrapper	{"system": "docker", "bolt_path": "/var/lib/influxdb2/influxd.bolt"}
+2026-04-07T00:41:57.9852270Z    "bolt-path": "/var/lib/influxdb2/influxd.bolt",
+2026-04-07T00:41:57.9852909Z    "engine-path": "/var/lib/influxdb2/engine",
+2026-04-07T00:41:57.9853477Z    "nats-port": 4222,
+2026-04-07T00:41:57.9853851Z    "http-bind-address": ":9999"
+2026-04-07T00:41:57.9854275Z  }
+2026-04-07T00:41:57.9855222Z  ts=2026-04-07T00:41:36.826319Z lvl=info msg="Welcome to InfluxDB" log_id=125M2aEW000 version=v2.7.12 commit=ec9dcde5d6 build_date=2025-05-20T22:48:39Z log_level=info
+2026-04-07T00:41:57.9856666Z  ts=2026-04-07T00:41:36.826365Z lvl=warn msg="nats-port argument is deprecated and unused" log_id=125M2aEW000
+2026-04-07T00:41:57.9857938Z  ts=2026-04-07T00:41:36.828313Z lvl=info msg="Resources opened" log_id=125M2aEW000 service=bolt path=/var/lib/influxdb2/influxd.bolt
+2026-04-07T00:41:57.9858996Z  ts=2026-04-07T00:41:36.828382Z lvl=info msg="Resources opened" log_id=125M2aEW000 service=sqlite path=/var/lib/influxdb2/influxd.sqlite
+2026-04-07T00:41:57.9859903Z  ts=2026-04-07T00:41:36.828691Z lvl=info msg="Bringing up metadata migrations" log_id=125M2aEW000 service="KV migrations" migration_count=20
+2026-04-07T00:41:57.9860771Z  ts=2026-04-07T00:41:36.854337Z lvl=info msg="Bringing up metadata migrations" log_id=125M2aEW000 service="SQL migrations" migration_count=8
+2026-04-07T00:41:57.9861976Z  ts=2026-04-07T00:41:36.888822Z lvl=info msg="Using data dir" log_id=125M2aEW000 service=storage-engine service=store path=/var/lib/influxdb2/engine/data
+2026-04-07T00:41:57.9863211Z  ts=2026-04-07T00:41:36.888900Z lvl=info msg="Compaction settings" log_id=125M2aEW000 service=storage-engine service=store max_concurrent_compactions=2 throughput_bytes_per_second=50331648 throughput_bytes_per_second_burst=50331648
+2026-04-07T00:41:57.9864460Z  ts=2026-04-07T00:41:36.888945Z lvl=info msg="Open store (start)" log_id=125M2aEW000 service=storage-engine service=store op_name=tsdb_open op_event=start
+2026-04-07T00:41:57.9865461Z  ts=2026-04-07T00:41:36.888998Z lvl=info msg="Open store (end)" log_id=125M2aEW000 service=storage-engine service=store op_name=tsdb_open op_event=end op_elapsed=0.054ms
+2026-04-07T00:41:57.9866441Z  ts=2026-04-07T00:41:36.889023Z lvl=info msg="Starting retention policy enforcement service" log_id=125M2aEW000 service=retention check_interval=30m
+2026-04-07T00:41:57.9867407Z  ts=2026-04-07T00:41:36.889031Z lvl=info msg="Starting precreation service" log_id=125M2aEW000 service=shard-precreation check_interval=10m advance_period=30m
+2026-04-07T00:41:57.9868792Z  ts=2026-04-07T00:41:36.889901Z lvl=info msg="Starting query controller" log_id=125M2aEW000 service=storage-reads concurrency_quota=1024 initial_memory_bytes_quota_per_query=9223372036854775807 memory_bytes_quota_per_query=9223372036854775807 max_memory_bytes=0 queue_size=1024
+2026-04-07T00:41:57.9870507Z  ts=2026-04-07T00:41:36.891657Z lvl=info msg="Configuring InfluxQL statement executor (zeros indicate unlimited)." log_id=125M2aEW000 max_select_point=0 max_select_series=0 max_select_buckets=0
+2026-04-07T00:41:57.9871428Z  ts=2026-04-07T00:41:36.896485Z lvl=info msg=Starting log_id=125M2aEW000 service=telemetry interval=8h
+2026-04-07T00:41:57.9872387Z  ts=2026-04-07T00:41:36.896580Z lvl=info msg=Listening log_id=125M2aEW000 service=tcp-listener transport=http addr=:9999 port=9999
+2026-04-07T00:41:57.9872929Z  User	Organization	Bucket
+2026-04-07T00:41:57.9873143Z  admin	anolis		anolis
+2026-04-07T00:41:57.9873713Z  ts=2026-04-07T00:41:38.002303Z lvl=info msg="Welcome to InfluxDB" log_id=125M2epW000 version=v2.7.12 commit=ec9dcde5d6 build_date=2025-05-20T22:48:39Z log_level=info
+2026-04-07T00:41:57.9874546Z  ts=2026-04-07T00:41:38.002338Z lvl=warn msg="nats-port argument is deprecated and unused" log_id=125M2epW000
+2026-04-07T00:41:57.9875272Z  ts=2026-04-07T00:41:38.002876Z lvl=info msg="Resources opened" log_id=125M2epW000 service=bolt path=/var/lib/influxdb2/influxd.bolt
+2026-04-07T00:41:57.9876227Z  ts=2026-04-07T00:41:38.002978Z lvl=info msg="Resources opened" log_id=125M2epW000 service=sqlite path=/var/lib/influxdb2/influxd.sqlite
+2026-04-07T00:41:57.9877104Z  ts=2026-04-07T00:41:38.004807Z lvl=info msg="Checking InfluxDB metadata for prior version." log_id=125M2epW000 bolt_path=/var/lib/influxdb2/influxd.bolt
+2026-04-07T00:41:57.9878018Z  ts=2026-04-07T00:41:38.004944Z lvl=info msg="Using data dir" log_id=125M2epW000 service=storage-engine service=store path=/var/lib/influxdb2/engine/data
+2026-04-07T00:41:57.9879212Z  ts=2026-04-07T00:41:38.004970Z lvl=info msg="Compaction settings" log_id=125M2epW000 service=storage-engine service=store max_concurrent_compactions=2 throughput_bytes_per_second=50331648 throughput_bytes_per_second_burst=50331648
+2026-04-07T00:41:57.9880417Z  ts=2026-04-07T00:41:38.004978Z lvl=info msg="Open store (start)" log_id=125M2epW000 service=storage-engine service=store op_name=tsdb_open op_event=start
+2026-04-07T00:41:57.9881412Z  ts=2026-04-07T00:41:38.005051Z lvl=info msg="Open store (end)" log_id=125M2epW000 service=storage-engine service=store op_name=tsdb_open op_event=end op_elapsed=0.073ms
+2026-04-07T00:41:57.9882810Z  ts=2026-04-07T00:41:38.005083Z lvl=info msg="Starting retention policy enforcement service" log_id=125M2epW000 service=retention check_interval=30m
+2026-04-07T00:41:57.9883783Z  ts=2026-04-07T00:41:38.005093Z lvl=info msg="Starting precreation service" log_id=125M2epW000 service=shard-precreation check_interval=10m advance_period=30m
+2026-04-07T00:41:57.9885137Z  ts=2026-04-07T00:41:38.005661Z lvl=info msg="Starting query controller" log_id=125M2epW000 service=storage-reads concurrency_quota=1024 initial_memory_bytes_quota_per_query=9223372036854775807 memory_bytes_quota_per_query=9223372036854775807 max_memory_bytes=0 queue_size=1024
+2026-04-07T00:41:57.9886616Z  ts=2026-04-07T00:41:38.006801Z lvl=info msg="Configuring InfluxQL statement executor (zeros indicate unlimited)." log_id=125M2epW000 max_select_point=0 max_select_series=0 max_select_buckets=0
+2026-04-07T00:41:57.9887538Z  ts=2026-04-07T00:41:38.009719Z lvl=info msg=Starting log_id=125M2epW000 service=telemetry interval=8h
+2026-04-07T00:41:57.9888316Z  ts=2026-04-07T00:41:38.009788Z lvl=info msg=Listening log_id=125M2epW000 service=tcp-listener transport=http addr=:8086 port=8086
+2026-04-07T00:41:57.9889136Z  ts=2026-04-07T00:41:57.458455Z lvl=info msg="index opened with 8 partitions" log_id=125M2epW000 service=storage-engine index=tsi
+2026-04-07T00:41:57.9890275Z  ts=2026-04-07T00:41:57.458712Z lvl=info msg="loading changes (start)" log_id=125M2epW000 service=storage-engine engine=tsm1 op_name="field indices" path=/var/lib/influxdb2/engine/data/fbb0cf65ba1a1159/autogen/1/fields.idxl op_event=start
+2026-04-07T00:41:57.9892063Z  ts=2026-04-07T00:41:57.458740Z lvl=info msg="loading changes (end)" log_id=125M2epW000 service=storage-engine engine=tsm1 op_name="field indices" path=/var/lib/influxdb2/engine/data/fbb0cf65ba1a1159/autogen/1/fields.idxl op_event=end op_elapsed=0.045ms
+2026-04-07T00:41:57.9893536Z  ts=2026-04-07T00:41:57.458934Z lvl=info msg="Reindexing TSM data" log_id=125M2epW000 service=storage-engine engine=tsm1 db_shard_id=1
+2026-04-07T00:41:57.9894342Z  ts=2026-04-07T00:41:57.458949Z lvl=info msg="Reindexing WAL data" log_id=125M2epW000 service=storage-engine engine=tsm1 db_shard_id=1
+2026-04-07T00:41:57.9895280Z  ts=2026-04-07T00:41:57.461112Z lvl=info msg="saving field index changes (start)" log_id=125M2epW000 service=storage-engine engine=tsm1 op_name=MeasurementFieldSet op_event=start
+2026-04-07T00:41:57.9896429Z  ts=2026-04-07T00:41:57.461698Z lvl=info msg="saving field index changes (end)" log_id=125M2epW000 service=storage-engine engine=tsm1 op_name=MeasurementFieldSet op_event=end op_elapsed=0.589ms
+2026-04-07T00:41:57.9902177Z Stop and remove container: 1d7138b346194c22b5803f953ac2f5ac_influxdb27_66d3c4
+2026-04-07T00:41:57.9906724Z ##[command]/usr/bin/docker rm --force ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:58.2101963Z ae787911eedf31a0e6cff5187be6b3ba5ee2465c8c2f6d2dd5e02c5b907a5f2d
+2026-04-07T00:41:58.2136689Z Remove container network: github_network_b51f7c9a48b24067b0a7b7a4c1365c4c
+2026-04-07T00:41:58.2141087Z ##[command]/usr/bin/docker network rm github_network_b51f7c9a48b24067b0a7b7a4c1365c4c
+2026-04-07T00:41:58.3085983Z github_network_b51f7c9a48b24067b0a7b7a4c1365c4c
+2026-04-07T00:41:58.3145161Z Cleaning up orphan processes
+2026-04-07T00:41:58.3527314Z ##[warning]Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-python@v5. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

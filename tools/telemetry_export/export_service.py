@@ -327,12 +327,6 @@ class ExportService:
         content_length = 0
 
         try:
-            LOGGER.debug(
-                "request_id=%s starting spooled export format=%s columns=%s",
-                request_id,
-                query.fmt,
-                ",".join(query.columns),
-            )
             if query.fmt == "csv":
                 csv_writer = csv.DictWriter(tmp_file, fieldnames=query.columns)
                 csv_writer.writeheader()
@@ -411,15 +405,6 @@ class ExportService:
             response.close()
             if query.fmt != "json":
                 content_length = tmp_path.stat().st_size
-
-            LOGGER.debug(
-                "request_id=%s completed spooled export format=%s rows=%d bytes=%d export_id=%s",
-                request_id,
-                query.fmt,
-                row_count,
-                content_length,
-                export_id,
-            )
 
             return SpoolResult(
                 path=tmp_path,

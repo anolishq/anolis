@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from http import HTTPStatus
 
 import requests
 
 from .models import ApiError, AppConfig
-
-LOGGER = logging.getLogger("telemetry_export")
 
 
 def influx_query_csv(config: AppConfig, flux_query: str) -> str:
@@ -89,14 +86,6 @@ def influx_query_csv_stream(config: AppConfig, flux_query: str) -> requests.Resp
         try:
             raw_stream.decode_content = True
         except Exception:
-            LOGGER.debug("Unable to set response.raw.decode_content=True", exc_info=True)
-
-    LOGGER.debug(
-        "Influx stream response: status=%s content_encoding=%s content_type=%s transfer_encoding=%s",
-        response.status_code,
-        response.headers.get("Content-Encoding", ""),
-        response.headers.get("Content-Type", ""),
-        response.headers.get("Transfer-Encoding", ""),
-    )
+            pass
 
     return response
