@@ -216,7 +216,7 @@ def test_export_service_e2e_paths(
         json=ndjson_request,
         timeout=30,
     )
-    assert ndjson_response.status_code == 200
+    assert ndjson_response.status_code == 200, ndjson_response.text
     assert ndjson_response.headers["Content-Type"].startswith("application/x-ndjson")
     assert len([line for line in ndjson_response.text.splitlines() if line.strip()]) > 0
 

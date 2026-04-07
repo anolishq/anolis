@@ -127,8 +127,8 @@ curl -sS -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
 ## Example Query (CSV Response)
 
 `format=csv` returns a `text/csv` body. The service writes CSV to a temporary
-spool file first (bounded memory path), enforces row/size limits, then streams
-the file to the response.
+spool file first (bounded memory path), enforces row limits, then streams the
+file to the response.
 
 ```bash
 curl -sS -D /tmp/export.headers \
@@ -196,3 +196,5 @@ python tools/telemetry_export/examples/query_signals.py \
    bounds and positive limit values).
 5. `authorization.enforce_selector_scope=true` requires at least one non-empty
    `allowed_*` allowlist.
+6. `limits.max_response_bytes` is enforced for `format=json`; streamed formats
+   (`csv`, `ndjson`) are governed by `max_rows` and request limits.

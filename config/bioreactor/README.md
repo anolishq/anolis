@@ -290,8 +290,9 @@ MVP constraints:
    - `value_bool`, `value_string`, and `quality` use `last`;
    - requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
 11. `json`, `csv`, and `ndjson` all use a bounded-memory spool-to-file path
-    before response streaming; limit violations still return deterministic API
-    errors.
+    before response streaming.
+12. `limits.max_response_bytes` applies to `format=json`; streamed `csv` and
+    `ndjson` are controlled by `max_rows` and request limits.
 
 Stop observability stack when finished:
 

@@ -114,7 +114,8 @@ class _BoundedTextWriter:
                 "limit_exceeded",
                 f"response exceeds max_response_bytes={self._max_bytes}",
             )
-        return self._handle.write(text)
+        written = self._handle.write(text)
+        return int(written)
 
     def flush(self) -> None:
         self._handle.flush()
@@ -318,15 +319,19 @@ class ExportService:
             suffix=suffix,
         )
         tmp_path = Path(tmp_file.name)
-        bounded_writer = _BoundedTextWriter(tmp_file, self.config.limits.max_response_bytes)
+        bounded_writer = (
+            _BoundedTextWriter(tmp_file, self.config.limits.max_response_bytes) if query.fmt == "json" else None
+        )
         export_id = str(uuid.uuid4())
         row_count = 0
+        content_length = 0
 
         try:
             if query.fmt == "csv":
-                csv_writer = csv.DictWriter(bounded_writer, fieldnames=query.columns)
+                csv_writer = csv.DictWriter(tmp_file, fieldnames=query.columns)
                 csv_writer.writeheader()
             elif query.fmt == "json":
+                assert bounded_writer is not None
                 bounded_writer.write('{"status":"ok","dataset":"signals","format":"json","data":[')
                 json_first = True
             else:
@@ -346,13 +351,14 @@ class ExportService:
                 if query.fmt == "csv":
                     csv_writer.writerow(normalized)
                 elif query.fmt == "json":
+                    assert bounded_writer is not None
                     if not json_first:
                         bounded_writer.write(",")
                     bounded_writer.write(json.dumps(normalized, separators=(",", ":")))
                     json_first = False
                 else:
-                    bounded_writer.write(json.dumps(normalized, separators=(",", ":")))
-                    bounded_writer.write("\n")
+                    tmp_file.write(json.dumps(normalized, separators=(",", ":")))
+                    tmp_file.write("\n")
 
             manifest = build_manifest(
                 query,
@@ -366,20 +372,26 @@ class ExportService:
             self._store_manifest(export_id, manifest, manifest_hash)
 
             if query.fmt == "json":
+                assert bounded_writer is not None
                 bounded_writer.write('],"manifest":')
                 bounded_writer.write(json.dumps(manifest, separators=(",", ":")))
                 bounded_writer.write("}")
+                bounded_writer.flush()
+                content_length = bounded_writer.bytes_written
+            else:
+                tmp_file.flush()
 
-            bounded_writer.flush()
             tmp_file.close()
             response.close()
+            if query.fmt != "json":
+                content_length = tmp_path.stat().st_size
 
             return SpoolResult(
                 path=tmp_path,
                 fmt=query.fmt,
                 content_type=content_type,
                 row_count=row_count,
-                content_length=bounded_writer.bytes_written,
+                content_length=content_length,
                 export_id=export_id,
                 manifest_hash=manifest_hash,
                 manifest=manifest,
@@ -389,9 +401,15 @@ class ExportService:
                 tmp_file.close()
             except Exception:
                 pass
-            response.close()
-            if tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
+            try:
+                response.close()
+            except Exception:
+                pass
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             raise
 
     # Backward-compatible aliases kept for existing tests/callers.

@@ -706,6 +706,116 @@ def test_execute_spooled_query_supports_ndjson(monkeypatch: pytest.MonkeyPatch):
         result.path.unlink(missing_ok=True)
 
 
+def test_execute_spooled_query_ndjson_is_not_limited_by_max_response_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_module()
+    base_cfg = _test_config(module)
+    strict_cfg = module.AppConfig(
+        server=base_cfg.server,
+        influx=base_cfg.influx,
+        limits=module.LimitConfig(
+            max_span_seconds=base_cfg.limits.max_span_seconds,
+            max_rows=base_cfg.limits.max_rows,
+            max_response_bytes=64,
+            max_selector_items=base_cfg.limits.max_selector_items,
+            request_timeout_seconds=base_cfg.limits.request_timeout_seconds,
+            max_request_bytes=base_cfg.limits.max_request_bytes,
+        ),
+        authorization=base_cfg.authorization,
+    )
+    svc = module.ExportService(strict_cfg)
+
+    class _FakeStreamResponse:
+        def __init__(self, lines: list[str]):
+            self._lines = lines
+
+        def iter_lines(self, decode_unicode: bool = True):
+            assert decode_unicode is True
+            for line in self._lines:
+                yield line
+
+        def close(self):
+            return None
+
+    fake_lines = [
+        ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+    ]
+    for i in range(10):
+        fake_lines.append(
+            f",,0,2026-04-01T00:00:{i:02d}Z,bioreactor-telemetry,bread0,dcmt0,motor.rpm,OK,{120 + i / 10.0},,,,"
+        )
+
+    monkeypatch.setattr(module, "influx_query_csv_stream", lambda _cfg, _query: _FakeStreamResponse(fake_lines))
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "resolution": {"mode": "raw_event"},
+        "format": "ndjson",
+    }
+
+    result = svc.execute_spooled_query(request, request_id="req-ndjson-big", requester_id="operator-a")
+    try:
+        assert result.fmt == "ndjson"
+        assert result.row_count == 10
+        assert result.content_length > strict_cfg.limits.max_response_bytes
+    finally:
+        result.path.unlink(missing_ok=True)
+
+
+def test_execute_spooled_query_json_enforces_max_response_bytes(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module()
+    base_cfg = _test_config(module)
+    strict_cfg = module.AppConfig(
+        server=base_cfg.server,
+        influx=base_cfg.influx,
+        limits=module.LimitConfig(
+            max_span_seconds=base_cfg.limits.max_span_seconds,
+            max_rows=base_cfg.limits.max_rows,
+            max_response_bytes=128,
+            max_selector_items=base_cfg.limits.max_selector_items,
+            request_timeout_seconds=base_cfg.limits.request_timeout_seconds,
+            max_request_bytes=base_cfg.limits.max_request_bytes,
+        ),
+        authorization=base_cfg.authorization,
+    )
+    svc = module.ExportService(strict_cfg)
+
+    class _FakeStreamResponse:
+        def __init__(self, lines: list[str]):
+            self._lines = lines
+
+        def iter_lines(self, decode_unicode: bool = True):
+            assert decode_unicode is True
+            for line in self._lines:
+                yield line
+
+        def close(self):
+            return None
+
+    fake_lines = [
+        ",result,table,_time,runtime_name,provider_id,device_id,signal_id,quality,value_double,value_int,value_uint,value_bool,value_string",
+    ]
+    for i in range(10):
+        fake_lines.append(
+            f",,0,2026-04-01T00:00:{i:02d}Z,bioreactor-telemetry,bread0,dcmt0,motor.rpm,OK,{120 + i / 10.0},,,,"
+        )
+
+    monkeypatch.setattr(module, "influx_query_csv_stream", lambda _cfg, _query: _FakeStreamResponse(fake_lines))
+
+    request = {
+        "time_range": {"start": "2026-04-01T00:00:00Z", "end": "2026-04-01T00:10:00Z"},
+        "resolution": {"mode": "raw_event"},
+        "format": "json",
+    }
+
+    with pytest.raises(module.ApiError) as exc_info:
+        svc.execute_spooled_query(request, request_id="req-json-big", requester_id="operator-a")
+
+    assert exc_info.value.status == 413
+    assert exc_info.value.code == "limit_exceeded"
+
+
 def test_iter_influx_csv_rows_supports_multiline_values_from_raw_stream():
     module = _load_module()
 
