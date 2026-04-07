@@ -238,9 +238,8 @@ nlohmann::json encode_capabilities(const registry::DeviceCapabilitySet &caps) {
         (void)id;
         sorted_signals.emplace_back(std::cref(spec));
     }
-    std::sort(sorted_signals.begin(), sorted_signals.end(), [](const auto &a, const auto &b) {
-        return a.get().signal_id < b.get().signal_id;
-    });
+    std::sort(sorted_signals.begin(), sorted_signals.end(),
+              [](const auto &a, const auto &b) { return a.get().signal_id < b.get().signal_id; });
     for (const auto &spec : sorted_signals) {
         signals.push_back(encode_signal_spec(spec.get()));
     }
