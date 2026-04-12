@@ -19,9 +19,9 @@ devices:
     address: 0x0A
   - id: dcmt0
     type: dcmt
-    label: Reactor Media Feed Pumps
+    label: Reactor Stirring + Media Feed (ch1 stir, ch2 media)
     address: 0x14
   - id: dcmt1
     type: dcmt
-    label: Reactor Acid-Base Pumps
+    label: Reactor Acid/Base Dosing (ch1 acid, ch2 base)
     address: 0x15

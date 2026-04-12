@@ -21,6 +21,20 @@ Device map:
    - `ph0` at `0x63`
    - `do0` at `0x61`
 
+DCMT channel intent map:
+
+1. `dcmt0` (`0x14` / decimal 20):
+   - channel 1: impeller stirring motor
+   - channel 2: media/feed motor
+2. `dcmt1` (`0x15` / decimal 21):
+   - channel 1: acid pump motor
+   - channel 2: base pump motor
+
+RLHT usage note:
+
+1. `rlht0` (`0x0A`) is currently used for vessel/culture temperature sensing only.
+2. Relay channels are not used in the current bioreactor setup.
+
 ## Files
 
 1. `anolis-runtime.bioreactor.manual.yaml`
@@ -286,9 +300,11 @@ MVP constraints:
 8. Selector supports optional `runtime_names` for multi-runtime disambiguation.
 9. `timezone` request input is not supported in v1 (timestamps are always UTC).
 10. In downsample mode:
-   - numeric fields use requested aggregation (`last|mean|min|max|count`);
-   - `value_bool`, `value_string`, and `quality` use `last`;
-   - requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
+
+- numeric fields use requested aggregation (`last|mean|min|max|count`);
+- `value_bool`, `value_string`, and `quality` use `last`;
+- requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
+
 11. `json`, `csv`, and `ndjson` all use a bounded-memory spool-to-file path
     before response streaming.
 12. `limits.max_response_bytes` applies to `format=json`; streamed `csv` and
