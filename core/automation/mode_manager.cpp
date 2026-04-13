@@ -82,15 +82,26 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
     }  // Lock released here
 
     // Execute before-transition callbacks (may veto transition)
+    // NOTE: FAULT transitions are fail-safe and cannot be vetoed by callbacks.
     for (const auto &callback : before_callbacks_copy) {
         try {
             std::string callback_error;
             if (!callback(previous_mode, new_mode, callback_error)) {
+                if (new_mode == RuntimeMode::FAULT) {
+                    const std::string warn = callback_error.empty() ? "Before-mode callback rejected FAULT transition"
+                                                                    : callback_error;
+                    LOG_WARN("[ModeManager] Ignoring before-mode rejection during FAULT transition: " << warn);
+                    continue;
+                }
                 error = callback_error.empty() ? "Mode transition rejected by before-mode callback" : callback_error;
                 LOG_ERROR("[ModeManager] " << error);
                 return false;
             }
         } catch (const std::exception &e) {
+            if (new_mode == RuntimeMode::FAULT) {
+                LOG_WARN("[ModeManager] Ignoring before-mode callback exception during FAULT transition: " << e.what());
+                continue;
+            }
             error = std::string("Before mode change callback error: ") + e.what();
             LOG_ERROR("[ModeManager] " << error);
             return false;

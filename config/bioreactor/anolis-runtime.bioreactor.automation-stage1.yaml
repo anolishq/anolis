@@ -143,7 +143,8 @@ automation:
               motor2_pwm: 0
       - from: "*"
         to: FAULT
-        fail_on_error: true
+        # FAULT is fail-safe: best-effort output writes, never block FAULT entry.
+        fail_on_error: false
         calls:
           - device_handle: bread0/dcmt0
             function_name: set_mode

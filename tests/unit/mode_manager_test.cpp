@@ -374,6 +374,35 @@ TEST_F(ModeManagerTest, BeforeCallbackRunsBeforeAfterCallback) {
     EXPECT_EQ(call_order[1], "after");
 }
 
+TEST_F(ModeManagerTest, BeforeCallbackCannotRejectFaultTransition) {
+    mode_manager_->on_before_mode_change(
+        [](RuntimeMode, RuntimeMode next_mode, std::string &error) {
+            if (next_mode == RuntimeMode::FAULT) {
+                error = "Simulated failure while entering FAULT";
+                return false;
+            }
+            return true;
+        });
+
+    std::string error;
+    EXPECT_TRUE(mode_manager_->set_mode(RuntimeMode::FAULT, error));
+    EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::FAULT);
+}
+
+TEST_F(ModeManagerTest, BeforeCallbackExceptionCannotBlockFaultTransition) {
+    mode_manager_->on_before_mode_change(
+        [](RuntimeMode, RuntimeMode next_mode, std::string &) -> bool {
+            if (next_mode == RuntimeMode::FAULT) {
+                throw std::runtime_error("boom while entering fault");
+            }
+            return true;
+        });
+
+    std::string error;
+    EXPECT_TRUE(mode_manager_->set_mode(RuntimeMode::FAULT, error));
+    EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::FAULT);
+}
+
 /******************************************************************************
  * Thread-Safety Tests
  ******************************************************************************/

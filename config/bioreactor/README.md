@@ -106,6 +106,11 @@ This profile enables Behavior Tree automation for:
 2. `dcmt0` channel 2 feed pulse schedule.
 3. Safe mode-transition handoff writes (`AUTO->MANUAL`, `MANUAL->IDLE`, `*->FAULT`).
 
+Safety behavior note:
+
+1. Transition hooks targeting `FAULT` run best-effort; hook failures are logged.
+2. `FAULT` entry is not blocked by hook failures.
+
 Start runtime:
 
 ```bash

@@ -31,7 +31,8 @@ std::optional<BTServiceContext> read_service_context(const BT::TreeNode &node, c
 }
 
 int64_t current_time_ms() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+    // Use monotonic time to avoid schedule distortions from wall-clock jumps.
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
         .count();
 }
 }  // namespace

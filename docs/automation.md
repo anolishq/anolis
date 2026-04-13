@@ -620,6 +620,11 @@ automation:
 | `parameters`           | list   | []       | Parameter definitions                  |
 | `mode_transition_hooks`| map    | {}       | Generic before/after mode transition hook calls |
 
+Mode-transition hook fail-safe rule:
+
+- Transitions to `FAULT` are never vetoed by `before_transition` callback failures.
+- Hook errors are logged and runtime still enters `FAULT`.
+
 ---
 
 ## BT Execution Gating

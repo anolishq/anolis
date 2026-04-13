@@ -49,7 +49,11 @@ public:
     /**
      * Before mode change callback signature.
      *
-     * Returning false vetoes the transition and sets an error message.
+     * Returning false vetoes the transition and sets an error message,
+     * except when transitioning to FAULT.
+     *
+     * FAULT is treated as fail-safe: before-callback rejection/exception is
+     * logged but does not block entry into FAULT mode.
      *
      * @param previous_mode Mode before transition
      * @param new_mode Requested mode
@@ -108,7 +112,7 @@ public:
      * Register callback invoked before mode transition is committed.
      *
      * Callbacks run with no internal lock held. Returning false rejects
-     * the transition.
+     * the transition, except when transitioning to FAULT.
      */
     void on_before_mode_change(const BeforeModeChangeCallback& callback);
 
