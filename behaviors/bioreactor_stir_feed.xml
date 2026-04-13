@@ -12,10 +12,10 @@
     <ReactiveSequence name="stir_feed_control_loop">
       <!-- Runtime-tunable parameters -->
       <GetParameterBool param="impeller_enable" value="{impeller_enable}"/>
-      <GetParameterInt64 param="impeller_pwm" value="{impeller_pwm}"/>
+      <GetParameter param="impeller_pwm" value="{impeller_pwm}"/>
 
       <GetParameterBool param="feed_enable" value="{feed_enable}"/>
-      <GetParameterInt64 param="feed_pwm" value="{feed_pwm}"/>
+      <GetParameter param="feed_pwm" value="{feed_pwm}"/>
       <GetParameterInt64 param="feed_startup_delay_s" value="{feed_startup_delay_s}"/>
       <GetParameterInt64 param="feed_interval_s" value="{feed_interval_s}"/>
       <GetParameterInt64 param="feed_pulse_s" value="{feed_pulse_s}"/>
