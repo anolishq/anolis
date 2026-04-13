@@ -19,9 +19,9 @@ devices:
     address: 0x0A
   - id: dcmt0
     type: dcmt
-    label: Reactor Media Feed + Stirring (ch1 media, ch2 stir)
+    label: Reactor Sampling + Stirring (ch1 sample, ch2 stir)
     address: 0x14
   - id: dcmt1
     type: dcmt
-    label: Reactor Base/Acid Dosing (ch1 base, ch2 acid)
+    label: Reactor Dual Dosing (ch1 dose1, ch2 dose2)
     address: 0x15

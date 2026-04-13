@@ -52,7 +52,7 @@ telemetry:
 
 automation:
   enabled: true
-  behavior_tree: ./behaviors/bioreactor_stir_feed.xml
+  behavior_tree: ./behaviors/bioreactor_stir_dual_dosing.xml
   tick_rate_hz: 2
   manual_gating_policy: BLOCK
   parameters:
@@ -64,30 +64,58 @@ automation:
       default: 255
       min: 0
       max: 255
-    - name: feed_enable
+    - name: dose1_enable
       type: bool
       default: false
-    - name: feed_pwm
+    - name: dose1_pwm
       type: int64
       default: 240
       min: 0
       max: 255
-    - name: feed_startup_delay_s
+    - name: dose1_startup_delay_s
       type: int64
       default: 60
       min: 0
       max: 3600
-    - name: feed_interval_s
+    - name: dose1_interval_s
       type: int64
       default: 900
       min: 1
       max: 86400
-    - name: feed_pulse_s
+    - name: dose1_pulse_s
       type: int64
       default: 5
       min: 1
       max: 3600
-    - name: feed_max_pulses_per_hour
+    - name: dose1_max_pulses_per_hour
+      type: int64
+      default: 0
+      min: 0
+      max: 3600
+    - name: dose2_enable
+      type: bool
+      default: false
+    - name: dose2_pwm
+      type: int64
+      default: 240
+      min: 0
+      max: 255
+    - name: dose2_startup_delay_s
+      type: int64
+      default: 60
+      min: 0
+      max: 3600
+    - name: dose2_interval_s
+      type: int64
+      default: 900
+      min: 1
+      max: 86400
+    - name: dose2_pulse_s
+      type: int64
+      default: 5
+      min: 1
+      max: 3600
+    - name: dose2_max_pulses_per_hour
       type: int64
       default: 0
       min: 0

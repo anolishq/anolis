@@ -26,11 +26,11 @@ Device map:
 DCMT channel intent map:
 
 1. `dcmt0` (`0x14` / decimal 20):
-   - channel 1: media/feed motor
+   - channel 1: sample pump motor
    - channel 2: impeller stirring motor
 2. `dcmt1` (`0x15` / decimal 21):
-   - channel 1: base pump motor
-   - channel 2: acid pump motor
+   - channel 1: dosing pump 1
+   - channel 2: dosing pump 2
 
 RLHT usage note:
 
@@ -46,7 +46,7 @@ RLHT usage note:
 5. `provider-bread.bioreactor.yaml`
 6. `provider-ezo.bioreactor.yaml`
 7. `telemetry-export.bioreactor.yaml`
-8. `../../behaviors/bioreactor_stir_feed.xml`
+8. `../../behaviors/bioreactor_stir_dual_dosing.xml`
 
 Automation naming convention:
 
@@ -112,13 +112,15 @@ Acceptance:
 
 This profile enables Behavior Tree automation for:
 
-1. `dcmt0` channel 1 feed pulse schedule.
-2. `dcmt0` channel 2 impeller command.
-3. Safe mode-transition handoff writes (`AUTO->MANUAL`, `MANUAL->IDLE`, `*->FAULT`).
+1. `dcmt0` channel 2 impeller command.
+2. `dcmt1` channel 1 independent dosing schedule (`dose1_*` parameters).
+3. `dcmt1` channel 2 independent dosing schedule (`dose2_*` parameters).
+4. `dcmt0` channel 1 sample pump held at `0` in automation mode (manual-only for now).
+5. Safe mode-transition handoff writes (`AUTO->MANUAL`, `MANUAL->IDLE`, `*->FAULT`).
 
 PWM parameter guardrails:
 
-1. `feed_pwm` and `impeller_pwm` use Nano-compatible open-loop bounds: `0..255`.
+1. `impeller_pwm`, `dose1_pwm`, and `dose2_pwm` use Nano-compatible open-loop bounds: `0..255`.
 2. Bioreactor automation intentionally keeps these non-negative (forward-only dosing/stir).
 
 Safety behavior note:
@@ -135,11 +137,13 @@ cd /path/to/anolis
 
 Recommended first validation:
 
-1. Keep defaults (`impeller_enable=false`, `feed_enable=false`).
+1. Keep defaults (`impeller_enable=false`, `dose1_enable=false`, `dose2_enable=false`).
 2. Set `impeller_enable=true` and `impeller_pwm` via `POST /v0/parameters`.
 3. Confirm `dcmt0` channel 2 responds and channel 1 remains off.
-4. Set `feed_enable=true` and tune `feed_interval_s` / `feed_pulse_s`.
-5. Confirm channel 1 pulses on schedule.
+4. Set `dose1_enable=true` and tune `dose1_interval_s` / `dose1_pulse_s`.
+5. Confirm `dcmt1` channel 1 pulses on schedule.
+6. Optionally set `dose2_enable=true` and tune `dose2_interval_s` / `dose2_pulse_s`.
+7. Confirm `dcmt1` channel 2 pulses independently from channel 1.
 
 Capture automation API artifacts:
 
