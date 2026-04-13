@@ -2,14 +2,14 @@
  * Main Application Entry Point
  */
 
-import * as API from "./api.js";
-import * as SSE from "./sse.js";
-import * as UI from "./ui.js";
-import * as Automation from "./automation.js";
-import * as DeviceOverview from "./device-overview.js";
-import * as DeviceDetail from "./device-detail.js";
-import * as Telemetry from "./telemetry.js";
-import { CONFIG, THEMES } from "./config.js";
+import * as API from "./api.js?v=20260413b";
+import * as SSE from "./sse.js?v=20260413b";
+import * as UI from "./ui.js?v=20260413b";
+import * as Automation from "./automation.js?v=20260413b";
+import * as DeviceOverview from "./device-overview.js?v=20260413b";
+import * as DeviceDetail from "./device-detail.js?v=20260413b";
+import * as Telemetry from "./telemetry.js?v=20260413b";
+import { CONFIG, THEMES } from "./config.js?v=20260413b";
 
 // DOM elements
 const elements = {
