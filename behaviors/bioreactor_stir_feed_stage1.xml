@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <!--
+    Bioreactor Stage 1 automation:
+    - Maintain impeller command (dcmt0 motor1)
+    - Run feed pulse schedule (dcmt0 motor2)
+    - Emit set_open_loop only on command change or keepalive
+
+    All machine semantics live in config/BT assets; core runtime remains provider-agnostic.
+  -->
+  <BehaviorTree ID="BioreactorStirFeedStage1">
+    <ReactiveSequence name="stir_feed_control_loop">
+      <!-- Runtime-tunable parameters -->
+      <GetParameterBool param="impeller_enable" value="{impeller_enable}"/>
+      <GetParameter param="impeller_pwm" value="{impeller_pwm}"/>
+
+      <GetParameterBool param="feed_enable" value="{feed_enable}"/>
+      <GetParameter param="feed_pwm" value="{feed_pwm}"/>
+      <GetParameterInt64 param="feed_startup_delay_s" value="{feed_startup_delay_s}"/>
+      <GetParameterInt64 param="feed_interval_s" value="{feed_interval_s}"/>
+      <GetParameterInt64 param="feed_pulse_s" value="{feed_pulse_s}"/>
+      <GetParameterInt64 param="feed_max_pulses_per_hour" value="{feed_max_pulses_per_hour}"/>
+
+      <GetParameterInt64 param="command_keepalive_s" value="{command_keepalive_s}"/>
+      <GetParameterInt64 param="command_min_spacing_ms" value="{command_min_spacing_ms}"/>
+
+      <!-- Feed window scheduler -->
+      <PeriodicPulseWindow
+        enabled="{feed_enable}"
+        startup_delay_s="{feed_startup_delay_s}"
+        interval_s="{feed_interval_s}"
+        pulse_s="{feed_pulse_s}"
+        max_pulses_per_hour="{feed_max_pulses_per_hour}"
+        active="{feed_active}"
+        pulse_index="{feed_pulse_index}"
+        elapsed_ms="{feed_elapsed_ms}"/>
+
+      <!-- Build command args for all enable/window combinations -->
+      <Fallback name="compose_open_loop_args">
+        <Sequence>
+          <CheckBool value="{impeller_enable}" expected="true"/>
+          <CheckBool value="{feed_active}" expected="true"/>
+          <BuildArgsJson
+            arg1_name="motor1_pwm"
+            arg1_type="int64"
+            arg1_num="{impeller_pwm}"
+            arg2_name="motor2_pwm"
+            arg2_type="int64"
+            arg2_num="{feed_pwm}"
+            json="{dcmt0_open_loop_args}"/>
+        </Sequence>
+
+        <Sequence>
+          <CheckBool value="{impeller_enable}" expected="true"/>
+          <CheckBool value="{feed_active}" expected="false"/>
+          <BuildArgsJson
+            arg1_name="motor1_pwm"
+            arg1_type="int64"
+            arg1_num="{impeller_pwm}"
+            arg2_name="motor2_pwm"
+            arg2_type="int64"
+            arg2_num="0"
+            json="{dcmt0_open_loop_args}"/>
+        </Sequence>
+
+        <Sequence>
+          <CheckBool value="{impeller_enable}" expected="false"/>
+          <CheckBool value="{feed_active}" expected="true"/>
+          <BuildArgsJson
+            arg1_name="motor1_pwm"
+            arg1_type="int64"
+            arg1_num="0"
+            arg2_name="motor2_pwm"
+            arg2_type="int64"
+            arg2_num="{feed_pwm}"
+            json="{dcmt0_open_loop_args}"/>
+        </Sequence>
+
+        <Sequence>
+          <CheckBool value="{impeller_enable}" expected="false"/>
+          <CheckBool value="{feed_active}" expected="false"/>
+          <BuildArgsJson
+            arg1_name="motor1_pwm"
+            arg1_type="int64"
+            arg1_num="0"
+            arg2_name="motor2_pwm"
+            arg2_type="int64"
+            arg2_num="0"
+            json="{dcmt0_open_loop_args}"/>
+        </Sequence>
+      </Fallback>
+
+      <!-- Write only when needed -->
+      <EmitOnChangeOrInterval
+        key="{dcmt0_open_loop_args}"
+        keepalive_s="{command_keepalive_s}"
+        min_spacing_ms="{command_min_spacing_ms}"
+        emit="{dcmt0_emit}"
+        reason="{dcmt0_emit_reason}"/>
+
+      <Fallback name="write_if_emit">
+        <Sequence>
+          <CheckBool value="{dcmt0_emit}" expected="true"/>
+          <CallDevice
+            device_handle="bread0/dcmt0"
+            function_name="set_open_loop"
+            args="{dcmt0_open_loop_args}"
+            success="{dcmt0_write_ok}"
+            error="{dcmt0_write_error}"/>
+        </Sequence>
+        <AlwaysSuccess/>
+      </Fallback>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>

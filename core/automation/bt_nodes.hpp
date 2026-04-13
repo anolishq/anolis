@@ -183,6 +183,37 @@ private:
 };
 
 /**
+ * GetParameterInt64Node - BT action node for reading int64 runtime parameters.
+ *
+ * Returns SUCCESS only when the parameter exists and has int64 type.
+ */
+class GetParameterInt64Node : public BT::SyncActionNode {
+public:
+    GetParameterInt64Node(const std::string &name, const BT::NodeConfig &config);
+
+    BT::NodeStatus tick() override;
+
+    static BT::PortsList providedPorts();
+
+private:
+    std::optional<BTServiceContext> get_services() const;
+};
+
+/**
+ * CheckBoolNode - generic bool condition node.
+ *
+ * Returns SUCCESS when input `value` equals `expected` (default true).
+ */
+class CheckBoolNode : public BT::SyncActionNode {
+public:
+    CheckBoolNode(const std::string &name, const BT::NodeConfig &config);
+
+    BT::NodeStatus tick() override;
+
+    static BT::PortsList providedPorts();
+};
+
+/**
  * PeriodicPulseWindowNode - Generic periodic scheduler window.
  *
  * Computes whether current time is inside a pulse window after startup delay.

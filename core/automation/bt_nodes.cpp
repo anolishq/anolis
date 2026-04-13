@@ -444,6 +444,75 @@ std::optional<BTServiceContext> GetParameterBoolNode::get_services() const {
 }
 
 //-----------------------------------------------------------------------------
+// GetParameterInt64Node
+//-----------------------------------------------------------------------------
+
+GetParameterInt64Node::GetParameterInt64Node(const std::string &name, const BT::NodeConfig &config)
+    : BT::SyncActionNode(name, config) {}
+
+/*static*/ BT::PortsList GetParameterInt64Node::providedPorts() {
+    return {BT::InputPort<std::string>("param", "Parameter name"),
+            BT::OutputPort<int64_t>("value", "Parameter value (int64)")};
+}
+
+BT::NodeStatus GetParameterInt64Node::tick() {
+    const auto services = get_services();
+    if (!services || services->parameter_manager == nullptr) {
+        LOG_ERROR("[GetParameterInt64Node] ParameterManager not available in BT service context");
+        return BT::NodeStatus::FAILURE;
+    }
+
+    auto param_name = getInput<std::string>("param");
+    if (!param_name) {
+        LOG_ERROR("[GetParameterInt64Node] Missing 'param' input port");
+        return BT::NodeStatus::FAILURE;
+    }
+
+    auto value_opt = services->parameter_manager->get(param_name.value());
+    if (!value_opt.has_value()) {
+        LOG_ERROR("[GetParameterInt64Node] Parameter not found: " << param_name.value());
+        return BT::NodeStatus::FAILURE;
+    }
+
+    const auto &param_value = value_opt.value();
+    if (!std::holds_alternative<int64_t>(param_value)) {
+        LOG_ERROR("[GetParameterInt64Node] Parameter '" << param_name.value() << "' has non-int64 type '"
+                                                        << parameter_value_type_name(param_value) << "'");
+        return BT::NodeStatus::FAILURE;
+    }
+
+    setOutput("value", std::get<int64_t>(param_value));
+    return BT::NodeStatus::SUCCESS;
+}
+
+std::optional<BTServiceContext> GetParameterInt64Node::get_services() const {
+    return read_service_context(*this, "GetParameterInt64Node");
+}
+
+//-----------------------------------------------------------------------------
+// CheckBoolNode
+//-----------------------------------------------------------------------------
+
+CheckBoolNode::CheckBoolNode(const std::string &name, const BT::NodeConfig &config)
+    : BT::SyncActionNode(name, config) {}
+
+/*static*/ BT::PortsList CheckBoolNode::providedPorts() {
+    return {BT::InputPort<bool>("value", "Boolean value to compare"),
+            BT::InputPort<bool>("expected", true, "Expected value (default: true)")};
+}
+
+BT::NodeStatus CheckBoolNode::tick() {
+    const auto value = getInput<bool>("value");
+    if (!value) {
+        LOG_ERROR("[CheckBoolNode] Missing required input 'value'");
+        return BT::NodeStatus::FAILURE;
+    }
+
+    const bool expected = getInput<bool>("expected").value_or(true);
+    return (value.value() == expected) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+}
+
+//-----------------------------------------------------------------------------
 // PeriodicPulseWindowNode
 //-----------------------------------------------------------------------------
 

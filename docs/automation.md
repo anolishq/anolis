@@ -358,6 +358,7 @@ Behavior Trees can access parameters via the `GetParameter` node.
 The node is available in the default node registry and reads a parameter by name from the blackboard using the `param` input port.
 It returns SUCCESS with the value available on the `value` output port **only for numeric parameter types** (`double`, `int64`).
 For `bool` parameters, use `GetParameterBool`.
+For strict `int64` typed flows, use `GetParameterInt64`.
 For `string` parameters, `GetParameter` returns `FAILURE` by design (no string node yet).
 
 Example:
@@ -519,6 +520,38 @@ Reads a boolean runtime parameter from the ParameterManager.
 
 - `SUCCESS` — Parameter read successfully and is bool
 - `FAILURE` — Parameter missing, manager unavailable, or non-bool type
+
+### GetParameterInt64
+
+Reads an `int64` runtime parameter from the ParameterManager.
+
+**Ports:**
+
+| Port  | Type   | Direction | Description        |
+| ----- | ------ | --------- | ------------------ |
+| param | string | input     | Parameter name     |
+| value | int64  | output    | `int64` value      |
+
+**Returns:**
+
+- `SUCCESS` — Parameter read successfully and is `int64`
+- `FAILURE` — Parameter missing, manager unavailable, or non-`int64` type
+
+### CheckBool
+
+Compares a boolean input against an expected value.
+
+**Ports:**
+
+| Port     | Type | Direction | Description |
+| -------- | ---- | --------- | ----------- |
+| value    | bool | input     | Value to compare |
+| expected | bool | input     | Expected value (default `true`) |
+
+**Returns:**
+
+- `SUCCESS` — `value == expected`
+- `FAILURE` — values do not match (or input missing)
 
 ### PeriodicPulseWindow
 

@@ -1,0 +1,168 @@
+runtime:
+  name: bioreactor-automation-stage1
+  shutdown_timeout_ms: 3000
+  startup_timeout_ms: 30000
+
+http:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8080
+  cors_allowed_origins:
+    - http://localhost:3000
+    - http://127.0.0.1:3000
+  cors_allow_credentials: false
+
+providers:
+  - id: bread0
+    command: ../anolis-provider-bread/build/dev-linux-hardware-release/anolis-provider-bread
+    args: ["--config", "config/bioreactor/provider-bread.bioreactor.yaml"]
+    timeout_ms: 5000
+    hello_timeout_ms: 2000
+    ready_timeout_ms: 10000
+    restart_policy:
+      enabled: true
+      max_attempts: 3
+      backoff_ms: [200, 500, 1000]
+      timeout_ms: 30000
+
+  - id: ezo0
+    command: ../anolis-provider-ezo/build/dev-linux-hardware-release/anolis-provider-ezo
+    args: ["--config", "config/bioreactor/provider-ezo.bioreactor.yaml"]
+    timeout_ms: 5000
+    hello_timeout_ms: 5000
+    ready_timeout_ms: 10000
+    restart_policy:
+      enabled: true
+      max_attempts: 3
+      backoff_ms: [200, 500, 1000]
+      timeout_ms: 30000
+
+polling:
+  interval_ms: 2500
+
+telemetry:
+  enabled: false
+
+automation:
+  enabled: true
+  behavior_tree: ./behaviors/bioreactor_stir_feed_stage1.xml
+  tick_rate_hz: 2
+  manual_gating_policy: BLOCK
+  parameters:
+    - name: impeller_enable
+      type: bool
+      default: false
+    - name: impeller_pwm
+      type: int64
+      default: 300
+      min: 0
+      max: 32767
+    - name: feed_enable
+      type: bool
+      default: false
+    - name: feed_pwm
+      type: int64
+      default: 240
+      min: 0
+      max: 32767
+    - name: feed_startup_delay_s
+      type: int64
+      default: 60
+      min: 0
+      max: 3600
+    - name: feed_interval_s
+      type: int64
+      default: 900
+      min: 1
+      max: 86400
+    - name: feed_pulse_s
+      type: int64
+      default: 5
+      min: 1
+      max: 3600
+    - name: feed_max_pulses_per_hour
+      type: int64
+      default: 0
+      min: 0
+      max: 3600
+    - name: command_keepalive_s
+      type: int64
+      default: 30
+      min: 0
+      max: 3600
+    - name: command_min_spacing_ms
+      type: int64
+      default: 500
+      min: 0
+      max: 600000
+  mode_transition_hooks:
+    before_transition:
+      - from: AUTO
+        to: MANUAL
+        fail_on_error: true
+        calls:
+          - device_handle: bread0/dcmt0
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt0
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+          - device_handle: bread0/dcmt1
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt1
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+      - from: MANUAL
+        to: IDLE
+        fail_on_error: true
+        calls:
+          - device_handle: bread0/dcmt0
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt0
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+          - device_handle: bread0/dcmt1
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt1
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+      - from: "*"
+        to: FAULT
+        fail_on_error: true
+        calls:
+          - device_handle: bread0/dcmt0
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt0
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+          - device_handle: bread0/dcmt1
+            function_name: set_mode
+            args:
+              mode: open_loop
+          - device_handle: bread0/dcmt1
+            function_name: set_open_loop
+            args:
+              motor1_pwm: 0
+              motor2_pwm: 0
+
+logging:
+  level: info

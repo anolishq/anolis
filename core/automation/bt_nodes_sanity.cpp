@@ -15,6 +15,8 @@ int main() {
         factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
         factory.registerNodeType<anolis::automation::GetParameterNode>("GetParameter");
         factory.registerNodeType<anolis::automation::GetParameterBoolNode>("GetParameterBool");
+        factory.registerNodeType<anolis::automation::GetParameterInt64Node>("GetParameterInt64");
+        factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
         factory.registerNodeType<anolis::automation::PeriodicPulseWindowNode>("PeriodicPulseWindow");
         factory.registerNodeType<anolis::automation::EmitOnChangeOrIntervalNode>("EmitOnChangeOrInterval");
         factory.registerNodeType<anolis::automation::BuildArgsJsonNode>("BuildArgsJson");
@@ -24,6 +26,8 @@ int main() {
         const auto qual_ports = anolis::automation::CheckQualityNode::providedPorts();
         const auto param_ports = anolis::automation::GetParameterNode::providedPorts();
         const auto bool_param_ports = anolis::automation::GetParameterBoolNode::providedPorts();
+        const auto int_param_ports = anolis::automation::GetParameterInt64Node::providedPorts();
+        const auto check_bool_ports = anolis::automation::CheckBoolNode::providedPorts();
         const auto pulse_ports = anolis::automation::PeriodicPulseWindowNode::providedPorts();
         const auto emit_ports = anolis::automation::EmitOnChangeOrIntervalNode::providedPorts();
         const auto args_ports = anolis::automation::BuildArgsJsonNode::providedPorts();
@@ -47,6 +51,14 @@ int main() {
         }
         if (!has_port(bool_param_ports, "param") || !has_port(bool_param_ports, "value")) {
             std::cerr << "GetParameterBoolNode ports missing\n";
+            return 1;
+        }
+        if (!has_port(int_param_ports, "param") || !has_port(int_param_ports, "value")) {
+            std::cerr << "GetParameterInt64Node ports missing\n";
+            return 1;
+        }
+        if (!has_port(check_bool_ports, "value") || !has_port(check_bool_ports, "expected")) {
+            std::cerr << "CheckBoolNode ports missing\n";
             return 1;
         }
         if (!has_port(pulse_ports, "enabled") || !has_port(pulse_ports, "active")) {
