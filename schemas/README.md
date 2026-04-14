@@ -26,3 +26,17 @@ Compatibility notes for current wave:
 5. Contract tooling enforces schema draft lock and meta-validation:
    - schema must declare Draft-07
    - schema must pass JSON Schema meta-validation before instance checks
+
+## Machine Profile Schema
+
+File:
+
+1. `machine-profile.schema.json`
+
+Scope:
+
+1. Machine package manifests at `config/**/machine-profile.yaml`.
+2. Declares package entrypoints, provider config references, optional behavior assets,
+   validation metadata, and compatibility metadata.
+3. Works with `tools/contracts/validate-machine-profiles.py` to enforce schema validity,
+   reference integrity, and runtime-profile schema compatibility.

@@ -1,0 +1,31 @@
+schema_version: 1
+machine_id: fixture-machine
+display_name: Fixture Machine
+
+runtime_profiles:
+  manual: runtime.manual.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+behaviors:
+  - behavior.xml
+
+validation:
+  expected_providers:
+    - provider0
+  check_http_script: config/mixed-bus-providers/check_mixed_bus_http.sh
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local

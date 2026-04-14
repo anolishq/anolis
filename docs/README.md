@@ -13,6 +13,7 @@ Minimal living documentation for Anolis Core.
 - [../schemas/README.md](../schemas/README.md) - Machine-validated runtime config contract artifacts
 - [contracts/runtime-config-baseline.md](contracts/runtime-config-baseline.md) - Baseline behavior snapshot for runtime config contract
 - [contracts/runtime-http-baseline.md](contracts/runtime-http-baseline.md) - Baseline behavior snapshot for runtime HTTP contract
+- [contracts/machine-profile-baseline.md](contracts/machine-profile-baseline.md) - Baseline behavior snapshot for machine profile packaging contract
 - [http/README.md](http/README.md) - Runtime HTTP OpenAPI contract artifacts
 - [providers.md](providers.md) - Provider protocol and development
 - [http-api.md](http-api.md) - HTTP REST API reference

@@ -35,6 +35,9 @@ else
   echo "[verify-local] Skipping runtime config contract checks: runtime binary not found"
 fi
 
+echo "[verify-local] Running machine profile contract checks"
+"$PYTHON_BIN" tools/contracts/validate-machine-profiles.py
+
 echo "[verify-local] Running runtime HTTP OpenAPI structural checks"
 "$PYTHON_BIN" tools/contracts/validate-runtime-http-openapi.py
 

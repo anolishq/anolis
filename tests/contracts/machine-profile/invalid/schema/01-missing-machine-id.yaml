@@ -1,0 +1,22 @@
+schema_version: 1
+display_name: Invalid Fixture
+
+runtime_profiles:
+  manual: runtime.manual.yaml
+
+providers:
+  provider0:
+    config: provider0.yaml
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local

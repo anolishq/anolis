@@ -7,6 +7,7 @@ Canonical bioreactor runtime profile:
 
 1. `config/bioreactor/anolis-runtime.bioreactor.manual.yaml`
 2. `config/bioreactor/README.md`
+3. `config/bioreactor/machine-profile.yaml`
 
 ## Runtime Profiles
 

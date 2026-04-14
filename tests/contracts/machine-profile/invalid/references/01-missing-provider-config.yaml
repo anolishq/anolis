@@ -1,0 +1,23 @@
+schema_version: 1
+machine_id: invalid-refs-fixture
+display_name: Invalid References Fixture
+
+runtime_profiles:
+  manual: ../../valid/runtime.manual.yml
+
+providers:
+  provider0:
+    config: missing-provider0.yaml
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local

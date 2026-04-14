@@ -280,6 +280,11 @@ jobs:
         run: |
           python tools/contracts/validate-runtime-configs.py --runtime-bin build/ci-linux-release-strict/core/anolis-runtime
 
+      - name: Validate machine profile contract
+        if: runner.os == 'Linux' && matrix.configure_preset == 'ci-linux-release-strict'
+        run: |
+          python tools/contracts/validate-machine-profiles.py
+
       - name: Validate runtime HTTP OpenAPI contract (structural)
         if: runner.os == 'Linux' && matrix.configure_preset == 'ci-linux-release-strict'
         run: |

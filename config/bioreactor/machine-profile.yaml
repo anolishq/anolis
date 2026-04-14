@@ -1,0 +1,45 @@
+schema_version: 1
+machine_id: bioreactor
+display_name: Bioreactor Lab Profile
+
+runtime_profiles:
+  manual: anolis-runtime.bioreactor.manual.yaml
+  telemetry: anolis-runtime.bioreactor.telemetry.yaml
+  automation: anolis-runtime.bioreactor.automation.yaml
+  full: anolis-runtime.bioreactor.full.yaml
+
+providers:
+  bread0:
+    config: provider-bread.bioreactor.yaml
+    notes: "CRUMBS bus devices: rlht0 (0x0A), dcmt0 (0x14), dcmt1 (0x15)"
+  ezo0:
+    config: provider-ezo.bioreactor.yaml
+    notes: "EZO sensors: ph0 (0x63), do0 (0x61)"
+
+behaviors:
+  - ../../behaviors/bioreactor_stir_dual_dosing.xml
+
+validation:
+  expected_providers:
+    - bread0
+    - ezo0
+  check_http_script: config/mixed-bus-providers/check_mixed_bus_http.sh
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01-runtime-config"
+    http_contract: "02-runtime-http"
+    notes: "Validated against current mainline runtime contract gates."
+  providers:
+    bread0:
+      strategy: local-build
+      version: dev-linux-hardware-release
+      notes: "Built from sibling anolis-provider-bread repo."
+    ezo0:
+      strategy: local-build
+      version: dev-linux-hardware-release
+      notes: "Built from sibling anolis-provider-ezo repo."

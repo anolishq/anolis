@@ -12,6 +12,7 @@ Scope:
    - `telemetry` with InfluxDB sink enabled.
    - `automation` for stir + feed BT control.
    - `full` for combined automation + telemetry.
+4. Contract-validated machine package metadata via `machine-profile.yaml`.
 
 Device map:
 
@@ -45,8 +46,19 @@ RLHT usage note:
 4. `anolis-runtime.bioreactor.full.yaml`
 5. `provider-bread.bioreactor.yaml`
 6. `provider-ezo.bioreactor.yaml`
-7. `telemetry-export.bioreactor.yaml`
-8. `../../behaviors/bioreactor_stir_dual_dosing.xml`
+7. `machine-profile.yaml`
+8. `telemetry-export.bioreactor.yaml`
+9. `../../behaviors/bioreactor_stir_dual_dosing.xml`
+
+## Machine Manifest
+
+`machine-profile.yaml` is the package contract entrypoint for this directory.
+It declares:
+
+1. runtime profile entrypoints (`manual`, `telemetry`, `automation`, `full`),
+2. required provider config files,
+3. behavior asset references,
+4. compatibility metadata and contract baseline references.
 
 Automation naming convention:
 
