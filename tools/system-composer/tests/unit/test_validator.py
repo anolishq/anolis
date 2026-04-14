@@ -135,6 +135,37 @@ def test_duplicate_i2c_address():
     assert any("0x62" in e for e in errors), errors
 
 
+def test_duplicate_i2c_address_mixed_literal_formats():
+    """Decimal and hex literals for the same address must conflict on same bus."""
+    system = {
+        "topology": {
+            "runtime": {
+                "http_port": 8080,
+                "providers": [{"id": "bread0"}, {"id": "ezo0"}],
+            },
+            "providers": {
+                "bread0": {
+                    "kind": "bread",
+                    "devices": [{"id": "dev0", "type": "rlht", "address": "20"}],
+                },
+                "ezo0": {
+                    "kind": "ezo",
+                    "devices": [{"id": "dev1", "type": "ph", "address": "0x14"}],
+                },
+            },
+        },
+        "paths": {
+            "runtime_executable": "../anolis/build/anolis-runtime",
+            "providers": {
+                "bread0": {"executable": "../anolis-provider-bread/build/bread", "bus_path": "/dev/i2c-1"},
+                "ezo0": {"executable": "../anolis-provider-ezo/build/ezo", "bus_path": "/dev/i2c-1"},
+            },
+        },
+    }
+    errors = validator.validate_system(system)
+    assert any("0x14" in e for e in errors), errors
+
+
 def test_same_address_different_bus_is_ok():
     """Same address on different bus paths must NOT produce an error."""
     system = {
@@ -284,6 +315,7 @@ if __name__ == "__main__":
         test_duplicate_provider_ids,
         test_port_3002_collision,
         test_duplicate_i2c_address,
+        test_duplicate_i2c_address_mixed_literal_formats,
         test_same_address_different_bus_is_ok,
         test_provider_in_runtime_missing_from_topology,
         test_provider_in_topology_missing_from_runtime,

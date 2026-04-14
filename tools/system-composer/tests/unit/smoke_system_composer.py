@@ -32,6 +32,18 @@ def post(path, body=None):
         return json.loads(r.read()), r.status
 
 
+def put(path, body=None):
+    data = json.dumps(body or {}).encode()
+    req = urllib.request.Request(
+        f"http://localhost:3002{path}",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="PUT",
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read()), r.status
+
+
 def delete(path):
     req = urllib.request.Request(f"http://localhost:3002{path}", method="DELETE")
     with urllib.request.urlopen(req) as r:
@@ -51,6 +63,29 @@ try:
     sys_obj, sc = post("/api/projects", {"name": "smoke-p4", "template": "sim-quickstart"})
     assert sc == 201
     print("POST /api/projects    OK")
+
+    # Save validation error should be structured and deterministic
+    invalid_payload = {"schema_version": 1}
+    req = urllib.request.Request(
+        "http://localhost:3002/api/projects/smoke-p4",
+        data=json.dumps(invalid_payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req):
+            raise AssertionError("Expected HTTP 400 for invalid payload")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert body.get("code") == "validation_failed", body
+        assert isinstance(body.get("errors"), list) and body["errors"], body
+        print("PUT /api/projects    OK  (validation failure is structured)")
+
+    # Save valid payload still succeeds
+    _, sc = put("/api/projects/smoke-p4", sys_obj)
+    assert sc == 200
+    print("PUT /api/projects    OK  (valid payload)")
 
     # Preflight (task 4.5)
     pf, sc = post("/api/projects/smoke-p4/preflight")

@@ -4,7 +4,6 @@ import * as sidebar from './sidebar.js';
 import * as launch from './launch.js';
 import { renderRuntimeForm } from './forms/runtime-form.js';
 import { renderProviderList } from './forms/provider-list.js';
-import { validateSystem } from './validation.js';
 
 let _catalog = null;
 
@@ -79,18 +78,6 @@ async function _handleSave() {
   // Remove any existing error banner
   document.getElementById('error-banner')?.remove();
 
-  const errors = validateSystem(cur.system);
-  if (errors.length > 0) {
-    const banner = document.createElement('div');
-    banner.id = 'error-banner';
-    banner.className = 'error-banner';
-    banner.innerHTML = '<ul>' + errors.map(e => `<li>${_esc(e)}</li>`).join('') + '</ul>';
-    const formArea = document.getElementById('form-area');
-    formArea.insertBefore(banner, formArea.firstChild);
-    banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    return;
-  }
-
   const btn = document.getElementById('btn-save');
   btn.disabled = true;
   btn.textContent = 'Saving…';
@@ -108,61 +95,25 @@ async function _handleSave() {
       const banner = document.createElement('div');
       banner.id = 'error-banner';
       banner.className = 'error-banner';
-      banner.textContent = d.error || 'Save failed';
-      const formArea = document.getElementById('form-area');
-      formArea.insertBefore(banner, formArea.firstChild);
-    }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Save';
-  }
-}
-
-function _esc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-document.addEventListener('DOMContentLoaded', init);
-
-
-async function _handleSave() {
-  const cur = state.getProject();
-  if (!cur) return;
-
-  // Remove any existing error banner
-  document.getElementById('error-banner')?.remove();
-
-  const errors = validateSystem(cur.system);
-  if (errors.length > 0) {
-    const banner = document.createElement('div');
-    banner.id = 'error-banner';
-    banner.className = 'error-banner';
-    banner.innerHTML = '<ul>' + errors.map(e => `<li>${_esc(e)}</li>`).join('') + '</ul>';
-    const formArea = document.getElementById('form-area');
-    formArea.insertBefore(banner, formArea.firstChild);
-    banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    return;
-  }
-
-  const btn = document.getElementById('btn-save');
-  btn.disabled = true;
-  btn.textContent = 'Saving…';
-
-  try {
-    const res = await fetch(`/api/projects/${encodeURIComponent(cur.name)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cur.system),
-    });
-    if (res.ok) {
-      state.markClean();
-    } else {
-      const d = await res.json();
-      const banner = document.createElement('div');
-      banner.id = 'error-banner';
-      banner.className = 'error-banner';
-      banner.textContent = d.error || 'Save failed';
+      const detailErrors = Array.isArray(d.errors) ? d.errors : [];
+      if (detailErrors.length > 0) {
+        banner.innerHTML =
+          `<p>${_esc(d.error || 'Save failed')}</p>` +
+          '<ul>' +
+          detailErrors
+            .map((entry) => {
+              const path = typeof entry?.path === 'string' ? entry.path : '$';
+              const message =
+                typeof entry?.message === 'string'
+                  ? entry.message
+                  : 'Validation error';
+              return `<li><code>${_esc(path)}</code>: ${_esc(message)}</li>`;
+            })
+            .join('') +
+          '</ul>';
+      } else {
+        banner.textContent = d.error || 'Save failed';
+      }
       const formArea = document.getElementById('form-area');
       formArea.insertBefore(banner, formArea.firstChild);
     }

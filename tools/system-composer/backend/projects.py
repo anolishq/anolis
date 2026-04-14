@@ -7,18 +7,91 @@ import re
 import shutil
 from datetime import datetime, timezone
 
+import jsonschema
+
 from backend import renderer
+from backend import validator as semantic_validator
 
 SYSTEMS_ROOT = pathlib.Path("systems")
 TEMPLATES_ROOT = pathlib.Path("tools/system-composer/templates")
+SYSTEM_SCHEMA_PATH = pathlib.Path("tools/system-composer/schema/system.schema.json")
 
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_SYSTEM_SCHEMA_CACHE: dict | None = None
+
+
+class ProjectValidationError(ValueError):
+    """Raised when a composer system document fails validation."""
+
+    def __init__(self, errors: list[dict[str, str]]) -> None:
+        super().__init__("Project validation failed")
+        self.errors = errors
 
 
 def validate_name(name: str) -> "str | None":
     if not NAME_RE.match(name or ""):
         return "Project name must be 1-64 characters: letters, digits, hyphens, underscores only."
     return None
+
+
+def _json_path_from_iter(path_parts: list) -> str:
+    if not path_parts:
+        return "$"
+    out = "$"
+    for part in path_parts:
+        if isinstance(part, int):
+            out += f"[{part}]"
+        else:
+            out += f".{part}"
+    return out
+
+
+def _load_system_schema() -> dict:
+    global _SYSTEM_SCHEMA_CACHE
+    if _SYSTEM_SCHEMA_CACHE is None:
+        payload = json.loads(SYSTEM_SCHEMA_PATH.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Invalid system schema at {SYSTEM_SCHEMA_PATH}: root must be object")
+        _SYSTEM_SCHEMA_CACHE = payload
+    return _SYSTEM_SCHEMA_CACHE
+
+
+def validate_system_payload(system: object) -> list[dict[str, str]]:
+    """Return structured validation errors for a system document."""
+    if not isinstance(system, dict):
+        return [
+            {
+                "source": "schema",
+                "code": "schema.type",
+                "path": "$",
+                "message": "system payload must be a JSON object",
+            }
+        ]
+
+    schema = _load_system_schema()
+    schema_validator = jsonschema.Draft7Validator(schema)
+    schema_errors = sorted(schema_validator.iter_errors(system), key=lambda err: list(err.path))
+    if schema_errors:
+        return [
+            {
+                "source": "schema",
+                "code": "schema.validation",
+                "path": _json_path_from_iter(list(err.path)),
+                "message": err.message,
+            }
+            for err in schema_errors
+        ]
+
+    semantic_messages = semantic_validator.validate_system(system)
+    return [
+        {
+            "source": "semantic",
+            "code": "semantic.validation",
+            "path": "$",
+            "message": msg,
+        }
+        for msg in semantic_messages
+    ]
 
 
 def project_dir(name: str) -> pathlib.Path:
@@ -133,6 +206,10 @@ def get_project(name: str) -> dict:
 
 
 def save_project(name: str, system: dict) -> None:
+    validation_errors = validate_system_payload(system)
+    if validation_errors:
+        raise ProjectValidationError(validation_errors)
+
     pdir = project_dir(name)
     pdir.mkdir(parents=True, exist_ok=True)
     system_json_path(name).write_text(json.dumps(system, indent=2), encoding="utf-8")

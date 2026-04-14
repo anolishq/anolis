@@ -146,6 +146,15 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             system = projects_module.create_project_from_template(name, template)
             self._json(201, system)
+        except projects_module.ProjectValidationError as e:
+            self._json(
+                500,
+                {
+                    "error": "Template produced invalid system payload",
+                    "code": "template_validation_failed",
+                    "errors": e.errors,
+                },
+            )
         except FileNotFoundError as e:
             self._json(404, {"error": str(e)})
         except ValueError as e:
@@ -172,6 +181,15 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             projects_module.save_project(name, system)
             self._json(200, {"ok": True})
+        except projects_module.ProjectValidationError as exc:
+            self._json(
+                400,
+                {
+                    "error": "Project validation failed",
+                    "code": "validation_failed",
+                    "errors": exc.errors,
+                },
+            )
         except Exception as e:
             self._json(500, {"error": str(e)})
 
@@ -215,6 +233,15 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             system = projects_module.duplicate_project(name, new_name)
             self._json(201, system)
+        except projects_module.ProjectValidationError as e:
+            self._json(
+                500,
+                {
+                    "error": "Duplicated project failed validation",
+                    "code": "duplicate_validation_failed",
+                    "errors": e.errors,
+                },
+            )
         except FileNotFoundError as e:
             self._json(404, {"error": str(e)})
         except ValueError as e:

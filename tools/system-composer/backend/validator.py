@@ -1,6 +1,25 @@
 """Cross-provider system-level validation for the Anolis System Composer."""
 
 
+def _parse_i2c_address(value: object) -> int | None:
+    """Parse I2C addresses from canonical hex or decimal string/int forms."""
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text == "":
+        return None
+    try:
+        return int(text, 0)
+    except ValueError:
+        pass
+    try:
+        return int(text, 16)
+    except ValueError:
+        return None
+
+
 def validate_system(system: dict) -> list[str]:
     """
     Returns a list of error strings. Empty list means the system is valid.
@@ -30,15 +49,14 @@ def validate_system(system: dict) -> list[str]:
             continue
         bus_path = provider_paths.get(pid, {}).get("bus_path", "")
         for dev in pcfg.get("devices", []):
-            addr_str = dev.get("address", "0x00")
-            try:
-                addr = int(addr_str, 16)
-            except (ValueError, TypeError):
+            addr_str = dev.get("address", "")
+            addr = _parse_i2c_address(addr_str)
+            if addr is None:
                 continue
             key = (bus_path, addr)
             if key in owned:
                 errors.append(
-                    f"I2C address {addr_str} on bus '{bus_path}' is claimed by both '{owned[key]}' and '{pid}'."
+                    f"I2C address 0x{addr:02X} on bus '{bus_path}' is claimed by both '{owned[key]}' and '{pid}'."
                 )
             else:
                 owned[key] = pid
