@@ -64,7 +64,12 @@ Contract tooling must validate:
 2. runtime/provider version negotiation redesign,
 3. cross-dialect shared schema fragment extraction.
 
-## Next Step
+## Implementation Status
 
-Implement `schemas/machine-profile.schema.json`, `tools/contracts/validate-machine-profiles.py`,
-fixtures, and CI/local gate wiring.
+Implemented in this wave:
+
+1. `schemas/machine-profile.schema.json`
+2. `tools/contracts/validate-machine-profiles.py`
+3. contract fixtures under `tests/contracts/machine-profile/`
+4. canonical `config/bioreactor/machine-profile.yaml`
+5. CI + local gate wiring for machine-profile validation

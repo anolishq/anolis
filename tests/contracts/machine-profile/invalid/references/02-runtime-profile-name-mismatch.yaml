@@ -1,0 +1,23 @@
+schema_version: 1
+machine_id: invalid-profile-name-fixture
+display_name: Invalid Runtime Profile Name Fixture
+
+runtime_profiles:
+  manual: ../../valid/runtime.primary.yml
+
+providers:
+  provider0:
+    config: ../../valid/provider0.yml
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local

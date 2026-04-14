@@ -6,6 +6,9 @@ Fixture layout:
    - Must pass machine-profile schema validation.
    - Must pass reference integrity validation.
    - Referenced runtime profile YAML must pass `runtime-config.schema.json`.
+   - Runtime profile paths should follow discoverable naming tokens
+     (`manual`, `telemetry`, `automation`, `full`).
+   - `manifest.providers` IDs must align with `providers[].id` in each referenced runtime profile.
 2. `invalid/schema/*.yaml`
    - Must fail machine-profile schema validation.
 3. `invalid/references/*.yaml`

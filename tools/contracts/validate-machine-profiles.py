@@ -30,6 +30,12 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit("ERROR: missing dependency 'pyyaml' (pip install pyyaml)") from exc
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_RUNTIME_PROFILE_TOKENS: dict[str, str] = {
+    "manual": "manual",
+    "telemetry": "telemetry",
+    "automation": "automation",
+    "full": "full",
+}
 
 
 @dataclass
@@ -148,6 +154,23 @@ def _resolve_path(repo_root: Path, manifest_path: Path, raw: str, *, base: str) 
     return (manifest_path.parent / raw).resolve()
 
 
+def _check_runtime_profile_path_convention(profile_name: str, raw: str) -> list[str]:
+    errors: list[str] = []
+    lowered = raw.lower()
+    if not lowered.endswith((".yaml", ".yml")):
+        errors.append(f"runtime_profiles.{profile_name}: file must end with .yaml or .yml")
+
+    token = _RUNTIME_PROFILE_TOKENS.get(profile_name)
+    if token is not None:
+        stem_tokens = {part for part in re.split(r"[._-]+", Path(raw).stem.lower()) if part}
+        if token not in stem_tokens:
+            errors.append(
+                f"runtime_profiles.{profile_name}: file name should include token '{token}' "
+                "(for discoverable profile intent)"
+            )
+    return errors
+
+
 def _validate_path_reference(
     *,
     repo_root: Path,
@@ -169,18 +192,43 @@ def _validate_path_reference(
     return resolved, []
 
 
+def _extract_runtime_provider_ids(runtime_payload: dict, runtime_path: Path) -> tuple[set[str], list[str]]:
+    provider_ids: set[str] = set()
+    errors: list[str] = []
+    providers = runtime_payload.get("providers")
+    if not isinstance(providers, list):
+        return provider_ids, [f"runtime profile '{runtime_path.name}' has non-list providers section"]
+    for idx, entry in enumerate(providers):
+        if not isinstance(entry, dict):
+            errors.append(f"runtime profile '{runtime_path.name}' providers[{idx}] is not an object")
+            continue
+        provider_id = entry.get("id")
+        if not isinstance(provider_id, str) or not provider_id:
+            errors.append(f"runtime profile '{runtime_path.name}' providers[{idx}] has missing/invalid id")
+            continue
+        provider_ids.add(provider_id)
+    return provider_ids, errors
+
+
 def _validate_runtime_profile_schema(
     *,
     runtime_validator: jsonschema.Validator,
     runtime_path: Path,
-    manifest_path: Path,
-) -> list[str]:
+    profile_name: str,
+) -> tuple[dict | None, list[str]]:
     payload, schema_errors = _schema_validate(runtime_validator, runtime_path)
     if payload is None:
-        return [f"runtime profile '{runtime_path.name}' parse failed: {schema_errors[0]}"]
+        return None, [f"runtime profile '{runtime_path.name}' parse failed: {schema_errors[0]}"]
     if schema_errors:
-        return [f"runtime profile '{runtime_path.name}' schema error: {error}" for error in schema_errors]
-    return []
+        return None, [f"runtime profile '{runtime_path.name}' schema error: {error}" for error in schema_errors]
+
+    provider_ids, provider_errors = _extract_runtime_provider_ids(payload, runtime_path)
+    if provider_errors:
+        return None, provider_errors
+
+    payload["__provider_ids__"] = sorted(provider_ids)
+    payload["__profile_name__"] = profile_name
+    return payload, []
 
 
 def _validate_manifest_refs(
@@ -192,8 +240,12 @@ def _validate_manifest_refs(
 ) -> list[str]:
     errors: list[str] = []
 
+    providers = payload.get("providers", {})
+    manifest_provider_ids = set(providers.keys())
+
     runtime_profiles = payload.get("runtime_profiles", {})
     for profile_name, profile_path in runtime_profiles.items():
+        errors.extend(_check_runtime_profile_path_convention(profile_name, profile_path))
         resolved, path_errors = _validate_path_reference(
             repo_root=repo_root,
             manifest_path=manifest_path,
@@ -203,15 +255,27 @@ def _validate_manifest_refs(
         )
         errors.extend(path_errors)
         if resolved is not None and not path_errors:
-            errors.extend(
-                _validate_runtime_profile_schema(
-                    runtime_validator=runtime_validator,
-                    runtime_path=resolved,
-                    manifest_path=manifest_path,
-                )
+            runtime_payload, runtime_errors = _validate_runtime_profile_schema(
+                runtime_validator=runtime_validator,
+                runtime_path=resolved,
+                profile_name=profile_name,
             )
+            errors.extend(runtime_errors)
+            if runtime_payload is not None:
+                runtime_provider_ids = set(runtime_payload.get("__provider_ids__", []))
+                missing_in_manifest = sorted(runtime_provider_ids - manifest_provider_ids)
+                missing_in_runtime = sorted(manifest_provider_ids - runtime_provider_ids)
+                if missing_in_manifest:
+                    errors.append(
+                        f"runtime_profiles.{profile_name}: providers present in runtime config but missing in "
+                        f"manifest.providers: {', '.join(missing_in_manifest)}"
+                    )
+                if missing_in_runtime:
+                    errors.append(
+                        f"runtime_profiles.{profile_name}: manifest.providers contains IDs not present in runtime "
+                        f"config providers list: {', '.join(missing_in_runtime)}"
+                    )
 
-    providers = payload.get("providers", {})
     for provider_id, provider_cfg in providers.items():
         provider_path = provider_cfg.get("config")
         _, path_errors = _validate_path_reference(

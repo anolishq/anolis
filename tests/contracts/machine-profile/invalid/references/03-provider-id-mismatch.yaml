@@ -1,0 +1,23 @@
+schema_version: 1
+machine_id: invalid-provider-ids-fixture
+display_name: Invalid Provider ID Consistency Fixture
+
+runtime_profiles:
+  manual: ../../valid/runtime.manual.yml
+
+providers:
+  other0:
+    config: ../../valid/provider0.yml
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    other0:
+      strategy: local-build
+      version: local
