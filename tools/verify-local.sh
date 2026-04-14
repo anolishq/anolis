@@ -56,6 +56,13 @@ fi
 echo "[verify-local] Running System Composer test suite"
 "$PYTHON_BIN" -m pytest tools/system-composer/tests -q
 
+if command -v node >/dev/null 2>&1; then
+  echo "[verify-local] Running Operator UI fixture contract tests"
+  node --test tools/operator-ui/tests/contracts.test.mjs
+else
+  echo "[verify-local] Skipping Operator UI fixture contract tests: node not found"
+fi
+
 if ! command -v ctest >/dev/null 2>&1; then
   echo "[verify-local] Skipping focused C++ tests: ctest not found"
   exit 0

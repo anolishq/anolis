@@ -197,6 +197,54 @@ jobs:
         run: |
           python -m pytest tests/integration/test_telemetry_export_service_e2e.py -vv
 
+  ui-composer-contracts:
+    name: UI and Composer Contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python and dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-lock.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+
+      - name: Validate runtime HTTP OpenAPI contract (structural)
+        run: |
+          python tools/contracts/validate-runtime-http-openapi.py
+
+      - name: Validate runtime HTTP OpenAPI contract (examples)
+        run: |
+          python tools/contracts/validate-runtime-http-examples.py
+
+      - name: Validate machine profile contract
+        run: |
+          python tools/contracts/validate-machine-profiles.py
+
+      - name: Run System Composer tests
+        run: |
+          python -m pytest tools/system-composer/tests -q
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Operator UI fixture contract tests
+        run: |
+          node --test tools/operator-ui/tests/contracts.test.mjs
+
   core-build-test:
     name: ${{ matrix.lane }}
     runs-on: ${{ matrix.os }}

@@ -75,6 +75,16 @@ def test_runtime_executable_required():
     assert any("Runtime executable path" in e for e in errors), errors
 
 
+def test_custom_provider_kind_is_rejected():
+    system = _make_system(
+        providers={"custom0": {"kind": "custom"}},
+        runtime_providers=[{"id": "custom0", "kind": "custom"}],
+    )
+    system["paths"]["providers"]["custom0"] = {"executable": "../custom-provider/build/provider"}
+    errors = validator.validate_system(system)
+    assert any("not supported by Composer contract v1" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # Test: duplicate provider IDs
 # ---------------------------------------------------------------------------
@@ -312,6 +322,7 @@ if __name__ == "__main__":
         test_clean_mixed_bus_mock,
         test_clean_bioreactor_manual_template,
         test_runtime_executable_required,
+        test_custom_provider_kind_is_rejected,
         test_duplicate_provider_ids,
         test_port_3002_collision,
         test_duplicate_i2c_address,

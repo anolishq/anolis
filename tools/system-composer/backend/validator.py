@@ -33,6 +33,20 @@ def validate_system(system: dict) -> list[str]:
     provider_paths = paths.get("providers", {})
     runtime_providers = runtime.get("providers", [])
 
+    unsupported_custom_ids: set[str] = set()
+    for p in runtime_providers:
+        pid = p.get("id")
+        if not isinstance(pid, str) or not pid:
+            continue
+        kind = p.get("kind") or providers.get(pid, {}).get("kind")
+        if kind == "custom":
+            unsupported_custom_ids.add(pid)
+    for pid, pcfg in providers.items():
+        if pcfg.get("kind") == "custom":
+            unsupported_custom_ids.add(pid)
+    for pid in sorted(unsupported_custom_ids):
+        errors.append(f"Provider '{pid}' uses kind 'custom', which is not supported by Composer contract v1.")
+
     if not paths.get("runtime_executable"):
         errors.append("Runtime executable path is missing from paths.runtime_executable.")
 

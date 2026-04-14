@@ -9,8 +9,8 @@ A **minimal dev/operator tool** for validating the Anolis HTTP API.
 ### 1. Start the Anolis Runtime
 
 ```bash
-cd /path/to/anolis/build/core/Release
-./anolis-runtime --config /path/to/anolis-runtime.yaml
+cd /path/to/anolis
+./build/dev-release/core/anolis-runtime --config /path/to/anolis-runtime.yaml
 ```
 
 ### 2. Open the UI
@@ -120,9 +120,22 @@ python -m http.server 3000 -d tools/operator-ui
 - Green = connected, Red = unavailable
 - Real-time updates via Server-Sent Events (SSE)
 
+## Contract Normalization
+
+Operator UI uses `js/contracts.js` as its runtime HTTP shape adapter.
+
+Examples:
+
+1. Normalizes state signal timestamps (`timestamp_epoch_ms` -> `timestamp_ms`).
+2. Normalizes capabilities/parameters collection extraction.
+3. Parses SSE JSON payloads consistently across event types.
+
+Fixture contract tests for this module run against canonical runtime HTTP examples
+from `tests/contracts/runtime-http/examples`.
+
 ## Configuration
 
-Edit `app.js` to change:
+Edit `js/config.js` to change:
 
 ```javascript
 const API_BASE = "http://localhost:8080"; // Runtime HTTP address
@@ -136,7 +149,7 @@ This UI follows strict constraints by design:
 | Constraint             | Reason                        |
 | ---------------------- | ----------------------------- |
 | No framework           | Keep it simple, no build step |
-| No npm/node            | Zero dependencies             |
+| No runtime npm/node build step | Static assets served directly |
 | Capability-driven only | No device-type assumptions    |
 | No charts/graphs       | Grafana territory             |
 | No auth                | Future Work                   |
@@ -148,11 +161,37 @@ The UI is a **mirror** of the HTTP API, not a new abstraction. It must not intro
 
 ```sh
 tools/operator-ui/
-├── index.html   # Single-page UI structure
-├── app.js       # Vanilla JS application logic
-├── style.css    # Minimal dark theme styling
-└── README.md    # This file
+├── index.html
+├── package.json
+├── style.css
+├── js/
+│   ├── app.js
+│   ├── api.js
+│   ├── contracts.js
+│   ├── automation.js
+│   ├── device-overview.js
+│   ├── device-detail.js
+│   ├── sse.js
+│   ├── telemetry.js
+│   ├── ui.js
+│   └── config.js
+├── tests/
+│   └── contracts.test.mjs
+└── README.md
 ```
+
+## Local Contract Test
+
+```bash
+node --test tools/operator-ui/tests/contracts.test.mjs
+```
+
+If `node` is unavailable locally, `tools/verify-local.sh` skips this step.
+
+Contract dependencies:
+
+1. Runtime HTTP OpenAPI: `schemas/http/runtime-http.openapi.v0.yaml`
+2. Runtime HTTP fixture source: `tests/contracts/runtime-http/examples/`
 
 ## Troubleshooting
 

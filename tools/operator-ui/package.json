@@ -1,0 +1,5 @@
+{
+  "name": "anolis-operator-ui",
+  "private": true,
+  "type": "module"
+}

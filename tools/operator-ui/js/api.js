@@ -3,6 +3,12 @@
  */
 
 import { CONFIG } from "./config.js";
+import {
+  extractCapabilities,
+  extractDeviceStateValues,
+  extractDevices,
+  extractParameters,
+} from "./contracts.js";
 
 /**
  * Generic API fetch wrapper with error handling
@@ -49,19 +55,19 @@ export async function fetchRuntimeStatus() {
 // Devices
 export async function fetchDevices() {
   const data = await fetchApi("/v0/devices");
-  return data.devices || [];
+  return extractDevices(data);
 }
 
 export async function fetchDeviceCapabilities(providerId, deviceId) {
   const data = await fetchApi(
     `/v0/devices/${providerId}/${deviceId}/capabilities`,
   );
-  return data.capabilities || {};
+  return extractCapabilities(data);
 }
 
 export async function fetchDeviceState(providerId, deviceId) {
   const data = await fetchApi(`/v0/state/${providerId}/${deviceId}`);
-  return data.values || [];
+  return extractDeviceStateValues(data);
 }
 
 // Function Execution
@@ -91,7 +97,7 @@ export async function setMode(mode) {
 
 export async function fetchParameters() {
   const data = await fetchApi("/v0/parameters");
-  return data.parameters || [];
+  return extractParameters(data);
 }
 
 export async function updateParameter(name, value) {

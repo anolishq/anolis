@@ -53,6 +53,31 @@ def test_save_project_rejects_semantic_invalid_payload(monkeypatch: pytest.Monke
     assert not (tmp_path / "systems" / "invalid-semantic" / "system.json").exists()
 
 
+def test_save_project_rejects_custom_provider_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    monkeypatch.setattr(projects, "SYSTEMS_ROOT", tmp_path / "systems")
+    system = _load_template("sim-quickstart")
+    system["topology"]["runtime"]["providers"].append(
+        {
+            "id": "custom0",
+            "kind": "custom",
+            "timeout_ms": 5000,
+            "hello_timeout_ms": 2000,
+            "ready_timeout_ms": 10000,
+            "restart_policy": {"enabled": False},
+        }
+    )
+    system["topology"]["providers"]["custom0"] = {"kind": "custom", "args": ["--foo", "bar"]}
+    system["paths"]["providers"]["custom0"] = {"executable": "../custom-provider/build/provider"}
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("invalid-custom", system)
+
+    errors = exc_info.value.errors
+    assert any(err.get("source") == "semantic" for err in errors), errors
+    assert any("not supported by Composer contract v1" in err.get("message", "") for err in errors), errors
+    assert not (tmp_path / "systems" / "invalid-custom" / "system.json").exists()
+
+
 def test_save_project_writes_outputs_for_valid_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
     monkeypatch.setattr(projects, "SYSTEMS_ROOT", tmp_path / "systems")
     system = _load_template("sim-quickstart")

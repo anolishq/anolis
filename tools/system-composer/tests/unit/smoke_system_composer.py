@@ -82,6 +82,50 @@ try:
         assert isinstance(body.get("errors"), list) and body["errors"], body
         print("PUT /api/projects    OK  (validation failure is structured)")
 
+    # Catalog should not advertise custom provider support in v1
+    catalog, sc = get("/api/catalog")
+    assert sc == 200
+    provider_kinds = {entry.get("kind") for entry in catalog.get("providers", [])}
+    assert "custom" not in provider_kinds, provider_kinds
+    print("GET /api/catalog      OK  (custom provider hidden in v1)")
+
+    # Save should reject custom provider kind explicitly
+    custom_payload = dict(sys_obj)
+    custom_payload["topology"] = dict(sys_obj.get("topology", {}))
+    custom_payload["topology"]["runtime"] = dict(sys_obj["topology"].get("runtime", {}))
+    custom_payload["topology"]["providers"] = dict(sys_obj["topology"].get("providers", {}))
+    custom_payload["paths"] = dict(sys_obj.get("paths", {}))
+    custom_payload["paths"]["providers"] = dict(sys_obj["paths"].get("providers", {}))
+
+    custom_payload["topology"]["runtime"]["providers"] = list(sys_obj["topology"]["runtime"].get("providers", [])) + [
+        {
+            "id": "custom0",
+            "kind": "custom",
+            "timeout_ms": 5000,
+            "hello_timeout_ms": 2000,
+            "ready_timeout_ms": 10000,
+            "restart_policy": {"enabled": False},
+        }
+    ]
+    custom_payload["topology"]["providers"]["custom0"] = {"kind": "custom", "args": ["--foo", "bar"]}
+    custom_payload["paths"]["providers"]["custom0"] = {"executable": "../custom-provider/build/provider"}
+    req = urllib.request.Request(
+        "http://localhost:3002/api/projects/smoke-p4",
+        data=json.dumps(custom_payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req):
+            raise AssertionError("Expected HTTP 400 for unsupported custom provider kind")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert body.get("code") == "validation_failed", body
+        messages = [str(err.get("message", "")) for err in body.get("errors", [])]
+        assert any("not supported by Composer contract v1" in msg for msg in messages), body
+        print("PUT /api/projects    OK  (custom provider rejected in v1)")
+
     # Save valid payload still succeeds
     _, sc = put("/api/projects/smoke-p4", sys_obj)
     assert sc == 200

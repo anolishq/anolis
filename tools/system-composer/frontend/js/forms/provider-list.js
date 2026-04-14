@@ -3,7 +3,8 @@
 import { renderSimForm    } from './sim-form.js';
 import { renderBreadForm  } from './bread-form.js';
 import { renderEzoForm    } from './ezo-form.js';
-import { renderCustomForm } from './custom-form.js';
+
+const SUPPORTED_PROVIDER_KINDS = ['sim', 'bread', 'ezo'];
 
 /**
  * Render the Providers section and append it to container.
@@ -48,16 +49,17 @@ export function renderProviderList(container, system, catalog, onChanged) {
 // ---- Helpers ----
 
 function _addProvider(system, kind) {
-  const id = _genId(system, kind);
+  const safeKind = _isSupportedProviderKind(kind) ? kind : 'sim';
+  const id = _genId(system, safeKind);
   system.topology.runtime.providers.push({
-    id, kind,
+    id, kind: safeKind,
     timeout_ms: 5000, hello_timeout_ms: 3000, ready_timeout_ms: 10000,
     restart_policy: { enabled: false },
   });
   system.topology.providers       = system.topology.providers || {};
   system.paths.providers          = system.paths.providers    || {};
-  system.topology.providers[id]   = _defaultTopology(kind);
-  system.paths.providers[id]      = _defaultPaths(kind);
+  system.topology.providers[id]   = _defaultTopology(safeKind);
+  system.paths.providers[id]      = _defaultPaths(safeKind);
 }
 
 function _genId(system, kind) {
@@ -74,7 +76,6 @@ function _defaultTopology(kind) {
     case 'sim':    return { startup_policy: 'degraded', simulation_mode: 'non_interacting', tick_rate_hz: 10.0, devices: [] };
     case 'bread':  return { provider_name: '', require_live_session: false, query_delay_us: 10000, timeout_ms: 100, retry_count: 2, discovery: { mode: 'manual', addresses: [] }, devices: [] };
     case 'ezo':    return { provider_name: '', query_delay_us: 300000, timeout_ms: 300, retry_count: 2, devices: [] };
-    case 'custom': return { args: [] };
     default:       return {};
   }
 }
@@ -86,6 +87,7 @@ function _defaultPaths(kind) {
 function _buildRow(provEntry, index, system, kindMap, onChanged, rerender) {
   const row = document.createElement('div');
   row.className = 'provider-row';
+  const supportedKind = _isSupportedProviderKind(provEntry.kind);
 
   // --- Header: id input, kind select, remove button ---
   const header = document.createElement('div');
@@ -116,7 +118,15 @@ function _buildRow(provEntry, index, system, kindMap, onChanged, rerender) {
 
   const kindSel = document.createElement('select');
   kindSel.className = 'provider-kind-select';
-  for (const kind of ['sim', 'bread', 'ezo', 'custom']) {
+  if (!supportedKind) {
+    const unsupportedOpt = document.createElement('option');
+    unsupportedOpt.value = provEntry.kind;
+    unsupportedOpt.textContent = `Unsupported (${provEntry.kind})`;
+    unsupportedOpt.selected = true;
+    kindSel.append(unsupportedOpt);
+    kindSel.disabled = true;
+  }
+  for (const kind of SUPPORTED_PROVIDER_KINDS) {
     const opt = document.createElement('option');
     opt.value = kind;
     opt.textContent = kindMap[kind]?.display_name ?? kind;
@@ -134,7 +144,7 @@ function _buildRow(provEntry, index, system, kindMap, onChanged, rerender) {
       ..._typedFormNodes(provEntry, system, currentId, onChanged)
     );
     const busGroup = row.querySelector('.bus-path-group');
-    busGroup.style.display = (newKind === 'bread' || newKind === 'ezo') ? '' : 'none';
+    busGroup.style.display = _isHardwareKind(newKind) ? '' : 'none';
     onChanged();
   });
 
@@ -152,6 +162,13 @@ function _buildRow(provEntry, index, system, kindMap, onChanged, rerender) {
 
   header.append(idInput, kindSel, removeBtn);
   row.append(header);
+
+  if (!supportedKind) {
+    const unsupported = document.createElement('div');
+    unsupported.className = 'bus-note note-warning';
+    unsupported.textContent = `Provider kind "${provEntry.kind}" is not supported in Composer contract v1. Remove this provider or migrate it manually before saving.`;
+    row.append(unsupported);
+  }
 
   // --- Timeout fields ---
   const timing = document.createElement('div');
@@ -252,7 +269,7 @@ function _buildRow(provEntry, index, system, kindMap, onChanged, rerender) {
   // --- Bus path (bread/ezo only) ---
   const busGroup = _fmtGroup('Bus path');
   busGroup.className += ' bus-path-group';
-  busGroup.style.display = (provEntry.kind === 'bread' || provEntry.kind === 'ezo') ? '' : 'none';
+  busGroup.style.display = _isHardwareKind(provEntry.kind) ? '' : 'none';
   const busInp = document.createElement('input');
   busInp.type = 'text'; busInp.spellcheck = false;
   busInp.style.fontFamily = 'monospace';
@@ -294,9 +311,23 @@ function _typedFormNodes(provEntry, system, id, onChanged) {
     case 'sim':    renderSimForm   (tmp, cfg, onChanged); break;
     case 'bread':  renderBreadForm (tmp, cfg, onChanged); break;
     case 'ezo':    renderEzoForm   (tmp, cfg, onChanged); break;
-    case 'custom': renderCustomForm(tmp, cfg, onChanged); break;
+    default: {
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.textContent = 'Unsupported provider kind in Composer contract v1.';
+      tmp.append(note);
+      break;
+    }
   }
   return [...tmp.children];
+}
+
+function _isSupportedProviderKind(kind) {
+  return SUPPORTED_PROVIDER_KINDS.includes(kind);
+}
+
+function _isHardwareKind(kind) {
+  return kind === 'bread' || kind === 'ezo';
 }
 
 function _renameId(system, oldId, newId) {

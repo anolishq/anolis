@@ -3,6 +3,7 @@
  */
 
 import { CONFIG } from "./config.js";
+import { parseSseJsonData } from "./contracts.js";
 
 let eventSource = null;
 let sseConnected = false;
@@ -77,7 +78,7 @@ export function connect() {
     eventSource.addEventListener("state_update", (event) => {
       try {
         lastEventTime = Date.now();
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("state_update", data);
       } catch (err) {
         console.error("[SSE] Failed to parse state_update:", err);
@@ -87,7 +88,7 @@ export function connect() {
     // Quality change events
     eventSource.addEventListener("quality_change", (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("quality_change", data);
       } catch (err) {
         console.error("[SSE] Failed to parse quality_change:", err);
@@ -97,7 +98,7 @@ export function connect() {
     // Mode change events
     eventSource.addEventListener("mode_change", (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("mode_change", data);
       } catch (err) {
         console.error("[SSE] Failed to parse mode_change:", err);
@@ -108,7 +109,7 @@ export function connect() {
     eventSource.addEventListener("parameter_change", (event) => {
       try {
         lastEventTime = Date.now();
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("parameter_change", data);
       } catch (err) {
         console.error("[SSE] Failed to parse parameter_change:", err);
@@ -119,7 +120,7 @@ export function connect() {
     eventSource.addEventListener("bt_error", (event) => {
       try {
         lastEventTime = Date.now();
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("bt_error", data);
       } catch (err) {
         console.error("[SSE] Failed to parse bt_error:", err);
@@ -130,7 +131,7 @@ export function connect() {
     eventSource.addEventListener("provider_health_change", (event) => {
       try {
         lastEventTime = Date.now();
-        const data = JSON.parse(event.data);
+        const data = parseSseJsonData(event.data);
         emit("provider_health_change", data);
       } catch (err) {
         console.error("[SSE] Failed to parse provider_health_change:", err);

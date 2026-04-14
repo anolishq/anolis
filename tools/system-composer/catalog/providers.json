@@ -91,21 +91,6 @@
         { "key": "executable", "type": "path",   "required": true },
         { "key": "bus_path",   "type": "string", "required": true, "placeholder": "/dev/i2c-1 or mock://name" }
       ]
-    },
-    {
-      "kind": "custom",
-      "display_name": "Custom Provider",
-      "description": "Advanced: any provider not listed above",
-      "repo": null,
-      "build_docs": null,
-      "check_config_flag": null,
-      "topology_fields": [
-        { "key": "args", "type": "string_list", "required": false, "default": [] }
-      ],
-      "device_types": [],
-      "path_fields": [
-        { "key": "executable", "type": "path", "required": true }
-      ]
     }
   ]
 }
