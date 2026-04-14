@@ -1,0 +1,24 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ./behaviors/demo.xml
+  tick_rate_hz: 5
+  mode_transition_hooks:
+    after_transition:
+      - from: MANUAL
+        to: IDLE
+        calls:
+          - device_handle: test0/device0
+            function_name: set_output
+            args:
+              leading_zero: "0015"
+              sci_notation: "1e3"
+              signed_int: "+42"
+              plain_text: "open_loop"
+
+logging:
+  level: info
+

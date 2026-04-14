@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
-
 try:
     import yaml
 except ImportError as exc:  # pragma: no cover
@@ -28,7 +27,9 @@ except ImportError as exc:  # pragma: no cover
 try:
     import jsonschema
 except ImportError as exc:  # pragma: no cover
-    raise SystemExit("ERROR: missing dependency 'jsonschema' (pip install jsonschema)") from exc
+    raise SystemExit(
+        "ERROR: missing dependency 'jsonschema' (pip install jsonschema)"
+    ) from exc
 
 
 @dataclass
@@ -65,7 +66,9 @@ def _load_schema(schema_path: Path) -> dict:
     try:
         return json.loads(schema_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"ERROR: schema json parse failed at {schema_path}: {exc}") from exc
+        raise SystemExit(
+            f"ERROR: schema json parse failed at {schema_path}: {exc}"
+        ) from exc
 
 
 def _schema_validate(validator: jsonschema.Validator, config_path: Path) -> list[str]:
@@ -81,6 +84,10 @@ def _schema_validate(validator: jsonschema.Validator, config_path: Path) -> list
 
     errors = sorted(validator.iter_errors(payload), key=lambda e: list(e.path))
     return [f"{_format_json_path(err)}: {err.message}" for err in errors]
+
+
+def _summarize_errors(errors: Sequence[str]) -> str:
+    return " | ".join(errors)
 
 
 def _resolve_runtime_binary(repo_root: Path, override: str | None) -> Path:
@@ -104,8 +111,7 @@ def _resolve_runtime_binary(repo_root: Path, override: str | None) -> Path:
         return Path(in_path).resolve()
 
     raise SystemExit(
-        "ERROR: anolis-runtime binary not found.\n"
-        "Build runtime first or pass --runtime-bin <path>."
+        "ERROR: anolis-runtime binary not found.\nBuild runtime first or pass --runtime-bin <path>."
     )
 
 
@@ -152,7 +158,7 @@ def _check_expected_runtime_failures(
                     path=path,
                     message=(
                         "invalid/runtime fixture must be schema-valid and runtime-invalid. "
-                        f"Schema errors: {errs[0]}"
+                        f"Schema errors: {_summarize_errors(errs)}"
                     ),
                 )
             )
@@ -189,7 +195,7 @@ def _check_expected_success(
                 Failure(
                     stage="schema",
                     path=path,
-                    message=errs[0],
+                    message=_summarize_errors(errs),
                 )
             )
             continue
@@ -205,7 +211,9 @@ def _check_expected_success(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate Anolis runtime config contract.")
+    parser = argparse.ArgumentParser(
+        description="Validate Anolis runtime config contract."
+    )
     parser.add_argument(
         "--repo-root",
         default=str(_repo_root_from_script()),
@@ -241,12 +249,36 @@ def main() -> int:
             "systems/**/anolis-runtime.yaml",
         ),
     )
-    valid_fixtures = _glob_paths(repo_root, ("tests/contracts/runtime-config/valid/*.yaml",))
-    invalid_schema_fixtures = _glob_paths(repo_root, ("tests/contracts/runtime-config/invalid/schema/*.yaml",))
-    invalid_runtime_fixtures = _glob_paths(repo_root, ("tests/contracts/runtime-config/invalid/runtime/*.yaml",))
+    valid_fixtures = _glob_paths(
+        repo_root, ("tests/contracts/runtime-config/valid/*.yaml",)
+    )
+    invalid_schema_fixtures = _glob_paths(
+        repo_root, ("tests/contracts/runtime-config/invalid/schema/*.yaml",)
+    )
+    invalid_runtime_fixtures = _glob_paths(
+        repo_root, ("tests/contracts/runtime-config/invalid/runtime/*.yaml",)
+    )
 
     if not tracked_runtime_configs:
-        print("ERROR: no runtime config files discovered from target patterns", file=sys.stderr)
+        print(
+            "ERROR: no runtime config files discovered from target patterns",
+            file=sys.stderr,
+        )
+        return 1
+    if not valid_fixtures:
+        print("ERROR: no valid runtime-config fixtures discovered", file=sys.stderr)
+        return 1
+    if not invalid_schema_fixtures:
+        print(
+            "ERROR: no invalid/schema runtime-config fixtures discovered",
+            file=sys.stderr,
+        )
+        return 1
+    if not invalid_runtime_fixtures:
+        print(
+            "ERROR: no invalid/runtime runtime-config fixtures discovered",
+            file=sys.stderr,
+        )
         return 1
 
     runtime_bin = _resolve_runtime_binary(repo_root, args.runtime_bin)
@@ -256,7 +288,9 @@ def main() -> int:
         validator, runtime_bin, [*tracked_runtime_configs, *valid_fixtures], failures
     )
     _check_expected_schema_failures(validator, invalid_schema_fixtures, failures)
-    _check_expected_runtime_failures(validator, runtime_bin, invalid_runtime_fixtures, failures)
+    _check_expected_runtime_failures(
+        validator, runtime_bin, invalid_runtime_fixtures, failures
+    )
 
     print("runtime-config contract summary")
     print(f"  runtime configs checked: {len(tracked_runtime_configs)}")
@@ -281,4 +315,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

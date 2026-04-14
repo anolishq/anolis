@@ -1,9 +1,11 @@
-﻿certifi==2026.1.4
+﻿attrs==25.3.0
+certifi==2026.1.4
 charset-normalizer==3.4.4
 colorama==0.4.6
 idna==3.11
 iniconfig==2.3.0
 jsonschema==4.22.0
+jsonschema-specifications==2025.4.1
 librt==0.8.1
 mypy==1.19.1
 mypy_extensions==1.1.0
@@ -17,6 +19,8 @@ pytest==8.4.2
 pytest-timeout==2.4.0
 PyYAML==6.0.3
 requests==2.32.5
+referencing==0.36.2
+rpds-py==0.25.1
 ruff==0.15.2
 types-psutil==7.2.2.20260130
 types-PyYAML==6.0.12.20250915

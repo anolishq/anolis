@@ -1,6 +1,6 @@
 # Convenience deps for running Python test scripts locally/CI.
 # Pinned with version ranges for reproducibility while allowing minor/patch updates.
-# Latest as of 2026-02-12: requests 2.32.5, pyyaml 6.0.3, ruff 0.15.0, psutil 6.1.1, protobuf 5.29.5
+# Latest as of 2026-04-14: requests 2.32.5, pyyaml 6.0.3, jsonschema 4.22.0, ruff 0.15.0, psutil 6.1.1, protobuf 5.29.5
 # To update lock file: 
 # - activate clean venv
 # - run `pip install -r requirements.txt`

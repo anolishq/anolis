@@ -12,3 +12,6 @@ Fixture layout:
    - Must fail `anolis-runtime --check-config`.
 
 Use these fixtures to lock compatibility behavior while the runtime-config contract evolves.
+
+Edge-case coverage includes quoted scalar values in automation hook args
+(numeric-like, bool-like, and text) to guard current loader scalar parsing behavior.

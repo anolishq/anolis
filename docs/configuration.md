@@ -6,8 +6,10 @@ For composer-managed systems, the generated runtime YAML lives at
 `systems/<project>/anolis-runtime.yaml` and is derived from that project's
 `system.json`.
 
-> **📖 Complete Schema Reference:**
-> See [configuration-schema.md](configuration-schema.md) for the canonical v1.0 schema with validation rules, constraints, and migration notes.
+> **📖 Contract Source of Truth:**
+> Runtime config contract authority is machine-validated:
+> `schemas/runtime-config.schema.json` + `anolis-runtime --check-config`.
+> See [configuration-schema.md](configuration-schema.md) for human-readable reference material.
 
 ## Structure
 

@@ -14,9 +14,6 @@ else
   exit 1
 fi
 
-echo "[verify-local] Running System Composer test suite"
-"$PYTHON_BIN" -m pytest tools/system-composer/tests -q
-
 RUNTIME_BIN=""
 if [ -f build/dev-release/core/anolis-runtime ]; then
   RUNTIME_BIN="build/dev-release/core/anolis-runtime"
@@ -30,6 +27,9 @@ if [ -n "$RUNTIME_BIN" ]; then
 else
   echo "[verify-local] Skipping runtime config contract checks: runtime binary not found"
 fi
+
+echo "[verify-local] Running System Composer test suite"
+"$PYTHON_BIN" -m pytest tools/system-composer/tests -q
 
 if ! command -v ctest >/dev/null 2>&1; then
   echo "[verify-local] Skipping focused C++ tests: ctest not found"

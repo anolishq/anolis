@@ -1,9 +1,13 @@
 # Configuration Schema v1.0
 
-**Status:** Canonical  
+**Status:** Human-Readable Reference  
 **Date:** February 6, 2026
 
-This document defines the canonical YAML configuration schema for Anolis Runtime v0.
+This document describes the runtime YAML schema in narrative form.
+Authoritative contract enforcement is machine-validated via:
+
+1. `schemas/runtime-config.schema.json`
+2. `anolis-runtime --check-config`
 
 ---
 
