@@ -1,12 +1,14 @@
 # Runtime HTTP Contract
 
-Canonical HTTP contract artifacts for the runtime `/v0` surface.
+Human-facing guide for the runtime `/v0` HTTP contract.
+Canonical machine-validated artifacts live under `schemas/` and `tests/contracts/`.
 
 ## Source of Truth
 
-1. OpenAPI spec: [`openapi.v0.yaml`](openapi.v0.yaml)
-2. Implementation baseline: [`../contracts/runtime-http-baseline.md`](../contracts/runtime-http-baseline.md)
-3. Runtime handlers/routes:
+1. OpenAPI spec: [`../../schemas/http/runtime-http.openapi.v0.yaml`](../../schemas/http/runtime-http.openapi.v0.yaml)
+2. Example manifest: [`../../tests/contracts/runtime-http/examples/manifest.yaml`](../../tests/contracts/runtime-http/examples/manifest.yaml)
+3. Implementation baseline: [`../contracts/runtime-http-baseline.md`](../contracts/runtime-http-baseline.md)
+4. Runtime handlers/routes:
    - `core/http/server.cpp`
    - `core/http/handlers/*.cpp`
 
@@ -44,7 +46,7 @@ Run live runtime conformance smoke validation (runtime + provider-sim required):
 python3 tools/contracts/validate-runtime-http-conformance.py \
   --runtime-bin <path-to-anolis-runtime> \
   --provider-bin <path-to-anolis-provider-sim> \
-  --capture-dir docs/http/examples/_captures
+  --capture-dir tests/contracts/runtime-http/examples/_captures
 ```
 
 Live conformance checks:

@@ -40,3 +40,18 @@ Scope:
    validation metadata, and compatibility metadata.
 3. Works with `tools/contracts/validate-machine-profiles.py` to enforce schema validity,
    reference integrity, and runtime-profile schema compatibility.
+
+## Runtime HTTP OpenAPI Contract
+
+File:
+
+1. `http/runtime-http.openapi.v0.yaml`
+
+Scope:
+
+1. Canonical machine contract for runtime `/v0` HTTP operations.
+2. Validated by:
+   - `tools/contracts/validate-runtime-http-openapi.py`
+   - `tools/contracts/validate-runtime-http-examples.py`
+   - `tools/contracts/validate-runtime-http-conformance.py`
+3. Human-facing guide remains at `docs/http/README.md`.

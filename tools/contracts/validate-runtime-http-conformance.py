@@ -348,7 +348,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--openapi",
-        default="docs/http/openapi.v0.yaml",
+        default="schemas/http/runtime-http.openapi.v0.yaml",
         help="OpenAPI spec path relative to repo root.",
     )
     parser.add_argument(

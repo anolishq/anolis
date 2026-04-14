@@ -1,4 +1,4 @@
-"""Phase 4 smoke test — run from the anolis repo root."""
+"""System Composer smoke test — run from the anolis repo root."""
 
 import json
 import subprocess
@@ -112,7 +112,7 @@ try:
     delete("/api/projects/smoke-p4")
 
     print()
-    print("All Phase 4 smoke tests passed.")
+    print("All System Composer smoke tests passed.")
 
 finally:
     proc.terminate()

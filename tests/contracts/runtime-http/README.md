@@ -1,6 +1,6 @@
-# HTTP Example Payloads
+# Runtime HTTP Contract Fixtures
 
-Captured payload fixtures for the `/v0` HTTP contract.
+Captured fixture payloads for the `/v0` HTTP contract.
 
 ## Files
 
@@ -31,7 +31,7 @@ Examples remain curated contract anchors, but can be refreshed from live runtime
 python3 tools/contracts/validate-runtime-http-conformance.py \
   --runtime-bin <path-to-anolis-runtime> \
   --provider-bin <path-to-anolis-provider-sim> \
-  --capture-dir docs/http/examples/_captures
+  --capture-dir tests/contracts/runtime-http/examples/_captures
 ```
 
 The capture directory contains:

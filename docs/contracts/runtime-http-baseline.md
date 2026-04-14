@@ -55,7 +55,7 @@ Ready to start when these are executed in order:
 
 1. Freeze this baseline as the implementation anchor.
 2. Decide per drift item: implementation change vs documentation correction.
-3. Author `docs/http/openapi.v0.yaml` against the decided baseline.
+3. Author `schemas/http/runtime-http.openapi.v0.yaml` against the decided baseline.
 4. Add spec lint + structural validation in CI.
 5. Add example payload validation and runtime conformance smoke checks.
 
@@ -63,7 +63,7 @@ Ready to start when these are executed in order:
 
 Implemented for initial contracts-02 execution:
 
-1. `docs/http/openapi.v0.yaml` created with current shipped endpoint coverage.
+1. `schemas/http/runtime-http.openapi.v0.yaml` created with current shipped endpoint coverage.
 2. Structural OpenAPI validation script added at `tools/contracts/validate-runtime-http-openapi.py`.
 3. CI structural gate wired in `.github/workflows/ci.yml` (Linux strict lane).
 4. `/v0/automation/status` and `/v0/events` documentation coverage added in `docs/http-api.md`.
@@ -72,7 +72,7 @@ Implemented for initial contracts-02 execution:
 
 Implemented for contract drift hardening:
 
-1. Example manifest and payload fixtures added under `docs/http/examples/`.
+1. Example manifest and payload fixtures added under `tests/contracts/runtime-http/examples/`.
 2. Example schema validator added at `tools/contracts/validate-runtime-http-examples.py`.
 3. Live runtime conformance smoke validator added at `tools/contracts/validate-runtime-http-conformance.py`.
 4. CI gates updated:

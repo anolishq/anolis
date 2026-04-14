@@ -1,6 +1,10 @@
-# Anolis
+# Anolis Documentation Index
 
-Welcome to the Anolis documentation! This project is currently developing rapidly, so documentation the documentation is what it is.
-Check out the documentation using the navbar and check back often for updates.
+Use [README.md](README.md) as the canonical documentation index.
 
-Stay composable, friends!
+High-signal entry points:
+
+1. [architecture.md](architecture.md)
+2. [configuration.md](configuration.md)
+3. [http-api.md](http-api.md)
+4. [contracts/README.md](contracts/README.md)

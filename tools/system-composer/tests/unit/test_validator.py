@@ -59,6 +59,12 @@ def test_clean_mixed_bus_mock():
     assert errors == [], f"Expected no errors but got: {errors}"
 
 
+def test_clean_bioreactor_manual_template():
+    system = _load_template("bioreactor-manual")
+    errors = validator.validate_system(system)
+    assert errors == [], f"Expected no errors but got: {errors}"
+
+
 def test_runtime_executable_required():
     system = _make_system(
         providers={"sim0": {"kind": "sim"}},
@@ -239,6 +245,22 @@ def test_restart_policy_requires_matching_backoff_length():
     assert any("backoff_ms length" in e for e in errors), errors
 
 
+def test_restart_policy_backoff_must_be_non_negative_ints():
+    system = _load_template("mixed-bus-mock")
+    restart_policy = system["topology"]["runtime"]["providers"][0]["restart_policy"]
+    restart_policy["backoff_ms"] = [200, -1, 1000]
+    errors = validator.validate_system(system)
+    assert any("backoff_ms values" in e for e in errors), errors
+
+
+def test_restart_policy_requires_timeout_greater_than_backoff():
+    system = _load_template("mixed-bus-mock")
+    restart_policy = system["topology"]["runtime"]["providers"][0]["restart_policy"]
+    restart_policy["timeout_ms"] = 500
+    errors = validator.validate_system(system)
+    assert any("timeout_ms" in e for e in errors), errors
+
+
 def test_automation_enabled_requires_behavior_tree_path():
     system = _make_system(
         providers={"sim0": {"kind": "sim"}},
@@ -257,6 +279,7 @@ if __name__ == "__main__":
     tests = [
         test_clean_sim_quickstart,
         test_clean_mixed_bus_mock,
+        test_clean_bioreactor_manual_template,
         test_runtime_executable_required,
         test_duplicate_provider_ids,
         test_port_3002_collision,
@@ -268,6 +291,8 @@ if __name__ == "__main__":
         test_missing_executable_path,
         test_missing_bus_path_for_hardware_provider,
         test_restart_policy_requires_matching_backoff_length,
+        test_restart_policy_backoff_must_be_non_negative_ints,
+        test_restart_policy_requires_timeout_greater_than_backoff,
         test_automation_enabled_requires_behavior_tree_path,
     ]
     passed = 0

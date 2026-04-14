@@ -61,7 +61,7 @@ This checks:
 2. Required `/v0` endpoint/method coverage
 3. Internal `$ref` resolution
 4. SSE media type contract on `/v0/events`
-5. Example payload schema conformance from `docs/http/examples/manifest.yaml`
+5. Example payload schema conformance from `tests/contracts/runtime-http/examples/manifest.yaml`
 
 ### Runtime HTTP conformance smoke coverage (live fixture)
 

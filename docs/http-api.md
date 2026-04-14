@@ -2,7 +2,7 @@
 
 This document describes the HTTP REST API exposed by `anolis-runtime` for device discovery, state monitoring, and control.
 
-> Contract source of truth for machine validation: [`docs/http/openapi.v0.yaml`](http/openapi.v0.yaml).
+> Contract source of truth for machine validation: [`schemas/http/runtime-http.openapi.v0.yaml`](../schemas/http/runtime-http.openapi.v0.yaml).
 > This document is a human-readable reference and examples guide.
 
 ## Overview
