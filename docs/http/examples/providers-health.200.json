@@ -1,0 +1,32 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "providers": [
+    {
+      "provider_id": "sim0",
+      "state": "AVAILABLE",
+      "lifecycle_state": "RUNNING",
+      "last_seen_ago_ms": 42,
+      "uptime_seconds": 300,
+      "device_count": 4,
+      "supervision": {
+        "enabled": true,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "crash_detected": false,
+        "circuit_open": false,
+        "next_restart_in_ms": null
+      },
+      "devices": [
+        {
+          "device_id": "tempctl0",
+          "health": "OK",
+          "last_poll_ms": 1710000000123,
+          "staleness_ms": 150
+        }
+      ]
+    }
+  ]
+}

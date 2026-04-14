@@ -1,0 +1,20 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "parameters": [
+    {
+      "name": "feed_enable",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "name": "feed_interval_s",
+      "type": "int64",
+      "value": 3600,
+      "min": 1,
+      "max": 86400
+    }
+  ]
+}

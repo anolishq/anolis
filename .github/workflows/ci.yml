@@ -285,6 +285,11 @@ jobs:
         run: |
           python tools/contracts/validate-runtime-http-openapi.py
 
+      - name: Validate runtime HTTP OpenAPI contract (examples)
+        if: runner.os == 'Linux' && matrix.configure_preset == 'ci-linux-release-strict'
+        run: |
+          python tools/contracts/validate-runtime-http-examples.py
+
       - name: Run CTest
         run: ctest --preset "${{ matrix.test_preset }}"
 
@@ -382,6 +387,14 @@ jobs:
 
       - name: Build compatibility preset
         run: cmake --build --preset ci-linux-compat --parallel
+
+      - name: Validate runtime HTTP contract (live conformance smoke)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci-linux-compat/vcpkg_installed/x64-linux/lib
+        run: |
+          python tools/contracts/validate-runtime-http-conformance.py \
+            --runtime-bin build/ci-linux-compat/core/anolis-runtime \
+            --provider-bin "${{ steps.provider.outputs.exe }}"
 
       - name: Run CTest compatibility entrypoint (Python)
         env:

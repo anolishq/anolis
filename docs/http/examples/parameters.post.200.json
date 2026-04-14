@@ -1,0 +1,10 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "parameter": {
+    "name": "feed_enable",
+    "value": false
+  }
+}

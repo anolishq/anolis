@@ -1,0 +1,6 @@
+{
+  "status": {
+    "code": "INVALID_ARGUMENT",
+    "message": "Missing required field"
+  }
+}

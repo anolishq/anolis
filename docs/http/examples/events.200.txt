@@ -1,0 +1,4 @@
+event: state_update
+id: 123
+data: {"provider_id":"sim0","device_id":"tempctl0","signal_id":"tc1_temp","value":{"type":"double","double":25.0},"quality":"OK","timestamp_ms":1710000000123}
+

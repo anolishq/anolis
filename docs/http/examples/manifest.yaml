@@ -1,0 +1,76 @@
+examples:
+  - method: GET
+    path: /v0/runtime/status
+    status: "200"
+    content_type: application/json
+    file: runtime-status.200.json
+  - method: GET
+    path: /v0/providers/health
+    status: "200"
+    content_type: application/json
+    file: providers-health.200.json
+  - method: GET
+    path: /v0/devices
+    status: "200"
+    content_type: application/json
+    file: devices.200.json
+  - method: GET
+    path: /v0/devices/{provider_id}/{device_id}/capabilities
+    status: "200"
+    content_type: application/json
+    file: device-capabilities.200.json
+  - method: GET
+    path: /v0/state
+    status: "200"
+    content_type: application/json
+    file: state-collection.200.json
+  - method: GET
+    path: /v0/state/{provider_id}/{device_id}
+    status: "200"
+    content_type: application/json
+    file: device-state.200.json
+  - method: POST
+    path: /v0/call
+    status: "200"
+    content_type: application/json
+    file: call.200.json
+  - method: POST
+    path: /v0/call
+    status: "400"
+    content_type: application/json
+    file: error.400.json
+  - method: GET
+    path: /v0/mode
+    status: "200"
+    content_type: application/json
+    file: mode.get.200.json
+  - method: POST
+    path: /v0/mode
+    status: "200"
+    content_type: application/json
+    file: mode.post.200.json
+  - method: GET
+    path: /v0/parameters
+    status: "200"
+    content_type: application/json
+    file: parameters.get.200.json
+  - method: POST
+    path: /v0/parameters
+    status: "200"
+    content_type: application/json
+    file: parameters.post.200.json
+  - method: GET
+    path: /v0/automation/tree
+    status: "200"
+    content_type: application/json
+    file: automation-tree.200.json
+  - method: GET
+    path: /v0/automation/status
+    status: "200"
+    content_type: application/json
+    file: automation-status.200.json
+  - method: GET
+    path: /v0/events
+    status: "200"
+    content_type: text/event-stream
+    file: events.200.txt

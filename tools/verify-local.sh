@@ -21,6 +21,13 @@ elif [ -f build/dev-windows-release/core/Release/anolis-runtime.exe ]; then
   RUNTIME_BIN="build/dev-windows-release/core/Release/anolis-runtime.exe"
 fi
 
+PROVIDER_BIN=""
+if [ -f ../anolis-provider-sim/build/dev-release/anolis-provider-sim ]; then
+  PROVIDER_BIN="../anolis-provider-sim/build/dev-release/anolis-provider-sim"
+elif [ -f ../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe ]; then
+  PROVIDER_BIN="../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe"
+fi
+
 if [ -n "$RUNTIME_BIN" ]; then
   echo "[verify-local] Running runtime config contract checks"
   "$PYTHON_BIN" tools/contracts/validate-runtime-configs.py --runtime-bin "$RUNTIME_BIN"
@@ -30,6 +37,18 @@ fi
 
 echo "[verify-local] Running runtime HTTP OpenAPI structural checks"
 "$PYTHON_BIN" tools/contracts/validate-runtime-http-openapi.py
+
+echo "[verify-local] Running runtime HTTP OpenAPI example checks"
+"$PYTHON_BIN" tools/contracts/validate-runtime-http-examples.py
+
+if [ -n "$RUNTIME_BIN" ] && [ -n "$PROVIDER_BIN" ]; then
+  echo "[verify-local] Running runtime HTTP conformance smoke checks"
+  "$PYTHON_BIN" tools/contracts/validate-runtime-http-conformance.py \
+    --runtime-bin "$RUNTIME_BIN" \
+    --provider-bin "$PROVIDER_BIN"
+else
+  echo "[verify-local] Skipping runtime HTTP conformance smoke checks: runtime or provider-sim binary not found"
+fi
 
 echo "[verify-local] Running System Composer test suite"
 "$PYTHON_BIN" -m pytest tools/system-composer/tests -q

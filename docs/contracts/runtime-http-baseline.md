@@ -67,3 +67,14 @@ Implemented for initial contracts-02 execution:
 2. Structural OpenAPI validation script added at `tools/contracts/validate-runtime-http-openapi.py`.
 3. CI structural gate wired in `.github/workflows/ci.yml` (Linux strict lane).
 4. `/v0/automation/status` and `/v0/events` documentation coverage added in `docs/http-api.md`.
+
+## Slice 2 Status
+
+Implemented for contract drift hardening:
+
+1. Example manifest and payload fixtures added under `docs/http/examples/`.
+2. Example schema validator added at `tools/contracts/validate-runtime-http-examples.py`.
+3. Live runtime conformance smoke validator added at `tools/contracts/validate-runtime-http-conformance.py`.
+4. CI gates updated:
+   - Linux strict lane validates OpenAPI examples.
+   - Provider compatibility lane runs live conformance smoke.

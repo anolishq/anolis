@@ -1,0 +1,17 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "mode": "MANUAL",
+  "uptime_seconds": 123,
+  "polling_interval_ms": 500,
+  "providers": [
+    {
+      "provider_id": "sim0",
+      "state": "AVAILABLE",
+      "device_count": 4
+    }
+  ],
+  "device_count": 4
+}

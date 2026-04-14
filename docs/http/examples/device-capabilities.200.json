@@ -1,0 +1,38 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "provider_id": "sim0",
+  "device_id": "motorctl0",
+  "capabilities": {
+    "signals": [
+      {
+        "signal_id": "motor1_duty",
+        "value_type": "double",
+        "label": "Motor 1 Duty"
+      }
+    ],
+    "functions": [
+      {
+        "function_id": 10,
+        "name": "set_motor",
+        "label": "Set motor duty",
+        "args": {
+          "motor_index": {
+            "type": "int64",
+            "required": true,
+            "description": "Motor channel index"
+          },
+          "duty": {
+            "type": "double",
+            "required": true,
+            "description": "Duty cycle fraction",
+            "min": 0.0,
+            "max": 1.0
+          }
+        }
+      }
+    ]
+  }
+}

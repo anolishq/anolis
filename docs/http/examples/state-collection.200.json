@@ -1,0 +1,26 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "generated_at_epoch_ms": 1710000000456,
+  "devices": [
+    {
+      "provider_id": "sim0",
+      "device_id": "tempctl0",
+      "quality": "OK",
+      "values": [
+        {
+          "signal_id": "tc1_temp",
+          "value": {
+            "type": "double",
+            "double": 24.5
+          },
+          "timestamp_epoch_ms": 1710000000400,
+          "quality": "OK",
+          "age_ms": 56
+        }
+      ]
+    }
+  ]
+}

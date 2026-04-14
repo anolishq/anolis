@@ -16,6 +16,8 @@ This runs:
 
 - runtime config contract validation (schema + `anolis-runtime --check-config`) when a local runtime binary is present
 - runtime HTTP OpenAPI structural validation
+- runtime HTTP example payload validation
+- runtime HTTP live conformance smoke validation when both local runtime and provider-sim binaries are present
 - the full System Composer pytest suite
 - focused C++ tests for runtime config parsing and ownership validation when a
   local CMake build directory is present
@@ -44,12 +46,13 @@ This enforces the runtime config contract across:
 1. tracked runtime YAML profiles
 2. contract fixture sets (`valid`, `invalid/schema`, `invalid/runtime`)
 
-### Runtime HTTP contract coverage (structural, slice 1)
+### Runtime HTTP contract coverage (structural + examples)
 
 The script always runs:
 
 ```bash
 python3 tools/contracts/validate-runtime-http-openapi.py
+python3 tools/contracts/validate-runtime-http-examples.py
 ```
 
 This checks:
@@ -58,6 +61,20 @@ This checks:
 2. Required `/v0` endpoint/method coverage
 3. Internal `$ref` resolution
 4. SSE media type contract on `/v0/events`
+5. Example payload schema conformance from `docs/http/examples/manifest.yaml`
+
+### Runtime HTTP conformance smoke coverage (live fixture)
+
+If both a runtime binary and provider-sim binary are present, the script also runs:
+
+```bash
+python3 tools/contracts/validate-runtime-http-conformance.py \
+  --runtime-bin <local-runtime-binary> \
+  --provider-bin <local-provider-sim-binary>
+```
+
+This starts a runtime fixture and validates live endpoint responses against the
+OpenAPI schema declared for each observed status code.
 
 ### Focused runtime coverage
 

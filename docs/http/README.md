@@ -32,6 +32,26 @@ The validator checks:
 4. Internal `$ref` resolution.
 5. SSE media type contract for `/v0/events`.
 
+Run example payload validation:
+
+```bash
+python3 tools/contracts/validate-runtime-http-examples.py
+```
+
+Run live runtime conformance smoke validation (runtime + provider-sim required):
+
+```bash
+python3 tools/contracts/validate-runtime-http-conformance.py \
+  --runtime-bin <path-to-anolis-runtime> \
+  --provider-bin <path-to-anolis-provider-sim>
+```
+
+Live conformance checks:
+
+1. Starts runtime with provider-sim via fixture process management.
+2. Exercises all required `/v0` operations.
+3. Validates each observed response against the OpenAPI schema declared for that status code.
+
 ## Notes
 
 1. `/v0/events` is intentionally documented with provisional schema depth in this initial contract wave.

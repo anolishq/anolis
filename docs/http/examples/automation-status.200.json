@@ -1,0 +1,15 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "enabled": true,
+  "active": true,
+  "bt_status": "RUNNING",
+  "last_tick_ms": 1710000000444,
+  "ticks_since_progress": 0,
+  "total_ticks": 987,
+  "last_error": null,
+  "error_count": 0,
+  "current_tree": "bioreactor_stir_feed"
+}

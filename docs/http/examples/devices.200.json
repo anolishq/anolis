@@ -1,0 +1,20 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "devices": [
+    {
+      "provider_id": "sim0",
+      "device_id": "tempctl0",
+      "display_name": "Temperature Controller 0",
+      "type": "sim.tempctl"
+    },
+    {
+      "provider_id": "sim0",
+      "device_id": "motorctl0",
+      "display_name": "Motor Controller 0",
+      "type": "sim.motorctl"
+    }
+  ]
+}
