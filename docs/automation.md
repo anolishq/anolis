@@ -37,13 +37,13 @@ Automation is a consumer of kernel services, not a replacement for them.
 | `IDLE`   | Stopped    | Blocked      | Safe startup     |
 | `MANUAL` | Stopped    | Allowed      | Operator control |
 | `AUTO`   | Running    | Policy-gated | Automated control |
-| `FAULT`  | Stopped    | Blocked      | Recovery state   |
+| `FAULT`  | Stopped    | Allowed      | Manual recovery state |
 
 Transition rules:
 
 1. `IDLE <-> MANUAL`
 2. `MANUAL <-> AUTO`
-3. `Any -> FAULT`
+3. `Any -> FAULT` (valid transition target)
 4. `FAULT -> MANUAL`
 5. `FAULT -> AUTO` is not allowed directly.
 6. `AUTO -> IDLE` is not allowed directly.
@@ -56,6 +56,12 @@ Startup is always `IDLE`.
 
 1. `BLOCK` (default): manual `POST /v0/call` rejected.
 2. `OVERRIDE`: manual calls allowed during AUTO.
+
+Control-operation guardrails in current runtime:
+
+1. `IDLE` blocks control operations at `CallRouter`.
+2. `AUTO` applies manual-call gating policy (`BLOCK`/`OVERRIDE`).
+3. `FAULT` is primarily a recovery mode; transition constraints apply, but control calls are not globally blocked by `CallRouter`.
 
 ## Runtime Parameters
 

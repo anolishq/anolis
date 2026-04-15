@@ -236,6 +236,10 @@ jobs:
         run: |
           python tools/contracts/validate-machine-profiles.py
 
+      - name: Validate docs local links
+        run: |
+          python tools/contracts/validate-doc-links.py
+
       - name: Run System Composer tests
         run: |
           python -m pytest tools/system-composer/tests -q

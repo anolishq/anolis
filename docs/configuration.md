@@ -63,8 +63,10 @@ automation:
 ### Runtime modes
 
 1. Startup mode is always `IDLE` (not YAML-configurable).
-2. Move to `MANUAL`/`AUTO` at runtime via `POST /v0/mode`.
-3. See [automation.md](automation.md) for mode and gating semantics.
+2. Mode changes happen at runtime via `POST /v0/mode`.
+3. `IDLE` blocks control operations; `AUTO` applies manual-call gating policy.
+4. `FAULT` is a recovery mode with constrained transitions (`FAULT -> MANUAL` only).
+5. See [automation.md](automation.md) for full mode semantics.
 
 ### HTTP and CORS
 

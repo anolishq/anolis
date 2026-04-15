@@ -15,6 +15,8 @@ bash tools/verify-local.sh
 This runs:
 
 - runtime config contract validation (schema + `anolis-runtime --check-config`) when a local runtime binary is present
+- machine profile contract validation
+- docs local-link validation (`docs/**/*.md` + root `README.md`)
 - runtime HTTP OpenAPI structural validation
 - runtime HTTP example payload validation
 - composer control OpenAPI structural validation
@@ -60,6 +62,33 @@ This enforces the runtime config contract across:
 
 1. tracked runtime YAML profiles
 2. contract fixture sets (`valid`, `invalid/schema`, `invalid/runtime`)
+
+### Machine profile contract coverage
+
+The script always runs:
+
+```bash
+python3 tools/contracts/validate-machine-profiles.py
+```
+
+This validates:
+
+1. machine profile schema conformance
+2. referenced file existence
+3. referenced runtime profile compatibility checks
+
+### Docs local-link coverage
+
+The script always runs:
+
+```bash
+python3 tools/contracts/validate-doc-links.py
+```
+
+This validates:
+
+1. local markdown links under `docs/`
+2. local markdown links in root `README.md`
 
 ### Runtime HTTP contract coverage (structural + examples)
 

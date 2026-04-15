@@ -38,6 +38,9 @@ fi
 echo "[verify-local] Running machine profile contract checks"
 "$PYTHON_BIN" tools/contracts/validate-machine-profiles.py
 
+echo "[verify-local] Running docs local-link checks"
+"$PYTHON_BIN" tools/contracts/validate-doc-links.py
+
 echo "[verify-local] Running runtime HTTP OpenAPI structural checks"
 "$PYTHON_BIN" tools/contracts/validate-runtime-http-openapi.py
 

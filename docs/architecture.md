@@ -5,7 +5,7 @@
 ```text
 ┌─────────────────────────────────────────┐
 │         External Interfaces             │
-│   (HTTP, Behavior Trees, CLI - future)  │
+│     (HTTP, Behavior Trees, Tools)       │
 └───────────────┬─────────────────────────┘
                 │
 ┌───────────────▼─────────────────────────┐
@@ -30,8 +30,7 @@
           │ ADPP (stdio)
 ┌─────────▼─────────────────────────────────┐
 │       Provider Processes                  │
-│  (anolis-provider-sim, future: modbus,    │
-│   arduino, canbus, crumbs, etc.)          │
+│  (anolis-provider-sim and other providers) │
 └───────────────────────────────────────────┘
 ```
 
@@ -187,22 +186,15 @@ logging:
 
 ## Extension Points
 
-Future layers plug in via:
+External layers integrate via:
 
 - **State Cache**: `get_device_state()`, `get_signal_value()`
 - **Call Router**: `execute_call(device, function, args)`
 - **Registry**: `get_device()`, `get_all_devices()`
 
-HTTP gateway, Behavior Trees, and CLI will use these APIs only.
+HTTP, automation, and UI integrations should remain on these runtime surfaces.
 
-## Deferred SDK Layout (L11)
+## Packaging Boundary Note
 
-`include/` vs `src/` repository split is intentionally deferred to a dedicated SDK-surface workstream to avoid mixing
-packaging churn with runtime correctness hardening.
-
-Entry criteria for that dedicated SDK-surface workstream:
-
-1. Public API boundary is explicitly versioned (consumer-facing headers and compatibility policy documented).
-2. Export/install model is defined in CMake (`install(TARGETS ...)`, header install roots, package config strategy).
-3. External consumer use-case is present (at least one out-of-tree build consuming installed headers).
-4. Include path migration plan is prepared with compatibility shims for one transition window.
+Public SDK packaging (`include/` export/install surface) is not part of this runtime architecture baseline.
+Current architecture decisions in this document apply to runtime behavior, provider boundaries, and control/state flow.
