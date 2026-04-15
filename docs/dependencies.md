@@ -35,7 +35,8 @@ Rules:
 
 ## CI Lane Tiers
 
-- **Required PR lanes**: CI workflow gates currently include formatting, Python lint/type/tests, UI/composer contracts, and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
+- **Required PR lanes**: CI workflow gates currently include formatting, Python lint/type/tests, UI/composer contracts,
+  and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
 - **Advisory lanes**: optional non-blocking lanes may be added as needed.
 - **Nightly/periodic lanes**: heavy coverage/sanitizer/stress lanes.
 

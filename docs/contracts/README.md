@@ -18,4 +18,5 @@ Baselines in this directory freeze expected behavior at a point in time so contr
 
 ## Change Rule
 
-Treat baselines as compatibility snapshots: update them only in the same change that intentionally modifies contract behavior, tests, and validator expectations.
+Treat baselines as compatibility snapshots:
+update them only in the same change that intentionally modifies contract behavior, tests, and validator expectations.

@@ -12,12 +12,12 @@ This guide defines safe operating procedures for Anolis-managed hardware systems
 
 ## Runtime Mode Safety Semantics
 
-| Runtime Mode | Automation Loop | Control Operations (`POST /v0/call`) | Notes |
-| --- | --- | --- | --- |
-| `IDLE` | Stopped | Blocked | Safe startup/standby mode |
-| `MANUAL` | Stopped | Allowed | Operator-driven commissioning/control |
-| `AUTO` | Running | Manual calls policy-gated | Automation calls continue normally |
-| `FAULT` | Stopped | Allowed | Recovery/diagnostic mode; transition restrictions still apply |
+| Runtime Mode | Automation Loop | Control Operations (`POST /v0/call`) | Notes                                                         |
+| ------------ | --------------- | ------------------------------------ | ------------------------------------------------------------- |
+| `IDLE`       | Stopped         | Blocked                              | Safe startup/standby mode                                     |
+| `MANUAL`     | Stopped         | Allowed                              | Operator-driven commissioning/control                         |
+| `AUTO`       | Running         | Manual calls policy-gated            | Automation calls continue normally                            |
+| `FAULT`      | Stopped         | Allowed                              | Recovery/diagnostic mode; transition restrictions still apply |
 
 Transition rules:
 
@@ -28,7 +28,8 @@ Transition rules:
 5. `FAULT -> AUTO` is invalid
 6. `AUTO -> IDLE` is invalid
 
-Note: FAULT is not globally auto-entered for every error condition in the current runtime; it is a defined mode and transition target with strict recovery pathing.
+Note: FAULT is not globally auto-entered for every error condition in the current runtime;
+it is a defined mode and transition target with strict recovery pathing.
 
 ## Standard Startup Sequence
 
