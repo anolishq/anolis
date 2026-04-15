@@ -100,6 +100,64 @@ cd /path/to/anolis
 python -m tools.telemetry_export.export_service --config config/bioreactor/telemetry-export.bioreactor.yaml
 ```
 
+## Quick Local Export (Existing Run)
+
+Use this when you already ran an experiment and just want data out of Influx.
+
+```bash
+BASE_URL="http://127.0.0.1:8091"
+EXPORT_TOKEN="export-dev-token"
+START="2026-04-13T00:00:00Z"
+END="2026-04-13T06:00:00Z"
+mkdir -p artifacts/exports
+```
+
+Discover available `runtime_name` values first (recommended):
+
+```bash
+curl -sS --request POST "http://127.0.0.1:8086/api/v2/query?org=anolis" \
+  --header "Authorization: Token dev-token" \
+  --header "Accept: application/csv" \
+  --header "Content-type: application/vnd.flux" \
+  --data 'from(bucket:"anolis") |> range(start: -30d) |> filter(fn:(r) => r._measurement == "anolis_signal") |> keep(columns:["runtime_name"]) |> group() |> distinct(column:"runtime_name")'
+```
+
+Bioreactor profile runtime names:
+
+1. `bioreactor-manual`
+2. `bioreactor-telemetry`
+3. `bioreactor-automation`
+4. `bioreactor-full`
+
+Export downsampled CSV for the bioreactor device set:
+
+```bash
+curl -sS -D artifacts/exports/run.headers \
+  -o artifacts/exports/run.csv \
+  -X POST "${BASE_URL}/v1/exports/signals:query" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${EXPORT_TOKEN}" \
+  -H "X-Requester-Id: lab-validation" \
+  -d "{
+    \"time_range\": {\"start\": \"${START}\", \"end\": \"${END}\"},
+    \"selector\": {
+      \"provider_ids\": [\"bread0\", \"ezo0\"],
+      \"device_ids\": [\"rlht0\", \"dcmt0\", \"dcmt1\", \"ph0\", \"do0\"]
+    },
+    \"resolution\": {\"mode\": \"downsampled\", \"interval\": \"10s\", \"aggregation\": \"last\"},
+    \"format\": \"csv\"
+  }"
+```
+
+Fetch manifest:
+
+```bash
+EXPORT_ID=$(awk '/^X-Export-Id:/ {print $2}' artifacts/exports/run.headers | tr -d '\r')
+curl -sS "${BASE_URL}/v1/exports/manifests/${EXPORT_ID}" \
+  -H "Authorization: Bearer ${EXPORT_TOKEN}" \
+  > artifacts/exports/run.manifest.json
+```
+
 ## Example Query (JSON Response)
 
 ```bash

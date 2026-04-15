@@ -308,6 +308,11 @@ Expected: output includes at least one data row (not only CSV headers).
 This service is the production-MVP export path. It is intentionally external to
 `anolis-runtime` control-plane APIs.
 
+Canonical export API docs live in:
+
+1. `tools/telemetry_export/README.md`
+2. `tools/telemetry_export/examples/query_signals.py`
+
 Start export service:
 
 ```bash
@@ -324,112 +329,45 @@ Health check:
 curl -sS http://127.0.0.1:8091/v1/health
 ```
 
-Raw-event query (`json` response):
+Bioreactor runtime names by profile:
+
+1. `anolis-runtime.bioreactor.manual.yaml` -> `bioreactor-manual`
+2. `anolis-runtime.bioreactor.telemetry.yaml` -> `bioreactor-telemetry`
+3. `anolis-runtime.bioreactor.automation.yaml` -> `bioreactor-automation`
+4. `anolis-runtime.bioreactor.full.yaml` -> `bioreactor-full`
+
+Minimal export example (CSV, downsampled):
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer export-dev-token" \
-  -H "X-Requester-Id: operator-ui" \
-  -d '{
-    "time_range": {
-      "start": "2026-04-01T00:00:00Z",
-      "end": "2026-04-01T00:30:00Z"
-    },
-    "selector": {
-      "runtime_names": ["bioreactor-telemetry"],
-      "provider_ids": ["bread0", "ezo0"],
-      "device_ids": ["rlht0", "dcmt0", "dcmt1", "ph0", "do0"]
-    },
-    "resolution": {
-      "mode": "raw_event"
-    },
-    "format": "json"
-  }'
-```
+BASE_URL="http://127.0.0.1:8091"
+EXPORT_TOKEN="export-dev-token"
+START="2026-04-01T00:00:00Z"
+END="2026-04-01T00:30:00Z"
 
-Downsampled query (`csv` response):
-
-```bash
 curl -sS -D /tmp/export.headers \
   -o /tmp/export.csv \
-  -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
+  -X POST "${BASE_URL}/v1/exports/signals:query" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer export-dev-token" \
-  -d '{
-    "time_range": {
-      "start": "2026-04-01T00:00:00Z",
-      "end": "2026-04-01T00:30:00Z"
+  -H "Authorization: Bearer ${EXPORT_TOKEN}" \
+  -d "{
+    \"time_range\": {\"start\": \"${START}\", \"end\": \"${END}\"},
+    \"selector\": {
+      \"runtime_names\": [\"bioreactor-telemetry\"],
+      \"provider_ids\": [\"bread0\", \"ezo0\"],
+      \"device_ids\": [\"rlht0\", \"dcmt0\", \"dcmt1\", \"ph0\", \"do0\"]
     },
-    "resolution": {
-      "mode": "downsampled",
-      "interval": "10s",
-      "aggregation": "last"
-    },
-    "format": "csv"
-  }'
+    \"resolution\": {\"mode\": \"downsampled\", \"interval\": \"10s\", \"aggregation\": \"last\"},
+    \"format\": \"csv\"
+  }"
 ```
 
-Fetch the CSV manifest by export id:
+Fetch manifest for the export:
 
 ```bash
-export EXPORT_ID=$(grep -i '^X-Export-Id:' /tmp/export.headers | awk '{print $2}' | tr -d '\r')
-curl -sS "http://127.0.0.1:8091/v1/exports/manifests/${EXPORT_ID}" \
-  -H "Authorization: Bearer export-dev-token"
+EXPORT_ID=$(awk '/^X-Export-Id:/ {print $2}' /tmp/export.headers | tr -d '\r')
+curl -sS "${BASE_URL}/v1/exports/manifests/${EXPORT_ID}" \
+  -H "Authorization: Bearer ${EXPORT_TOKEN}"
 ```
-
-Raw-event query (`ndjson` response):
-
-```bash
-curl -sS -X POST "http://127.0.0.1:8091/v1/exports/signals:query" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer export-dev-token" \
-  -d '{
-    "time_range": {
-      "start": "2026-04-01T00:00:00Z",
-      "end": "2026-04-01T00:30:00Z"
-    },
-    "resolution": {
-      "mode": "raw_event"
-    },
-    "format": "ndjson"
-  }'
-```
-
-Programmatic example:
-
-```bash
-python3 tools/telemetry_export/examples/query_signals.py \
-  --start 2026-04-01T00:00:00Z \
-  --end 2026-04-01T00:30:00Z \
-  --provider bread0 \
-  --provider ezo0 \
-  --format json
-```
-
-MVP constraints:
-
-1. Dataset support is `signals` only.
-2. Auth is mandatory (`Authorization: Bearer ...`).
-3. Completeness is best-effort under current telemetry overflow behavior.
-4. `bytes` vs `string` fidelity remains a known MVP limitation.
-5. `X-Request-Id` is always emitted; `X-Requester-Id` is optional.
-6. Export responses include `X-Export-Id` and `X-Export-Manifest-Hash`; full
-   manifest payload is available in JSON responses and at
-   `GET /v1/exports/manifests/{export_id}`.
-7. Optional selector scope enforcement can return `403 permission_denied`.
-8. Selector supports optional `runtime_names` for multi-runtime disambiguation.
-9. `timezone` request input is not supported in v1 (timestamps are always UTC).
-10. In downsample mode:
-
-- numeric fields use requested aggregation (`last|mean|min|max|count`);
-- `value_bool`, `value_string`, and `quality` use `last`;
-- requesting `value_bool`/`value_string` columns with non-`last` aggregation returns `400 invalid_argument`.
-
-11. `json`, `csv`, and `ndjson` all use a bounded-memory spool-to-file path
-    before response streaming.
-12. `limits.max_response_bytes` applies to `format=json`; streamed `csv` and
-    `ndjson` are controlled by `max_rows` and request limits.
 
 Stop observability stack when finished:
 
