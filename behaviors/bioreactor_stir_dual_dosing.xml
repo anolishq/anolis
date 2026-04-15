@@ -13,17 +13,17 @@
     <ReactiveSequence name="stir_dual_dosing_control_loop">
       <!-- Runtime-tunable parameters -->
       <GetParameterBool param="impeller_enable" value="{impeller_enable}"/>
-      <GetParameterInt64 param="impeller_pwm" value="{impeller_pwm}"/>
+      <GetParameter param="impeller_pwm" value="{impeller_pwm}"/>
 
       <GetParameterBool param="dose1_enable" value="{dose1_enable}"/>
-      <GetParameterInt64 param="dose1_pwm" value="{dose1_pwm}"/>
+      <GetParameter param="dose1_pwm" value="{dose1_pwm}"/>
       <GetParameterInt64 param="dose1_startup_delay_s" value="{dose1_startup_delay_s}"/>
       <GetParameterInt64 param="dose1_interval_s" value="{dose1_interval_s}"/>
       <GetParameterInt64 param="dose1_pulse_s" value="{dose1_pulse_s}"/>
       <GetParameterInt64 param="dose1_max_pulses_per_hour" value="{dose1_max_pulses_per_hour}"/>
 
       <GetParameterBool param="dose2_enable" value="{dose2_enable}"/>
-      <GetParameterInt64 param="dose2_pwm" value="{dose2_pwm}"/>
+      <GetParameter param="dose2_pwm" value="{dose2_pwm}"/>
       <GetParameterInt64 param="dose2_startup_delay_s" value="{dose2_startup_delay_s}"/>
       <GetParameterInt64 param="dose2_interval_s" value="{dose2_interval_s}"/>
       <GetParameterInt64 param="dose2_pulse_s" value="{dose2_pulse_s}"/>
