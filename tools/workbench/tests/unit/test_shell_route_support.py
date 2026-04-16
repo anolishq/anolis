@@ -18,6 +18,8 @@ import pytest
 
 _WB_DIR = pathlib.Path(__file__).resolve().parents[2]
 _SERVER_SCRIPT = _WB_DIR / "backend" / "server.py"
+_REPO_ROOT = _WB_DIR.parent.parent
+_SYSTEMS_ROOT = _REPO_ROOT / "systems"
 
 
 def _pick_free_port() -> int:
@@ -181,3 +183,63 @@ def test_invalid_project_name_is_rejected(workbench_server: dict[str, Any]) -> N
     )
     assert status == 400
     assert "Project name must be" in str(payload.get("error"))
+
+
+def test_runtime_proxy_returns_503_when_runtime_stopped(workbench_server: dict[str, Any]) -> None:
+    base_url = workbench_server["base_url"]
+    status, payload = _http_json(base_url, "/v0/mode")
+    assert status == 503
+    assert "Runtime is not running" in str(payload.get("error"))
+
+
+def test_launch_is_hard_blocked_when_another_project_is_running(workbench_server: dict[str, Any]) -> None:
+    base_url = workbench_server["base_url"]
+    requested = "wb-launch-requested"
+    running = "wb-launch-running"
+
+    for name in (requested, running):
+        status, payload = _http_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            body={"name": name, "template": "sim-quickstart"},
+        )
+        assert status == 201, payload
+
+    runner = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    running_path = _SYSTEMS_ROOT / running / "running.json"
+    running_path.write_text(
+        json.dumps({"pid": runner.pid, "project": running, "started": time.time()}),
+        encoding="utf-8",
+    )
+
+    try:
+        launch_status, launch_payload = _http_json(
+            base_url,
+            f"/api/projects/{urllib.parse.quote(requested)}/launch",
+            method="POST",
+            body={},
+        )
+        assert launch_status == 409, launch_payload
+        assert "already running" in str(launch_payload.get("error")).lower()
+    finally:
+        _http_json(
+            base_url,
+            f"/api/projects/{urllib.parse.quote(running)}/stop",
+            method="POST",
+            body={},
+        )
+        if runner.poll() is None:
+            runner.terminate()
+            try:
+                runner.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                runner.kill()
+                runner.wait(timeout=5)
+        for name in (requested, running):
+            _http_json(base_url, f"/api/projects/{urllib.parse.quote(name)}", method="DELETE")

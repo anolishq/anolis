@@ -1,3 +1,5 @@
+import { deriveOperateAvailability, normalizeProviderHealthQuality } from "./operate-state.js";
+
 const INT64_MIN = -9223372036854775808n;
 const INT64_MAX = 9223372036854775807n;
 const UINT64_MAX = 18446744073709551615n;
@@ -65,21 +67,11 @@ async function _refreshOperate() {
     return;
   }
 
-  const isRunning = Boolean(status?.running);
-  const runningProject = typeof status?.active_project === "string" ? status.active_project : "";
-  state.runningProject = runningProject;
+  const availability = deriveOperateAvailability(status, state.projectName);
+  state.runningProject = availability.runningProject;
 
-  if (!isRunning) {
-    _showBanner("Runtime is stopped. Start runtime from Commission to operate this project.");
-    _setModeBadge("--", "unknown");
-    _clearOperateData();
-    return;
-  }
-
-  if (runningProject !== state.projectName) {
-    _showBanner(
-      `Runtime is running for project "${runningProject}". Stop it before operating "${state.projectName}".`,
-    );
+  if (!availability.available) {
+    _showBanner(availability.message);
     _setModeBadge("--", "unknown");
     _clearOperateData();
     return;
@@ -206,7 +198,7 @@ function _renderProviderHealth(payload) {
 
   for (const entry of providers) {
     const providerId = typeof entry?.provider_id === "string" ? entry.provider_id : "unknown";
-    const quality = _normalizeQuality(entry?.health?.quality || entry?.quality || "UNKNOWN");
+    const quality = normalizeProviderHealthQuality(entry?.health?.quality || entry?.quality || "UNKNOWN");
     const li = document.createElement("li");
     li.innerHTML = `${_esc(providerId)} <span class="badge ${quality.toLowerCase()}">${_esc(quality)}</span>`;
     list.appendChild(li);
@@ -755,17 +747,7 @@ function _normalizeStateSignal(signal) {
 }
 
 function _normalizeQuality(quality) {
-  const value = String(quality || "UNKNOWN").toUpperCase();
-  if (value === "OK" || value === "READY" || value === "AVAILABLE") {
-    return "OK";
-  }
-  if (value === "FAULT") {
-    return "FAULT";
-  }
-  if (value === "UNAVAILABLE" || value === "STALE") {
-    return "UNAVAILABLE";
-  }
-  return "UNKNOWN";
+  return normalizeProviderHealthQuality(quality);
 }
 
 function _formatValue(value) {

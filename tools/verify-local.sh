@@ -70,6 +70,8 @@ if command -v node >/dev/null 2>&1; then
   node --test tools/operator-ui/tests/contracts.test.mjs
   echo "[verify-local] Running System Composer launch URL resolution tests"
   node --test tools/system-composer/tests/unit/launch_url_resolution.test.mjs
+  echo "[verify-local] Running Workbench guard tests"
+  node --test tools/workbench/tests/unit/workbench_guards.test.mjs
 else
   echo "[verify-local] Skipping UI fixture contract tests: node not found"
 fi

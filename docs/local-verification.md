@@ -47,6 +47,7 @@ If `node` is present, the script also runs:
 ```bash
 node --test tools/operator-ui/tests/contracts.test.mjs
 node --test tools/system-composer/tests/unit/launch_url_resolution.test.mjs
+node --test tools/workbench/tests/unit/workbench_guards.test.mjs
 ```
 
 If `node` is not available, this step is skipped with an explicit message.

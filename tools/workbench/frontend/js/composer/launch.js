@@ -1,6 +1,7 @@
 // launch.js — Preflight, launch, stop, restart, health badge, operator-ui link
 import { connect as logConnect, disconnect as logDisconnect } from './log-pane.js';
 import { startPolling, stopPolling } from './health.js';
+import { deriveLaunchBlockReason } from './launch-guards.js';
 
 let _name = null;
 let _system = null;
@@ -147,6 +148,22 @@ async function _doLaunch() {
   btn.textContent = 'Launching…';
 
   try {
+    const statusRes = await fetch('/api/status');
+    if (statusRes.ok) {
+      const status = await statusRes.json().catch(() => ({}));
+      const blockReason = deriveLaunchBlockReason(status, _name);
+      if (blockReason) {
+        const summary = document.getElementById('preflight-summary');
+        if (summary) {
+          summary.textContent = blockReason;
+          summary.style.color = 'var(--danger)';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Launch →';
+        return;
+      }
+    }
+
     const res = await fetch(
       `/api/projects/${encodeURIComponent(_name)}/launch`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
@@ -160,7 +177,11 @@ async function _doLaunch() {
       const d = await res.json().catch(() => ({}));
       const summary = document.getElementById('preflight-summary');
       if (summary) {
-        summary.textContent = `Launch failed: ${d.error || 'unknown error'}`;
+        const conflictMessage =
+          typeof d?.error === 'string' && d.error.toLowerCase().includes('already running')
+            ? 'Launch blocked: runtime is already active. Stop current runtime before launching this project.'
+            : null;
+        summary.textContent = conflictMessage || `Launch failed: ${d.error || 'unknown error'}`;
         summary.style.color = 'var(--danger)';
       }
       btn.disabled = false;

@@ -10,6 +10,13 @@ This tool is implemented as a new project under `tools/workbench/` and reuses th
 existing composer backend modules for project CRUD, render/preflight, launch
 ownership, and log streaming.
 
+Phase 6 hardening currently includes:
+
+1. URL-routed shell workspaces with unsaved-change and running-runtime guard prompts.
+2. Launch hard-block guidance when another runtime is active.
+3. Commission health sourced from runtime contracts (`/v0/runtime/status`, `/v0/providers/health`).
+4. Operate contract state sourced from `/v0/*` and `/v0/events` through workbench pass-through.
+
 ## Quick Start (Linux / macOS)
 
 ```sh

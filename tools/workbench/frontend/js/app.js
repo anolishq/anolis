@@ -1,9 +1,14 @@
 import { renderRuntimeForm } from "./composer/forms/runtime-form.js";
 import { renderProviderList } from "./composer/forms/provider-list.js";
 import * as launch from "./composer/launch.js";
+import * as commissionHealth from "./composer/commission-health.js";
 import { disconnect as disconnectLogs } from "./composer/log-pane.js";
 import { stopPolling as stopCommissionPolling } from "./composer/health.js";
 import * as operateWorkspace from "./operate-workspace.js";
+import {
+  describeCrossProjectRunningBanner,
+  evaluateNavigationPrompts,
+} from "./shell-guards.js";
 
 const state = {
   catalog: null,
@@ -82,11 +87,19 @@ function _bindUiHandlers() {
   elements.projectSelector.addEventListener("change", () => {
     const selected = elements.projectSelector.value;
     if (!selected) {
-      void _navigateTo("/");
+      void _navigateTo("/").then((ok) => {
+        if (!ok) {
+          _syncUi();
+        }
+      });
       return;
     }
     const workspace = state.workspace || "compose";
-    void _navigateTo(_projectWorkspacePath(selected, workspace));
+    void _navigateTo(_projectWorkspacePath(selected, workspace)).then((ok) => {
+      if (!ok) {
+        _syncUi();
+      }
+    });
   });
 
   for (const tab of elements.workspaceTabs) {
@@ -218,42 +231,21 @@ async function _navigateTo(
 }
 
 function _confirmNavigation(route) {
-  const currentProject = state.projectName;
-  const nextProject = route.project;
-  const nextWorkspace = route.workspace || "compose";
-  const switchingProject = currentProject !== null && nextProject !== currentProject;
-  const switchingWorkspace =
-    currentProject !== null &&
-    nextProject === currentProject &&
-    state.workspace !== null &&
-    nextWorkspace !== state.workspace;
-  const leavingProjectContext = currentProject !== null && nextProject === null;
+  const prompts = evaluateNavigationPrompts({
+    dirty: state.dirty,
+    currentProject: state.projectName,
+    currentWorkspace: state.workspace,
+    nextProject: route.project,
+    nextWorkspace: route.workspace || "compose",
+    runtimeRunning: Boolean(state.runtimeStatus?.running),
+    runningProject:
+      typeof state.runtimeStatus?.active_project === "string"
+        ? state.runtimeStatus.active_project
+        : "",
+  });
 
-  if (state.dirty && (switchingProject || switchingWorkspace || leavingProjectContext)) {
-    const ok = window.confirm(
-      "You have unsaved Compose edits. Continue and discard unsaved changes?",
-    );
-    if (!ok) {
-      return false;
-    }
-  }
-
-  const running = Boolean(state.runtimeStatus?.running);
-  const runningProject =
-    typeof state.runtimeStatus?.active_project === "string"
-      ? state.runtimeStatus.active_project
-      : null;
-
-  if (
-    nextProject &&
-    running &&
-    runningProject &&
-    runningProject !== nextProject &&
-    nextProject !== currentProject
-  ) {
-    const ok = window.confirm(
-      `Project "${runningProject}" is currently running. Switching to "${nextProject}" will not stop it. Continue?`,
-    );
+  for (const prompt of prompts) {
+    const ok = window.confirm(prompt.message);
     if (!ok) {
       return false;
     }
@@ -266,6 +258,7 @@ function _deactivateWorkspace(workspace) {
   if (workspace === "commission") {
     stopCommissionPolling();
     disconnectLogs();
+    commissionHealth.stop();
   } else if (workspace === "operate") {
     operateWorkspace.deactivate();
   }
@@ -321,15 +314,14 @@ function _syncUi() {
     elements.runtimeIndicator.className = "runtime-indicator stopped";
   }
 
-  if (
-    state.projectName &&
-    running &&
-    runningProject &&
-    runningProject !== state.projectName
-  ) {
-    _showGlobalBanner(
-      `Runtime for "${runningProject}" remains active. Launch for "${state.projectName}" is blocked until you stop the running runtime.`,
-    );
+  const crossProjectBanner = describeCrossProjectRunningBanner({
+    activeProject: state.projectName,
+    runtimeRunning: running,
+    runningProject,
+  });
+  if (crossProjectBanner !== "") {
+    const message = crossProjectBanner;
+    _showGlobalBanner(message);
   } else {
     _hideGlobalBanner();
   }
@@ -337,7 +329,6 @@ function _syncUi() {
 
 function _renderProjectSelector() {
   const selector = elements.projectSelector;
-  const prior = selector.value;
 
   selector.innerHTML = "";
 
@@ -357,10 +348,6 @@ function _renderProjectSelector() {
     selector.value = state.projectName;
   } else {
     selector.value = "";
-  }
-
-  if (!state.projectName && prior && state.projects.some((p) => p.name === prior)) {
-    selector.value = prior;
   }
 }
 
@@ -471,6 +458,7 @@ function _renderCommissionWorkspace() {
   } else {
     launch.init(state.projectName, state.system);
   }
+  commissionHealth.start(state.projectName);
 
   state.commissionRunningForCurrent = runningForCurrent;
 }
