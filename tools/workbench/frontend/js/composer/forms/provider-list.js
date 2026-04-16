@@ -73,10 +73,10 @@ function _genId(system, kind) {
 
 function _defaultTopology(kind) {
   switch (kind) {
-    case 'sim':    return { startup_policy: 'degraded', simulation_mode: 'non_interacting', tick_rate_hz: 10.0, devices: [] };
-    case 'bread':  return { provider_name: '', require_live_session: false, query_delay_us: 10000, timeout_ms: 100, retry_count: 2, discovery: { mode: 'manual', addresses: [] }, devices: [] };
-    case 'ezo':    return { provider_name: '', query_delay_us: 300000, timeout_ms: 300, retry_count: 2, devices: [] };
-    default:       return {};
+    case 'sim':    return { kind, startup_policy: 'degraded', simulation_mode: 'non_interacting', tick_rate_hz: 10.0, devices: [] };
+    case 'bread':  return { kind, provider_name: '', require_live_session: false, query_delay_us: 10000, timeout_ms: 100, retry_count: 2, discovery: { mode: 'manual', addresses: [] }, devices: [] };
+    case 'ezo':    return { kind, provider_name: '', query_delay_us: 300000, timeout_ms: 300, retry_count: 2, devices: [] };
+    default:       return { kind };
   }
 }
 

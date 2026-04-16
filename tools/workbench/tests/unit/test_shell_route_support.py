@@ -243,3 +243,22 @@ def test_launch_is_hard_blocked_when_another_project_is_running(workbench_server
                 runner.wait(timeout=5)
         for name in (requested, running):
             _http_json(base_url, f"/api/projects/{urllib.parse.quote(name)}", method="DELETE")
+
+
+def test_operate_proxy_endpoints_return_503_when_runtime_stopped(workbench_server: dict[str, Any]) -> None:
+    """Endpoints consumed by the Operate workspace all return 503 when no runtime is running.
+
+    Validates that operate-workspace.js Promise.allSettled polling receives
+    503 errors (not hard crashes) for every /v0/* route it hits.
+    """
+    base_url = workbench_server["base_url"]
+    for path in (
+        "/v0/devices",
+        "/v0/providers/health",
+        "/v0/runtime/status",
+        "/v0/state",
+        "/v0/mode",
+    ):
+        status, payload = _http_json(base_url, path)
+        assert status == 503, (path, status, payload)
+        assert "Runtime is not running" in str(payload.get("error")), (path, payload)
