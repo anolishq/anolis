@@ -62,6 +62,9 @@ fi
 echo "[verify-local] Running System Composer test suite"
 "$PYTHON_BIN" -m pytest tools/system-composer/tests -q
 
+echo "[verify-local] Running Workbench shell test suite"
+"$PYTHON_BIN" -m pytest tools/workbench/tests -q
+
 if command -v node >/dev/null 2>&1; then
   echo "[verify-local] Running Operator UI fixture contract tests"
   node --test tools/operator-ui/tests/contracts.test.mjs

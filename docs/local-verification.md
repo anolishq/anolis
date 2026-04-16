@@ -22,6 +22,7 @@ This runs:
 - composer control OpenAPI structural validation
 - runtime HTTP live conformance smoke validation when both local runtime and provider-sim binaries are present
 - the full System Composer pytest suite
+- the Workbench shell pytest suite
 - Operator UI fixture contract tests when `node` is available
 - focused C++ tests for runtime config parsing and ownership validation when a
   local CMake build directory is present
@@ -32,11 +33,12 @@ This runs:
 
 ```bash
 python3 -m pytest tools/system-composer/tests -q
+python3 -m pytest tools/workbench/tests -q
 ```
 
 This covers renderer output, template parity, and validator behavior.
 It also covers the Composer control API contract baseline (`/api/status`,
-preflight/launch/stop/restart/logs behavior).
+preflight/launch/stop/restart/logs behavior) and Workbench shell route support.
 
 ### Operator UI fixture contract coverage
 
