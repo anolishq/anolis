@@ -1,4 +1,4 @@
-# Anolis Workbench (Phase 07)
+# Anolis Workbench
 
 Unified commissioning shell with three workspaces:
 
@@ -25,6 +25,7 @@ Phase 8 export pipeline currently includes:
 2. Shared pure export core: `tools/workbench/backend/exporter.py`.
 3. HTTP wrapper endpoint: `POST /api/projects/<name>/export`.
 4. CLI wrapper: `python tools/package.py <project-name> [output.anpkg]`.
+5. Package validation command: `python tools/contracts/validate-handoff-packages.py`.
 
 ## Quick Start (Linux / macOS)
 
@@ -68,6 +69,11 @@ Workbench-specific export route:
 
 1. `POST /api/projects/<name>/export` returns deterministic `.anpkg` bytes
    as `application/zip`.
+
+## Phase 08 Docs
+
+1. `docs/workbench/handoff-package-v1.md`
+2. `docs/workbench/commissioning-handoff-runbook.md`
 
 Standalone tools remain supported:
 

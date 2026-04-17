@@ -8,6 +8,7 @@ Baselines in this directory freeze expected behavior at a point in time so contr
 2. [runtime-http-baseline.md](runtime-http-baseline.md) - Runtime `/v0` HTTP behavior.
 3. [machine-profile-baseline.md](machine-profile-baseline.md) - Machine package and manifest behavior.
 4. [composer-control-baseline.md](composer-control-baseline.md) - System Composer control API behavior.
+5. [handoff-package-baseline.md](handoff-package-baseline.md) - Commissioning handoff package export/validation behavior.
 
 ## Canonical Machine Artifacts
 

@@ -16,6 +16,7 @@ This runs:
 
 - runtime config contract validation (schema + `anolis-runtime --check-config`) when a local runtime binary is present
 - machine profile contract validation
+- handoff package contract validation (structure, checksums, package-context refs, secret redaction, and replay checks)
 - docs local-link validation (`docs/**/*.md` + root `README.md`)
 - runtime HTTP OpenAPI structural validation
 - runtime HTTP example payload validation
@@ -83,6 +84,29 @@ This validates:
 1. machine profile schema conformance
 2. referenced file existence
 3. referenced runtime profile compatibility checks
+
+### Handoff package contract coverage
+
+The script always runs:
+
+```bash
+python3 tools/contracts/validate-handoff-packages.py
+```
+
+If a local runtime binary is present, it runs:
+
+```bash
+python3 tools/contracts/validate-handoff-packages.py --runtime-bin <local-runtime-binary>
+```
+
+This validates:
+
+1. package structure and required files
+2. checksum integrity (`meta/checksums.sha256`)
+3. package-context manifest/runtime/provider/behavior references
+4. secret redaction enforcement (`token` values must not leak)
+5. static replay assumptions from a clean extracted package directory
+6. optional `anolis-runtime --check-config` replay check when runtime binary is provided
 
 ### Docs local-link coverage
 

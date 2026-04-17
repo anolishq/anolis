@@ -38,6 +38,14 @@ fi
 echo "[verify-local] Running machine profile contract checks"
 "$PYTHON_BIN" tools/contracts/validate-machine-profiles.py
 
+if [ -n "$RUNTIME_BIN" ]; then
+  echo "[verify-local] Running handoff package contract checks (with runtime replay)"
+  "$PYTHON_BIN" tools/contracts/validate-handoff-packages.py --runtime-bin "$RUNTIME_BIN"
+else
+  echo "[verify-local] Running handoff package contract checks (static replay mode)"
+  "$PYTHON_BIN" tools/contracts/validate-handoff-packages.py
+fi
+
 echo "[verify-local] Running docs local-link checks"
 "$PYTHON_BIN" tools/contracts/validate-doc-links.py
 
