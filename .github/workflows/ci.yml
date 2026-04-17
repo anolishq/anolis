@@ -240,14 +240,6 @@ jobs:
         run: |
           python tools/contracts/validate-doc-links.py
 
-      - name: Run System Composer and Workbench tests
-        env:
-          ANOLIS_DATA_DIR: /tmp/anolis-ci/systems
-        run: |
-          mkdir -p "$ANOLIS_DATA_DIR"
-          python -m pytest tools/system-composer/tests -q
-          python -m pytest tools/workbench/tests -q
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -256,8 +248,6 @@ jobs:
       - name: Run Operator UI fixture contract tests
         run: |
           node --test tools/operator-ui/tests/contracts.test.mjs
-          node --test tools/system-composer/tests/unit/launch_url_resolution.test.mjs
-          node --test tools/workbench/tests/unit/*.test.mjs
 
   core-build-test:
     name: ${{ matrix.lane }}

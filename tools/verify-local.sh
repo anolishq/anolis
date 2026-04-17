@@ -14,16 +14,6 @@ else
   exit 1
 fi
 
-if [ -z "${ANOLIS_DATA_DIR:-}" ]; then
-  export ANOLIS_DATA_DIR="/tmp/anolis-local/systems"
-fi
-mkdir -p "$ANOLIS_DATA_DIR"
-echo "[verify-local] Using ANOLIS_DATA_DIR=$ANOLIS_DATA_DIR"
-
-if ! "$PYTHON_BIN" -c "import anolis_composer_backend, anolis_workbench_backend" >/dev/null 2>&1; then
-  echo "[verify-local] Installing local editable backend packages"
-  "$PYTHON_BIN" -m pip install --no-build-isolation -e ./tools/system-composer -e ./tools/workbench
-fi
 
 RUNTIME_BIN=""
 if [ -f build/dev-release/core/anolis-runtime ]; then
@@ -49,13 +39,7 @@ fi
 echo "[verify-local] Running machine profile contract checks"
 "$PYTHON_BIN" tools/contracts/validate-machine-profiles.py
 
-if [ -n "$RUNTIME_BIN" ]; then
-  echo "[verify-local] Running handoff package contract checks (with runtime replay)"
-  "$PYTHON_BIN" tools/contracts/validate-handoff-packages.py --runtime-bin "$RUNTIME_BIN"
-else
-  echo "[verify-local] Running handoff package contract checks (static replay mode)"
-  "$PYTHON_BIN" tools/contracts/validate-handoff-packages.py
-fi
+echo "[verify-local] Skipping handoff package contract checks: moved to anolis-workbench repo"
 
 echo "[verify-local] Running docs local-link checks"
 "$PYTHON_BIN" tools/contracts/validate-doc-links.py
@@ -78,26 +62,14 @@ else
   echo "[verify-local] Skipping runtime HTTP conformance smoke checks: runtime or provider-sim binary not found"
 fi
 
-echo "[verify-local] Running System Composer test suite"
-"$PYTHON_BIN" -m pytest tools/system-composer/tests -q
-
-echo "[verify-local] Running Workbench shell test suite"
-"$PYTHON_BIN" -m pytest tools/workbench/tests -q
+echo "[verify-local] Skipping System Composer + Workbench tests: moved to anolis-workbench repo"
 
 if command -v node >/dev/null 2>&1; then
   echo "[verify-local] Running Operator UI fixture contract tests"
   node --test tools/operator-ui/tests/contracts.test.mjs
-  echo "[verify-local] Running System Composer launch URL resolution tests"
-  node --test tools/system-composer/tests/unit/launch_url_resolution.test.mjs
-  echo "[verify-local] Running Workbench frontend unit tests"
-  node --test tools/workbench/tests/unit/*.test.mjs
 elif command -v cmd.exe >/dev/null 2>&1 && cmd.exe /c node -v >/dev/null 2>&1; then
-  echo "[verify-local] Running UI fixture contract tests via cmd.exe node"
+  echo "[verify-local] Running Operator UI fixture contract tests via cmd.exe node"
   cmd.exe /c node --test tools/operator-ui/tests/contracts.test.mjs
-  echo "[verify-local] Running System Composer launch URL resolution tests via cmd.exe node"
-  cmd.exe /c node --test tools/system-composer/tests/unit/launch_url_resolution.test.mjs
-  echo "[verify-local] Running Workbench frontend unit tests via cmd.exe node"
-  cmd.exe /c node --test tools/workbench/tests/unit/*.test.mjs
 else
   echo "[verify-local] Skipping UI fixture contract tests: node not found"
 fi
