@@ -8,6 +8,7 @@ import pathlib
 import sys
 import zipfile
 
+import pytest
 import yaml
 
 _WB_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -88,3 +89,47 @@ def _make_project(tmp_path: pathlib.Path, *, name: str) -> pathlib.Path:
 
     (project_dir / "system.json").write_text(json.dumps(system, indent=2), encoding="utf-8")
     return project_dir
+
+
+def test_missing_system_json_raises_export_error(tmp_path: pathlib.Path) -> None:
+    project_dir = tmp_path / "no-system"
+    project_dir.mkdir()
+    with pytest.raises(exporter.ExportError, match="Project file not found"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
+def test_malformed_system_json_raises_export_error(tmp_path: pathlib.Path) -> None:
+    project_dir = tmp_path / "bad-json"
+    project_dir.mkdir()
+    (project_dir / "system.json").write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(exporter.ExportError, match="Failed reading"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
+def test_absolute_behavior_tree_path_raises_export_error(tmp_path: pathlib.Path) -> None:
+    project_dir = _make_project(tmp_path, name="abs-bt-test")
+    system_path = project_dir / "system.json"
+    system = json.loads(system_path.read_text(encoding="utf-8"))
+    # Use an absolute path (drive + path is absolute on all platforms)
+    abs_bt = str((tmp_path / "behaviors" / "local.xml").resolve())
+    system["topology"]["runtime"]["behavior_tree_path"] = abs_bt
+    system_path.write_text(json.dumps(system, indent=2), encoding="utf-8")
+    with pytest.raises(exporter.ExportError, match="must be a relative path"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
+def test_missing_behavior_tree_file_raises_export_error(tmp_path: pathlib.Path) -> None:
+    project_dir = _make_project(tmp_path, name="missing-bt-test")
+    system_path = project_dir / "system.json"
+    system = json.loads(system_path.read_text(encoding="utf-8"))
+    system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/ghost.xml"
+    system_path.write_text(json.dumps(system, indent=2), encoding="utf-8")
+    with pytest.raises(exporter.ExportError, match="Behavior tree file not found"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
+def test_secret_leak_raises_export_error() -> None:
+    with pytest.raises(exporter.ExportError, match="Secret-like token value leaked"):
+        exporter._assert_no_secret_leak({
+            "providers/test.yaml": b"connection:\n  token: 'leaked-secret'\n",
+        })

@@ -15,6 +15,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Any
 
+import jsonschema
 import yaml
 
 # Ensure tools/system-composer is importable as `backend`.
@@ -33,6 +34,8 @@ class ExportError(RuntimeError):
 
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 _MACHINE_ID_RE = re.compile(r"[^a-z0-9-]+")
+_MACHINE_PROFILE_SCHEMA_PATH = paths_module.REPO_ROOT / "schemas" / "machine-profile.schema.json"
+_MACHINE_PROFILE_SCHEMA_CACHE: "dict[str, Any] | None" = None
 
 
 def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
@@ -69,6 +72,7 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
         provider_ids=provider_ids,
         behavior_rel_paths=behavior_rel_paths,
     )
+    _validate_machine_profile(machine_profile)
     machine_profile_text = yaml.safe_dump(machine_profile, sort_keys=False)
 
     exported_at = _deterministic_exported_at(system)
@@ -283,6 +287,19 @@ def _build_machine_profile(
     if behavior_rel_paths:
         payload["behaviors"] = sorted(behavior_rel_paths.keys())
     return payload
+
+
+def _validate_machine_profile(profile: dict[str, Any]) -> None:
+    global _MACHINE_PROFILE_SCHEMA_CACHE
+    if _MACHINE_PROFILE_SCHEMA_CACHE is None:
+        _MACHINE_PROFILE_SCHEMA_CACHE = json.loads(
+            _MACHINE_PROFILE_SCHEMA_PATH.read_text(encoding="utf-8")
+        )
+    validator = jsonschema.Draft7Validator(_MACHINE_PROFILE_SCHEMA_CACHE)
+    errors = sorted(validator.iter_errors(profile), key=lambda e: list(e.path))
+    if errors:
+        msgs = "; ".join(f"{'.' + '.'.join(str(p) for p in e.path) if e.path else '$'}: {e.message}" for e in errors)
+        raise ExportError(f"Generated machine-profile failed schema validation: {msgs}")
 
 
 def _machine_id_from_name(name: str) -> str:
