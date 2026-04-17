@@ -7,8 +7,6 @@
 # - then `pip freeze > requirements-lock.txt`
 # on Powershell properly generate cross-compatible UTF8:
 # - run: `python -m pip freeze | Out-File -Encoding utf8 requirements-lock.txt`
--e ./tools/system-composer
--e ./tools/workbench
 requests>=2.32.0,<3.0.0
 pyyaml>=6.0.0,<7.0.0
 jsonschema>=4.22.0,<5.0.0

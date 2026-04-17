@@ -1,8 +1,0 @@
-{
-  "name": "anolis-workbench",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "node --test tests/unit/workbench_guards.test.mjs"
-  }
-}
