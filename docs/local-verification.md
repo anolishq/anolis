@@ -17,6 +17,12 @@ The script auto-installs local editable backend packages if missing:
 1. `-e ./tools/system-composer`
 2. `-e ./tools/workbench`
 
+Project state location:
+
+1. If `ANOLIS_DATA_DIR` is set, composer/workbench project data is read from that path.
+2. `tools/verify-local.sh` sets `ANOLIS_DATA_DIR=/tmp/anolis-local/systems` when unset to keep verification independent from repo checkout state.
+3. Runtime launch path resolution still supports legacy repo-relative executable paths.
+
 This runs:
 
 - runtime config contract validation (schema + `anolis-runtime --check-config`) when a local runtime binary is present

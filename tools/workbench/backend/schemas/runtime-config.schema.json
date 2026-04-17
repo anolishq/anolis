@@ -1,0 +1,732 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://anolis.dev/schemas/runtime-config.schema.json",
+  "title": "Anolis Runtime Config",
+  "description": "Compatibility-preserving schema for runtime YAML consumed by anolis-runtime.",
+  "type": "object",
+  "required": [
+    "providers"
+  ],
+  "properties": {
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "http": {
+      "$ref": "#/$defs/http"
+    },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/provider"
+      }
+    },
+    "polling": {
+      "$ref": "#/$defs/polling"
+    },
+    "telemetry": {
+      "$ref": "#/$defs/telemetry"
+    },
+    "logging": {
+      "$ref": "#/$defs/logging"
+    },
+    "automation": {
+      "$ref": "#/$defs/automation"
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "http": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "http"
+        ]
+      },
+      "then": {
+        "properties": {
+          "http": {
+            "allOf": [
+              {
+                "properties": {
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "thread_pool_size": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "cors_allowed_origins": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "cors_allow_credentials": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "cors_allow_credentials"
+                  ]
+                },
+                "then": {
+                  "allOf": [
+                    {
+                      "not": {
+                        "properties": {
+                          "cors_allowed_origins": {
+                            "const": "*"
+                          }
+                        },
+                        "required": [
+                          "cors_allowed_origins"
+                        ]
+                      }
+                    },
+                    {
+                      "not": {
+                        "properties": {
+                          "cors_allowed_origins": {
+                            "type": "array",
+                            "contains": {
+                              "const": "*"
+                            }
+                          }
+                        },
+                        "required": [
+                          "cors_allowed_origins"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "automation": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "automation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "automation": {
+            "anyOf": [
+              {
+                "required": [
+                  "behavior_tree"
+                ]
+              },
+              {
+                "required": [
+                  "behavior_tree_path"
+                ]
+              }
+            ],
+            "properties": {
+              "tick_rate_hz": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "shutdown_timeout_ms": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 30000
+        },
+        "startup_timeout_ms": {
+          "type": "integer",
+          "minimum": 5000,
+          "maximum": 300000
+        },
+        "mode": false
+      },
+      "additionalProperties": true
+    },
+    "http": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "bind": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "cors_allowed_origins": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "cors_allow_credentials": {
+          "type": "boolean"
+        },
+        "thread_pool_size": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "id",
+        "command"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100
+        },
+        "hello_timeout_ms": {
+          "type": "integer",
+          "minimum": 100
+        },
+        "ready_timeout_ms": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "restart_policy": {
+          "$ref": "#/$defs/restart_policy"
+        }
+      },
+      "additionalProperties": true
+    },
+    "restart_policy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_attempts": {
+          "type": "integer"
+        },
+        "backoff_ms": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "timeout_ms": {
+          "type": "integer"
+        },
+        "success_reset_ms": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "max_attempts",
+              "backoff_ms",
+              "timeout_ms"
+            ],
+            "properties": {
+              "max_attempts": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "backoff_ms": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1000
+              },
+              "success_reset_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "polling": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 100
+        }
+      },
+      "additionalProperties": true
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "influxdb": {
+          "$ref": "#/$defs/influxdb"
+        },
+        "influx_url": {
+          "type": "string",
+          "deprecated": true
+        },
+        "influx_org": {
+          "type": "string",
+          "deprecated": true
+        },
+        "influx_bucket": {
+          "type": "string",
+          "deprecated": true
+        },
+        "influx_token": {
+          "type": "string",
+          "deprecated": true
+        },
+        "batch_size": {
+          "type": "integer",
+          "deprecated": true
+        },
+        "flush_interval_ms": {
+          "type": "integer",
+          "deprecated": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "influxdb": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "org": {
+          "type": "string"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "batch_size": {
+          "type": "integer"
+        },
+        "flush_interval_ms": {
+          "type": "integer"
+        },
+        "max_retry_buffer_size": {
+          "type": "integer"
+        },
+        "queue_size": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "automation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "behavior_tree": {
+          "type": "string"
+        },
+        "behavior_tree_path": {
+          "type": "string",
+          "deprecated": true
+        },
+        "tick_rate_hz": {
+          "type": "integer"
+        },
+        "manual_gating_policy": {
+          "type": "string",
+          "enum": [
+            "BLOCK",
+            "OVERRIDE"
+          ]
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "mode_transition_hooks": {
+          "$ref": "#/$defs/mode_transition_hooks"
+        }
+      },
+      "additionalProperties": true
+    },
+    "parameter": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/parameter_double"
+        },
+        {
+          "$ref": "#/$defs/parameter_int64"
+        },
+        {
+          "$ref": "#/$defs/parameter_bool"
+        },
+        {
+          "$ref": "#/$defs/parameter_string"
+        }
+      ]
+    },
+    "parameter_base": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "parameter_double": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/parameter_base"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "double"
+            },
+            "default": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          },
+          "not": {
+            "required": [
+              "allowed_values"
+            ]
+          }
+        }
+      ]
+    },
+    "parameter_int64": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/parameter_base"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "int64"
+            },
+            "default": {
+              "type": "integer"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          },
+          "not": {
+            "required": [
+              "allowed_values"
+            ]
+          }
+        }
+      ]
+    },
+    "parameter_bool": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/parameter_base"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "bool"
+            },
+            "default": {
+              "type": "boolean"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "min"
+                ]
+              },
+              {
+                "required": [
+                  "max"
+                ]
+              },
+              {
+                "required": [
+                  "allowed_values"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "parameter_string": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/parameter_base"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "string"
+            },
+            "default": {
+              "type": "string"
+            },
+            "allowed_values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "min"
+                ]
+              },
+              {
+                "required": [
+                  "max"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "mode_transition_hooks": {
+      "type": "object",
+      "properties": {
+        "before_transition": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_hook"
+          }
+        },
+        "after_transition": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_hook"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "mode_transition_hook": {
+      "type": "object",
+      "required": [
+        "calls"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "enum": [
+            "MANUAL",
+            "AUTO",
+            "IDLE",
+            "FAULT",
+            "*"
+          ]
+        },
+        "to": {
+          "type": "string",
+          "enum": [
+            "MANUAL",
+            "AUTO",
+            "IDLE",
+            "FAULT",
+            "*"
+          ]
+        },
+        "fail_on_error": {
+          "type": "boolean"
+        },
+        "calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/mode_transition_call"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "mode_transition_call": {
+      "type": "object",
+      "required": [
+        "device_handle"
+      ],
+      "properties": {
+        "device_handle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "function_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "function_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "function_id"
+          ]
+        },
+        {
+          "required": [
+            "function_name"
+          ]
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

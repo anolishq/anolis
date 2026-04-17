@@ -25,17 +25,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover
     ) from exc
 
 
-def _repo_root_from_script() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parents[2]
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate .anpkg handoff package structure, integrity, and replay checks.")
-    parser.add_argument(
-        "--repo-root",
-        default=str(_repo_root_from_script()),
-        help="Path to repository root (default: auto-detected).",
-    )
     parser.add_argument(
         "--package",
         action="append",
@@ -55,29 +46,80 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_fixture_project(repo_root: pathlib.Path, fixture_root: pathlib.Path) -> pathlib.Path:
-    template_path = repo_root / "tools" / "system-composer" / "templates" / "sim-quickstart" / "system.json"
-    payload = json.loads(template_path.read_text(encoding="utf-8"))
+def _fixture_system_payload(project_name: str) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "meta": {
+            "name": project_name,
+            "created": "2026-04-16T19:01:02+00:00",
+            "template": "sim-quickstart-fixture",
+        },
+        "topology": {
+            "runtime": {
+                "name": "anolis-main",
+                "http_port": 8080,
+                "http_bind": "127.0.0.1",
+                "cors_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+                "cors_allow_credentials": False,
+                "shutdown_timeout_ms": 2000,
+                "startup_timeout_ms": 30000,
+                "polling_interval_ms": 500,
+                "log_level": "info",
+                "telemetry": {
+                    "enabled": True,
+                    "influxdb": {
+                        "url": "http://localhost:8086",
+                        "org": "anolis",
+                        "bucket": "anolis",
+                        "token": "fixture-secret",
+                    },
+                },
+                "automation_enabled": True,
+                "behavior_tree_path": "behaviors/fixture.xml",
+                "providers": [
+                    {
+                        "id": "sim0",
+                        "kind": "sim",
+                        "timeout_ms": 5000,
+                        "hello_timeout_ms": 2000,
+                        "ready_timeout_ms": 10000,
+                        "restart_policy": {"enabled": False},
+                    }
+                ],
+            },
+            "providers": {
+                "sim0": {
+                    "kind": "sim",
+                    "provider_name": "sim0",
+                    "startup_policy": "degraded",
+                    "simulation_mode": "non_interacting",
+                    "tick_rate_hz": 10.0,
+                    "devices": [
+                        {"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0},
+                        {"id": "motorctl0", "type": "motorctl", "max_speed": 3000.0},
+                    ],
+                }
+            },
+        },
+        "paths": {
+            "runtime_executable": "build/dev-release/core/anolis-runtime",
+            "providers": {
+                "sim0": {
+                    "executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim",
+                }
+            },
+        },
+    }
+
+
+def _build_fixture_project(fixture_root: pathlib.Path) -> pathlib.Path:
+    payload = _fixture_system_payload("fixture-project")
 
     project_dir = fixture_root / "fixture-project"
     project_dir.mkdir(parents=True, exist_ok=True)
     behavior_dir = project_dir / "behaviors"
     behavior_dir.mkdir(parents=True, exist_ok=True)
     (behavior_dir / "fixture.xml").write_text("<root />\n", encoding="utf-8")
-
-    payload["meta"]["name"] = "fixture-project"
-    payload["meta"]["created"] = "2026-04-16T19:01:02+00:00"
-    payload["topology"]["runtime"]["automation_enabled"] = True
-    payload["topology"]["runtime"]["behavior_tree_path"] = "behaviors/fixture.xml"
-    payload["topology"]["runtime"]["telemetry"] = {
-        "enabled": True,
-        "influxdb": {
-            "url": "http://localhost:8086",
-            "org": "anolis",
-            "bucket": "anolis",
-            "token": "fixture-secret",
-        },
-    }
 
     (project_dir / "system.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return project_dir
@@ -106,7 +148,6 @@ def _recompute_checksums(package_root: pathlib.Path) -> None:
 
 def _run_fixture_checks(
     *,
-    repo_root: pathlib.Path,
     runtime_bin: pathlib.Path | None,
     exporter,
     package_validator,
@@ -115,7 +156,7 @@ def _run_fixture_checks(
     failures = 0
     with tempfile.TemporaryDirectory(prefix="anolis-package-fixtures-") as tmp_dir:
         root = pathlib.Path(tmp_dir)
-        project_dir = _build_fixture_project(repo_root, root)
+        project_dir = _build_fixture_project(root)
         package_path = root / "fixture.anpkg"
 
         exporter.build_package(project_dir=project_dir, out_path=package_path)
@@ -173,7 +214,6 @@ def _run_fixture_checks(
 
 def main() -> int:
     args = _parse_args()
-    repo_root = pathlib.Path(args.repo_root).resolve()
     runtime_bin = pathlib.Path(args.runtime_bin).resolve() if args.runtime_bin else None
 
     checks = 0
@@ -181,7 +221,6 @@ def main() -> int:
 
     if not args.skip_fixtures:
         fixture_checks, fixture_failures = _run_fixture_checks(
-            repo_root=repo_root,
             runtime_bin=runtime_bin,
             exporter=exporter,
             package_validator=package_validator,

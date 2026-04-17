@@ -15,8 +15,7 @@ import yaml  # noqa: E402 (PyYAML must be available for the renderer already use
 from anolis_composer_backend import renderer
 
 TEMPLATES_DIR = pathlib.Path(__file__).parent.parent / "templates"
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-BIOREACTOR_DIR = REPO_ROOT / "config" / "bioreactor"
+FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "bioreactor"
 
 # Platform-dependent binary paths (relative to repo root)
 _WIN_RUNTIME = pathlib.Path("build/dev-windows-release/core/anolis-runtime.exe")
@@ -115,15 +114,15 @@ def test_bioreactor_manual_matches_checked_in_baselines():
     outputs = renderer.render(system, "bioreactor-manual")
 
     rendered_runtime = yaml.safe_load(outputs["anolis-runtime.yaml"])
-    expected_runtime = _load_yaml(BIOREACTOR_DIR / "anolis-runtime.bioreactor.manual.yaml")
+    expected_runtime = _load_yaml(FIXTURE_DIR / "anolis-runtime.bioreactor.manual.yaml")
     assert _normalize_runtime_doc(rendered_runtime) == _normalize_runtime_doc(expected_runtime)
 
     rendered_bread = yaml.safe_load(outputs["providers/bread0.yaml"])
-    expected_bread = _load_yaml(BIOREACTOR_DIR / "provider-bread.bioreactor.yaml")
+    expected_bread = _load_yaml(FIXTURE_DIR / "provider-bread.bioreactor.yaml")
     assert rendered_bread == expected_bread
 
     rendered_ezo = yaml.safe_load(outputs["providers/ezo0.yaml"])
-    expected_ezo = _load_yaml(BIOREACTOR_DIR / "provider-ezo.bioreactor.yaml")
+    expected_ezo = _load_yaml(FIXTURE_DIR / "provider-ezo.bioreactor.yaml")
     assert rendered_ezo == expected_ezo
 
 
@@ -134,7 +133,7 @@ def test_bioreactor_telemetry_path_matches_checked_in_baseline():
 
     outputs = renderer.render(system, "bioreactor-telemetry")
     rendered_runtime = yaml.safe_load(outputs["anolis-runtime.yaml"])
-    expected_runtime = _load_yaml(BIOREACTOR_DIR / "anolis-runtime.bioreactor.telemetry.yaml")
+    expected_runtime = _load_yaml(FIXTURE_DIR / "anolis-runtime.bioreactor.telemetry.yaml")
     assert _normalize_runtime_doc(rendered_runtime) == _normalize_runtime_doc(expected_runtime)
 
 

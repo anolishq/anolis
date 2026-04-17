@@ -1,0 +1,805 @@
+openapi: 3.1.0
+info:
+  title: Anolis Runtime HTTP API
+  version: "0.1.0"
+  description: |
+    Normative contract for the currently shipped `/v0` runtime HTTP surface.
+    This contract is compatibility-first and reflects implementation behavior.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default local runtime bind
+tags:
+  - name: runtime
+  - name: providers
+  - name: devices
+  - name: state
+  - name: control
+  - name: automation
+  - name: events
+paths:
+  /v0/runtime/status:
+    get:
+      tags: [runtime]
+      operationId: getRuntimeStatus
+      summary: Get runtime health and provider availability summary
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatusResponse'
+  /v0/providers/health:
+    get:
+      tags: [providers]
+      operationId: getProvidersHealth
+      summary: Get provider health, supervision, and per-device freshness
+      responses:
+        "200":
+          description: Provider health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvidersHealthResponse'
+  /v0/devices:
+    get:
+      tags: [devices]
+      operationId: getDevices
+      summary: List discovered devices
+      responses:
+        "200":
+          description: Device inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevicesResponse'
+  /v0/devices/{provider_id}/{device_id}/capabilities:
+    get:
+      tags: [devices]
+      operationId: getDeviceCapabilities
+      summary: Get capabilities for a specific device
+      parameters:
+        - $ref: '#/components/parameters/provider_id'
+        - $ref: '#/components/parameters/device_id'
+      responses:
+        "200":
+          description: Device capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCapabilitiesResponse'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+  /v0/state:
+    get:
+      tags: [state]
+      operationId: getAllState
+      summary: Get cached state for all devices with available state
+      responses:
+        "200":
+          description: Aggregated device state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateCollectionResponse'
+  /v0/state/{provider_id}/{device_id}:
+    get:
+      tags: [state]
+      operationId: getDeviceState
+      summary: Get cached state for one device
+      parameters:
+        - $ref: '#/components/parameters/provider_id'
+        - $ref: '#/components/parameters/device_id'
+        - name: signal_id
+          in: query
+          description: Optional repeated filter for returned signal ids
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        "200":
+          description: Device state snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceStateResponse'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+  /v0/call:
+    post:
+      tags: [control]
+      operationId: postCall
+      summary: Execute a device function by numeric function id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallRequest'
+      responses:
+        "200":
+          description: Call accepted/executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/FailedPrecondition'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "504":
+          $ref: '#/components/responses/DeadlineExceeded'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /v0/mode:
+    get:
+      tags: [automation]
+      operationId: getMode
+      summary: Get current runtime mode
+      responses:
+        "200":
+          description: Current mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+    post:
+      tags: [automation]
+      operationId: postMode
+      summary: Set runtime mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetModeRequest'
+      responses:
+        "200":
+          description: Mode set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "409":
+          $ref: '#/components/responses/FailedPrecondition'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /v0/parameters:
+    get:
+      tags: [automation]
+      operationId: getParameters
+      summary: Get runtime automation parameters
+      responses:
+        "200":
+          description: Parameter inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParametersResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+    post:
+      tags: [automation]
+      operationId: postParameter
+      summary: Update a runtime automation parameter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetParameterRequest'
+      responses:
+        "200":
+          description: Parameter updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetParameterResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /v0/automation/tree:
+    get:
+      tags: [automation]
+      operationId: getAutomationTree
+      summary: Get loaded behavior tree XML
+      responses:
+        "200":
+          description: Behavior tree content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationTreeResponse'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /v0/automation/status:
+    get:
+      tags: [automation]
+      operationId: getAutomationStatus
+      summary: Get automation runtime status
+      responses:
+        "200":
+          description: Automation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationStatusResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /v0/events:
+    get:
+      tags: [events]
+      operationId: getEventsStream
+      summary: Subscribe to SSE event stream
+      description: |
+        SSE endpoint. Response body is a text/event-stream stream.
+        Initial contract depth is provisional and validates endpoint presence
+        plus top-level streaming media type.
+      parameters:
+        - name: provider_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: signal_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "503":
+          $ref: '#/components/responses/Unavailable'
+components:
+  parameters:
+    provider_id:
+      name: provider_id
+      in: path
+      required: true
+      schema:
+        type: string
+    device_id:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid argument or malformed payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    FailedPrecondition:
+      description: Request rejected due to mode or lifecycle precondition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: Service or provider unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    DeadlineExceeded:
+      description: Request exceeded timeout
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Status:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+    RuntimeMode:
+      type: string
+      enum: [MANUAL, AUTO, IDLE, FAULT]
+    RuntimeStatusProvider:
+      type: object
+      additionalProperties: false
+      required: [provider_id, state, device_count]
+      properties:
+        provider_id:
+          type: string
+        state:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        device_count:
+          type: integer
+    RuntimeStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [status, mode, uptime_seconds, polling_interval_ms, providers, device_count]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        mode:
+          $ref: '#/components/schemas/RuntimeMode'
+        uptime_seconds:
+          type: integer
+        polling_interval_ms:
+          type: integer
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeStatusProvider'
+        device_count:
+          type: integer
+    DeviceInfo:
+      type: object
+      additionalProperties: false
+      required: [provider_id, device_id, display_name, type]
+      properties:
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        display_name:
+          type: string
+        type:
+          type: string
+    DevicesResponse:
+      type: object
+      additionalProperties: false
+      required: [status, devices]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceInfo'
+    ValueType:
+      type: string
+      enum: [double, int64, uint64, bool, string, bytes]
+    ArgSpec:
+      type: object
+      required: [type, required]
+      properties:
+        type:
+          $ref: '#/components/schemas/ValueType'
+        required:
+          type: boolean
+        description:
+          type: string
+        unit:
+          type: string
+        min:
+          type: number
+        max:
+          type: number
+      additionalProperties: false
+    FunctionSpec:
+      type: object
+      additionalProperties: false
+      required: [function_id, name, label, args]
+      properties:
+        function_id:
+          type: integer
+        name:
+          type: string
+        label:
+          type: string
+        args:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ArgSpec'
+    SignalSpec:
+      type: object
+      additionalProperties: false
+      required: [signal_id, value_type, label]
+      properties:
+        signal_id:
+          type: string
+        value_type:
+          $ref: '#/components/schemas/ValueType'
+        label:
+          type: string
+    DeviceCapabilities:
+      type: object
+      additionalProperties: false
+      required: [signals, functions]
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignalSpec'
+        functions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FunctionSpec'
+    DeviceCapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [status, provider_id, device_id, capabilities]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/DeviceCapabilities'
+    TypedValue:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: '#/components/schemas/ValueType'
+        double:
+          type: number
+        int64:
+          type: integer
+        uint64:
+          type: integer
+          minimum: 0
+        bool:
+          type: boolean
+        string:
+          type: string
+        base64:
+          type: string
+      additionalProperties: false
+    SignalValue:
+      type: object
+      additionalProperties: false
+      required: [signal_id, value, timestamp_epoch_ms, quality, age_ms]
+      properties:
+        signal_id:
+          type: string
+        value:
+          $ref: '#/components/schemas/TypedValue'
+        timestamp_epoch_ms:
+          type: integer
+        quality:
+          type: string
+          enum: [OK, STALE, UNAVAILABLE, FAULT]
+        age_ms:
+          type: integer
+    DeviceState:
+      type: object
+      additionalProperties: false
+      required: [provider_id, device_id, quality, values]
+      properties:
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        quality:
+          type: string
+          enum: [OK, STALE, UNAVAILABLE, FAULT]
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignalValue'
+    StateCollectionResponse:
+      type: object
+      additionalProperties: false
+      required: [status, generated_at_epoch_ms, devices]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        generated_at_epoch_ms:
+          type: integer
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceState'
+    DeviceStateResponse:
+      type: object
+      additionalProperties: false
+      required: [status, generated_at_epoch_ms, provider_id, device_id, quality, values]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        generated_at_epoch_ms:
+          type: integer
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        quality:
+          type: string
+          enum: [OK, STALE, UNAVAILABLE, FAULT]
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignalValue'
+    CallRequest:
+      type: object
+      additionalProperties: false
+      required: [provider_id, device_id, function_id]
+      properties:
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        function_id:
+          type: integer
+        args:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TypedValue'
+    CallResponse:
+      type: object
+      additionalProperties: false
+      required: [status, provider_id, device_id, function_id, post_call_poll_triggered]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        provider_id:
+          type: string
+        device_id:
+          type: string
+        function_id:
+          type: integer
+        post_call_poll_triggered:
+          type: boolean
+    ModeResponse:
+      type: object
+      additionalProperties: false
+      required: [status, mode]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        mode:
+          $ref: '#/components/schemas/RuntimeMode'
+    SetModeRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode:
+          $ref: '#/components/schemas/RuntimeMode'
+    ParameterType:
+      type: string
+      enum: [double, int64, bool, string]
+    ParameterValue:
+      anyOf:
+        - type: number
+        - type: integer
+        - type: boolean
+        - type: string
+    ParameterDefinition:
+      type: object
+      required: [name, type, value]
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ParameterType'
+        value:
+          $ref: '#/components/schemas/ParameterValue'
+        min:
+          type: number
+        max:
+          type: number
+        allowed_values:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    ParametersResponse:
+      type: object
+      additionalProperties: false
+      required: [status, parameters]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParameterDefinition'
+    SetParameterRequest:
+      type: object
+      additionalProperties: false
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          $ref: '#/components/schemas/ParameterValue'
+    SetParameterResponse:
+      type: object
+      additionalProperties: false
+      required: [status, parameter]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        parameter:
+          type: object
+          additionalProperties: false
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              $ref: '#/components/schemas/ParameterValue'
+    AutomationTreeResponse:
+      type: object
+      additionalProperties: false
+      required: [status, tree]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        tree:
+          type: string
+    AutomationStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - enabled
+        - active
+        - bt_status
+        - last_tick_ms
+        - ticks_since_progress
+        - total_ticks
+        - error_count
+        - current_tree
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        enabled:
+          type: boolean
+        active:
+          type: boolean
+        bt_status:
+          type: string
+          enum: [IDLE, RUNNING, STALLED, ERROR, UNKNOWN]
+        last_tick_ms:
+          type: integer
+        ticks_since_progress:
+          type: integer
+        total_ticks:
+          type: integer
+        last_error:
+          oneOf:
+            - type: string
+            - type: "null"
+        error_count:
+          type: integer
+        current_tree:
+          type: string
+    ProviderSupervision:
+      type: object
+      additionalProperties: false
+      required: [enabled, attempt_count, max_attempts, crash_detected, circuit_open, next_restart_in_ms]
+      properties:
+        enabled:
+          type: boolean
+        attempt_count:
+          type: integer
+        max_attempts:
+          type: integer
+        crash_detected:
+          type: boolean
+        circuit_open:
+          type: boolean
+        next_restart_in_ms:
+          oneOf:
+            - type: integer
+            - type: "null"
+    ProviderDeviceHealth:
+      type: object
+      additionalProperties: false
+      required: [device_id, health, last_poll_ms, staleness_ms]
+      properties:
+        device_id:
+          type: string
+        health:
+          type: string
+          enum: [OK, WARNING, STALE, UNAVAILABLE, UNKNOWN]
+        last_poll_ms:
+          type: integer
+        staleness_ms:
+          type: integer
+    ProviderHealth:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_id
+        - state
+        - lifecycle_state
+        - last_seen_ago_ms
+        - uptime_seconds
+        - device_count
+        - supervision
+        - devices
+      properties:
+        provider_id:
+          type: string
+        state:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE]
+        lifecycle_state:
+          type: string
+          enum: [RUNNING, RECOVERING, RESTARTING, CIRCUIT_OPEN, DOWN]
+        last_seen_ago_ms:
+          oneOf:
+            - type: integer
+            - type: "null"
+        uptime_seconds:
+          type: integer
+        device_count:
+          type: integer
+        supervision:
+          $ref: '#/components/schemas/ProviderSupervision'
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderDeviceHealth'
+    ProvidersHealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, providers]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderHealth'

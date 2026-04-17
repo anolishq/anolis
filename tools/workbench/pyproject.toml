@@ -13,3 +13,6 @@ packages = ["anolis_workbench_backend"]
 
 [tool.setuptools.package-dir]
 anolis_workbench_backend = "backend"
+
+[tool.setuptools.package-data]
+anolis_workbench_backend = ["schemas/*.json"]

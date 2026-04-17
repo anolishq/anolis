@@ -214,7 +214,7 @@ def save_project(name: str, system: dict) -> None:
     pdir = project_dir(name)
     pdir.mkdir(parents=True, exist_ok=True)
     system_json_path(name).write_text(json.dumps(system, indent=2), encoding="utf-8")
-    outputs = renderer.render(system, name)
+    outputs = renderer.render(system, name, systems_dir_name=SYSTEMS_ROOT.name)
     for rel, content in outputs.items():
         out_path = pdir / rel
         out_path.parent.mkdir(parents=True, exist_ok=True)

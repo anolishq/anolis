@@ -12,6 +12,7 @@ import pathlib
 import re
 import zipfile
 from datetime import datetime, timezone
+from importlib import resources
 from typing import Any
 
 import jsonschema
@@ -27,7 +28,6 @@ class ExportError(RuntimeError):
 
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 _MACHINE_ID_RE = re.compile(r"[^a-z0-9-]+")
-_MACHINE_PROFILE_SCHEMA_PATH = paths_module.REPO_ROOT / "schemas" / "machine-profile.schema.json"
 _MACHINE_PROFILE_SCHEMA_CACHE: "dict[str, Any] | None" = None
 
 
@@ -196,12 +196,18 @@ def _resolve_behavior_path(raw: str, project_dir: pathlib.Path) -> pathlib.Path:
         raise ExportError("automation.behavior_tree must be a relative path")
 
     repo_root = paths_module.REPO_ROOT.resolve()
+    data_root = paths_module.DATA_ROOT.resolve()
     candidates = [
         (project_dir / raw_path).resolve(),
+        (data_root / raw_path).resolve(),
         (repo_root / raw_path).resolve(),
     ]
     for candidate in candidates:
-        if candidate.is_file() and (_is_within(candidate, project_dir) or _is_within(candidate, repo_root)):
+        if candidate.is_file() and (
+            _is_within(candidate, project_dir)
+            or _is_within(candidate, data_root)
+            or _is_within(candidate, repo_root)
+        ):
             return candidate
     raise ExportError(f"Behavior tree file not found for automation.behavior_tree='{raw}'")
 
@@ -285,9 +291,14 @@ def _build_machine_profile(
 def _validate_machine_profile(profile: dict[str, Any]) -> None:
     global _MACHINE_PROFILE_SCHEMA_CACHE
     if _MACHINE_PROFILE_SCHEMA_CACHE is None:
-        _MACHINE_PROFILE_SCHEMA_CACHE = json.loads(
-            _MACHINE_PROFILE_SCHEMA_PATH.read_text(encoding="utf-8")
-        )
+        schema_file = resources.files("anolis_workbench_backend").joinpath("schemas", "machine-profile.schema.json")
+        try:
+            payload = json.loads(schema_file.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ExportError("Bundled machine-profile schema not found in package data") from exc
+        if not isinstance(payload, dict):
+            raise ExportError("Bundled machine-profile schema root must be an object")
+        _MACHINE_PROFILE_SCHEMA_CACHE = payload
     validator = jsonschema.Draft7Validator(_MACHINE_PROFILE_SCHEMA_CACHE)
     errors = sorted(validator.iter_errors(profile), key=lambda e: list(e.path))
     if errors:

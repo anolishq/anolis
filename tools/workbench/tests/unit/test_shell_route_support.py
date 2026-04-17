@@ -18,10 +18,6 @@ from io import BytesIO
 
 import pytest
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
-_SYSTEMS_ROOT = _REPO_ROOT / "systems"
-
-
 def _pick_free_port() -> int:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -120,10 +116,12 @@ def _wait_for_ready(base_url: str, proc: subprocess.Popen[str], timeout_s: float
 @pytest.fixture
 def workbench_server(tmp_path: pathlib.Path) -> dict[str, Any]:
     port = _pick_free_port()
+    systems_root = tmp_path / "systems"
     env = os.environ.copy()
     env["ANOLIS_WORKBENCH_HOST"] = "127.0.0.1"
     env["ANOLIS_WORKBENCH_PORT"] = str(port)
     env["ANOLIS_WORKBENCH_OPEN_BROWSER"] = "0"
+    env["ANOLIS_DATA_DIR"] = str(systems_root)
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "anolis_workbench_backend.server"],
@@ -138,7 +136,7 @@ def workbench_server(tmp_path: pathlib.Path) -> dict[str, Any]:
     _wait_for_ready(base_url, proc)
 
     try:
-        yield {"base_url": base_url, "port": port}
+        yield {"base_url": base_url, "port": port, "systems_root": systems_root, "env": env}
     finally:
         proc.terminate()
         try:
@@ -238,7 +236,7 @@ def test_launch_is_hard_blocked_when_another_project_is_running(workbench_server
         stderr=subprocess.DEVNULL,
     )
 
-    running_path = _SYSTEMS_ROOT / running / "running.json"
+    running_path = pathlib.Path(workbench_server["systems_root"]) / running / "running.json"
     running_path.write_text(
         json.dumps({"pid": runner.pid, "project": running, "started": time.time()}),
         encoding="utf-8",
@@ -328,7 +326,7 @@ def test_runtime_proxy_returns_502_when_runtime_unreachable(workbench_server: di
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    running_path = _SYSTEMS_ROOT / project_name / "running.json"
+    running_path = pathlib.Path(workbench_server["systems_root"]) / project_name / "running.json"
     running_path.write_text(
         json.dumps({"pid": runner.pid, "project": project_name, "started": time.time()}),
         encoding="utf-8",
@@ -382,11 +380,13 @@ def test_export_endpoint_and_cli_outputs_are_bit_identical(workbench_server: dic
         assert first_data == second_data
 
         cli_out = tmp_path / f"{project_name}.anpkg"
+        cli_env = dict(workbench_server["env"])
         cli_result = subprocess.run(
-            [sys.executable, str(_REPO_ROOT / "tools" / "package.py"), project_name, str(cli_out)],
+            [sys.executable, "-m", "anolis_workbench_backend.package_cli", project_name, str(cli_out)],
             check=False,
             capture_output=True,
             text=True,
+            env=cli_env,
         )
         assert cli_result.returncode == 0, cli_result.stderr
         assert cli_out.is_file()

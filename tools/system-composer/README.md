@@ -26,13 +26,14 @@ Optional environment overrides:
 2. `ANOLIS_COMPOSER_PORT` (default: `3002`)
 3. `ANOLIS_OPERATOR_UI_BASE` (default: `http://localhost:3000`)
 4. `ANOLIS_COMPOSER_OPEN_BROWSER` (`1` or `0`, default: `1`)
+5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`; legacy fallback: repo `systems/` when present)
 
 ## What it does
 
 The composer lets you pick a starter template (sim, mixed-bus, bioreactor),
 fill in device and provider settings through a form UI, save the system to a
 named project, and launch the full Anolis runtime stack with one click.
-Projects are stored in `systems/` at the repo root (gitignored).
+Projects are stored under the configured systems root (`ANOLIS_DATA_DIR`).
 
 When a runtime is healthy, the launch panel's "Open in Operator UI" link is
 resolved in this order:
@@ -68,10 +69,10 @@ intentionally disabled in v1 to avoid partial/ambiguous behavior.
 
 ## System Project Layout
 
-Each project in `systems/` is a self-contained machine description:
+Each project in `<systems-root>/` is a self-contained machine description:
 
 ```
-systems/<project-name>/
+<systems-root>/<project-name>/
   system.json             Composer source (topology + paths)
   anolis-runtime.yaml     Generated runtime config
   providers/

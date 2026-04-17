@@ -9,7 +9,7 @@ relative output path (e.g. "anolis-runtime.yaml", "providers/sim0.yaml").
 import yaml
 
 
-def render(system: dict, project_name: str) -> dict[str, str]:
+def render(system: dict, project_name: str, *, systems_dir_name: str = "systems") -> dict[str, str]:
     """
     Render a system.json dict into YAML config strings.
 
@@ -18,6 +18,10 @@ def render(system: dict, project_name: str) -> dict[str, str]:
         project_name: Name of the project directory under systems/.
                       Used to build the provider config file paths that the
                       runtime will pass to each provider via --config.
+        systems_dir_name:
+                      Root directory name that contains project folders
+                      (default: "systems"). Used for runtime provider
+                      config path generation.
 
     Returns:
         {
@@ -64,7 +68,7 @@ def render(system: dict, project_name: str) -> dict[str, str]:
     provider_list = []
     for p in rt.get("providers", []):
         pid = p["id"]
-        config_arg = f"systems/{project_name}/providers/{pid}.yaml"
+        config_arg = f"{systems_dir_name}/{project_name}/providers/{pid}.yaml"
         path_entry = provider_paths.get(pid, {})
         entry: dict = {
             "id": pid,

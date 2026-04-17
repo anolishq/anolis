@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from anolis_composer_backend import paths as paths_module
 
 _CATALOG_PATH = paths_module.CATALOG_PATH
-_SYSTEMS_DIR = paths_module.SYSTEMS_ROOT
 
 _state: dict = {
     "project": None,  # active project name
@@ -45,7 +44,7 @@ def _load_catalog() -> dict:
 
 
 def running_json_path(name: str) -> pathlib.Path:
-    return _SYSTEMS_DIR / name / "running.json"
+    return paths_module.SYSTEMS_ROOT / name / "running.json"
 
 
 def _resolve_executable_path(path_value: str | None) -> pathlib.Path | None:
@@ -158,10 +157,11 @@ def _terminate_pid(pid: int, timeout_s: float = 5.0) -> None:
 
 
 def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
-    if not _SYSTEMS_DIR.exists():
+    systems_dir = paths_module.SYSTEMS_ROOT
+    if not systems_dir.exists():
         return None
 
-    for project_dir in sorted(_SYSTEMS_DIR.iterdir()):
+    for project_dir in sorted(systems_dir.iterdir()):
         if not project_dir.is_dir():
             continue
         running_path = project_dir / "running.json"
@@ -242,7 +242,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
 
     # Re-render YAML to disk first so --check-config sees current state
     try:
-        renders = renderer.render(system, name)
+        renders = renderer.render(system, name, systems_dir_name=paths_module.SYSTEMS_ROOT.name)
         for rel_path, content in renders.items():
             out = project_dir / rel_path
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -433,6 +433,7 @@ def _check_config_binary(check_name: str, exe: pathlib.Path | None, yaml_path: p
     try:
         result = subprocess.run(
             [str(exe), "--check-config", str(yaml_path)],
+            cwd=str(paths_module.DATA_ROOT),
             capture_output=True,
             text=True,
             timeout=10,
@@ -464,7 +465,7 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
         raise RuntimeError("A system is already running.")
 
     # Re-render YAML to disk
-    renders = renderer.render(system, name)
+    renders = renderer.render(system, name, systems_dir_name=paths_module.SYSTEMS_ROOT.name)
     for rel_path, content in renders.items():
         out = project_dir / rel_path
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -486,7 +487,7 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        cwd=str(paths_module.REPO_ROOT),
+        cwd=str(paths_module.DATA_ROOT),
         bufsize=1,
         text=True,
     )
@@ -580,7 +581,7 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        cwd=str(paths_module.REPO_ROOT),
+        cwd=str(paths_module.DATA_ROOT),
         bufsize=1,
         text=True,
     )

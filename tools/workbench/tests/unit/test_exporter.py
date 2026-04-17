@@ -12,9 +12,6 @@ import yaml
 
 from anolis_workbench_backend import exporter
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
-
-
 def test_build_package_is_deterministic_and_rewrites_runtime_paths(tmp_path: pathlib.Path) -> None:
     project_dir = _make_project(tmp_path, name="export-deterministic")
     out_a = tmp_path / "a.anpkg"
@@ -58,25 +55,72 @@ def test_build_package_is_deterministic_and_rewrites_runtime_paths(tmp_path: pat
 
 
 def _make_project(tmp_path: pathlib.Path, *, name: str) -> pathlib.Path:
-    template_path = _REPO_ROOT / "tools" / "system-composer" / "templates" / "sim-quickstart" / "system.json"
-    system = json.loads(template_path.read_text(encoding="utf-8"))
+    system = {
+        "schema_version": 1,
+        "meta": {
+            "name": name,
+            "created": "2026-04-16T19:01:02.999999+00:00",
+            "template": "sim-quickstart-fixture",
+        },
+        "topology": {
+            "runtime": {
+                "name": "anolis-main",
+                "http_port": 8080,
+                "http_bind": "127.0.0.1",
+                "cors_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+                "cors_allow_credentials": False,
+                "shutdown_timeout_ms": 2000,
+                "startup_timeout_ms": 30000,
+                "polling_interval_ms": 500,
+                "log_level": "info",
+                "telemetry": {
+                    "enabled": True,
+                    "influxdb": {
+                        "url": "http://localhost:8086",
+                        "org": "anolis",
+                        "bucket": "anolis",
+                        "token": "super-secret",
+                    },
+                },
+                "automation_enabled": True,
+                "behavior_tree_path": "behaviors/local.xml",
+                "providers": [
+                    {
+                        "id": "sim0",
+                        "kind": "sim",
+                        "timeout_ms": 5000,
+                        "hello_timeout_ms": 2000,
+                        "ready_timeout_ms": 10000,
+                        "restart_policy": {"enabled": False},
+                    }
+                ],
+            },
+            "providers": {
+                "sim0": {
+                    "kind": "sim",
+                    "provider_name": "sim0",
+                    "startup_policy": "degraded",
+                    "simulation_mode": "non_interacting",
+                    "tick_rate_hz": 10.0,
+                    "devices": [
+                        {"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0},
+                        {"id": "motorctl0", "type": "motorctl", "max_speed": 3000.0},
+                    ],
+                }
+            },
+        },
+        "paths": {
+            "runtime_executable": "build/dev-release/core/anolis-runtime",
+            "providers": {
+                "sim0": {
+                    "executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim",
+                }
+            },
+        },
+    }
 
     project_dir = tmp_path / name
     project_dir.mkdir(parents=True, exist_ok=True)
-
-    system["meta"]["name"] = name
-    system["meta"]["created"] = "2026-04-16T19:01:02.999999+00:00"
-    system["topology"]["runtime"]["telemetry"] = {
-        "enabled": True,
-        "influxdb": {
-            "url": "http://localhost:8086",
-            "org": "anolis",
-            "bucket": "anolis",
-            "token": "super-secret",
-        },
-    }
-    system["topology"]["runtime"]["automation_enabled"] = True
-    system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/local.xml"
 
     behavior_dir = project_dir / "behaviors"
     behavior_dir.mkdir(parents=True, exist_ok=True)

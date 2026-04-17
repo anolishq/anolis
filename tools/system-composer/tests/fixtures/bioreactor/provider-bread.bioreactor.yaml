@@ -1,0 +1,27 @@
+provider:
+  name: bread0
+
+hardware:
+  bus_path: /dev/i2c-1
+  require_live_session: true
+  query_delay_us: 15000
+  timeout_ms: 150
+  retry_count: 3
+
+discovery:
+  mode: manual
+  addresses: [0x0A, 0x14, 0x15]
+
+devices:
+  - id: rlht0
+    type: rlht
+    label: Reactor Temperature Node
+    address: 0x0A
+  - id: dcmt0
+    type: dcmt
+    label: Reactor Sampling + Stirring (ch1 sample, ch2 stir)
+    address: 0x14
+  - id: dcmt1
+    type: dcmt
+    label: Reactor Dual Dosing (ch1 dose1, ch2 dose2)
+    address: 0x15

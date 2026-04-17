@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import zipfile
 from contextlib import contextmanager
+from importlib import resources
 from typing import Any, Iterator
 
 import jsonschema
@@ -30,8 +31,8 @@ def validate_package(package_path: pathlib.Path, runtime_bin: pathlib.Path | Non
         _validate_checksums(package_root)
         _assert_no_secret_leak(package_root)
 
-        machine_schema = _load_schema("schemas/machine-profile.schema.json")
-        runtime_schema = _load_schema("schemas/runtime-config.schema.json")
+        machine_schema = _load_schema("machine-profile.schema.json")
+        runtime_schema = _load_schema("runtime-config.schema.json")
         machine_validator = jsonschema.Draft7Validator(machine_schema)
         runtime_validator = jsonschema.Draft7Validator(runtime_schema)
 
@@ -167,13 +168,15 @@ def _iter_key_values(payload: Any, prefix: str = "$"):
 
 
 def _load_schema(rel_path: str) -> dict[str, Any]:
-    repo_root = pathlib.Path(__file__).resolve().parents[3]
-    schema_path = (repo_root / rel_path).resolve()
-    if not schema_path.is_file():
-        raise PackageValidationError(f"Schema file not found: {schema_path}")
-    payload = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema_name = pathlib.PurePosixPath(rel_path).name
+    schema_file = resources.files("anolis_workbench_backend").joinpath("schemas", schema_name)
+    try:
+        raw = schema_file.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise PackageValidationError(f"Schema file not found in package data: {schema_name}") from exc
+    payload = json.loads(raw)
     if not isinstance(payload, dict):
-        raise PackageValidationError(f"Schema root must be object: {schema_path}")
+        raise PackageValidationError(f"Schema root must be object: {schema_name}")
     return payload
 
 

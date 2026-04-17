@@ -24,7 +24,7 @@ Phase 8 export pipeline currently includes:
 1. Deterministic handoff package export from Commission workspace (`.anpkg` zip).
 2. Shared pure export core: `tools/workbench/backend/exporter.py`.
 3. HTTP wrapper endpoint: `POST /api/projects/<name>/export`.
-4. CLI wrapper: `python tools/package.py <project-name> [output.anpkg]`.
+4. CLI wrapper: `python -m anolis_workbench_backend.package_cli <project-name> [output.anpkg]`.
 5. Package validation command: `python tools/contracts/validate-handoff-packages.py`.
 
 Install Python dependencies first from repo root:
@@ -49,6 +49,7 @@ Double-click `tools/workbench/start.cmd`.
 2. `ANOLIS_WORKBENCH_PORT` (default: `3010`)
 3. `ANOLIS_WORKBENCH_OPEN_BROWSER` (`1` or `0`, default: `1`)
 4. `ANOLIS_OPERATOR_UI_BASE` (default: `http://localhost:3000`)
+5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`; legacy fallback: repo `systems/` when present)
 
 ## Route Model
 

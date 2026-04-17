@@ -14,6 +14,12 @@ else
   exit 1
 fi
 
+if [ -z "${ANOLIS_DATA_DIR:-}" ]; then
+  export ANOLIS_DATA_DIR="/tmp/anolis-local/systems"
+fi
+mkdir -p "$ANOLIS_DATA_DIR"
+echo "[verify-local] Using ANOLIS_DATA_DIR=$ANOLIS_DATA_DIR"
+
 if ! "$PYTHON_BIN" -c "import anolis_composer_backend, anolis_workbench_backend" >/dev/null 2>&1; then
   echo "[verify-local] Installing local editable backend packages"
   "$PYTHON_BIN" -m pip install --no-build-isolation -e ./tools/system-composer -e ./tools/workbench
