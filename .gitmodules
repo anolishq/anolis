@@ -1,3 +1,3 @@
 [submodule "external/anolis-protocol"]
 	path = external/anolis-protocol
-	url = https://github.com/FEASTOrg/anolis-protocol.git
+	url = https://github.com/anolishq/anolis-protocol.git
