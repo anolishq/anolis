@@ -164,9 +164,9 @@ TEST_F(CallRouterTest, PreconditionFailure) {
             // Note: CallResponse doesn't have status code in DPV0 if it fails?
             // Checking protocol.pb.h above, CallResponse has `results` and `operation_id`.
             // STATUS is defined in the top-level Response envelope
-            // (anolis-protocol/proto/anolis/deviceprovider/v1/envelope.proto). However, the provider interface (IProviderHandle)
-            // returns bool. If it returns false, the router checks last_status_code() of the provider handle? Let's
-            // check IProviderHandle again.
+            // (anolis-protocol/proto/anolis/deviceprovider/v1/envelope.proto). However, the provider interface
+            // (IProviderHandle) returns bool. If it returns false, the router checks last_status_code() of the provider
+            // handle? Let's check IProviderHandle again.
             return false;  // Provider indicates failure
         }));
 
