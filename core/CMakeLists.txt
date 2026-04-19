@@ -5,14 +5,24 @@ if(NOT DEFINED ANOLIS_PROTOCOL_DIR)
     set(ANOLIS_PROTOCOL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../external/anolis-protocol" CACHE PATH "Path to anolis-protocol repository")
 endif()
 get_filename_component(ANOLIS_PROTOCOL_DIR_ABS "${ANOLIS_PROTOCOL_DIR}" REALPATH)
-set(ADPP_PROTO_DIR "${ANOLIS_PROTOCOL_DIR_ABS}/spec/device-provider")
+set(ADPP_PROTO_IMPORT_ROOT "${ANOLIS_PROTOCOL_DIR_ABS}/proto")
+set(ADPP_PROTO_V1_DIR "${ADPP_PROTO_IMPORT_ROOT}/anolis/deviceprovider/v1")
+set(ADPP_PROTO_ENVELOPE "${ADPP_PROTO_V1_DIR}/envelope.proto")
 
-if(NOT EXISTS "${ADPP_PROTO_DIR}/protocol.proto")
+if(NOT EXISTS "${ADPP_PROTO_ENVELOPE}")
     message(FATAL_ERROR
-        "ADPP proto not found at: ${ADPP_PROTO_DIR}/protocol.proto\n"
+        "ADPP proto not found at: ${ADPP_PROTO_ENVELOPE}\n"
         "Expected anolis-protocol submodule at: ${ANOLIS_PROTOCOL_DIR_ABS}\n"
         "Run: git submodule update --init --recursive\n"
         "Or set custom path: cmake -DANOLIS_PROTOCOL_DIR=/path/to/anolis-protocol ..."
+    )
+endif()
+
+file(GLOB ADPP_PROTOS "${ADPP_PROTO_V1_DIR}/*.proto")
+if(NOT ADPP_PROTOS)
+    message(FATAL_ERROR
+        "No ADPP v1 proto files found under: ${ADPP_PROTO_V1_DIR}\n"
+        "Expected split protocol layout from anolis-protocol PR #1."
     )
 endif()
 
@@ -24,21 +34,31 @@ configure_file(
 )
 
 # Use modern protobuf_generate instead of deprecated protobuf_generate_cpp
-add_library(anolis_proto OBJECT ${ADPP_PROTO_DIR}/protocol.proto)
+add_library(anolis_proto OBJECT ${ADPP_PROTOS})
 target_link_libraries(anolis_proto PUBLIC protobuf::libprotobuf)
 target_include_directories(anolis_proto SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 protobuf_generate(
     TARGET anolis_proto
     LANGUAGE cpp
-    IMPORT_DIRS ${ADPP_PROTO_DIR}
+    IMPORT_DIRS ${ADPP_PROTO_IMPORT_ROOT}
     PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Skip clang-tidy on generated protobuf sources/headers to avoid noisy diagnostics
-set(PROTO_GEN_CC ${CMAKE_CURRENT_BINARY_DIR}/protocol.pb.cc)
-set(PROTO_GEN_H  ${CMAKE_CURRENT_BINARY_DIR}/protocol.pb.h)
-set_source_files_properties(${PROTO_GEN_CC} ${PROTO_GEN_H} PROPERTIES SKIP_CLANG_TIDY ON)
+# Compatibility shim: keep existing includes of "protocol.pb.h" working after proto split.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/protocol.pb.h"
+"#pragma once\n"
+"#include \"anolis/deviceprovider/v1/call.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/envelope.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/handshake.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/health.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/inventory.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/readiness.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/status.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/telemetry.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/types.pb.h\"\n"
+"#include \"anolis/deviceprovider/v1/value.pb.h\"\n")
+
 # Also disable clang-tidy on the generated protobuf target itself to prevent reruns via compile_commands
 set_property(TARGET anolis_proto PROPERTY CXX_CLANG_TIDY "")
 

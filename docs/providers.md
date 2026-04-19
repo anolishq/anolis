@@ -30,7 +30,7 @@ Recommended operations:
 1. `GetHealth`
 2. `WaitReady`
 
-Schema source: `external/anolis-protocol/spec/device-provider/protocol.proto`.
+Schema source: `external/anolis-protocol/proto/anolis/deviceprovider/v1/envelope.proto`.
 
 ## Runtime/Provider Contract
 
