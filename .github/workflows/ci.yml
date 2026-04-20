@@ -357,7 +357,6 @@ jobs:
           repository: ${{ steps.pins.outputs.repo }}
           ref: ${{ steps.pins.outputs.ref }}
           path: anolis-provider-sim
-          submodules: recursive
 
       - name: Validate requirements lockfile
         shell: bash
