@@ -1,9 +1,7 @@
 # Cross-repo compatibility pins consumed by anolis compatibility lanes.
-# DEV PHASE: refs are intentionally floating (`main`) for faster iteration.
-# Lock to immutable SHAs before release hardening.
 
 provider_sim:
   repository: anolishq/anolis-provider-sim
-  ref: main
-  updated_utc: 2026-02-22
-  rationale: "DEV PHASE: track latest provider-sim main branch in compatibility lane"
+  ref: v0.1.0
+  updated_utc: 2026-04-20
+  rationale: "Lock to first stable release tag"
