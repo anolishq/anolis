@@ -2,6 +2,6 @@
 
 provider_sim:
   repository: anolishq/anolis-provider-sim
-  ref: v0.1.1
+  ref: v0.1.2
   updated_utc: 2026-04-20
-  rationale: "Advance to FetchContent-based protocol consumption (no submodule)"
+  rationale: "Pass ANOLIS_PROTOCOL_PROTO_DIR via ctest; remove stale CMakePresets cache var"
