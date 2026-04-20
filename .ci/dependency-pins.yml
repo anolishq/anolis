@@ -2,6 +2,6 @@
 
 provider_sim:
   repository: anolishq/anolis-provider-sim
-  ref: v0.1.4
+  ref: v0.1.5
   updated_utc: 2026-04-20
-  rationale: "Advance anolis-protocol wheel to v1.1.1 (fixed release workflow)"
+  rationale: "Bump anolis-protocol to v1.1.2 (fix: include gen/ artifacts in wheel despite gitignore)"
