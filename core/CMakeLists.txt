@@ -1,20 +1,22 @@
 # Anolis Core - Runtime Executable
 
-# Generate protobuf from anolis-protocol (same as provider-sim)
-if(NOT DEFINED ANOLIS_PROTOCOL_DIR)
-    set(ANOLIS_PROTOCOL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../external/anolis-protocol" CACHE PATH "Path to anolis-protocol repository")
-endif()
-get_filename_component(ANOLIS_PROTOCOL_DIR_ABS "${ANOLIS_PROTOCOL_DIR}" REALPATH)
-set(ADPP_PROTO_IMPORT_ROOT "${ANOLIS_PROTOCOL_DIR_ABS}/proto")
+# Generate protobuf from anolis-protocol
+include(FetchContent)
+FetchContent_Declare(
+    anolis_protocol
+    URL https://github.com/anolishq/anolis-protocol/releases/download/v1.0.0/anolis-protocol-1.0.0-source.tar.gz
+    URL_HASH SHA256=2f9afea1e8944bd3bfd2b572d110e47d738ccc818d281442aa121b817941a24b
+)
+FetchContent_MakeAvailable(anolis_protocol)
+set(ADPP_PROTO_IMPORT_ROOT "${anolis_protocol_SOURCE_DIR}/proto")
 set(ADPP_PROTO_V1_DIR "${ADPP_PROTO_IMPORT_ROOT}/anolis/deviceprovider/v1")
 set(ADPP_PROTO_ENVELOPE "${ADPP_PROTO_V1_DIR}/envelope.proto")
 
 if(NOT EXISTS "${ADPP_PROTO_ENVELOPE}")
     message(FATAL_ERROR
         "ADPP proto not found at: ${ADPP_PROTO_ENVELOPE}\n"
-        "Expected anolis-protocol submodule at: ${ANOLIS_PROTOCOL_DIR_ABS}\n"
-        "Run: git submodule update --init --recursive\n"
-        "Or set custom path: cmake -DANOLIS_PROTOCOL_DIR=/path/to/anolis-protocol ..."
+        "FetchContent source dir: ${anolis_protocol_SOURCE_DIR}\n"
+        "Set FETCHCONTENT_SOURCE_DIR_ANOLIS_PROTOCOL to use a local clone."
     )
 endif()
 
