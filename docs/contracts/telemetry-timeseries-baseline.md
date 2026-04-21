@@ -1,6 +1,6 @@
 # Telemetry Timeseries Baseline
 
-Status: Locked for prereq wave (`v1`).
+Status: Locked (`v1`) with release-artifact distribution path implemented.
 
 ## Purpose
 
@@ -86,15 +86,17 @@ The gate must remain green in CI.
 
 ## Distribution Note
 
-Short-term contract sync model:
+Canonical source of truth:
 
 1. `anolis` is schema source of truth.
-2. `anolis-telemetry-export` consumes manual copied schema with checksum lock.
+2. release workflow publishes telemetry schema bundle and `telemetry-schema-manifest.json`.
 
-Long-term contract sync model:
+Release-pinned consumer model (`anolis-telemetry-export`):
 
-1. `anolis` release publishes schema artifact + checksum.
-2. `anolis-telemetry-export` consumes pinned release schema artifact.
+1. `scripts/sync-upstream-schema-from-release.py --tag vX.Y.Z` syncs vendored schema from release asset.
+2. `scripts/verify-upstream-schema.py --require-release-artifact` validates lock, checksums, and asset parity.
+
+Manual copy remains emergency-only fallback during transition.
 
 ## Change Rule
 

@@ -78,6 +78,36 @@ jobs:
             -o "anolis-${VERSION}-source.tar.gz" \
             HEAD
 
+      - name: Package telemetry schema artifact
+        id: schema_package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="anolis-${VERSION}-telemetry-schema.tar.gz"
+          SCHEMA_PATH="schemas/telemetry/telemetry-timeseries.schema.v1.json"
+          BASELINE_PATH="docs/contracts/telemetry-timeseries-baseline.md"
+          FIXTURE_MANIFEST_PATH="tests/contracts/telemetry-timeseries/examples/manifest.yaml"
+          VALIDATOR_PATH="tools/contracts/validate-telemetry-timeseries.py"
+
+          for path in "${SCHEMA_PATH}" "${BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" "${VALIDATOR_PATH}"; do
+            if [ ! -f "${path}" ]; then
+              echo "ERROR: required schema artifact input missing: ${path}" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p schema-staging/schemas/telemetry
+          mkdir -p schema-staging/docs/contracts
+          mkdir -p schema-staging/tests/contracts/telemetry-timeseries/examples
+          mkdir -p schema-staging/tools/contracts
+
+          cp "${SCHEMA_PATH}" schema-staging/schemas/telemetry/
+          cp "${BASELINE_PATH}" schema-staging/docs/contracts/
+          cp "${FIXTURE_MANIFEST_PATH}" schema-staging/tests/contracts/telemetry-timeseries/examples/
+          cp "${VALIDATOR_PATH}" schema-staging/tools/contracts/
+
+          tar -czf "${SCHEMA_ARTIFACT}" -C schema-staging .
+          echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
       - name: Generate checksums
         run: sha256sum anolis-*.tar.gz > SHA256SUMS
 
@@ -85,7 +115,9 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           ARTIFACT="${{ steps.package.outputs.artifact }}"
+          SCHEMA_ARTIFACT="${{ steps.schema_package.outputs.artifact }}"
           SHA=$(grep "${ARTIFACT}" SHA256SUMS | awk '{print $1}')
+          SCHEMA_SHA=$(grep "${SCHEMA_ARTIFACT}" SHA256SUMS | awk '{print $1}')
           jq -n \
             --argjson schema_version 1 \
             --arg repo "anolishq/anolis" \
@@ -97,6 +129,20 @@ jobs:
             '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, platform: $platform, asset: $asset, sha256: $sha256}' \
             > manifest.json
 
+          jq -n \
+            --argjson schema_version 1 \
+            --arg repo "anolishq/anolis" \
+            --arg component "telemetry-schema" \
+            --arg version "${VERSION}" \
+            --arg tag "v${VERSION}" \
+            --arg asset "${SCHEMA_ARTIFACT}" \
+            --arg sha256 "${SCHEMA_SHA}" \
+            --arg source_schema_path "schemas/telemetry/telemetry-timeseries.schema.v1.json" \
+            --arg source_baseline_path "docs/contracts/telemetry-timeseries-baseline.md" \
+            --arg source_fixture_manifest_path "tests/contracts/telemetry-timeseries/examples/manifest.yaml" \
+            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
+            > telemetry-schema-manifest.json
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -104,4 +150,5 @@ jobs:
             anolis-*.tar.gz
             SHA256SUMS
             manifest.json
+            telemetry-schema-manifest.json
           generate_release_notes: true
