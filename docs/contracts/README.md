@@ -11,9 +11,9 @@ Baselines in this directory freeze expected behavior at a point in time so contr
 
 ## Canonical Machine Artifacts
 
-1. Runtime config schema: `schemas/runtime-config.schema.json`
+1. Runtime config schema: `schemas/runtime/runtime-config.schema.json`
 2. Runtime HTTP OpenAPI: `schemas/http/runtime-http.openapi.v0.yaml`
-3. Machine profile schema: `schemas/machine-profile.schema.json`
+3. Machine profile schema: `schemas/machine/machine-profile.schema.json`
 4. Telemetry timeseries schema: `schemas/telemetry/telemetry-timeseries.schema.v1.json`
 
 Commissioning-specific contracts (System Composer + Workbench) are maintained in

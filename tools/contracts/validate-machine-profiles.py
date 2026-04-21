@@ -445,12 +445,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--machine-schema",
-        default="schemas/machine-profile.schema.json",
+        default="schemas/machine/machine-profile.schema.json",
         help="Machine profile schema path relative to repo root.",
     )
     parser.add_argument(
         "--runtime-schema",
-        default="schemas/runtime-config.schema.json",
+        default="schemas/runtime/runtime-config.schema.json",
         help="Runtime config schema path relative to repo root.",
     )
     args = parser.parse_args()

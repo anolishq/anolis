@@ -259,7 +259,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--schema",
-        default="schemas/runtime-config.schema.json",
+        default="schemas/runtime/runtime-config.schema.json",
         help="Schema path relative to repo root.",
     )
     parser.add_argument(

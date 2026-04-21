@@ -4,7 +4,7 @@ Automation in Anolis is a behavior-tree layer above core runtime services.
 
 ## Contract and Build Context
 
-1. Runtime config contract: `schemas/runtime-config.schema.json`
+1. Runtime config contract: `schemas/runtime/runtime-config.schema.json`
 2. Runtime HTTP contract: `schemas/http/runtime-http.openapi.v0.yaml`
 3. Runtime mode/parameter endpoints:
    - `GET/POST /v0/mode`

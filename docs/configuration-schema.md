@@ -4,7 +4,7 @@ This is a compact human map of runtime YAML sections.
 
 Authoritative contract behavior comes from:
 
-1. `schemas/runtime-config.schema.json`
+1. `schemas/runtime/runtime-config.schema.json`
 2. `tools/contracts/validate-runtime-configs.py`
 3. `anolis-runtime --check-config`
 

@@ -4,7 +4,7 @@ Anolis runtime is configured with YAML.
 
 Contract authority is machine-validated:
 
-1. `schemas/runtime-config.schema.json`
+1. `schemas/runtime/runtime-config.schema.json`
 2. `tools/contracts/validate-runtime-configs.py`
 3. `anolis-runtime --check-config` (semantic/load-time checks)
 
