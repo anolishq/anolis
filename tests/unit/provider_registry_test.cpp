@@ -260,24 +260,24 @@ TEST_F(ProviderRegistryTest, ConcurrentReadersAndWriters) {
 
     // Writer threads: add/remove/replace providers
     for (int t = 0; t < NUM_WRITERS; ++t) {
-        threads.emplace_back([this, t, &active_writers, &completed_writer_operations,
-                              operations_per_thread = OPERATIONS_PER_THREAD]() {
-            for (int i = 0; i < operations_per_thread; ++i) {
-                std::string provider_id = "writer" + std::to_string(t) + "_" + std::to_string(i % 10);
-                auto mock = create_mock_provider(provider_id);
+        threads.emplace_back(
+            [this, t, &active_writers, &completed_writer_operations, operations_per_thread = OPERATIONS_PER_THREAD]() {
+                for (int i = 0; i < operations_per_thread; ++i) {
+                    std::string provider_id = "writer" + std::to_string(t) + "_" + std::to_string(i % 10);
+                    auto mock = create_mock_provider(provider_id);
 
-                // Add provider
-                registry->add_provider(provider_id, mock);
+                    // Add provider
+                    registry->add_provider(provider_id, mock);
 
-                // Small delay to increase contention
-                std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    // Small delay to increase contention
+                    std::this_thread::sleep_for(std::chrono::microseconds(10));
 
-                // Remove provider
-                registry->remove_provider(provider_id);
-                ++completed_writer_operations;
-            }
-            active_writers.fetch_sub(1, std::memory_order_release);
-        });
+                    // Remove provider
+                    registry->remove_provider(provider_id);
+                    ++completed_writer_operations;
+                }
+                active_writers.fetch_sub(1, std::memory_order_release);
+            });
     }
 
     // Reader threads: read while writers modify
