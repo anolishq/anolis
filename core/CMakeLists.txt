@@ -4,8 +4,8 @@
 include(FetchContent)
 FetchContent_Declare(
     anolis_protocol
-    URL https://github.com/anolishq/anolis-protocol/releases/download/v1.0.0/anolis-protocol-1.0.0-source.tar.gz
-    URL_HASH SHA256=2f9afea1e8944bd3bfd2b572d110e47d738ccc818d281442aa121b817941a24b
+    URL https://github.com/anolishq/anolis-protocol/releases/download/v1.1.3/anolis-protocol-1.1.3-source.tar.gz
+    URL_HASH SHA256=520154759d6a1cb4a1a7badde6c0c5394e2a2cdc68e189a3db6aa4a390abb6b1
 )
 FetchContent_MakeAvailable(anolis_protocol)
 set(ADPP_PROTO_IMPORT_ROOT "${anolis_protocol_SOURCE_DIR}/proto")
