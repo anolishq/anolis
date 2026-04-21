@@ -13,6 +13,25 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-20
+
+### Changed
+
+- Release workflow: contract artifact publishing split into a dedicated `release-contracts` job,
+  independent of the binary build job; schema lane made dependent on build success.
+- Schema layout: `machine-profile.schema.json` and `runtime-config.schema.json` moved into
+  domain subdirectories (`schemas/machine/` and `schemas/runtime/` respectively).
+- Contract validators migrated from `tools/contracts/` into co-located
+  `tests/contracts/<domain>/` directories alongside their fixture trees.
+- `validate-doc-links.py` relocated from `tools/contracts/` to `tools/`.
+
+## [0.1.1] - 2026-04-20
+
+### Added
+
+- Release workflow: packages telemetry schema bundle (`anolis-{VERSION}-telemetry-schema.tar.gz`)
+  and `telemetry-schema-manifest.json` as release assets on every `v*` tag.
+
 ## [0.1.0] - 2026-04-20
 
 First tagged release. The runtime was developed in full before tagging; this entry
