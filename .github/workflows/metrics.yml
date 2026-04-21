@@ -9,4 +9,4 @@ on:
 
 jobs:
   collect:
-    uses: anolishq/.github/.github/workflows/metrics.yml@main
+    uses: anolishq/.github/.github/workflows/metrics.yml@v1
