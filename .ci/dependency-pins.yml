@@ -2,6 +2,6 @@
 
 provider_sim:
   repository: anolishq/anolis-provider-sim
-  ref: v0.1.5
+  ref: v0.1.6
   updated_utc: 2026-04-20
-  rationale: "Bump anolis-protocol to v1.1.2 (fix: include gen/ artifacts in wheel despite gitignore)"
+  rationale: "Bump anolis-protocol to v1.1.3 (pin buf plugin v34.1, upgrade protobuf runtime to 7.34.1)"
