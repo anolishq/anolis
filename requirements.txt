@@ -19,3 +19,4 @@ mypy>=1.8.0,<2.0.0  # Static type checker
 types-requests>=2.31.0  # Type stubs for requests
 types-psutil>=5.9.0  # Type stubs for psutil
 types-PyYAML>=6.0.0  # Type stubs for yaml
+types-jsonschema>=4.22.0  # Type stubs for jsonschema

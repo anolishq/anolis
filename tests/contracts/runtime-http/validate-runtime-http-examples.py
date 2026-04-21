@@ -159,6 +159,11 @@ def _parse_manifest(manifest_path: Path) -> list[ExampleEntry]:
                 f"ERROR: manifest entry #{idx + 1} requires non-empty string fields: "
                 "method, path, status, content_type, file"
             )
+        assert isinstance(method, str)
+        assert isinstance(path, str)
+        assert isinstance(status, str)
+        assert isinstance(content_type, str)
+        assert isinstance(file_name, str)
         out.append(
             ExampleEntry(
                 method=method.lower(),

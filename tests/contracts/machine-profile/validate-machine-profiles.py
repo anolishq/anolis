@@ -93,9 +93,12 @@ def _format_json_path(error: jsonschema.ValidationError) -> str:
     return "$." + ".".join(str(part) for part in error.path)
 
 
-def _load_json(path: Path) -> dict:
+def _load_json(path: Path) -> dict[str, object]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        result = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(result, dict):
+            raise SystemExit(f"ERROR: expected a JSON object at {path}")
+        return result
     except json.JSONDecodeError as exc:
         raise SystemExit(f"ERROR: json parse failed at {path}: {exc}") from exc
 

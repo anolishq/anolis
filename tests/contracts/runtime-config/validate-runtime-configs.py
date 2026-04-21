@@ -60,9 +60,12 @@ def _format_json_path(error: jsonschema.ValidationError) -> str:
     return "$." + ".".join(str(part) for part in error.path)
 
 
-def _load_schema(schema_path: Path) -> dict:
+def _load_schema(schema_path: Path) -> dict[str, object]:
     try:
-        return json.loads(schema_path.read_text(encoding="utf-8"))
+        result = json.loads(schema_path.read_text(encoding="utf-8"))
+        if not isinstance(result, dict):
+            raise SystemExit(f"ERROR: schema at {schema_path} is not a JSON object")
+        return result
     except json.JSONDecodeError as exc:
         raise SystemExit(f"ERROR: schema json parse failed at {schema_path}: {exc}") from exc
 
