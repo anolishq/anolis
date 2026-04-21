@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-21
+
+### Changed
+
+- Bump `anolis-protocol` FetchContent reference from `v1.0.0` to `v1.1.3`.
+- Consolidate OpenAPI schema README.
+
+### CI
+
+- Pin org reusable workflow refs from `@main` to `@v1`.
+- Add metrics collection to release workflow; `metrics.json` uploaded as release asset on each `v*` tag.
+
 ## [0.1.4] - 2026-04-21
 
 ### Fixed
