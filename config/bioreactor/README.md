@@ -47,8 +47,8 @@ RLHT usage note:
 5. `provider-bread.bioreactor.yaml`
 6. `provider-ezo.bioreactor.yaml`
 7. `machine-profile.yaml`
-8. `telemetry-export.bioreactor.yaml`
-9. `../../behaviors/bioreactor_stir_dual_dosing.xml`
+8. `../../behaviors/bioreactor_stir_dual_dosing.xml`
+9. telemetry export config and service docs now live in `anolishq/anolis-telemetry-export` (`config/bioreactor/telemetry-export.bioreactor.yaml`)
 
 ## Machine Manifest
 
@@ -308,15 +308,15 @@ Expected: output includes at least one data row (not only CSV headers).
 This service is the production-MVP export path. It is intentionally external to
 `anolis-runtime` control-plane APIs.
 
-Canonical export API docs live in:
+Canonical export API docs now live in `anolishq/anolis-telemetry-export`:
 
 1. `tools/telemetry_export/README.md`
 2. `tools/telemetry_export/examples/query_signals.py`
 
-Start export service:
+Start export service from that repository:
 
 ```bash
-cd /path/to/anolis
+cd /path/to/anolis-telemetry-export
 # Optional secret overrides (preferred in shared/prod-like environments):
 # export ANOLIS_EXPORT_AUTH_TOKEN='...'
 # export ANOLIS_EXPORT_INFLUX_TOKEN='...'
