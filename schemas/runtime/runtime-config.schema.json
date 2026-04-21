@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://schemas.anolishq.dev/anolis/runtime/runtime-config.schema.json",
+  "$id": "https://anolishq.github.io/schemas/anolis/runtime/runtime-config.schema.json",
   "title": "Anolis Runtime Config",
   "description": "Compatibility-preserving schema for runtime YAML consumed by anolis-runtime.",
   "type": "object",

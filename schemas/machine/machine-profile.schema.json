@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://anolishq.github.io/schemas/anolis/machine/machine-profile.schema.json",
   "title": "Anolis Machine Profile Manifest",
   "description": "Contract for machine package manifests under config/<machine_id>/machine-profile.yaml.",
   "type": "object",
