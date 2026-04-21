@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-21
+
+### Fixed
+
+- Schema `$id` URIs corrected to `https://anolishq.github.io/schemas/anolis/...` in
+  `runtime-config.schema.json` and `machine-profile.schema.json`. The v0.1.3 release
+  bundles incorrectly contained `schemas.anolishq.dev` URIs.
+
 ## [0.1.3] - 2026-04-21
 
 ### Added
