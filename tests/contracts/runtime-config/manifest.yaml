@@ -1,0 +1,44 @@
+schema: schemas/runtime/runtime-config.schema.json
+
+fixtures:
+  - file: tests/contracts/runtime-config/valid/01-minimal.yaml
+    expect: valid
+    note: minimal runtime config with no optional sections
+  - file: tests/contracts/runtime-config/valid/02-automation-behavior-tree-path-alias.yaml
+    expect: valid
+    note: automation enabled with behavior tree path alias
+  - file: tests/contracts/runtime-config/valid/03-telemetry-flat-alias.yaml
+    expect: valid
+    note: telemetry section with flat alias mapping
+  - file: tests/contracts/runtime-config/valid/04-hooks-and-restart.yaml
+    expect: valid
+    note: hooks and restart policy configured together
+  - file: tests/contracts/runtime-config/valid/05-hooks-quoted-numeric-like-scalars.yaml
+    expect: valid
+    note: hook args with quoted numeric-like scalar values
+  - file: tests/contracts/runtime-config/valid/06-hooks-scalar-edge-cases.yaml
+    expect: valid
+    note: hook args with bool-like and text scalar edge cases
+
+  - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
+    expect: invalid/schema
+    note: runtime_mode field is not permitted in config
+  - file: tests/contracts/runtime-config/invalid/schema/02-automation-enabled-missing-behavior-tree.yaml
+    expect: invalid/schema
+    note: automation enabled but behavior_tree_path absent
+  - file: tests/contracts/runtime-config/invalid/schema/03-cors-wildcard-credentials.yaml
+    expect: invalid/schema
+    note: CORS wildcard origin combined with credentials is forbidden
+  - file: tests/contracts/runtime-config/invalid/schema/04-duplicate-keys-provider-command.yaml
+    expect: invalid/schema
+    note: duplicate mapping key in provider command block
+
+  - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
+    expect: invalid/runtime
+    note: restart backoff array length does not match policy length
+  - file: tests/contracts/runtime-config/invalid/runtime/02-duplicate-provider-ids.yaml
+    expect: invalid/runtime
+    note: two providers share the same id
+  - file: tests/contracts/runtime-config/invalid/runtime/03-hooks-function-id-zero-without-name.yaml
+    expect: invalid/runtime
+    note: hook function id 0 requires a name but none is supplied

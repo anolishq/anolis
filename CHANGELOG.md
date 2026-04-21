@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-21
+
+### Added
+
+- Release workflow: three new schema bundles published as release assets on every `v*` tag:
+  `runtime-config-schema`, `machine-profile-schema`, and `runtime-http-schema`. Each bundle
+  includes the canonical schema file, baseline doc, fixture manifest, fixture tree, and
+  validator script.
+- Contract fixtures: added `manifest.yaml` to `tests/contracts/runtime-config/` and
+  `tests/contracts/machine-profile/` listing all fixtures with expected outcomes, mirroring
+  the telemetry-timeseries pattern.
+
 ## [0.1.2] - 2026-04-20
 
 ### Changed

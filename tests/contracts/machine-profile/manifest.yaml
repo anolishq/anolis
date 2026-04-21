@@ -1,0 +1,22 @@
+schema: schemas/machine/machine-profile.schema.json
+deps:
+  - schemas/runtime/runtime-config.schema.json
+
+fixtures:
+  - file: tests/contracts/machine-profile/valid/01-minimal.yaml
+    expect: valid
+    note: minimal machine profile referencing supporting runtime and provider configs
+
+  - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
+    expect: invalid/schema
+    note: machine_id field absent
+
+  - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
+    expect: invalid/references
+    note: manifest references a provider config file that does not exist
+  - file: tests/contracts/machine-profile/invalid/references/02-runtime-profile-name-mismatch.yaml
+    expect: invalid/references
+    note: runtime profile name in manifest does not match referenced file
+  - file: tests/contracts/machine-profile/invalid/references/03-provider-id-mismatch.yaml
+    expect: invalid/references
+    note: provider id in manifest does not match id in referenced runtime profile

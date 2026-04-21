@@ -170,9 +170,179 @@ jobs:
             '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
             > telemetry-schema-manifest.json
 
+      - name: Package runtime-config schema artifact
+        id: rc_schema_package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="anolis-${VERSION}-runtime-config-schema.tar.gz"
+          SCHEMA_PATH="schemas/runtime/runtime-config.schema.json"
+          BASELINE_PATH="docs/contracts/runtime-config-baseline.md"
+          FIXTURE_MANIFEST_PATH="tests/contracts/runtime-config/manifest.yaml"
+          VALIDATOR_PATH="tests/contracts/runtime-config/validate-runtime-configs.py"
+
+          for path in "${SCHEMA_PATH}" "${BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" "${VALIDATOR_PATH}"; do
+            if [ ! -f "${path}" ]; then
+              echo "ERROR: required schema artifact input missing: ${path}" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p rc-staging/schemas/runtime
+          mkdir -p rc-staging/docs/contracts
+          mkdir -p rc-staging/tests/contracts/runtime-config/valid
+          mkdir -p rc-staging/tests/contracts/runtime-config/invalid/schema
+          mkdir -p rc-staging/tests/contracts/runtime-config/invalid/runtime
+
+          cp "${SCHEMA_PATH}" rc-staging/schemas/runtime/
+          cp "${BASELINE_PATH}" rc-staging/docs/contracts/
+          cp "${FIXTURE_MANIFEST_PATH}" rc-staging/tests/contracts/runtime-config/
+          cp "${VALIDATOR_PATH}" rc-staging/tests/contracts/runtime-config/
+          cp tests/contracts/runtime-config/valid/*.yaml rc-staging/tests/contracts/runtime-config/valid/
+          cp tests/contracts/runtime-config/invalid/schema/*.yaml rc-staging/tests/contracts/runtime-config/invalid/schema/
+          cp tests/contracts/runtime-config/invalid/runtime/*.yaml rc-staging/tests/contracts/runtime-config/invalid/runtime/
+
+          tar -czf "${SCHEMA_ARTIFACT}" -C rc-staging .
+          echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate runtime-config schema manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="${{ steps.rc_schema_package.outputs.artifact }}"
+          SCHEMA_SHA=$(sha256sum "${SCHEMA_ARTIFACT}" | awk '{print $1}')
+          jq -n \
+            --argjson schema_version 1 \
+            --arg repo "anolishq/anolis" \
+            --arg component "runtime-config-schema" \
+            --arg version "${VERSION}" \
+            --arg tag "v${VERSION}" \
+            --arg asset "${SCHEMA_ARTIFACT}" \
+            --arg sha256 "${SCHEMA_SHA}" \
+            --arg source_schema_path "schemas/runtime/runtime-config.schema.json" \
+            --arg source_baseline_path "docs/contracts/runtime-config-baseline.md" \
+            --arg source_fixture_manifest_path "tests/contracts/runtime-config/manifest.yaml" \
+            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
+            > runtime-config-schema-manifest.json
+
+      - name: Package machine-profile schema artifact
+        id: mp_schema_package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="anolis-${VERSION}-machine-profile-schema.tar.gz"
+          SCHEMA_PATH="schemas/machine/machine-profile.schema.json"
+          RUNTIME_SCHEMA_PATH="schemas/runtime/runtime-config.schema.json"
+          BASELINE_PATH="docs/contracts/machine-profile-baseline.md"
+          FIXTURE_MANIFEST_PATH="tests/contracts/machine-profile/manifest.yaml"
+          VALIDATOR_PATH="tests/contracts/machine-profile/validate-machine-profiles.py"
+
+          for path in "${SCHEMA_PATH}" "${RUNTIME_SCHEMA_PATH}" "${BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" "${VALIDATOR_PATH}"; do
+            if [ ! -f "${path}" ]; then
+              echo "ERROR: required schema artifact input missing: ${path}" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p mp-staging/schemas/machine
+          mkdir -p mp-staging/schemas/runtime
+          mkdir -p mp-staging/docs/contracts
+          mkdir -p mp-staging/tests/contracts/machine-profile/valid
+          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/schema
+          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/references
+
+          cp "${SCHEMA_PATH}" mp-staging/schemas/machine/
+          cp "${RUNTIME_SCHEMA_PATH}" mp-staging/schemas/runtime/
+          cp "${BASELINE_PATH}" mp-staging/docs/contracts/
+          cp "${FIXTURE_MANIFEST_PATH}" mp-staging/tests/contracts/machine-profile/
+          cp "${VALIDATOR_PATH}" mp-staging/tests/contracts/machine-profile/
+          cp tests/contracts/machine-profile/valid/*.yaml mp-staging/tests/contracts/machine-profile/valid/
+          cp tests/contracts/machine-profile/invalid/schema/*.yaml mp-staging/tests/contracts/machine-profile/invalid/schema/
+          cp tests/contracts/machine-profile/invalid/references/*.yaml mp-staging/tests/contracts/machine-profile/invalid/references/
+
+          tar -czf "${SCHEMA_ARTIFACT}" -C mp-staging .
+          echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate machine-profile schema manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="${{ steps.mp_schema_package.outputs.artifact }}"
+          SCHEMA_SHA=$(sha256sum "${SCHEMA_ARTIFACT}" | awk '{print $1}')
+          jq -n \
+            --argjson schema_version 1 \
+            --arg repo "anolishq/anolis" \
+            --arg component "machine-profile-schema" \
+            --arg version "${VERSION}" \
+            --arg tag "v${VERSION}" \
+            --arg asset "${SCHEMA_ARTIFACT}" \
+            --arg sha256 "${SCHEMA_SHA}" \
+            --arg source_schema_path "schemas/machine/machine-profile.schema.json" \
+            --arg source_baseline_path "docs/contracts/machine-profile-baseline.md" \
+            --arg source_fixture_manifest_path "tests/contracts/machine-profile/manifest.yaml" \
+            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
+            > machine-profile-schema-manifest.json
+
+      - name: Package runtime-http schema artifact
+        id: rh_schema_package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="anolis-${VERSION}-runtime-http-schema.tar.gz"
+          SCHEMA_PATH="schemas/http/runtime-http.openapi.v0.yaml"
+          BASELINE_PATH="docs/contracts/runtime-http-baseline.md"
+          FIXTURE_MANIFEST_PATH="tests/contracts/runtime-http/examples/manifest.yaml"
+          VALIDATOR_OPENAPI_PATH="tests/contracts/runtime-http/validate-runtime-http-openapi.py"
+          VALIDATOR_EXAMPLES_PATH="tests/contracts/runtime-http/validate-runtime-http-examples.py"
+          VALIDATOR_CONFORMANCE_PATH="tests/contracts/runtime-http/validate-runtime-http-conformance.py"
+
+          for path in "${SCHEMA_PATH}" "${BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" \
+              "${VALIDATOR_OPENAPI_PATH}" "${VALIDATOR_EXAMPLES_PATH}" "${VALIDATOR_CONFORMANCE_PATH}"; do
+            if [ ! -f "${path}" ]; then
+              echo "ERROR: required schema artifact input missing: ${path}" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p rh-staging/schemas/http
+          mkdir -p rh-staging/docs/contracts
+          mkdir -p rh-staging/tests/contracts/runtime-http/examples
+
+          cp "${SCHEMA_PATH}" rh-staging/schemas/http/
+          cp "${BASELINE_PATH}" rh-staging/docs/contracts/
+          cp "${FIXTURE_MANIFEST_PATH}" rh-staging/tests/contracts/runtime-http/examples/
+          cp tests/contracts/runtime-http/examples/*.json rh-staging/tests/contracts/runtime-http/examples/ 2>/dev/null || true
+          cp tests/contracts/runtime-http/examples/*.txt rh-staging/tests/contracts/runtime-http/examples/ 2>/dev/null || true
+          cp "${VALIDATOR_OPENAPI_PATH}" rh-staging/tests/contracts/runtime-http/
+          cp "${VALIDATOR_EXAMPLES_PATH}" rh-staging/tests/contracts/runtime-http/
+          cp "${VALIDATOR_CONFORMANCE_PATH}" rh-staging/tests/contracts/runtime-http/
+
+          tar -czf "${SCHEMA_ARTIFACT}" -C rh-staging .
+          echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate runtime-http schema manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SCHEMA_ARTIFACT="${{ steps.rh_schema_package.outputs.artifact }}"
+          SCHEMA_SHA=$(sha256sum "${SCHEMA_ARTIFACT}" | awk '{print $1}')
+          jq -n \
+            --argjson schema_version 1 \
+            --arg repo "anolishq/anolis" \
+            --arg component "runtime-http-schema" \
+            --arg version "${VERSION}" \
+            --arg tag "v${VERSION}" \
+            --arg asset "${SCHEMA_ARTIFACT}" \
+            --arg sha256 "${SCHEMA_SHA}" \
+            --arg source_schema_path "schemas/http/runtime-http.openapi.v0.yaml" \
+            --arg source_baseline_path "docs/contracts/runtime-http-baseline.md" \
+            --arg source_fixture_manifest_path "tests/contracts/runtime-http/examples/manifest.yaml" \
+            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
+            > runtime-http-schema-manifest.json
+
       - name: Upload contract artifacts to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             anolis-*-telemetry-schema.tar.gz
             telemetry-schema-manifest.json
+            anolis-*-runtime-config-schema.tar.gz
+            runtime-config-schema-manifest.json
+            anolis-*-machine-profile-schema.tar.gz
+            machine-profile-schema-manifest.json
+            anolis-*-runtime-http-schema.tar.gz
+            runtime-http-schema-manifest.json
