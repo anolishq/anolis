@@ -78,6 +78,49 @@ jobs:
             -o "anolis-${VERSION}-source.tar.gz" \
             HEAD
 
+      - name: Generate checksums
+        run: sha256sum anolis-*-linux-x86_64.tar.gz anolis-*-source.tar.gz > SHA256SUMS
+
+      - name: Generate manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARTIFACT="${{ steps.package.outputs.artifact }}"
+          SHA=$(grep "${ARTIFACT}" SHA256SUMS | awk '{print $1}')
+          jq -n \
+            --argjson schema_version 1 \
+            --arg repo "anolishq/anolis" \
+            --arg component "anolis" \
+            --arg version "${VERSION}" \
+            --arg platform "linux-x86_64" \
+            --arg asset "${ARTIFACT}" \
+            --arg sha256 "${SHA}" \
+            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, platform: $platform, asset: $asset, sha256: $sha256}' \
+            > manifest.json
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            anolis-*-linux-x86_64.tar.gz
+            anolis-*-source.tar.gz
+            SHA256SUMS
+            manifest.json
+          generate_release_notes: true
+
+  release-contracts:
+    name: Release (contracts)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Package telemetry schema artifact
         id: schema_package
         run: |
@@ -108,27 +151,11 @@ jobs:
           tar -czf "${SCHEMA_ARTIFACT}" -C schema-staging .
           echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate checksums
-        run: sha256sum anolis-*.tar.gz > SHA256SUMS
-
-      - name: Generate manifest
+      - name: Generate schema manifest
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          ARTIFACT="${{ steps.package.outputs.artifact }}"
           SCHEMA_ARTIFACT="${{ steps.schema_package.outputs.artifact }}"
-          SHA=$(grep "${ARTIFACT}" SHA256SUMS | awk '{print $1}')
-          SCHEMA_SHA=$(grep "${SCHEMA_ARTIFACT}" SHA256SUMS | awk '{print $1}')
-          jq -n \
-            --argjson schema_version 1 \
-            --arg repo "anolishq/anolis" \
-            --arg component "anolis" \
-            --arg version "${VERSION}" \
-            --arg platform "linux-x86_64" \
-            --arg asset "${ARTIFACT}" \
-            --arg sha256 "${SHA}" \
-            '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, platform: $platform, asset: $asset, sha256: $sha256}' \
-            > manifest.json
-
+          SCHEMA_SHA=$(sha256sum "${SCHEMA_ARTIFACT}" | awk '{print $1}')
           jq -n \
             --argjson schema_version 1 \
             --arg repo "anolishq/anolis" \
@@ -143,12 +170,9 @@ jobs:
             '{schema_version: $schema_version, repo: $repo, component: $component, version: $version, tag: $tag, asset: $asset, sha256: $sha256, source_schema_path: $source_schema_path, source_baseline_path: $source_baseline_path, source_fixture_manifest_path: $source_fixture_manifest_path}' \
             > telemetry-schema-manifest.json
 
-      - name: Create GitHub release
+      - name: Upload contract artifacts to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            anolis-*.tar.gz
-            SHA256SUMS
-            manifest.json
+            anolis-*-telemetry-schema.tar.gz
             telemetry-schema-manifest.json
-          generate_release_notes: true
