@@ -14,20 +14,29 @@ else
   exit 1
 fi
 
-
 RUNTIME_BIN=""
-if [ -f build/dev-release/core/anolis-runtime ]; then
-  RUNTIME_BIN="build/dev-release/core/anolis-runtime"
-elif [ -f build/dev-windows-release/core/Release/anolis-runtime.exe ]; then
-  RUNTIME_BIN="build/dev-windows-release/core/Release/anolis-runtime.exe"
-fi
+for candidate in \
+  build/dev-release/core/anolis-runtime \
+  build/dev-windows-release/core/Release/anolis-runtime.exe
+
+do
+  if [ -f "$candidate" ]; then
+    RUNTIME_BIN="$candidate"
+    break
+  fi
+done
 
 PROVIDER_BIN=""
-if [ -f ../anolis-provider-sim/build/dev-release/anolis-provider-sim ]; then
-  PROVIDER_BIN="../anolis-provider-sim/build/dev-release/anolis-provider-sim"
-elif [ -f ../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe ]; then
-  PROVIDER_BIN="../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe"
-fi
+for candidate in \
+  ../anolis-provider-sim/build/dev-release/anolis-provider-sim \
+  ../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe
+
+do
+  if [ -f "$candidate" ]; then
+    PROVIDER_BIN="$candidate"
+    break
+  fi
+done
 
 if [ -n "$RUNTIME_BIN" ]; then
   echo "[verify-local] Running runtime config contract checks"
@@ -41,8 +50,6 @@ echo "[verify-local] Running machine profile contract checks"
 
 echo "[verify-local] Running telemetry timeseries contract checks"
 "$PYTHON_BIN" tools/contracts/validate-telemetry-timeseries.py
-
-echo "[verify-local] Skipping handoff package contract checks: moved to anolis-workbench repo"
 
 echo "[verify-local] Running docs local-link checks"
 "$PYTHON_BIN" tools/contracts/validate-doc-links.py
@@ -62,25 +69,17 @@ else
   echo "[verify-local] Skipping runtime HTTP conformance smoke checks: runtime or provider-sim binary not found"
 fi
 
-echo "[verify-local] Skipping System Composer + Workbench tests: moved to anolis-workbench repo"
-
-echo "[verify-local] Skipping Operator UI contract tests: moved to anolis-hq/anolis-operator-ui repo"
-
 if ! command -v ctest >/dev/null 2>&1; then
   echo "[verify-local] Skipping focused C++ tests: ctest not found"
   exit 0
 fi
 
-if [ -f build/dev-release/CTestTestfile.cmake ]; then
-  echo "[verify-local] Running focused C++ tests from build/dev-release"
-  ctest --test-dir build/dev-release --output-on-failure -R "ConfigTest|RuntimeOwnershipValidationTest"
-  exit 0
-fi
-
-if [ -f build/dev-windows-release/CTestTestfile.cmake ]; then
-  echo "[verify-local] Running focused C++ tests from build/dev-windows-release"
-  ctest --test-dir build/dev-windows-release --output-on-failure -R "ConfigTest|RuntimeOwnershipValidationTest"
-  exit 0
-fi
+for build_dir in build/dev-release build/dev-windows-release; do
+  if [ -f "$build_dir/CTestTestfile.cmake" ]; then
+    echo "[verify-local] Running focused C++ tests from $build_dir"
+    ctest --test-dir "$build_dir" --output-on-failure -R "ConfigTest|RuntimeOwnershipValidationTest"
+    exit 0
+  fi
+done
 
 echo "[verify-local] Skipping focused C++ tests: no supported build directory found"
