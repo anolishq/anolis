@@ -11,12 +11,12 @@ Define machine package expectations under `config/<machine_id>/` and lock manife
 1. Manifest schema: `schemas/machine/machine-profile.schema.json`
 2. Validator: `tests/contracts/machine-profile/validate-machine-profiles.py`
 3. Fixtures: `tests/contracts/machine-profile/`
-4. Canonical package example: `config/bioreactor/machine-profile.yaml`
+4. Canonical package example: `config/conformance/machine-profile.yaml`
 5. Runtime config schema dependency: `schemas/runtime/runtime-config.schema.json`
 
 ## Locked Behavior Summary
 
-1. Machine packages remain under `config/<machine_id>/` in this wave.
+1. Platform conformance fixture lives at `config/conformance/` in this repo; machine realizations live in `anolis-projects`.
 2. Manifest file is `machine-profile.yaml`.
 3. Manifest declares:
    - identity (`schema_version`, `machine_id`, `display_name`)
