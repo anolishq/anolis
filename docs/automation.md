@@ -119,10 +119,10 @@ Use runtime capability metadata and parameter constraints to keep BT logic gener
 
 ```bash
 # Linux
-./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./examples/anolis-runtime.yaml
 
 # Windows
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\examples\anolis-runtime.yaml
 ```
 
 ### 2) Verify startup mode

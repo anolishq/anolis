@@ -15,7 +15,6 @@ behaviors:
 validation:
   expected_providers:
     - provider0
-  check_http_script: config/mixed-bus-providers/check_mixed_bus_http.sh
 
 contracts:
   runtime_config_baseline: docs/contracts/runtime-config-baseline.md

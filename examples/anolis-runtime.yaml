@@ -46,32 +46,5 @@ telemetry:
 
 automation:
   enabled: true # Set to true to enable behavior tree automation
-  behavior_tree: ./behaviors/demo.xml
+  behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
   tick_rate_hz: 10 # 1-1000 Hz
-  manual_gating_policy: BLOCK # BLOCK or OVERRIDE
-
-  # Runtime parameters
-  parameters:
-    - name: temp_setpoint
-      type: double
-      default: 25.0
-      min: 10.0
-      max: 50.0
-
-    - name: motor_duty_cycle
-      type: int64
-      default: 50
-      min: 0
-      max: 100
-
-    - name: control_enabled
-      type: bool
-      default: true
-
-    - name: operating_mode
-      type: string
-      default: "normal"
-      allowed_values: ["normal", "test", "emergency"]
-
-logging:
-  level: info # debug, info, warn, error

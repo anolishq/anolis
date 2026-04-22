@@ -69,10 +69,10 @@ cmake --build --preset dev-release --parallel
 
 ```bash
 # Linux/macOS
-./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./examples/anolis-runtime.yaml
 
 # Windows
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\examples\anolis-runtime.yaml
 ```
 
 ### Testing

@@ -106,7 +106,7 @@ Capture baseline artifacts:
 
 ```bash
 cd /path/to/anolis
-./config/mixed-bus-providers/check_mixed_bus_http.sh \
+../anolis-projects/projects/mixed-bus-dev/validation/check_mixed_bus_http.sh \
   --base-url http://127.0.0.1:8080 \
   --expect-providers bread0,ezo0 \
   --min-device-count 5 \
@@ -161,7 +161,7 @@ Capture automation API artifacts:
 
 ```bash
 cd /path/to/anolis
-./config/mixed-bus-providers/check_mixed_bus_http.sh \
+../anolis-projects/projects/mixed-bus-dev/validation/check_mixed_bus_http.sh \
   --base-url http://127.0.0.1:8080 \
   --expect-providers bread0,ezo0 \
   --min-device-count 5 \
@@ -199,7 +199,7 @@ Capture API artifacts for full profile:
 
 ```bash
 cd /path/to/anolis
-./config/mixed-bus-providers/check_mixed_bus_http.sh \
+../anolis-projects/projects/mixed-bus-dev/validation/check_mixed_bus_http.sh \
   --base-url http://127.0.0.1:8080 \
   --expect-providers bread0,ezo0 \
   --min-device-count 5 \
@@ -274,7 +274,7 @@ Capture API baseline artifacts:
 
 ```bash
 cd /path/to/anolis
-./config/mixed-bus-providers/check_mixed_bus_http.sh \
+../anolis-projects/projects/mixed-bus-dev/validation/check_mixed_bus_http.sh \
   --base-url http://127.0.0.1:8080 \
   --expect-providers bread0,ezo0 \
   --min-device-count 5 \
@@ -397,5 +397,5 @@ Open `http://127.0.0.1:3000` and validate:
 ## Notes
 
 1. Bosch sensor checks remain outside provider mixed-bus scope.
-2. Ownership-conflict negative testing lives in `config/mixed-bus-providers/`.
+2. Ownership-conflict negative testing lives in `anolis-projects/projects/mixed-bus-dev/`.
 3. `anolis-runtime.bioreactor.telemetry.yaml` uses `token: dev-token` by default (same as `tools/docker/.env.example`).

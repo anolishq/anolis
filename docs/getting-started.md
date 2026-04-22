@@ -59,10 +59,10 @@ git submodule update --init --recursive
 cmake --preset dev-release
 cmake --build --preset dev-release --parallel
 ctest --preset dev-release
-./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./examples/anolis-runtime.yaml
 ```
 
-Before launching, verify `providers[].command` paths in `config/anolis-runtime.yaml` match your local platform/build outputs.
+Before launching, verify `providers[].command` paths in `examples/anolis-runtime.yaml` match your local platform/build outputs.
 
 Windows (PowerShell):
 
@@ -73,7 +73,7 @@ git submodule update --init --recursive
 cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release --parallel
 ctest --preset dev-windows-release
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\examples\anolis-runtime.yaml
 ```
 
 For commissioning-managed systems, use

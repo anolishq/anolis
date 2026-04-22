@@ -12,8 +12,9 @@ Use this document for authoring workflow and operational guidance.
 
 ## Where Runtime YAML Lives
 
-1. Checked-in examples: `config/anolis-runtime*.yaml`, `config/**/anolis-runtime*.yaml`
-2. Commissioning-generated outputs are managed in
+1. Checked-in examples: `examples/anolis-runtime*.yaml`
+2. Machine realization configs: `anolis-projects/projects/{name}/config/anolis-runtime*.yaml`
+3. Commissioning-generated outputs are managed in
    [`anolis-workbench`](https://github.com/anolishq/anolis-workbench)
    and are intentionally not tracked in this repository.
 

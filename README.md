@@ -145,7 +145,7 @@ git submodule update --init --recursive
 cmake --preset dev-release
 cmake --build --preset dev-release --parallel
 ctest --preset dev-release
-./build/dev-release/core/anolis-runtime --config ./config/anolis-runtime.yaml
+./build/dev-release/core/anolis-runtime --config ./examples/anolis-runtime.yaml
 ```
 
 Windows (PowerShell):
@@ -157,10 +157,10 @@ git submodule update --init --recursive
 cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release --parallel
 ctest --preset dev-windows-release
-.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\config\anolis-runtime.yaml
+.\build\dev-windows-release\core\Release\anolis-runtime.exe --config .\examples\anolis-runtime.yaml
 ```
 
-Use `config/anolis-runtime.yaml` for the checked-in sample config. Commissioning
+Use `examples/anolis-runtime.yaml` for the checked-in sample config. Commissioning
 flows and generated system outputs are owned by
 [`anolis-workbench`](https://github.com/anolishq/anolis-workbench).
 

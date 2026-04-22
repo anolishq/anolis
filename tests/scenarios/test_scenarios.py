@@ -21,7 +21,7 @@ from tests.scenarios.cases.telemetry_on_change import TelemetryOnChange
 
 def _scenario_config(provider_exe: Path, port: int, policy: str) -> dict:
     root = Path(__file__).resolve().parents[2]
-    bt_path = root / "behaviors" / "test_noop.xml"
+    bt_path = root / "tests" / "integration" / "fixtures" / "behaviors" / "test_noop.xml"
     fixture_path = root / "tests" / "integration" / "fixtures" / "provider-sim-default.yaml"
     return {
         "runtime": {},

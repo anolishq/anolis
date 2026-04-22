@@ -159,7 +159,7 @@ Example commands:
 
 ```bash
 python3 tests/contracts/runtime-config/validate-runtime-configs.py
-anolis-runtime --check-config --config config/anolis-runtime.yaml
+anolis-runtime --check-config --config examples/anolis-runtime.yaml
 ```
 
 ## Change Rule

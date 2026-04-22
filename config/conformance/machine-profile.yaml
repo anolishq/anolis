@@ -1,0 +1,27 @@
+schema_version: 1
+machine_id: conformance-sim
+display_name: Platform Conformance Fixture (sim)
+
+runtime_profiles:
+  manual: anolis-runtime.conformance.yaml
+
+providers:
+  sim0:
+    config: ../../tests/integration/fixtures/provider-sim-default.yaml
+
+behaviors:
+  - ../../tests/integration/fixtures/behaviors/test_noop.xml
+
+contracts:
+  runtime_config_baseline: docs/contracts/runtime-config-baseline.md
+  runtime_http_baseline: docs/contracts/runtime-http-baseline.md
+
+compatibility:
+  runtime:
+    config_contract: "01-runtime-config"
+    http_contract: "02-runtime-http"
+    notes: "Platform self-compliance fixture; validated against anolis-provider-sim."
+  providers:
+    sim0:
+      strategy: local-build
+      version: dev-release

@@ -44,7 +44,7 @@ class AutomationTester:
             "telemetry": {"enabled": False},
             "automation": {
                 "enabled": automation_enabled,
-                "behavior_tree": str(self.repo_root / "behaviors" / "demo.xml"),
+                "behavior_tree": str(self.repo_root / "tests" / "integration" / "fixtures" / "behaviors" / "demo.xml"),
                 "tick_rate_hz": 10,
                 "manual_gating_policy": manual_gating_policy,
                 "parameters": [
