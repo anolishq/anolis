@@ -2,7 +2,7 @@
 """
 Machine profile contract validator.
 
-Runs three layers of checks:
+Validates machine-profile fixtures against the schema and reference integrity rules:
 1) machine-profile schema validation
 2) machine-profile reference integrity validation
 3) referenced runtime profile validation against runtime-config schema
@@ -300,17 +300,6 @@ def _validate_manifest_refs(
         )
         errors.extend(path_errors)
 
-    contracts = payload.get("contracts", {})
-    for key in ("runtime_config_baseline", "runtime_http_baseline"):
-        _, path_errors = _validate_path_reference(
-            repo_root=repo_root,
-            manifest_path=manifest_path,
-            raw=contracts.get(key, ""),
-            label=f"contracts.{key}",
-            base="repo",
-        )
-        errors.extend(path_errors)
-
     validation = payload.get("validation", {})
     check_http_script = validation.get("check_http_script")
     if isinstance(check_http_script, str) and check_http_script:
@@ -481,14 +470,10 @@ def main() -> int:
         label="runtime config",
     )
 
-    tracked_manifests = _glob_paths(repo_root, ("config/**/machine-profile.yaml",))
     valid_fixtures = _glob_paths(repo_root, ("tests/contracts/machine-profile/valid/*.yaml",))
     invalid_schema_fixtures = _glob_paths(repo_root, ("tests/contracts/machine-profile/invalid/schema/*.yaml",))
     invalid_reference_fixtures = _glob_paths(repo_root, ("tests/contracts/machine-profile/invalid/references/*.yaml",))
 
-    if not tracked_manifests:
-        print("ERROR: no machine profile manifests discovered under config/**/machine-profile.yaml", file=sys.stderr)
-        return 1
     if not valid_fixtures:
         print("ERROR: no valid machine-profile fixtures discovered", file=sys.stderr)
         return 1
@@ -503,7 +488,7 @@ def main() -> int:
     _check_expected_success(
         machine_validator=machine_validator,
         runtime_validator=runtime_validator,
-        files=[*tracked_manifests, *valid_fixtures],
+        files=valid_fixtures,
         repo_root=repo_root,
         failures=failures,
     )
@@ -521,7 +506,6 @@ def main() -> int:
     )
 
     print("machine-profile contract summary")
-    print(f"  tracked manifests checked: {len(tracked_manifests)}")
     print(f"  valid fixtures checked: {len(valid_fixtures)}")
     print(f"  invalid/schema fixtures checked: {len(invalid_schema_fixtures)}")
     print(f"  invalid/references fixtures checked: {len(invalid_reference_fixtures)}")

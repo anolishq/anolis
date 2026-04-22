@@ -243,18 +243,7 @@ Enable automation and parameters in your runtime config:
 ```yaml
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
-  tick_rate_hz: 10
-  manual_gating_policy: BLOCK
-  parameters:
-    - name: temp_setpoint
-      type: double
-      default: 25.0
-      min: 10.0
-      max: 50.0
-```
-
-Update a parameter and enter AUTO mode:
+  behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v0/parameters \

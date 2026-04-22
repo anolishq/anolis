@@ -35,16 +35,18 @@ polling:
   interval_ms: 500 # Default polling interval (min 100ms)
 
 telemetry:
-  enabled: true
-  influxdb:
-    url: http://localhost:8086
-    org: anolis
-    bucket: anolis
-    token: dev-token
-    batch_size: 100
-    flush_interval_ms: 1000
+  enabled: false
+  # Uncomment and configure to enable InfluxDB telemetry:
+  # influxdb:
+  #   url: http://localhost:8086
+  #   org: anolis
+  #   bucket: anolis
+  #   token: dev-token
+  #   batch_size: 100
+  #   flush_interval_ms: 1000
 
 automation:
-  enabled: true # Set to true to enable behavior tree automation
-  behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
-  tick_rate_hz: 10 # 1-1000 Hz
+  enabled: false
+  # Uncomment to enable behavior tree automation:
+  # behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
+  # tick_rate_hz: 10

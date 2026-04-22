@@ -35,7 +35,7 @@ File:
 
 Scope:
 
-1. Machine package manifests at `config/**/machine-profile.yaml`.
+1. Machine profile manifests for machine realizations.
 2. Declares package entrypoints, provider config references, optional behavior assets,
    validation metadata, and compatibility metadata.
 3. Works with `tests/contracts/machine-profile/validate-machine-profiles.py` to enforce schema validity,

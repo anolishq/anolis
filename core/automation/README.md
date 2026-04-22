@@ -85,7 +85,7 @@ FAULT mode is _policy_, not a certified safety mechanism.
 
 ## Demo & Documentation
 
-Demo behavior tree available at: `behaviors/demo.xml`
+Demo behavior tree available at: `tests/integration/fixtures/behaviors/demo.xml`
 Full documentation: `docs/automation.md`
 
 Enable automation in `anolis-runtime.yaml`:
@@ -93,9 +93,7 @@ Enable automation in `anolis-runtime.yaml`:
 ```yaml
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
-  tick_rate_hz: 10
-  manual_gating_policy: BLOCK # or OVERRIDE
+  behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
 ```
 
 ## References

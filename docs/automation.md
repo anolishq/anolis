@@ -72,10 +72,7 @@ Example:
 ```yaml
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
-  tick_rate_hz: 10
-  manual_gating_policy: BLOCK
-  parameters:
+  behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
     - name: temp_setpoint
       type: double
       default: 25.0
