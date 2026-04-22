@@ -19,13 +19,7 @@ Thank you for your interest in contributing to Anolis!
    cd anolis
    ```
 
-2. Initialize protocol submodule:
-
-   ```bash
-   git submodule update --init --recursive
-   ```
-
-3. Configure and build:
+2. Configure and build:
 
    ```bash
    # Linux/macOS
