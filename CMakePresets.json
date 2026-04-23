@@ -118,7 +118,8 @@
       "name": "ci-linux-release-strict",
       "inherits": "ci-linux-release",
       "cacheVariables": {
-        "ANOLIS_WARNINGS_AS_ERRORS": "ON"
+        "ANOLIS_WARNINGS_AS_ERRORS": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-linux-static"
       }
     },
     {

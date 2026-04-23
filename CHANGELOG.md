@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-04-23
+
+### CI
+
+- Fixed `validate-artifact` job: switch release build to `x64-linux-static` vcpkg triplet so
+  the published binary is fully statically linked against vcpkg dependencies (including
+  `libbehaviortree_cpp`). The `x64-linux` triplet produces dynamic `.so` libraries that are
+  not bundled in the tarball and are not available on a stock Ubuntu runner.
+
 ## [0.1.7] - 2026-04-23
 
 ### CI
