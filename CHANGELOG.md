@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-23
+
+### CI
+
+- Added `validate-artifact` job to release workflow: downloads the published binary
+  tarball, verifies SHA256, runs `--help` smoke, then starts the runtime with a
+  provider-sim config and asserts `/v0/runtime/status`, `/v0/devices`, and
+  `/v0/state` all respond correctly before graceful shutdown.
+
 ## [0.1.6] - 2026-04-23
 
 ### Changed
