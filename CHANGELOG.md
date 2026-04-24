@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-04-24
+
+### CI
+
+- Fixed `validate-artifact` job: replaced `gh release download --latest` with
+  `gh release view` to resolve the latest tag first, then pass it explicitly.
+  The `--latest` flag is not available in the `gh` CLI version on the ubuntu-24.04
+  runner image.
+
 ## [0.1.11] - 2026-04-23
 
 ### Dependencies
