@@ -211,6 +211,13 @@ if(ANOLIS_ENABLE_AUTOMATION)
         anolis_automation_support
         BT::behaviortree_cpp
     )
+    # Treat BT.CPP headers as system includes so compiler warnings in
+    # third-party code (e.g. C4702 in safe_any.hpp) are not promoted to errors
+    # by our /WX / -Werror flags.
+    get_target_property(_bt_includes BT::behaviortree_cpp INTERFACE_INCLUDE_DIRECTORIES)
+    if(_bt_includes)
+        target_include_directories(anolis_automation SYSTEM PUBLIC ${_bt_includes})
+    endif()
     anolis_apply_warnings(anolis_automation)
 
     # Automation sanity test (lightweight, no gtest)
@@ -228,6 +235,9 @@ if(ANOLIS_ENABLE_AUTOMATION)
             anolis_automation
             BT::behaviortree_cpp
         )
+    endif()
+    if(_bt_includes)
+        target_include_directories(bt_nodes_sanity SYSTEM PRIVATE ${_bt_includes})
     endif()
     anolis_apply_warnings(bt_nodes_sanity)
 endif()
