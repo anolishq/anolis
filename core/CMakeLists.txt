@@ -230,16 +230,6 @@ if(ANOLIS_ENABLE_AUTOMATION)
         )
     endif()
     anolis_apply_warnings(bt_nodes_sanity)
-
-    # C4702 (unreachable code) fires from BT.CPP's safe_any.hpp during code
-    # generation for if-constexpr template expansions. MSVC's /external mechanism
-    # only suppresses frontend warnings, not optimizer/codegen warnings, so
-    # /external:I has no effect here. Suppress C4702 specifically on the two
-    # targets that consume BT.CPP headers.
-    if(MSVC)
-        target_compile_options(anolis_automation PRIVATE /wd4702)
-        target_compile_options(bt_nodes_sanity PRIVATE /wd4702)
-    endif()
 endif()
 
 # HTTP server library
