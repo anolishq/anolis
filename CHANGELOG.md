@@ -13,6 +13,16 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-04-23
+
+### Dependencies
+
+- Upgraded `behaviortree-cpp` from 4.6.2 to 4.8.4 (latest at vcpkg commit `66c0373`). The
+  4.6.2 vcpkg portfile predated static library support and ignored `VCPKG_LIBRARY_LINKAGE`,
+  always producing a shared `.so`. The 4.8.4 portfile correctly passes `BTCPP_SHARED_LIBS=OFF`
+  when the triplet requests static linkage. Removed the `overrides` pin from `vcpkg.json`.
+  No C++ API changes required — all APIs in use are unchanged across this version range.
+
 ## [0.1.10] - 2026-04-23
 
 ### CI
