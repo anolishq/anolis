@@ -11,9 +11,6 @@ function(anolis_apply_warnings target_name)
         if(ANOLIS_WARNINGS_AS_ERRORS)
             target_compile_options(${target_name} PRIVATE /WX)
         endif()
-        # Suppress warnings from directories explicitly marked external via
-        # /external:I (set per-target where third-party headers are included).
-        target_compile_options(${target_name} PRIVATE /external:W0)
     else()
         target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
         if(ANOLIS_WARNINGS_AS_ERRORS)

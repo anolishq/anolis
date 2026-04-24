@@ -231,18 +231,14 @@ if(ANOLIS_ENABLE_AUTOMATION)
     endif()
     anolis_apply_warnings(bt_nodes_sanity)
 
-    # Mark BT.CPP's include directory as external (/external:I) so MSVC applies
-    # /external:W0 to it. /external:anglebrackets is insufficient because
-    # safe_any.hpp is transitively included via quote-includes inside BT.CPP's
-    # own headers, so MSVC never sees it as angle-bracket-included.
+    # C4702 (unreachable code) fires from BT.CPP's safe_any.hpp during code
+    # generation for if-constexpr template expansions. MSVC's /external mechanism
+    # only suppresses frontend warnings, not optimizer/codegen warnings, so
+    # /external:I has no effect here. Suppress C4702 specifically on the two
+    # targets that consume BT.CPP headers.
     if(MSVC)
-        get_target_property(_bt_includes BT::behaviortree_cpp INTERFACE_INCLUDE_DIRECTORIES)
-        if(_bt_includes)
-            foreach(_inc IN LISTS _bt_includes)
-                target_compile_options(anolis_automation PRIVATE "/external:I${_inc}")
-                target_compile_options(bt_nodes_sanity PRIVATE "/external:I${_inc}")
-            endforeach()
-        endif()
+        target_compile_options(anolis_automation PRIVATE /wd4702)
+        target_compile_options(bt_nodes_sanity PRIVATE /wd4702)
     endif()
 endif()
 
