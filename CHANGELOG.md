@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-04-23
+
+### CI
+
+- Fixed `x64-linux-static` triplet: added missing `VCPKG_CMAKE_SYSTEM_NAME=Linux`.
+  Without this line vcpkg on Linux falls back to Windows host detection and aborts configure
+  with "Use of Visual Studio's Developer Prompt is unsupported on non-Windows hosts."
+
 ## [0.1.9] - 2026-04-23
 
 ### CI
