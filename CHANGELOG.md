@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-04-24
+
+### CI
+
+- Fixed `Windows Release (Core, strict)` build: suppressed MSVC C4702
+  (unreachable code) from BT.CPP's `safe_any.hpp` `if constexpr` template
+  instantiations. C4702 is emitted during the code-generation phase, so
+  `/external:I` and `/external:anglebrackets` have no effect on it. The fix
+  is `/wd4702` added to the MSVC branch of `anolis_apply_warnings()` in
+  `cmake/Warnings.cmake`, covering all targets uniformly.
+
 ## [0.1.12] - 2026-04-24
 
 ### CI
