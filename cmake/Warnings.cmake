@@ -11,10 +11,9 @@ function(anolis_apply_warnings target_name)
         if(ANOLIS_WARNINGS_AS_ERRORS)
             target_compile_options(${target_name} PRIVATE /WX)
         endif()
-        # Suppress warnings originating in external/third-party headers included
-        # via angle brackets (e.g. BT.CPP's safe_any.hpp C4702). Requires
-        # MSVC 2019 16.10+ (available on windows-2022 runners).
-        target_compile_options(${target_name} PRIVATE /external:anglebrackets /external:W0)
+        # Suppress warnings from directories explicitly marked external via
+        # /external:I (set per-target where third-party headers are included).
+        target_compile_options(${target_name} PRIVATE /external:W0)
     else()
         target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
         if(ANOLIS_WARNINGS_AS_ERRORS)
