@@ -390,9 +390,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p sim-dl
-          gh release download \
+          SIM_TAG=$(gh release view --repo anolishq/anolis-provider-sim --json tagName --jq '.tagName')
+          gh release download "$SIM_TAG" \
             --repo anolishq/anolis-provider-sim \
-            --latest \
             --pattern "anolis-provider-sim-*-linux-x86_64.tar.gz" \
             --dir sim-dl
 
