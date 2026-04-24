@@ -67,7 +67,8 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "VCPKG_TARGET_TRIPLET": "x64-linux"
+        "VCPKG_TARGET_TRIPLET": "x64-linux-static",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets"
       }
     },
     {
@@ -118,8 +119,7 @@
       "name": "ci-linux-release-strict",
       "inherits": "ci-linux-release",
       "cacheVariables": {
-        "ANOLIS_WARNINGS_AS_ERRORS": "ON",
-        "VCPKG_TARGET_TRIPLET": "x64-linux-static"
+        "ANOLIS_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
