@@ -18,6 +18,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     device_registry_concurrency_test.cpp
     event_emitter_test.cpp
     influx_sink_test.cpp
+    signal_handler_test.cpp
 )
 
 if(ANOLIS_ENABLE_AUTOMATION)

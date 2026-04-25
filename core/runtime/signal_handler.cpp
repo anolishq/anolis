@@ -8,6 +8,7 @@ namespace runtime {
 std::atomic<bool> SignalHandler::shutdown_requested_{false};
 
 void SignalHandler::install() {
+    shutdown_requested_.store(false);
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 #ifdef _WIN32
