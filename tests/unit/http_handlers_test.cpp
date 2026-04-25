@@ -917,7 +917,7 @@ TEST_F(HttpHandlersBoundsEncodingBugTest, MinOnlyUint64_JsonHasMinButNotMax) {
 // Registers a device with a single bytes-type function argument.
 // Used by all F2 tests below.
 void RegisterMockDeviceWithBytesArg(
-    testing::StrictMock<anolis::tests::MockProviderHandle>& mock_provider,
+    anolis::tests::MockProviderHandle& mock_provider,
     anolis::registry::DeviceRegistry& registry,
     const std::string& device_id = "test_device") {
 
