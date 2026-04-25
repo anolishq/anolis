@@ -644,9 +644,9 @@ TEST(EventEmitterTest, SseCapacityNotReducedByTelemetrySubscription) {
     std::vector<std::unique_ptr<Subscription>> sse_subs;
     for (size_t i = 0; i < sse_limit; ++i) {
         auto sub = emitter.subscribe(EventFilter::all(), 100, "sse-" + std::to_string(i + 1));
-        EXPECT_NE(nullptr, sub)
-            << "SSE subscription " << (i + 1) << " of " << sse_limit
-            << " must succeed — emitter cap must accommodate telemetry + " << sse_limit << " SSE clients";
+        EXPECT_NE(nullptr, sub) << "SSE subscription " << (i + 1) << " of " << sse_limit
+                                << " must succeed — emitter cap must accommodate telemetry + " << sse_limit
+                                << " SSE clients";
         if (sub) {
             sse_subs.push_back(std::move(sub));
         }
