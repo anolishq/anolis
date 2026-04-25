@@ -46,7 +46,7 @@ static std::optional<std::string> base64_decode(const std::string &encoded) {
     int val = 0;
     int bits = -8;
     for (unsigned char c : encoded) {
-        if (c == '=') break;               // valid padding — stop
+        if (c == '=') break;                  // valid padding — stop
         if (T[c] == -1) return std::nullopt;  // illegal character — fail
         val = (val << 6) + T[c];
         bits += 6;
