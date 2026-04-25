@@ -842,6 +842,75 @@ TEST_F(HttpHandlersProvidersHealthTest, DevicesArrayAlwaysPresent) {
     EXPECT_TRUE(provider["devices"].is_array());
 }
 
+//=============================================================================
+// Capability JSON encoding bug tests (F1)
+//=============================================================================
+// encode_function_spec() uses a single has_bounds flag that emits both min and max
+// keys together, or neither. A function with only min set gets a phantom max=0
+// emitted. A function with only max set gets a phantom min=0 emitted.
+//
+// The test below directly exposes this by registering a function with only
+// set_min_uint64(5) and asserting that "max" is absent from the JSON output.
+// CURRENTLY FAILS because has_bounds = (5 != 0 || 0 != 0) = true causes both
+// min=5 and max=0 to be emitted.
+
+class HttpHandlersBoundsEncodingBugTest : public HttpHandlersTest {
+protected:
+    void RegisterDeviceWithMinOnlyUint64(const std::string& device_id = "test_device") {
+        EXPECT_CALL(*mock_provider, list_devices(_))
+            .WillOnce(Invoke([device_id](std::vector<Device>& devices) {
+                Device dev;
+                dev.set_device_id(device_id);
+                devices.push_back(dev);
+                return true;
+            }));
+
+        EXPECT_CALL(*mock_provider, describe_device(device_id, _))
+            .WillOnce(Invoke([device_id](const std::string&, DescribeDeviceResponse& response) {
+                auto* device = response.mutable_device();
+                device->set_device_id(device_id);
+
+                auto* caps = response.mutable_capabilities();
+                auto* fn = caps->add_functions();
+                fn->set_name("set_counter");
+                fn->set_function_id(200);
+
+                auto* arg = fn->add_args();
+                arg->set_name("counter");
+                arg->set_type(anolis::deviceprovider::v1::VALUE_TYPE_UINT64);
+                arg->set_required(true);
+                arg->set_min_uint64(5);
+                // intentionally no set_max_uint64() — only a lower bound
+
+                return true;
+            }));
+
+        registry->discover_provider("test_provider", *mock_provider);
+    }
+};
+
+// CURRENTLY FAILS: has_bounds single-flag emits phantom max=0 alongside min=5.
+// After fix: only "min" key is present; "max" is absent.
+TEST_F(HttpHandlersBoundsEncodingBugTest, MinOnlyUint64_JsonHasMinButNotMax) {
+    RegisterDeviceWithMinOnlyUint64();
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+
+    const auto json = nlohmann::json::parse(res->body);
+    ASSERT_TRUE(json.contains("capabilities"));
+    ASSERT_TRUE(json["capabilities"].contains("functions"));
+    ASSERT_EQ(1, json["capabilities"]["functions"].size());
+
+    const auto& counter = json["capabilities"]["functions"][0]["args"]["counter"];
+
+    ASSERT_TRUE(counter.contains("min"));
+    EXPECT_FALSE(counter.contains("max"));  // no max was set — must not appear in JSON
+    EXPECT_EQ(5ULL, counter["min"].get<uint64_t>());
+}
+
 #else  // ANOLIS_SKIP_HTTP_TESTS
 TEST(HttpHandlersTest, DISABLED_SkippedUnderThreadSanitizer) {
     // This test exists to document that HttpHandlersTest suite is disabled

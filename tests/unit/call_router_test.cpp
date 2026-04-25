@@ -727,3 +727,276 @@ TEST_F(CallRouterTest, ConcurrentCallsMultipleProviders) {
         EXPECT_TRUE(result.success) << "Error: " << result.error_message;
     }
 }
+
+// =======================
+// Range Validation Bug Tests (F1)
+// =======================
+// These tests expose two defects in validate_argument_range():
+//
+//   Bug 1 — copy-paste: has_min and has_max are computed with identical || expressions,
+//            so a one-sided bound (min set, max unset, or vice versa) is silently
+//            expanded into a two-sided bound. A provider declaring only min=5.0 gets a
+//            phantom max=0.0 enforced; a provider declaring only max=50.0 gets a phantom
+//            min=0.0 enforced.
+//
+//   Bug 2 — zero heuristic: the presence check "field != 0" makes zero indistinguishable
+//            from "not set". A provider declaring min=0.0 has that constraint silently
+//            dropped; values below zero are accepted without complaint.
+//
+// Tests marked CURRENTLY FAILS are RED on main and go GREEN after the fix.
+// Tests marked REGRESSION GUARD currently produce correct output (possibly for the
+// wrong internal reason) and must remain GREEN through and after the fix.
+
+class CallRouterRangeBugTest : public Test {
+protected:
+    using ValueType = anolis::deviceprovider::v1::ValueType;
+    using Value = anolis::deviceprovider::v1::Value;
+
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+
+        mock_provider = std::make_shared<StrictMock<MockProviderHandle>>();
+        mock_provider->_id = "sim0";
+        EXPECT_CALL(*mock_provider, provider_id()).WillRepeatedly(ReturnRef(mock_provider->_id));
+        EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Return(true));
+
+        providers["sim0"] = mock_provider;
+
+        RegisterRangeTestDevice();
+    }
+
+    void RegisterRangeTestDevice() {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("rangedev");
+            devices.push_back(dev);
+            return true;
+        }));
+
+        EXPECT_CALL(*mock_provider, describe_device("rangedev", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                auto* device = response.mutable_device();
+                device->set_device_id("rangedev");
+
+                auto* caps = response.mutable_capabilities();
+
+                // fn 1: "min_only_double" — val: double, min=5.0, no max
+                // Bug 1: current code gives this a phantom max=0.0.
+                {
+                    auto* fn = caps->add_functions();
+                    fn->set_name("min_only_double");
+                    fn->set_function_id(1);
+                    auto* arg = fn->add_args();
+                    arg->set_name("val");
+                    arg->set_type(ValueType::VALUE_TYPE_DOUBLE);
+                    arg->set_required(true);
+                    arg->set_min_double(5.0);
+                    // intentionally no set_max_double()
+                }
+
+                // fn 2: "max_only_double" — val: double, no min, max=50.0
+                // Bug 1: current code gives this a phantom min=0.0.
+                {
+                    auto* fn = caps->add_functions();
+                    fn->set_name("max_only_double");
+                    fn->set_function_id(2);
+                    auto* arg = fn->add_args();
+                    arg->set_name("val");
+                    arg->set_type(ValueType::VALUE_TYPE_DOUBLE);
+                    arg->set_required(true);
+                    arg->set_max_double(50.0);
+                    // intentionally no set_min_double()
+                }
+
+                // fn 3: "zero_min_double" — val: double, min=0.0, no max
+                // Bug 2: current code treats min=0.0 as "not set" via != 0 heuristic.
+                {
+                    auto* fn = caps->add_functions();
+                    fn->set_name("zero_min_double");
+                    fn->set_function_id(3);
+                    auto* arg = fn->add_args();
+                    arg->set_name("val");
+                    arg->set_type(ValueType::VALUE_TYPE_DOUBLE);
+                    arg->set_required(true);
+                    arg->set_min_double(0.0);
+                    // intentionally no set_max_double()
+                }
+
+                // fn 4: "min_only_int64" — idx: int64, min=1, no max
+                // Bug 1: current code gives this a phantom max=0.
+                {
+                    auto* fn = caps->add_functions();
+                    fn->set_name("min_only_int64");
+                    fn->set_function_id(4);
+                    auto* arg = fn->add_args();
+                    arg->set_name("idx");
+                    arg->set_type(ValueType::VALUE_TYPE_INT64);
+                    arg->set_required(true);
+                    arg->set_min_int64(1);
+                    // intentionally no set_max_int64()
+                }
+
+                // fn 5: "max_only_int64" — idx: int64, no min, max=10
+                // Bug 1: current code gives this a phantom min=0.
+                {
+                    auto* fn = caps->add_functions();
+                    fn->set_name("max_only_int64");
+                    fn->set_function_id(5);
+                    auto* arg = fn->add_args();
+                    arg->set_name("idx");
+                    arg->set_type(ValueType::VALUE_TYPE_INT64);
+                    arg->set_required(true);
+                    arg->set_max_int64(10);
+                    // intentionally no set_min_int64()
+                }
+
+                return true;
+            }));
+
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    Value make_double(double v) {
+        Value val;
+        val.set_type(ValueType::VALUE_TYPE_DOUBLE);
+        val.set_double_value(v);
+        return val;
+    }
+
+    Value make_int64(int64_t v) {
+        Value val;
+        val.set_type(ValueType::VALUE_TYPE_INT64);
+        val.set_int64_value(v);
+        return val;
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> router;
+    std::shared_ptr<MockProviderHandle> mock_provider;
+    std::unordered_map<std::string, std::shared_ptr<provider::IProviderHandle>> providers;
+};
+
+// ---- Bug 1: one-sided double bounds ----
+
+// CURRENTLY FAILS: phantom max=0.0 causes "above maximum 0.000000" for val=10.0.
+TEST_F(CallRouterRangeBugTest, MinOnlyDouble_InRangeValuePasses) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "min_only_double";
+    req.args["val"] = make_double(10.0);  // above min=5.0, no upper bound
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+// REGRESSION GUARD: below min should always be rejected.
+TEST_F(CallRouterRangeBugTest, MinOnlyDouble_BelowMinFails) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "min_only_double";
+    req.args["val"] = make_double(4.9);  // below min=5.0
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_THAT(error, HasSubstr("below minimum"));
+}
+
+// CURRENTLY FAILS: phantom min=0.0 causes "below minimum 0.000000" for val=-10.0.
+TEST_F(CallRouterRangeBugTest, MaxOnlyDouble_InRangeNegativeValuePasses) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "max_only_double";
+    req.args["val"] = make_double(-10.0);  // below max=50.0, no lower bound
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+// REGRESSION GUARD: above max should always be rejected.
+TEST_F(CallRouterRangeBugTest, MaxOnlyDouble_AboveMaxFails) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "max_only_double";
+    req.args["val"] = make_double(51.0);  // above max=50.0
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_THAT(error, HasSubstr("above maximum"));
+}
+
+// ---- Bug 2: zero-valued minimum ----
+
+// CURRENTLY FAILS: zero heuristic treats min=0.0 as "not set", so -1.0 passes
+// when it should be rejected.
+TEST_F(CallRouterRangeBugTest, ZeroMinDouble_BelowZeroFails) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "zero_min_double";
+    req.args["val"] = make_double(-1.0);  // below min=0.0
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_THAT(error, HasSubstr("below minimum"));
+}
+
+// REGRESSION GUARD: value exactly at the zero minimum should pass.
+TEST_F(CallRouterRangeBugTest, ZeroMinDouble_AtZeroPasses) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "zero_min_double";
+    req.args["val"] = make_double(0.0);  // exactly at min=0.0
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+// ---- Bug 1: one-sided int64 bounds ----
+
+// CURRENTLY FAILS: phantom max=0 causes "above maximum 0" for val=5.
+TEST_F(CallRouterRangeBugTest, MinOnlyInt64_InRangeValuePasses) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "min_only_int64";
+    req.args["idx"] = make_int64(5);  // above min=1, no upper bound
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+// REGRESSION GUARD: below min should always be rejected.
+TEST_F(CallRouterRangeBugTest, MinOnlyInt64_BelowMinFails) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "min_only_int64";
+    req.args["idx"] = make_int64(0);  // below min=1
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_THAT(error, HasSubstr("below minimum"));
+}
+
+// CURRENTLY FAILS: phantom min=0 causes "below minimum 0" for val=-5.
+TEST_F(CallRouterRangeBugTest, MaxOnlyInt64_InRangeNegativeValuePasses) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "max_only_int64";
+    req.args["idx"] = make_int64(-5);  // below max=10, no lower bound
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+// REGRESSION GUARD: above max should always be rejected.
+TEST_F(CallRouterRangeBugTest, MaxOnlyInt64_AboveMaxFails) {
+    control::CallRequest req;
+    req.device_handle = "sim0/rangedev";
+    req.function_name = "max_only_int64";
+    req.args["idx"] = make_int64(11);  // above max=10
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_THAT(error, HasSubstr("above maximum"));
+}
