@@ -203,25 +203,16 @@ nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
             arg_info["unit"] = arg.unit();
         }
 
-        // Add range constraints for numeric types
+        // Add range constraints for numeric types - emit each bound independently.
         if (arg.type() == anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE) {
-            bool has_bounds = arg.min_double() != 0.0 || arg.max_double() != 0.0;
-            if (has_bounds) {
-                arg_info["min"] = arg.min_double();
-                arg_info["max"] = arg.max_double();
-            }
+            if (arg.has_min_double()) arg_info["min"] = arg.min_double();
+            if (arg.has_max_double()) arg_info["max"] = arg.max_double();
         } else if (arg.type() == anolis::deviceprovider::v1::VALUE_TYPE_INT64) {
-            bool has_bounds = arg.min_int64() != 0 || arg.max_int64() != 0;
-            if (has_bounds) {
-                arg_info["min"] = arg.min_int64();
-                arg_info["max"] = arg.max_int64();
-            }
+            if (arg.has_min_int64()) arg_info["min"] = arg.min_int64();
+            if (arg.has_max_int64()) arg_info["max"] = arg.max_int64();
         } else if (arg.type() == anolis::deviceprovider::v1::VALUE_TYPE_UINT64) {
-            bool has_bounds = arg.min_uint64() != 0 || arg.max_uint64() != 0;
-            if (has_bounds) {
-                arg_info["min"] = arg.min_uint64();
-                arg_info["max"] = arg.max_uint64();
-            }
+            if (arg.has_min_uint64()) arg_info["min"] = arg.min_uint64();
+            if (arg.has_max_uint64()) arg_info["max"] = arg.max_uint64();
         }
 
         args[arg.name()] = arg_info;

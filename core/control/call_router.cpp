@@ -336,10 +336,8 @@ bool CallRouter::validate_argument_range(const anolis::deviceprovider::v1::ArgSp
     switch (spec.type()) {
         case ValueType::VALUE_TYPE_DOUBLE: {
             double val = value.double_value();
-            // Check if bounds are set (protobuf defaults to 0.0)
-            // We use -inf/+inf to indicate unbounded
-            bool has_min = spec.min_double() != 0.0 || spec.max_double() != 0.0;
-            bool has_max = spec.min_double() != 0.0 || spec.max_double() != 0.0;
+            bool has_min = spec.has_min_double();
+            bool has_max = spec.has_max_double();
 
             if (has_min && val < spec.min_double()) {
                 std::ostringstream oss;
@@ -357,8 +355,8 @@ bool CallRouter::validate_argument_range(const anolis::deviceprovider::v1::ArgSp
         }
         case ValueType::VALUE_TYPE_INT64: {
             int64_t val = value.int64_value();
-            bool has_min = spec.min_int64() != 0 || spec.max_int64() != 0;
-            bool has_max = spec.min_int64() != 0 || spec.max_int64() != 0;
+            bool has_min = spec.has_min_int64();
+            bool has_max = spec.has_max_int64();
 
             if (has_min && val < spec.min_int64()) {
                 std::ostringstream oss;
@@ -376,8 +374,8 @@ bool CallRouter::validate_argument_range(const anolis::deviceprovider::v1::ArgSp
         }
         case ValueType::VALUE_TYPE_UINT64: {
             uint64_t val = value.uint64_value();
-            bool has_min = spec.min_uint64() != 0 || spec.max_uint64() != 0;
-            bool has_max = spec.min_uint64() != 0 || spec.max_uint64() != 0;
+            bool has_min = spec.has_min_uint64();
+            bool has_max = spec.has_max_uint64();
 
             if (has_min && val < spec.min_uint64()) {
                 std::ostringstream oss;
