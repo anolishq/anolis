@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-04-25
+
+### Fixed
+
+- F4: `ProviderSupervisor::record_crash` now clamps `attempt_index` to the last
+  valid entry in `backoff_ms` when the vector is shorter than `max_attempts`,
+  preventing an out-of-bounds vector access. `get_backoff_ms` is updated to use
+  the same clamping logic for consistency (previously returned 0 on OOB).
+  The YAML config path already rejects mismatched configs; this adds a second
+  layer of defence for direct class construction.
+
 ## [0.1.16] - 2026-04-25
 
 ### Fixed
