@@ -42,8 +42,8 @@ std::string derive_lifecycle_state(bool is_available,
 //=============================================================================
 void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Response &res) {
     // Calculate uptime from server start (set in HttpServer::start())
-    auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::steady_clock::now() - start_time_).count();
+    auto uptime =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time_).count();
 
     // Build provider status list
     nlohmann::json providers_json = nlohmann::json::array();
