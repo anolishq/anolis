@@ -13,6 +13,16 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-04-25
+
+### Fixed
+
+- F6: `SignalHandler::install()` now resets `shutdown_requested_` to `false`
+  before registering OS signal handlers. Previously the static latch was never
+  cleared, so any re-invocation of `install()` after a signal had fired (e.g.
+  in-process re-initialization or unit tests) would leave a stale `true` and
+  cause `Runtime::run()` to exit immediately on its first shutdown check.
+
 ## [0.1.18] - 2026-04-25
 
 ### Fixed
