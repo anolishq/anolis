@@ -602,6 +602,41 @@ TEST_F(HttpHandlersTest, GetRuntimeStatusUsesUnavailableWhenProviderUnavailable)
     EXPECT_FALSE(provider.contains("supervision"));
 }
 
+TEST_F(HttpHandlersTest, GetRuntimeStatusUptimeReflectsServerStartNotFirstRequest) {
+    // F5 regression: uptime_seconds used a static local start_time that was
+    // initialised on the first call to the handler, not at server start.
+    // This test verifies the epoch is anchored to server start.
+    //
+    // Strategy: wait long enough (total > 1s from server start) before making
+    // the first request, so that the *second* call should report >= 1s.
+    //
+    // Before fix: static local initialised on first call → second call sees
+    // ~500ms elapsed → uptime_seconds = 0. FAILS.
+    // After fix: epoch set at server start (~100ms before test body executes
+    // due to SetUp sleep) → second call at ~1200ms → uptime_seconds >= 1. PASSES.
+
+    RegisterMockDevice();
+
+    // Wait 500ms before the very first status request.
+    // SetUp already slept 100ms, so server has been alive ~600ms at this point.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    auto res = client->Get("/v0/runtime/status");
+    ASSERT_TRUE(res);
+    ASSERT_EQ(200, res->status);
+
+    // Wait another 600ms so total server lifetime is >= 1200ms.
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    auto res2 = client->Get("/v0/runtime/status");
+    ASSERT_TRUE(res2);
+    ASSERT_EQ(200, res2->status);
+
+    const auto json2 = nlohmann::json::parse(res2->body);
+    ASSERT_TRUE(json2.contains("uptime_seconds"));
+
+    // Server has been alive > 1s; uptime must reflect that.
+    EXPECT_GE(json2["uptime_seconds"].get<int64_t>(), int64_t{1});
+}
+
 //=============================================================================
 // CORS Tests
 //=============================================================================
