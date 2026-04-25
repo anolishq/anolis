@@ -570,3 +570,53 @@ TEST(EventEmitterTest, UnsubscribeDuringEmission) {
     // Should complete without crashes
     EXPECT_EQ(emitter.subscriber_count(), 0);
 }
+
+// ============================================================================
+// F3: Subscription Lifetime / Emitter Destruction Tests
+// ============================================================================
+
+// After emitter is destroyed the surviving subscription's queue must be closed
+// so that is_active() returns false and pop() unblocks.
+// FAILS before fix: emitter destructor does not close queues.
+TEST(EventEmitterTest, SubscriptionQueueClosedWhenEmitterDestroyed) {
+    std::unique_ptr<Subscription> sub;
+    {
+        EventEmitter emitter(10, 10);
+        sub = emitter.subscribe();
+        ASSERT_NE(sub, nullptr);
+        EXPECT_TRUE(sub->is_active());
+    }
+    // Emitter destroyed above; queue must be closed by emitter destructor.
+    EXPECT_FALSE(sub->is_active());
+}
+
+// Destroying a subscription after its emitter must not crash or invoke UB.
+// The queue is closed by the emitter destructor, so unsubscribe() must skip
+// the raw-this lambda call.
+// FAILS before fix under ASan/UBSan due to UAF through dangling lambda.
+TEST(EventEmitterTest, SubscriptionDestructorAfterEmitterDestroyedIsNoOp) {
+    std::unique_ptr<Subscription> sub;
+    {
+        EventEmitter emitter(10, 10);
+        sub = emitter.subscribe();
+    }
+    // Must not crash. Under ASan/UBSan this hits UAF before the fix.
+    sub.reset();
+}
+
+// All surviving subscriptions must have their queues closed when the emitter
+// is destroyed, even if unsubscribe() was never called on any of them.
+// FAILS before fix.
+TEST(EventEmitterTest, MultipleSubscriptionsQueueClosedOnEmitterDestroy) {
+    std::vector<std::unique_ptr<Subscription>> subs;
+    {
+        EventEmitter emitter(10, 10);
+        for (int i = 0; i < 5; ++i) {
+            subs.push_back(emitter.subscribe());
+        }
+        EXPECT_EQ(emitter.subscriber_count(), 5);
+    }
+    for (auto &sub : subs) {
+        EXPECT_FALSE(sub->is_active());
+    }
+}
