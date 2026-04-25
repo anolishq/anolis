@@ -308,3 +308,56 @@ TEST(ProviderSupervisorTest, ConcurrentReadsAndWritesAreThreadSafe) {
     // No assertions needed — TSAN races are detected during execution.
     // If this test passes under -fsanitize=thread, the mutex coverage is correct.
 }
+
+// ---------------------------------------------------------------------------
+// F4: Backoff vector bounds safety
+// ---------------------------------------------------------------------------
+
+// record_crash with backoff_ms shorter than max_attempts must not OOB-access
+// the vector. Before the fix, attempt 2 reads past the end of a 1-entry vector.
+// Under ASan this faults; on plain builds it is UB (and returns garbage/0).
+// FAILS before fix under ASan/UBSan.
+TEST(ProviderSupervisorTest, RecordCrashWithShortBackoffVectorDoesNotCrash) {
+    ProviderSupervisor sup;
+    RestartPolicyConfig policy;
+    policy.enabled = true;
+    policy.max_attempts = 3;
+    policy.backoff_ms = {500};  // 1 entry — mismatched; OOB before fix on attempt 2+
+    policy.timeout_ms = 5000;
+    policy.success_reset_ms = 1000;
+    sup.register_provider("prov", policy);
+
+    EXPECT_TRUE(sup.record_crash("prov"));   // attempt 1: index 0 — always safe
+    EXPECT_TRUE(sup.record_crash("prov"));   // attempt 2: index 1 — OOB before fix
+    EXPECT_TRUE(sup.record_crash("prov"));   // attempt 3: index 2 — OOB before fix
+    EXPECT_FALSE(sup.record_crash("prov"));  // attempt 4 > max_attempts: circuit opens
+    EXPECT_TRUE(sup.is_circuit_open("prov"));
+}
+
+// After fix, the clamped backoff for all out-of-range attempts must equal the
+// last entry in backoff_ms. get_backoff_ms must reflect the same clamped value.
+// FAILS before fix: get_backoff_ms returns 0 (its own OOB guard) rather than 500,
+// or record_crash crashes under sanitizers preventing get_backoff_ms from running.
+TEST(ProviderSupervisorTest, RecordCrashWithShortBackoffVectorUsesLastEntryAsBackoff) {
+    ProviderSupervisor sup;
+    RestartPolicyConfig policy;
+    policy.enabled = true;
+    policy.max_attempts = 3;
+    policy.backoff_ms = {9999};  // 1 entry; all clamped attempts should use 9999ms
+    policy.timeout_ms = 5000;
+    policy.success_reset_ms = 1000;
+    sup.register_provider("prov", policy);
+
+    // Attempt 1 (index 0 — in range): backoff must be 9999ms
+    sup.record_crash("prov");
+    EXPECT_EQ(9999, sup.get_backoff_ms("prov"));
+
+    sup.record_success("prov");
+
+    // Attempt 1 + 2 after reset: attempt 2 is OOB before fix
+    sup.record_crash("prov");
+    sup.record_crash("prov");
+    // After fix: clamped to last entry (9999ms)
+    // Before fix: get_backoff_ms returns 0 (its own guard path) — FAILS
+    EXPECT_EQ(9999, sup.get_backoff_ms("prov"));
+}
