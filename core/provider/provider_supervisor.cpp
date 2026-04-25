@@ -63,11 +63,15 @@ int ProviderSupervisor::get_backoff_ms(const std::string &provider_id) const {
     }
 
     int attempt_index = state.attempt_count - 1;
-    if (attempt_index >= 0 && attempt_index < static_cast<int>(policy.backoff_ms.size())) {
-        return policy.backoff_ms[attempt_index];
+    if (attempt_index < 0) {
+        return 0;
     }
-
-    return 0;
+    // Clamp to last entry: if backoff_ms is shorter than max_attempts, use the
+    // last element as the steady-state backoff rather than going out-of-bounds.
+    if (static_cast<size_t>(attempt_index) >= policy.backoff_ms.size()) {
+        attempt_index = static_cast<int>(policy.backoff_ms.size()) - 1;
+    }
+    return policy.backoff_ms[attempt_index];
 }
 
 bool ProviderSupervisor::record_crash(const std::string &provider_id) {
@@ -101,6 +105,11 @@ bool ProviderSupervisor::record_crash(const std::string &provider_id) {
     }
 
     int attempt_index = state.attempt_count - 1;
+    // Clamp to last entry: if backoff_ms is shorter than max_attempts, use the
+    // last element as the steady-state backoff rather than going out-of-bounds.
+    if (static_cast<size_t>(attempt_index) >= policy.backoff_ms.size()) {
+        attempt_index = static_cast<int>(policy.backoff_ms.size()) - 1;
+    }
     int backoff_ms = policy.backoff_ms[attempt_index];
 
     auto now = std::chrono::steady_clock::now();
