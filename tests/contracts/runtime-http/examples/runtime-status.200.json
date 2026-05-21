@@ -3,6 +3,7 @@
     "code": "OK",
     "message": "ok"
   },
+  "version": "0.1.21",
   "mode": "MANUAL",
   "uptime_seconds": 123,
   "polling_interval_ms": 500,

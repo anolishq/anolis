@@ -371,10 +371,13 @@ components:
     RuntimeStatusResponse:
       type: object
       additionalProperties: false
-      required: [status, mode, uptime_seconds, polling_interval_ms, providers, device_count]
+      required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count]
       properties:
         status:
           $ref: '#/components/schemas/Status'
+        version:
+          type: string
+          description: Runtime version string (e.g. "0.1.21")
         mode:
           $ref: '#/components/schemas/RuntimeMode'
         uptime_seconds:
