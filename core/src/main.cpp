@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 
+#include "anolis_build_config.hpp"
 #include "logging/logger.hpp"
 #include "runtime/config.hpp"
 #include "runtime/runtime.hpp"
@@ -30,7 +31,11 @@ int main(int argc, char **argv) {
             std::cerr << "Options:\n";
             std::cerr << "  --config=PATH         Path to config file (default: anolis-runtime.yaml)\n";
             std::cerr << "  --check-config PATH   Validate config file and exit (0=ok, 1=error)\n";
+            std::cerr << "  --version, -V         Print version and exit\n";
             std::cerr << "  --help, -h            Show this help\n";
+            return 0;
+        } else if (arg == "--version" || arg == "-V") {
+            std::cout << "anolis-runtime " << ANOLIS_VERSION << "\n";
             return 0;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";

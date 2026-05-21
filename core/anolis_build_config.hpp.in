@@ -1,3 +1,5 @@
 #pragma once
 
 #cmakedefine01 ANOLIS_ENABLE_AUTOMATION
+
+#define ANOLIS_VERSION "@PROJECT_VERSION@"

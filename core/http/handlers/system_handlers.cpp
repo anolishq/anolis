@@ -66,6 +66,7 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
     }
 
     nlohmann::json response = {{"status", make_status(StatusCode::OK)},
+                               {"version", ANOLIS_VERSION},
                                {"mode", current_mode},
                                {"uptime_seconds", uptime},
                                {"polling_interval_ms", polling_interval_ms_},
