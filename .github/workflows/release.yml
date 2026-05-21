@@ -439,6 +439,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            tools/install.sh
             anolis-*-observability.tar.gz
             anolis-*-telemetry-schema.tar.gz
             telemetry-schema-manifest.json
