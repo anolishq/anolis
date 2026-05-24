@@ -301,8 +301,9 @@ jobs:
 
       - name: Configure compatibility preset
         run: |
-          uv run cmake --preset ci-linux-compat \
+          cmake --preset ci-linux-compat \
             -DANOLIS_ENABLE_PYTHON_CTEST=ON \
+            -DPython3_EXECUTABLE="$(pwd)/.venv/bin/python" \
             -DANOLIS_PROVIDER_SIM_EXE="${{ steps.provider.outputs.exe }}"
 
       - name: Build compatibility preset
@@ -319,7 +320,7 @@ jobs:
       - name: Run CTest compatibility entrypoint (Python)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci-linux-compat/vcpkg_installed/x64-linux/lib
-        run: uv run ctest --preset ci-linux-compat -L integration
+        run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
     uses: anolishq/.github/.github/workflows/version-sync.yml@main
