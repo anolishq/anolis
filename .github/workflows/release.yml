@@ -14,7 +14,7 @@ env:
 jobs:
   metrics:
     name: Collect metrics
-    uses: anolishq/.github/.github/workflows/metrics.yml@v1
+    uses: anolishq/.github/.github/workflows/metrics.yml@bc164399678c8e0921a9c606b660bb4a16ad9e98 # v2
     with:
       tag: ${{ github.ref_name }}
 
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install system dependencies
         run: |
@@ -34,11 +34,11 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -106,7 +106,7 @@ jobs:
             > manifest.json
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |
             anolis-*-linux-x86_64.tar.gz
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install system dependencies
         run: |
@@ -131,11 +131,11 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -192,7 +192,7 @@ jobs:
             > manifest-linux-arm64.json
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |
             anolis-*-linux-arm64.tar.gz
@@ -204,7 +204,7 @@ jobs:
     needs: [release-linux-x86_64]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -440,7 +440,7 @@ jobs:
             > runtime-http-schema-manifest.json
 
       - name: Upload contract artifacts to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |
             tools/install.sh
@@ -598,12 +598,12 @@ jobs:
     needs: [release-linux-x86_64, release-linux-arm64, metrics]
     steps:
       - name: Download metrics artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: metrics-${{ github.event.repository.name }}-${{ github.run_number }}
           path: metrics-out/
 
       - name: Upload metrics.json to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: metrics-out/metrics.json
