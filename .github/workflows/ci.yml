@@ -197,7 +197,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
           doNotCache: false
@@ -277,7 +277,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
           doNotCache: false
@@ -323,7 +323,7 @@ jobs:
         run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
-    uses: anolishq/.github/.github/workflows/version-sync.yml@main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@15f6901a9ef7e845841d371a64addb04b0f7755a # main
     with:
       python-version: '3.12'
       working-directory: '.'
