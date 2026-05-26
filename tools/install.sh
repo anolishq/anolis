@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # unused vars are future flags (telemetry, observability)
 # Anolis Runtime — Standalone Provisioning Script
 # Downloads and installs the anolis runtime + providers from a bundle.
 #
@@ -113,7 +114,7 @@ parse_args() {
 
 phase_root_check() {
     if [[ $EUID -ne 0 ]]; then
-        die "This script must be run as root. Use: sudo $0 $*"
+        die "This script must be run as root. Use: sudo $0"
     fi
     log_ok "root check"
 }
@@ -179,7 +180,6 @@ phase_resolve() {
     # Find the matching release
     local tag_prefix="${PROFILE}-"
     local target_tag=""
-    local asset_url=""
 
     if [[ -n "${VERSION}" ]]; then
         # Exact version requested
@@ -231,7 +231,7 @@ phase_download() {
             BUNDLE_DIR="${LOCAL_PATH}"
         elif [[ -f "${LOCAL_PATH}" ]]; then
             BUNDLE_DIR=$(mktemp -d)
-            trap "rm -rf '${BUNDLE_DIR}'" EXIT
+            trap 'rm -rf "${BUNDLE_DIR}"' EXIT
             tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
         else
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
@@ -242,7 +242,7 @@ phase_download() {
 
     # Online mode — download
     BUNDLE_DIR=$(mktemp -d)
-    trap "rm -rf '${BUNDLE_DIR}'" EXIT
+    trap 'rm -rf "${BUNDLE_DIR}"' EXIT
 
     local tmp_tarball="${BUNDLE_DIR}.tar.gz"
     local auth_args=()
@@ -376,6 +376,7 @@ phase_deps() {
         return
     fi
 
+    # shellcheck disable=SC2015  # intentional: error handler covers both failures
     apt-get update -qq && apt-get install -y -qq i2c-tools || {
         log_warn "deps: failed to install i2c-tools (non-fatal)"
         return
@@ -422,7 +423,7 @@ phase_install_binaries() {
     cp "${BUNDLE_DIR}"/bin/* "${PREFIX}/bin/"
     chmod +x "${PREFIX}"/bin/*
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/*
-    log_ok "install binaries: $(ls "${BUNDLE_DIR}/bin/" | tr '\n' ' ')"
+    log_ok "install binaries: $(find "${BUNDLE_DIR}/bin/" -maxdepth 1 -type f -printf '%f ' 2>/dev/null || ls "${BUNDLE_DIR}/bin/")"
 }
 
 # =============================================================================
