@@ -220,7 +220,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@afc2d268fb34aae478284589c29e3043c136a897 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@89e202564c576446cbc13c87061bf9632b9bfef5 # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: ${{ matrix.triplet }}
@@ -300,7 +300,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@afc2d268fb34aae478284589c29e3043c136a897 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@89e202564c576446cbc13c87061bf9632b9bfef5 # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: x64-linux-static
@@ -346,7 +346,7 @@ jobs:
         run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
-    uses: anolishq/.github/.github/workflows/version-sync.yml@afc2d268fb34aae478284589c29e3043c136a897 # main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@89e202564c576446cbc13c87061bf9632b9bfef5 # main
     with:
       python-version: '3.12'
       working-directory: '.'
