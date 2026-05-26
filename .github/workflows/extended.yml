@@ -59,10 +59,10 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@main
         with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
-          doNotCache: false
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          triplet: x64-linux-static
 
       - name: Configure
         run: cmake --preset "${{ matrix.preset }}"
@@ -114,10 +114,10 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@main
         with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
-          doNotCache: false
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          triplet: x64-linux-static
 
       - name: Configure
         run: cmake --preset ci-tsan
@@ -168,10 +168,10 @@ jobs:
           sudo ln -sf /usr/bin/clang-tidy-14 /usr/bin/clang-tidy
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@main
         with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
-          doNotCache: false
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          triplet: x64-linux-static
 
       - name: Configure
         run: cmake --preset ci-linux-clang-tidy
@@ -259,10 +259,10 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@main
         with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
-          doNotCache: false
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          triplet: x64-linux-static
 
       - name: Configure
         run: cmake --preset ci-coverage
