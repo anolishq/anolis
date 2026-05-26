@@ -323,7 +323,7 @@ jobs:
         run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
-    uses: anolishq/.github/.github/workflows/version-sync.yml@15f6901a9ef7e845841d371a64addb04b0f7755a # main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@15446ff3fbd9ec1d4c341485731356de026d2f67 # main
     with:
       python-version: '3.12'
       working-directory: '.'
