@@ -49,7 +49,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@afc2d268fb34aae478284589c29e3043c136a897 # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: x64-linux-static
@@ -146,7 +146,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@afc2d268fb34aae478284589c29e3043c136a897 # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: arm64-linux
