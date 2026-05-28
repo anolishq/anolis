@@ -3,24 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.svg"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.svg"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
   workflow_dispatch:
 
 concurrency:
@@ -31,8 +15,32 @@ env:
   VCPKG_COMMIT: "66c0373dc7fca549e5803087b9487edfe3aca0a1"
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!**/*.png'
+              - '!**/*.svg'
+              - '!**/*.jpg'
+              - '!**/*.jpeg'
+              - '!**/*.gif'
+
   format-check:
     name: C++ Formatting (clang-format)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -56,6 +64,8 @@ jobs:
 
   python-lint:
     name: Python Linting (ruff)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -84,6 +94,8 @@ jobs:
 
   python-typecheck:
     name: Python Type Checking (mypy)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -110,6 +122,8 @@ jobs:
 
   shell-tests:
     name: Shell Lint & Smoke Tests
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -128,6 +142,8 @@ jobs:
 
   ui-contracts:
     name: UI and Runtime Contracts
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -163,6 +179,8 @@ jobs:
 
   core-build-test:
     name: ${{ matrix.lane }}
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -252,6 +270,8 @@ jobs:
 
   anolis-provider-compat:
     name: anolis-provider-compat
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
@@ -346,7 +366,32 @@ jobs:
         run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: anolishq/.github/.github/workflows/version-sync.yml@01b61259e549666b145d941a5aa8a851b98ec399 # main
     with:
       python-version: '3.12'
       working-directory: '.'
+
+  ok:
+    name: ok
+    if: always()
+    needs:
+      - changes
+      - format-check
+      - python-lint
+      - python-typecheck
+      - shell-tests
+      - ui-contracts
+      - core-build-test
+      - anolis-provider-compat
+      - version-sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate job results
+        run: |
+          echo "Job results: ${{ toJSON(needs.*.result) }}"
+      - name: Fail if any required job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
