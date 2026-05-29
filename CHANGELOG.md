@@ -13,6 +13,12 @@ commit messages only.
 
 ## [Unreleased]
 
+### CI
+
+- Add CI OK aggregator gate: removed `paths-ignore`, added `dorny/paths-filter`
+  to detect code-vs-docs changes, gated all jobs behind the filter, and added a
+  final `ok` job as the sole required status check for `main` branch protection.
+
 ## [0.1.20] - 2026-04-25
 
 ### Fixed
