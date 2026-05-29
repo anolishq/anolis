@@ -22,8 +22,13 @@
     {
       "description": "Group Python dev tooling (ruff, pytest, mypy, type stubs)",
       "matchManagers": ["pep621"],
-      "matchPackagePatterns": ["^ruff", "^pytest", "^mypy", "^types-"],
-      "groupName": "python-dev-tooling"
+      "groupName": "python-dev-tooling",
+      "matchPackageNames": [
+        "/^ruff/",
+        "/^pytest/",
+        "/^mypy/",
+        "/^types-/"
+      ]
     }
   ]
 }
