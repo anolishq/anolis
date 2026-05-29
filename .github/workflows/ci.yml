@@ -22,7 +22,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
         id: filter
         with:
@@ -238,7 +238,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@01b61259e549666b145d941a5aa8a851b98ec399 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@acf7758d393dab943086634dd9e07a1a49e6ce0a # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: ${{ matrix.triplet }}
@@ -320,7 +320,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@01b61259e549666b145d941a5aa8a851b98ec399 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@acf7758d393dab943086634dd9e07a1a49e6ce0a # main
         with:
           vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: x64-linux-static
@@ -368,7 +368,7 @@ jobs:
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: anolishq/.github/.github/workflows/version-sync.yml@01b61259e549666b145d941a5aa8a851b98ec399 # main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@acf7758d393dab943086634dd9e07a1a49e6ce0a # main
     with:
       python-version: '3.12'
       working-directory: '.'
