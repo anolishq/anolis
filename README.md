@@ -1,5 +1,6 @@
 # anolis
 
+<!-- CI paths-filter validation: this comment is safe to remove -->
 [![CI](https://github.com/anolishq/anolis/actions/workflows/ci.yml/badge.svg)](https://github.com/anolishq/anolis/actions/workflows/ci.yml)
 [![Extended](https://github.com/anolishq/anolis/actions/workflows/extended.yml/badge.svg)](https://github.com/anolishq/anolis/actions/workflows/extended.yml)
 
