@@ -11,9 +11,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  VCPKG_COMMIT: "66c0373dc7fca549e5803087b9487edfe3aca0a1"
-
 jobs:
   changes:
     name: Detect changes
@@ -239,9 +236,8 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@acf7758d393dab943086634dd9e07a1a49e6ce0a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
         with:
-          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: ${{ matrix.triplet }}
 
       - name: Configure
@@ -321,9 +317,8 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@acf7758d393dab943086634dd9e07a1a49e6ce0a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
         with:
-          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
           triplet: x64-linux-static
 
       - name: Build pinned provider-sim (FluxGraph OFF)
