@@ -204,12 +204,12 @@ jobs:
             test_preset: ci-linux-arm64-release-strict
             triplet: arm64-linux
           - lane: Windows Release (Core, strict)
-            os: windows-2022
+            os: windows-2025
             configure_preset: ci-windows-release-strict
             test_preset: ci-windows-release-strict
             triplet: x64-windows
           - lane: Windows Release (Core, no automation)
-            os: windows-2022
+            os: windows-2025
             configure_preset: ci-windows-release-no-automation
             test_preset: ci-windows-release-no-automation
             triplet: x64-windows
