@@ -15,6 +15,12 @@ commit messages only.
 
 ### CI
 
+- Migrate Windows build to Visual Studio 2026. The hosted `windows-2025` /
+  `windows-latest` runner image moved from VS 2022 to VS 2026; update the
+  `base-windows-msvc` preset generator `Visual Studio 17 2022` →
+  `Visual Studio 18 2026` and move both Windows CI lanes from `windows-2022` to
+  `windows-2025`. The plain `x64-windows` triplet inherits the image's default
+  toolset (`v145`), so no triplet/toolset changes are required.
 - Add CI OK aggregator gate: removed `paths-ignore`, added `dorny/paths-filter`
   to detect code-vs-docs changes, gated all jobs behind the filter, and added a
   final `ok` job as the sole required status check for `main` branch protection.
