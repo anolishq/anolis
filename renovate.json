@@ -1,34 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "ignorePaths": ["requirements.txt", "requirements-lock.txt"],
-  "osvVulnerabilityAlerts": true,
-  "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": ["before 6am on monday"]
-  },
-  "packageRules": [
-    {
-      "description": "Group all GitHub Actions updates",
-      "matchManagers": ["github-actions"],
-      "groupName": "github-actions",
-      "pinDigests": true
-    },
-    {
-      "description": "Supply-chain safety: wait 3 days for pypi packages",
-      "matchManagers": ["pep621"],
-      "minimumReleaseAge": "3 days"
-    },
-    {
-      "description": "Group Python dev tooling (ruff, pytest, mypy, type stubs)",
-      "matchManagers": ["pep621"],
-      "groupName": "python-dev-tooling",
-      "matchPackageNames": [
-        "/^ruff/",
-        "/^pytest/",
-        "/^mypy/",
-        "/^types-/"
-      ]
-    }
-  ]
+  "extends": ["local>anolishq/renovate-config"]
 }
