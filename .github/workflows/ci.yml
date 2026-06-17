@@ -236,7 +236,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: ${{ matrix.triplet }}
 
@@ -317,7 +317,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: x64-linux-static
 
@@ -364,7 +364,7 @@ jobs:
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: anolishq/.github/.github/workflows/version-sync.yml@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
     with:
       python-version: '3.12'
       working-directory: '.'
