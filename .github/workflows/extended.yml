@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: x64-linux-static
 
@@ -110,7 +110,7 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: x64-linux-static
 
@@ -163,7 +163,7 @@ jobs:
           sudo ln -sf /usr/bin/clang-tidy-14 /usr/bin/clang-tidy
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: x64-linux-static
 
@@ -253,7 +253,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c995c89985377c46ed4350e16cb761d8a9c57d1a # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@d663c20e85733d18b083c20e8051c7ce2149e9ed # main
         with:
           triplet: x64-linux-static
 
