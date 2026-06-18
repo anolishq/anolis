@@ -46,7 +46,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@e1bd27e1815926f1d7f92a5448df9f5ae2f5d3c3 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@82e7f70687b6b2b3cc8a9b047a397c73283b0428 # main
         with:
           triplet: x64-linux-static
 
@@ -142,7 +142,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@e1bd27e1815926f1d7f92a5448df9f5ae2f5d3c3 # main
+        uses: anolishq/.github/.github/actions/setup-vcpkg@82e7f70687b6b2b3cc8a9b047a397c73283b0428 # main
         with:
           triplet: arm64-linux
 
