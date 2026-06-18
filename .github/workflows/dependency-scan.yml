@@ -14,8 +14,8 @@ permissions:
 
 jobs:
   scan:
-    uses: anolishq/.github/.github/workflows/dependency-scan.yml@e1bd27e1815926f1d7f92a5448df9f5ae2f5d3c3 # main
+    uses: anolishq/.github/.github/workflows/dependency-scan.yml@26d15f0cfdcc47f48411a8fac96ac28f6b66d0f8 # main
     with:
       triplet: x64-linux-static
     secrets:
-      nvd-api-key: ${{ secrets.NVD_API_KEY }}
+      nvd_api_key: ${{ secrets.NVD_API_KEY }}
