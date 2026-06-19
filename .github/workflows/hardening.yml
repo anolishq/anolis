@@ -1,0 +1,47 @@
+name: Hardening
+
+# Memory-safety hardening for anolis-runtime (TSAN lives in extended.yml).
+#   - valgrind: shared org leak-check over `--check-config`.
+#   - fuzz:     shared org libFuzzer runner over the YAML-config and ADPP-frame
+#               decoders (bounded regression run against the checked-in corpus).
+# Both fail only on a real first-party finding; third-party false positives are
+# scoped in valgrind.supp (first run per change = triage pass).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: anolis-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  valgrind:
+    name: Valgrind leak-check
+    uses: anolishq/.github/.github/workflows/valgrind-leak.yml@0f4d8cd3c04dcb17fe128248a147b237c1465e0c # v2
+    with:
+      build-preset: ci-linux-release
+      build-target: anolis-runtime
+      run: "build/ci-linux-release/core/anolis-runtime --check-config tests/contracts/runtime-config/valid/01-minimal.yaml"
+      suppressions: valgrind.supp
+
+  fuzz:
+    name: Fuzz (libFuzzer)
+    uses: anolishq/.github/.github/workflows/fuzz.yml@0f4d8cd3c04dcb17fe128248a147b237c1465e0c # v2
+    with:
+      build-preset: ci-fuzz
+      fuzz-binaries: "build/ci-fuzz/fuzz/fuzz_config build/ci-fuzz/fuzz/fuzz_frame"
+      corpus-root: fuzz/corpus
+      max-total-time: "60"

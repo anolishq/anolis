@@ -1,0 +1,20 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+polling:
+  interval_ms: 500
+
+automation:
+  enabled: true
+  behavior_tree_path: ./behaviors/demo.xml
+  tick_rate_hz: 10
+  manual_gating_policy: BLOCK
+  parameters:
+    - name: control_enabled
+      type: bool
+      default: true
+
+logging:
+  level: info
+
