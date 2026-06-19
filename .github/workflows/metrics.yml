@@ -9,4 +9,4 @@ on:
 
 jobs:
   collect:
-    uses: anolishq/.github/.github/workflows/metrics.yml@fe0a8fce045364cb2e3552a7fbca59263395c8d6 # v2
+    uses: anolishq/.github/.github/workflows/metrics.yml@0f4d8cd3c04dcb17fe128248a147b237c1465e0c # v2
