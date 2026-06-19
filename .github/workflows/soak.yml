@@ -1,0 +1,111 @@
+name: Soak
+
+# Accelerated restart-churn soak for anolis-runtime (see tests/soak/churn_soak.sh).
+# GitHub-hosted jobs are capped at 6h, so this is the bounded hosted-CI signal;
+# the true >24h soak runs on the self-hosted runner (anolishq/.github#57).
+# Scheduled weekly + manual dispatch (short durations for validation).
+
+on:
+  schedule:
+    - cron: "0 3 * * 0" # Sundays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      churn_minutes:
+        description: "Restart-churn duration (minutes)"
+        required: false
+        default: "240"
+      run_seconds:
+        description: "Seconds each churn cycle runs before SIGTERM"
+        required: false
+        default: "3"
+      sustain_seconds:
+        description: "Sustained-instance RSS-watch duration (seconds)"
+        required: false
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anolis-soak
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: Accelerated churn soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++
+
+      - name: Setup vcpkg
+        uses: anolishq/.github/.github/actions/setup-vcpkg@0f4d8cd3c04dcb17fe128248a147b237c1465e0c # v2
+        with:
+          triplet: x64-linux-static
+
+      - name: Build anolis-runtime
+        run: |
+          cmake --preset ci-linux-release
+          cmake --build --preset ci-linux-release --target anolis-runtime --parallel
+
+      - name: Fetch provider-sim binary (latest release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p psim
+          gh release download -R anolishq/anolis-provider-sim \
+            --pattern '*linux-x86_64.tar.gz' -D psim
+          tar -xzf psim/*linux-x86_64.tar.gz -C psim
+          SIM=$(find "$PWD/psim" -type f -name anolis-provider-sim | head -1)
+          test -n "$SIM" || { echo "::error::provider-sim binary not found in release"; ls -R psim; exit 1; }
+          chmod +x "$SIM"
+          echo "SIM_BIN=$SIM" >> "$GITHUB_ENV"
+          echo "Using provider-sim: $SIM"
+
+      - name: Write soak runtime config
+        run: |
+          FIX="$PWD/tests/integration/fixtures/provider-sim-default.yaml"
+          test -f "$FIX" || { echo "::error::sim fixture missing"; exit 1; }
+          cat > soak-runtime.yaml <<EOF
+          runtime: {}
+          http:
+            enabled: false
+          providers:
+            - id: sim
+              command: ${SIM_BIN}
+              args: ["--config", "${FIX}"]
+          polling:
+            interval_ms: 200
+          logging:
+            level: info
+          automation:
+            enabled: false
+          telemetry:
+            enabled: false
+          EOF
+          cat soak-runtime.yaml
+
+      - name: Run accelerated soak
+        run: |
+          chmod +x tests/soak/churn_soak.sh
+          churn_min="${{ github.event.inputs.churn_minutes || '240' }}"
+          run_s="${{ github.event.inputs.run_seconds || '3' }}"
+          sustain_s="${{ github.event.inputs.sustain_seconds || '90' }}"
+          tests/soak/churn_soak.sh \
+            build/ci-linux-release/core/anolis-runtime \
+            soak-runtime.yaml \
+            "$(( churn_min * 60 ))" "$run_s" "$sustain_s" | tee soak.log
+
+      - name: Upload soak log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: soak-log-${{ github.run_number }}
+          path: soak.log
+          if-no-files-found: ignore
