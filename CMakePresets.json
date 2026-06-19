@@ -168,6 +168,17 @@
       }
     },
     {
+      "name": "ci-fuzz",
+      "inherits": "ci-linux-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "ENABLE_FUZZING": "ON",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
       "name": "ci-linux-compat",
       "inherits": "ci-linux-release",
       "cacheVariables": {
@@ -248,6 +259,10 @@
     {
       "name": "ci-tsan",
       "configurePreset": "ci-tsan"
+    },
+    {
+      "name": "ci-fuzz",
+      "configurePreset": "ci-fuzz"
     },
     {
       "name": "ci-linux-compat",

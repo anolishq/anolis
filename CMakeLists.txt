@@ -81,6 +81,13 @@ if(ENABLE_TSAN)
     endif()
 endif()
 
+# Fuzzing (libFuzzer, requires clang). Include the helper BEFORE add_subdirectory
+# so its instrumentation applies to the code-under-test, not just the harness.
+option(ENABLE_FUZZING "Build libFuzzer fuzz targets (requires clang)" OFF)
+if(ENABLE_FUZZING)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AddFuzzTarget.cmake)
+endif()
+
 # Enable testing
 option(BUILD_TESTING "Build unit tests" ON)
 option(ANOLIS_ENABLE_AUTOMATION "Enable automation subsystem (BehaviorTree runtime and BT endpoints)" ON)
@@ -89,6 +96,10 @@ set(ANOLIS_PROVIDER_SIM_EXE "" CACHE FILEPATH "Path to anolis-provider-sim execu
 
 # Subdirectories
 add_subdirectory(core)
+
+if(ENABLE_FUZZING)
+    add_subdirectory(fuzz)
+endif()
 
 if(BUILD_TESTING)
     enable_testing()
