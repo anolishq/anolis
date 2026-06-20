@@ -190,8 +190,7 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
         }
 
         // Safety gate: never expose the REST surface to the network unauthenticated.
-        if (!is_loopback_bind(config.http.bind) && !config.http.auth_enabled &&
-            !config.http.allow_insecure_bind) {
+        if (!is_loopback_bind(config.http.bind) && !config.http.auth_enabled && !config.http.allow_insecure_bind) {
             error = "http.bind '" + config.http.bind +
                     "' is non-loopback but authentication is disabled; set http.auth_enabled=true "
                     "(recommended) or http.allow_insecure_bind=true to override";
@@ -964,8 +963,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         std::stringstream http_msg;
         http_msg << "[Config] HTTP: " << (config.http.enabled ? "enabled" : "disabled");
         if (config.http.enabled) {
-            http_msg << " (" << config.http.bind << ":" << config.http.port
-                     << ", auth " << (config.http.auth_enabled ? "on" : "off") << ")";
+            http_msg << " (" << config.http.bind << ":" << config.http.port << ", auth "
+                     << (config.http.auth_enabled ? "on" : "off") << ")";
         }
         LOG_INFO(http_msg.str());
 

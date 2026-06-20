@@ -1,6 +1,3 @@
-#include "http/auth.hpp"
-#include "runtime/config.hpp"
-
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -8,6 +5,9 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+
+#include "http/auth.hpp"
+#include "runtime/config.hpp"
 
 using anolis::http::authorize;
 using anolis::http::constant_time_equals;
@@ -38,10 +38,10 @@ TEST(HttpAuth, NetworkRequiresValidBearerToken) {
     EXPECT_TRUE(authorize(true, true, "secret", "10.0.0.5", "Bearer secret"));
     EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Bearer wrong"));
     EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", ""));
-    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "secret"));        // missing scheme
-    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Basic secret"));  // wrong scheme
-    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Bearer "));       // empty token
-    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Bearer secretx")); // prefix match only
+    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "secret"));          // missing scheme
+    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Basic secret"));    // wrong scheme
+    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Bearer "));         // empty token
+    EXPECT_FALSE(authorize(true, true, "secret", "10.0.0.5", "Bearer secretx"));  // prefix match only
 }
 
 TEST(HttpAuth, EmptyExpectedTokenNeverAuthorizesNetwork) {
@@ -161,8 +161,6 @@ TEST(HttpAuthRedaction, AuthTokenNotLogged) {
 
     ASSERT_TRUE(ok) << error;
     EXPECT_EQ(config.http.auth_token, kToken);  // parsed correctly...
-    EXPECT_EQ(captured.str().find(kToken), std::string::npos)
-        << "auth token leaked into logs:\n"
-        << captured.str();  // ...but never logged.
+    EXPECT_EQ(captured.str().find(kToken), std::string::npos) << "auth token leaked into logs:\n"
+                                                              << captured.str();  // ...but never logged.
 }
-

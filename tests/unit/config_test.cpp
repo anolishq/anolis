@@ -211,6 +211,9 @@ http:
   enabled: true
   bind: 0.0.0.0
   port: 9090
+  # A non-loopback bind requires auth or an explicit insecure override; this
+  # test only exercises bind-address parsing.
+  allow_insecure_bind: true
 
 providers:
   - id: test
