@@ -196,6 +196,22 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
                     "(recommended) or http.allow_insecure_bind=true to override";
             return false;
         }
+
+        // TLS requires both a certificate and a key (or neither).
+        if (config.http.tls_cert_path.empty() != config.http.tls_key_path.empty()) {
+            error = "http TLS requires both tls_cert_path and tls_key_path (or neither)";
+            return false;
+        }
+
+        // Bearer token over plaintext on the network is sniffable — warn (don't
+        // block: a TLS-terminating reverse proxy is a valid deployment).
+        const bool tls_on = !config.http.tls_cert_path.empty();
+        if (config.http.auth_enabled && !is_loopback_bind(config.http.bind) && !tls_on) {
+            LOG_WARN(
+                "[Config] HTTP auth is enabled on a non-loopback bind without TLS; the Bearer token "
+                "will be sent in plaintext. Configure http.tls_cert_path/tls_key_path or terminate TLS "
+                "at a reverse proxy.");
+        }
     }
 
     // Validate Provider settings
@@ -436,10 +452,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["http"], "http", error)) {
                 return false;
             }
-            warn_unknown_keys(
-                yaml["http"], "http",
-                {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials", "thread_pool_size",
-                 "auth_enabled", "auth_token", "auth_exempt_loopback", "allow_insecure_bind"});
+            warn_unknown_keys(yaml["http"], "http",
+                              {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials",
+                               "thread_pool_size", "auth_enabled", "auth_token", "auth_exempt_loopback",
+                               "allow_insecure_bind", "tls_cert_path", "tls_key_path"});
 
             if (yaml["http"]["enabled"]) {
                 config.http.enabled = yaml["http"]["enabled"].as<bool>();
@@ -490,6 +506,14 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (yaml["http"]["allow_insecure_bind"]) {
                 config.http.allow_insecure_bind = yaml["http"]["allow_insecure_bind"].as<bool>();
+            }
+
+            // TLS
+            if (yaml["http"]["tls_cert_path"]) {
+                config.http.tls_cert_path = yaml["http"]["tls_cert_path"].as<std::string>();
+            }
+            if (yaml["http"]["tls_key_path"]) {
+                config.http.tls_key_path = yaml["http"]["tls_key_path"].as<std::string>();
             }
 
             // Environment fallback: only when auth is enabled and the config did
@@ -963,8 +987,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         std::stringstream http_msg;
         http_msg << "[Config] HTTP: " << (config.http.enabled ? "enabled" : "disabled");
         if (config.http.enabled) {
-            http_msg << " (" << config.http.bind << ":" << config.http.port << ", auth "
-                     << (config.http.auth_enabled ? "on" : "off") << ")";
+            http_msg << " (" << (config.http.tls_cert_path.empty() ? "http" : "https") << "://" << config.http.bind
+                     << ":" << config.http.port << ", auth " << (config.http.auth_enabled ? "on" : "off") << ")";
         }
         LOG_INFO(http_msg.str());
 

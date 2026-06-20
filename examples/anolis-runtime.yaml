@@ -22,6 +22,10 @@ http:
   # auth_token: ""               # shared secret; or set the ANOLIS_API_TOKEN env var
   # auth_exempt_loopback: true   # skip auth for 127.0.0.1 / ::1 (keeps localhost dev open)
   # allow_insecure_bind: false   # override the non-loopback-without-auth guard (NOT recommended)
+  # TLS (HTTPS) — set both to serve over TLS; strongly recommended when auth is
+  # used on a non-loopback bind (a Bearer token over plaintext is sniffable).
+  # tls_cert_path: /etc/anolis/tls/cert.pem
+  # tls_key_path: /etc/anolis/tls/key.pem
 
 providers:
   - id: sim0

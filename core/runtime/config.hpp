@@ -60,6 +60,12 @@ struct HttpConfig {
     std::string auth_token;            // Shared secret; falls back to ANOLIS_API_TOKEN env
     bool auth_exempt_loopback = true;  // Skip auth for requests from 127.0.0.1 / ::1
     bool allow_insecure_bind = false;  // Override the non-loopback-without-auth startup guard
+
+    // TLS (HTTPS). Set both paths to serve over TLS (httplib::SSLServer); leave
+    // empty for plain HTTP. Strongly recommended whenever auth is used on a
+    // non-loopback bind (a Bearer token over plaintext is sniffable).
+    std::string tls_cert_path;  // PEM certificate (chain) path
+    std::string tls_key_path;   // PEM private key path
 };
 
 /**

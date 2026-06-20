@@ -47,10 +47,29 @@ bool HttpServer::start(std::string &error) {
         return false;
     }
 
-    LOG_INFO("[HTTP] Starting server on " << config_.bind << ":" << config_.port);
+    const bool tls_enabled = !config_.tls_cert_path.empty();
+    LOG_INFO("[HTTP] Starting server on " << (tls_enabled ? "https://" : "http://") << config_.bind << ":"
+                                          << config_.port);
 
-    // Create server
-    server_ = std::make_unique<httplib::Server>();
+    // Create server (TLS when a cert/key pair is configured).
+    if (tls_enabled) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        auto ssl_server =
+            std::make_unique<httplib::SSLServer>(config_.tls_cert_path.c_str(), config_.tls_key_path.c_str());
+        if (!ssl_server->is_valid()) {
+            error = "Failed to load TLS certificate/key (cert='" + config_.tls_cert_path + "', key='" +
+                    config_.tls_key_path + "')";
+            return false;
+        }
+        server_ = std::move(ssl_server);
+        LOG_INFO("[HTTP] TLS enabled");
+#else
+        error = "TLS configured (http.tls_cert_path) but this build lacks OpenSSL support";
+        return false;
+#endif
+    } else {
+        server_ = std::make_unique<httplib::Server>();
+    }
 
     // Configure server
     server_->set_read_timeout(kDefaultTimeoutSeconds, kDefaultTimeoutMilliseconds);

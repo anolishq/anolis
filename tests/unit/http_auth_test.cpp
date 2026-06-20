@@ -129,6 +129,40 @@ TEST(HttpAuthBindGate, AuthEnabledWithoutTokenIsRejected) {
     EXPECT_NE(error.find("auth_token"), std::string::npos) << error;
 }
 
+// ---- TLS config validation (both-or-neither) ----------------------------
+
+TEST(HttpTls, BothCertAndKeyIsValid) {
+    RuntimeConfig c = base_valid_config();
+    c.http.tls_cert_path = "/etc/anolis/cert.pem";
+    c.http.tls_key_path = "/etc/anolis/key.pem";
+    std::string error;
+    EXPECT_TRUE(validate_config(c, error)) << error;
+}
+
+TEST(HttpTls, CertWithoutKeyIsRejected) {
+    RuntimeConfig c = base_valid_config();
+    c.http.tls_cert_path = "/etc/anolis/cert.pem";
+    c.http.tls_key_path = "";
+    std::string error;
+    EXPECT_FALSE(validate_config(c, error));
+    EXPECT_NE(error.find("tls_"), std::string::npos) << error;
+}
+
+TEST(HttpTls, KeyWithoutCertIsRejected) {
+    RuntimeConfig c = base_valid_config();
+    c.http.tls_cert_path = "";
+    c.http.tls_key_path = "/etc/anolis/key.pem";
+    std::string error;
+    EXPECT_FALSE(validate_config(c, error));
+    EXPECT_NE(error.find("tls_"), std::string::npos) << error;
+}
+
+TEST(HttpTls, NeitherIsValid) {
+    RuntimeConfig c = base_valid_config();
+    std::string error;
+    EXPECT_TRUE(validate_config(c, error)) << error;
+}
+
 // ---- redaction: the auth token must never reach the logs ----------------
 
 TEST(HttpAuthRedaction, AuthTokenNotLogged) {
