@@ -140,6 +140,12 @@ bool parse_scalar_parameter_value(const YAML::Node &node, automation::ParameterV
     return true;
 }
 
+// True if a bind address only accepts connections from the local host (so it is
+// not exposed to the network). "0.0.0.0" / "::" (all interfaces) are NOT loopback.
+bool is_loopback_bind(const std::string &bind) {
+    return bind == "127.0.0.1" || bind == "::1" || bind == "localhost" || bind.rfind("127.", 0) == 0;
+}
+
 }  // namespace
 
 bool validate_config(const RuntimeConfig &config, std::string &error) {
@@ -175,6 +181,21 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
                     return false;
                 }
             }
+        }
+
+        // Authentication must have a token to compare against.
+        if (config.http.auth_enabled && config.http.auth_token.empty()) {
+            error = "http.auth_enabled=true requires http.auth_token (or the ANOLIS_API_TOKEN env var)";
+            return false;
+        }
+
+        // Safety gate: never expose the REST surface to the network unauthenticated.
+        if (!is_loopback_bind(config.http.bind) && !config.http.auth_enabled &&
+            !config.http.allow_insecure_bind) {
+            error = "http.bind '" + config.http.bind +
+                    "' is non-loopback but authentication is disabled; set http.auth_enabled=true "
+                    "(recommended) or http.allow_insecure_bind=true to override";
+            return false;
         }
     }
 
@@ -418,7 +439,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             warn_unknown_keys(
                 yaml["http"], "http",
-                {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials", "thread_pool_size"});
+                {"enabled", "bind", "port", "cors_allowed_origins", "cors_allow_credentials", "thread_pool_size",
+                 "auth_enabled", "auth_token", "auth_exempt_loopback", "allow_insecure_bind"});
 
             if (yaml["http"]["enabled"]) {
                 config.http.enabled = yaml["http"]["enabled"].as<bool>();
@@ -455,6 +477,38 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
             if (yaml["http"]["thread_pool_size"]) {
                 config.http.thread_pool_size = yaml["http"]["thread_pool_size"].as<int>();
+            }
+
+            // Authentication
+            if (yaml["http"]["auth_enabled"]) {
+                config.http.auth_enabled = yaml["http"]["auth_enabled"].as<bool>();
+            }
+            if (yaml["http"]["auth_token"]) {
+                config.http.auth_token = yaml["http"]["auth_token"].as<std::string>();
+            }
+            if (yaml["http"]["auth_exempt_loopback"]) {
+                config.http.auth_exempt_loopback = yaml["http"]["auth_exempt_loopback"].as<bool>();
+            }
+            if (yaml["http"]["allow_insecure_bind"]) {
+                config.http.allow_insecure_bind = yaml["http"]["allow_insecure_bind"].as<bool>();
+            }
+
+            // Environment fallback: only when auth is enabled and the config did
+            // not provide a token. Mirrors the INFLUXDB_TOKEN handling below.
+            if (config.http.auth_enabled && config.http.auth_token.empty()) {
+#ifdef _WIN32
+                char *token_env = nullptr;
+                size_t token_len = 0;
+                if (_dupenv_s(&token_env, &token_len, "ANOLIS_API_TOKEN") == 0 && token_env != nullptr) {
+                    config.http.auth_token = token_env;
+                    std::free(token_env);
+                }
+#else
+                const char *token_env = std::getenv("ANOLIS_API_TOKEN");
+                if (token_env != nullptr) {
+                    config.http.auth_token = token_env;
+                }
+#endif
             }
         }
 
@@ -910,7 +964,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         std::stringstream http_msg;
         http_msg << "[Config] HTTP: " << (config.http.enabled ? "enabled" : "disabled");
         if (config.http.enabled) {
-            http_msg << " (" << config.http.bind << ":" << config.http.port << ")";
+            http_msg << " (" << config.http.bind << ":" << config.http.port
+                     << ", auth " << (config.http.auth_enabled ? "on" : "off") << ")";
         }
         LOG_INFO(http_msg.str());
 
