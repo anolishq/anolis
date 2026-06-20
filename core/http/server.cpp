@@ -5,6 +5,7 @@
 
 #include "errors.hpp"
 #include "events/event_emitter.hpp"
+#include "http/auth.hpp"
 #include "logging/logger.hpp"
 #include "provider/provider_supervisor.hpp"
 
@@ -107,6 +108,25 @@ bool HttpServer::start(std::string &error) {
             res.set_header("Access-Control-Allow-Credentials", "true");
         }
     });
+
+    // Authentication gate (runs before routing, so it covers every endpoint
+    // including the SSE stream). Loopback is exempt by default; see config.
+    if (config_.auth_enabled) {
+        server_->set_pre_routing_handler(
+            [auth_enabled = config_.auth_enabled, exempt_loopback = config_.auth_exempt_loopback,
+             token = config_.auth_token](const httplib::Request &req, httplib::Response &res) {
+                if (authorize(auth_enabled, exempt_loopback, token, req.remote_addr,
+                              req.get_header_value("Authorization"))) {
+                    return httplib::Server::HandlerResponse::Unhandled;
+                }
+                res.status = 401;
+                res.set_header("WWW-Authenticate", "Bearer");
+                res.set_content(R"({"error":"unauthorized"})", "application/json");
+                return httplib::Server::HandlerResponse::Handled;
+            });
+        LOG_INFO("[HTTP] Bearer-token authentication enabled"
+                 << (config_.auth_exempt_loopback ? " (loopback exempt)" : ""));
+    }
 
     // Set up routes
     setup_routes();

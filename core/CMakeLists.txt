@@ -237,6 +237,7 @@ find_package(httplib CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(anolis_http STATIC
+    http/auth.cpp
     http/json.cpp
     http/server.cpp
     http/handlers/device_handlers.cpp

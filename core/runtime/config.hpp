@@ -53,6 +53,13 @@ struct HttpConfig {
     std::vector<std::string> cors_allowed_origins{"*"};  // CORS allowlist ("*" = allow all)
     bool cors_allow_credentials = false;                 // Whether to emit Access-Control-Allow-Credentials
     int thread_pool_size = 40;                           // Worker thread pool size
+
+    // Authentication (Bearer token). Non-loopback exposure requires auth (see the
+    // startup guard in validate_config); loopback stays friction-free by default.
+    bool auth_enabled = false;         // Require a Bearer token on incoming requests
+    std::string auth_token;            // Shared secret; falls back to ANOLIS_API_TOKEN env
+    bool auth_exempt_loopback = true;  // Skip auth for requests from 127.0.0.1 / ::1
+    bool allow_insecure_bind = false;  // Override the non-loopback-without-auth startup guard
 };
 
 /**
