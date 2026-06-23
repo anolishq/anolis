@@ -45,20 +45,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
-
-      - name: Check formatting
-        run: |
-          set -euo pipefail
-          FILES=$(find core tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
-          if [ -z "$FILES" ]; then
-            echo "No C++ files found"
-            exit 1
-          fi
-          echo "$FILES" | xargs clang-format --dry-run --Werror
+      - name: Check formatting (pinned pre-commit)
+        # The pinned formatter source of truth is `.pre-commit-config.yaml`
+        # (mirrors-clang-format@v18.1.8 — the byte-identical PyPI wheel), replacing
+        # the unversioned apt clang-format. Covers all tracked C/C++ (incl. fuzz/).
+        # Devs run the same hooks via `pre-commit install` / `just hooks`. See
+        # anolishq/.github#69.
+        run: pipx run pre-commit run --all-files --show-diff-on-failure
 
   python-lint:
     name: Python Linting (ruff)
