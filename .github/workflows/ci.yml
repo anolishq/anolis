@@ -236,7 +236,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c76784aff711e6540d539f6a5c3ea33c63627930 # v2
+        uses: anolishq/.github/.github/actions/setup-vcpkg@b2d9b16b9accee0e58d37e7d05add68b6621961a # v2.2
         with:
           triplet: ${{ matrix.triplet }}
 
@@ -317,7 +317,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@c76784aff711e6540d539f6a5c3ea33c63627930 # v2
+        uses: anolishq/.github/.github/actions/setup-vcpkg@b2d9b16b9accee0e58d37e7d05add68b6621961a # v2.2
         with:
           triplet: x64-linux-static
 
