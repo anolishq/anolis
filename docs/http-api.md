@@ -159,7 +159,7 @@ curl -s -X POST http://127.0.0.1:8080/v0/call \
   -d '{
     "provider_id": "sim0",
     "device_id": "motorctl0",
-    "function_id": 10,
+    "function_id": 1,
     "args": {
       "motor_index": {"type": "int64", "int64": 1},
       "duty": {"type": "double", "double": 0.75}
