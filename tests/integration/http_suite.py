@@ -147,11 +147,26 @@ class HttpGatewayTester:
         value_types = {entry.get("value", {}).get("type") for entry in values}
         assert "double" in value_types, f"Expected at least one double typed value, got {value_types}"
 
+    def resolve_function_id(self, device_id: str, function_name: str) -> int:
+        """Resolve a function_id by name from the device's capabilities.
+
+        Keeps the suite convention-agnostic: ADPP numbers function_ids per-type
+        from 1, but the *name* is the stable identifier, so the test must not pin a
+        literal id (see anolis-provider-sim#58).
+        """
+        result = self.http_get(f"/v0/devices/sim0/{device_id}/capabilities")
+        assert result["status_code"] == 200, f"Expected 200 resolving {device_id} capabilities, got {result}"
+        functions = result["body"].get("capabilities", {}).get("functions", [])
+        for entry in functions:
+            if entry.get("name") == function_name:
+                return int(entry["function_id"])
+        raise AssertionError(f"function '{function_name}' not found in {device_id} capabilities: {functions}")
+
     def check_call_endpoint(self) -> None:
         call_data = {
             "provider_id": "sim0",
             "device_id": "motorctl0",
-            "function_id": 10,
+            "function_id": self.resolve_function_id("motorctl0", "set_motor_duty"),
             "args": {
                 "motor_index": {"type": "int64", "int64": 1},
                 "duty": {"type": "double", "double": 0.5},
@@ -186,7 +201,7 @@ class HttpGatewayTester:
         call_data = {
             "provider_id": "sim0",
             "device_id": "motorctl0",
-            "function_id": 10,
+            "function_id": self.resolve_function_id("motorctl0", "set_motor_duty"),
             "args": {},
         }
 
