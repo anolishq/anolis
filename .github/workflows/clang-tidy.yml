@@ -1,0 +1,24 @@
+name: Clang-Tidy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.c"
+      - "**/*.cc"
+      - "**/*.cpp"
+      - "**/*.cxx"
+      - "**/*.h"
+      - "**/*.hh"
+      - "**/*.hpp"
+      - "**/*.hxx"
+      - ".clang-tidy"
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy-diff:
+    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@36dd130dddbff472be8fc5e1c1e575e528c83e1b # clang-tidy-diff
+    with:
+      configure-preset: ci-linux-release
