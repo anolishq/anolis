@@ -156,11 +156,19 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - name: Install clang-tidy
+      - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-14 ninja-build g++
-          sudo ln -sf /usr/bin/clang-tidy-14 /usr/bin/clang-tidy
+          sudo apt-get install -y ninja-build g++
+
+      - name: Setup pinned clang-tidy
+        # Pinned static clang-tidy 18.1.8 (with its co-located resource dir) on
+        # PATH — retires the stray apt clang-tidy-14, matching the org's pinned
+        # clang-format. CMake's find_program(clang-tidy) picks it up. See
+        # anolishq/.github#69.
+        uses: anolishq/.github/.github/actions/setup-clang-tools@05ebd524c178f01133f76e2eb17bb4af0c08b290 # setup-clang-tools
+        with:
+          tidy: "true"
 
       - name: Setup vcpkg
         uses: anolishq/.github/.github/actions/setup-vcpkg@c76784aff711e6540d539f6a5c3ea33c63627930 # v2
