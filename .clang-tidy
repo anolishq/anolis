@@ -7,7 +7,8 @@ Checks: >
   bugprone-*,
   -readability-*,
   -bugprone-macro-parentheses,
-  -bugprone-easily-swappable-parameters
+  -bugprone-easily-swappable-parameters,
+  -performance-enum-size
 # Note: consider re-enabling specific readability checks once bugprone/perf are clean.
 WarningsAsErrors: ""
 # Limit diagnostics to repository source roots only.
