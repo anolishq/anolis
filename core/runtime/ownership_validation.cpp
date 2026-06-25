@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <format>
 #include <iomanip>
 #include <map>
 #include <sstream>
@@ -102,36 +103,39 @@ bool validate_i2c_ownership_claims(const std::vector<registry::RegisteredDevice>
         // a safe uniqueness decision from incomplete tags.
         if (!has_bus_path && !has_i2c_address) {
             if (has_legacy_bus_path || has_legacy_i2c_address) {
-                error = "Device '" + handle + "' uses legacy ownership tags ('" + kLegacyBusPathTag + "', '" +
-                        kLegacyI2cAddressTag + "') without canonical tags ('" + kBusPathTag + "', '" + kI2cAddressTag +
-                        "')";
+                error = std::format(
+                    "Device '{}' uses legacy ownership tags ('{}', '{}') without canonical tags "
+                    "('{}', '{}')",
+                    handle, kLegacyBusPathTag, kLegacyI2cAddressTag, kBusPathTag, kI2cAddressTag);
                 return false;
             }
             continue;
         }
 
         if (has_bus_path != has_i2c_address) {
-            error = "Device '" + handle + "' has incomplete ownership tags; both '" + kBusPathTag + "' and '" +
-                    kI2cAddressTag + "' are required when either is present";
+            error = std::format(
+                "Device '{}' has incomplete ownership tags; both '{}' and '{}' are required when "
+                "either is present",
+                handle, kBusPathTag, kI2cAddressTag);
             return false;
         }
 
         const std::string bus_path = trim_copy(bus_it->second);
         if (bus_path.empty()) {
-            error = "Device '" + handle + "' has empty tag '" + kBusPathTag + "'";
+            error = std::format("Device '{}' has empty tag '{}'", handle, kBusPathTag);
             return false;
         }
 
         std::string canonical_address;
         if (!parse_i2c_address(address_it->second, canonical_address)) {
             error =
-                "Device '" + handle + "' has invalid tag '" + kI2cAddressTag + "' value '" + address_it->second + "'";
+                std::format("Device '{}' has invalid tag '{}' value '{}'", handle, kI2cAddressTag, address_it->second);
             return false;
         }
 
         // Validation keys are normalized to trimmed bus path plus canonical
         // lowercase hex address so providers cannot evade collisions by format.
-        const std::string key = bus_path + "|" + canonical_address;
+        const std::string key = std::format("{}|{}", bus_path, canonical_address);
         claims_by_key[key].push_back(OwnershipClaim{device.provider_id, device.device_id, bus_path, canonical_address});
     }
 

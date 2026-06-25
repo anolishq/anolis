@@ -575,7 +575,7 @@ BT::NodeStatus PeriodicPulseWindowNode::tick() {
     int64_t interval_ms = interval_s * 1000;
 
     if (max_pulses_per_hour > 0) {
-        const int64_t min_interval_by_cap_ms = (3600 * 1000) / max_pulses_per_hour;
+        const int64_t min_interval_by_cap_ms = (int64_t{3600} * 1000) / max_pulses_per_hour;
         if (interval_ms < min_interval_by_cap_ms) {
             interval_ms = min_interval_by_cap_ms;
         }
