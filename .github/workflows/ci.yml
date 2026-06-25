@@ -49,7 +49,7 @@ jobs:
         # SHA-verified static LLVM 18.1.8 clang-format on PATH — the org source of
         # truth, matching workstation-configs apps/clang-tools on dev boxes. See
         # anolishq/.github#69.
-        uses: anolishq/.github/.github/actions/setup-clang-tools@43a0fe0a7feb87215f6e7677133be542ef6f1031 # setup-clang-tools
+        uses: anolishq/.github/.github/actions/setup-clang-tools@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # setup-clang-tools
       - name: Check formatting
         run: git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' | xargs clang-format --dry-run --Werror
 
