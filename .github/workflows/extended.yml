@@ -166,7 +166,7 @@ jobs:
         # PATH — retires the stray apt clang-tidy-14, matching the org's pinned
         # clang-format. CMake's find_program(clang-tidy) picks it up. See
         # anolishq/.github#69.
-        uses: anolishq/.github/.github/actions/setup-clang-tools@05ebd524c178f01133f76e2eb17bb4af0c08b290 # setup-clang-tools
+        uses: anolishq/.github/.github/actions/setup-clang-tools@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # setup-clang-tools
         with:
           tidy: "true"
 
