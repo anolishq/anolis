@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <format>
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
@@ -888,7 +889,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     for (const auto &hook_node : group_node) {
                         const std::string hook_path = group_path + "[" + std::to_string(hook_index) + "]";
                         if (!hook_node.IsMap()) {
-                            error = "'" + hook_path + "' must be a map";
+                            error = std::format("'{}' must be a map", hook_path);
                             return false;
                         }
                         warn_unknown_keys(hook_node, hook_path, {"from", "to", "fail_on_error", "calls"});
@@ -905,7 +906,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                         }
 
                         if (!hook_node["calls"]) {
-                            error = "'" + hook_path + ".calls' is required";
+                            error = std::format("'{}.calls' is required", hook_path);
                             return false;
                         }
                         if (!ensure_sequence(hook_node["calls"], hook_path + ".calls", error)) {
@@ -916,7 +917,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                         for (const auto &call_node : hook_node["calls"]) {
                             const std::string call_path = hook_path + ".calls[" + std::to_string(call_index) + "]";
                             if (!call_node.IsMap()) {
-                                error = "'" + call_path + "' must be a map";
+                                error = std::format("'{}' must be a map", call_path);
                                 return false;
                             }
                             warn_unknown_keys(call_node, call_path,
@@ -939,7 +940,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                                 }
                                 for (const auto &arg_entry : call_node["args"]) {
                                     const std::string arg_key = arg_entry.first.as<std::string>();
-                                    const std::string arg_path = call_path + ".args." + arg_key;
+                                    const std::string arg_path = std::format("{}.args.{}", call_path, arg_key);
                                     automation::ParameterValue arg_value;
                                     if (!parse_scalar_parameter_value(arg_entry.second, arg_value, error, arg_path)) {
                                         return false;

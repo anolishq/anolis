@@ -1,0 +1,15 @@
+# Test code has different concerns than production code. Inherit the repo's
+# production checks but relax the ones that are pure noise in tests:
+#  - performance-*: tests are not performance-sensitive.
+#  - bugprone-narrowing-conversions / -implicit-widening-of-multiplication-result:
+#    intentional small-literal integer arithmetic in tests.
+#  - bugprone-unchecked-optional-access: false positive against the gtest
+#    ASSERT_TRUE(opt.has_value()) guard idiom.
+#  - bugprone-reserved-identifier: test-local identifier conventions.
+InheritParentConfig: true
+Checks: >
+  -performance-*,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-unchecked-optional-access,
+  -bugprone-reserved-identifier

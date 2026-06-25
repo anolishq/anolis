@@ -298,7 +298,11 @@ void HttpServer::handle_post_parameters(const httplib::Request &req, httplib::Re
         return;
     }
 
-    // Success - return updated parameter
+    // Success - return updated parameter.
+    // Safe by invariant: the set() above only returns true when param_name is
+    // present, and ParameterManager has no remove/erase API, so get() here is
+    // guaranteed to hold a value.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto updated_value = parameter_manager_->get(param_name).value();
     nlohmann::json value_json;
     if (std::holds_alternative<double>(updated_value)) {

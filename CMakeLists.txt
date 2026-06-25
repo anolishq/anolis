@@ -2,8 +2,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(anolis VERSION 0.1.23 LANGUAGES CXX)
 
-# Set C++17 standard
-set(CMAKE_CXX_STANDARD 17)
+# Set C++20 standard
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Guard against unsupported ABI/toolchain combinations on Windows.

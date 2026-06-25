@@ -64,7 +64,7 @@ void HttpServer::handle_get_device_state(const httplib::Request &req, httplib::R
 
     // Handle optional signal_id query params
     std::vector<std::string> filter_signals;
-    for (size_t i = 0; req.has_param("signal_id"); i++) {
+    if (req.has_param("signal_id")) {
         // Collect all signal_id params
         auto it = req.params.find("signal_id");
         if (it != req.params.end()) {
@@ -73,7 +73,6 @@ void HttpServer::handle_get_device_state(const httplib::Request &req, httplib::R
             for (auto it2 = range.first; it2 != range.second; ++it2) {
                 filter_signals.push_back(it2->second);
             }
-            break;
         }
     }
 
