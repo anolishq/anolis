@@ -1,20 +1,10 @@
 # Anolis Runtime - TODO
 
-## CI / Quality
-
-- [ ] Setup precommit hooks for relevant tooling
-- [ ] Add fuzzing targets for ADPP/protocol and runtime config parsing surfaces.
-
 ## Security / Production Hardening
 
 ### Runtime / App Security
 
-- [ ] Implement HTTP/API authentication and authorization before non-localhost exposure.
 - [ ] Define and enforce telemetry redaction/classification + secret-safe logging policy.
-
-### Supply Chain Security
-
-- [ ] Add dependency/CVE automation (Dependabot + security advisory checks).
 
 ### Compiler / Binary Hardening
 
@@ -28,9 +18,6 @@
 
 ## Performance / Reliability
 
-- [ ] Run valgrind leak analysis on Linux for runtime lifecycle paths.
-  - Command: `valgrind --leak-check=full --show-leak-kinds=all ./build/core/Release/anolis-runtime --config test.yaml`
-  - Focus: event emitter queues, provider supervision, HTTP server threads
 - [ ] Add benchmark baselines and regression tracking for core runtime paths.
 - [ ] Run long-duration soak/stress tests (>24h), including rapid provider restart cycles.
 - [ ] Conditional: move to async provider polling only if provider-count/latency metrics demand it.
