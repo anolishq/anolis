@@ -19,6 +19,6 @@ permissions:
 
 jobs:
   clang-tidy-diff:
-    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@36dd130dddbff472be8fc5e1c1e575e528c83e1b # clang-tidy-diff
+    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # clang-tidy-diff
     with:
       configure-preset: ci-linux-release
