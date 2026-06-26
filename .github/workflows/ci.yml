@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      cpp: ${{ steps.cppfilter.outputs.cpp }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
@@ -34,6 +35,22 @@ jobs:
               - '!**/*.jpg'
               - '!**/*.jpeg'
               - '!**/*.gif'
+      # Separate OR-filter (default quantifier) for the C++ sources the clang-tidy
+      # gate lints, so it skips (and the ok gate stays green) on non-C++ PRs.
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: cppfilter
+        with:
+          filters: |
+            cpp:
+              - '**/*.c'
+              - '**/*.cc'
+              - '**/*.cpp'
+              - '**/*.cxx'
+              - '**/*.h'
+              - '**/*.hh'
+              - '**/*.hpp'
+              - '**/*.hxx'
+              - '.clang-tidy'
 
   format-check:
     name: C++ Formatting (clang-format)
@@ -362,6 +379,17 @@ jobs:
       python-version: '3.12'
       working-directory: '.'
 
+  clang-tidy:
+    name: Clang-Tidy (changed lines)
+    needs: [changes]
+    if: needs.changes.outputs.cpp == 'true'
+    permissions:
+      contents: read
+    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # clang-tidy-diff
+    with:
+      configure-preset: ci-linux-release
+      blocking: true
+
   ok:
     name: ok
     if: always()
@@ -374,6 +402,7 @@ jobs:
       - ui-contracts
       - core-build-test
       - anolis-provider-compat
+      - clang-tidy
       - version-sync
     runs-on: ubuntu-latest
     timeout-minutes: 5
