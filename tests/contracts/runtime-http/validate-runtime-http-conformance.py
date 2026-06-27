@@ -40,6 +40,7 @@ except ImportError as exc:  # pragma: no cover
 REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/v0/runtime/status"),
     ("get", "/v0/providers/health"),
+    ("get", "/v0/telemetry/status"),
     ("get", "/v0/devices"),
     ("get", "/v0/devices/{provider_id}/{device_id}/capabilities"),
     ("get", "/v0/state"),

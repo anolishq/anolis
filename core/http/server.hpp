@@ -47,6 +47,9 @@ class BTRuntime;
 namespace provider {
 class ProviderSupervisor;
 }  // namespace provider
+namespace telemetry {
+class InfluxSink;
+}  // namespace telemetry
 }  // namespace anolis
 
 namespace anolis {
@@ -69,6 +72,7 @@ struct HttpServerDependencies {
     std::shared_ptr<events::EventEmitter> event_emitter = nullptr;
     automation::ModeManager *mode_manager = nullptr;
     automation::ParameterManager *parameter_manager = nullptr;
+    telemetry::InfluxSink *telemetry_sink = nullptr;  // optional: telemetry health surface
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -150,6 +154,7 @@ private:
     automation::ParameterManager *parameter_manager_;  // optional
     std::shared_ptr<events::EventEmitter> event_emitter_;
     automation::ModeManager *mode_manager_;  // optional
+    telemetry::InfluxSink *telemetry_sink_;  // optional: nullptr when telemetry disabled
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif
@@ -181,6 +186,7 @@ private:
     void handle_get_automation_tree(const httplib::Request &req, httplib::Response &res);
     void handle_get_automation_status(const httplib::Request &req, httplib::Response &res);
     void handle_get_providers_health(const httplib::Request &req, httplib::Response &res);
+    void handle_get_telemetry_status(const httplib::Request &req, httplib::Response &res);
 
     // SSE handler
     void handle_get_events(const httplib::Request &req, httplib::Response &res);

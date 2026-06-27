@@ -31,7 +31,8 @@ HttpServer::HttpServer(const runtime::HttpConfig &config, int polling_interval_m
       supervisor_(dependencies.supervisor),
       parameter_manager_(dependencies.parameter_manager),
       event_emitter_(std::move(dependencies.event_emitter)),
-      mode_manager_(dependencies.mode_manager)
+      mode_manager_(dependencies.mode_manager),
+      telemetry_sink_(dependencies.telemetry_sink)
 #if ANOLIS_ENABLE_AUTOMATION
       ,
       bt_runtime_(dependencies.bt_runtime)
@@ -307,6 +308,11 @@ void HttpServer::setup_routes() {
         handle_get_providers_health(req, res);
     });
 
+    // GET /v0/telemetry/status - Get telemetry (InfluxDB sink) health
+    server_->Get("/v0/telemetry/status", [this](const httplib::Request &req, httplib::Response &res) {
+        handle_get_telemetry_status(req, res);
+    });
+
     // GET /v0/events - SSE event stream
     server_->Get("/v0/events",
                  [this](const httplib::Request &req, httplib::Response &res) { handle_get_events(req, res); });
@@ -325,6 +331,7 @@ void HttpServer::setup_routes() {
     LOG_INFO("[HTTP]   GET  /v0/automation/tree");
     LOG_INFO("[HTTP]   GET  /v0/automation/status");
     LOG_INFO("[HTTP]   GET  /v0/providers/health");
+    LOG_INFO("[HTTP]   GET  /v0/telemetry/status");
     LOG_INFO("[HTTP]   GET  /v0/events (SSE)");
 }
 

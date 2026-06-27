@@ -324,6 +324,32 @@ public:
         return batch_.size();
     }
 
+    /**
+     * @brief Whether telemetry is enabled in config (the sink was configured to run)
+     */
+    bool enabled() const { return config_.enabled; }
+
+    /**
+     * @brief Backend coordinates (never includes the API token)
+     */
+    const std::string &url() const { return config_.url; }
+    const std::string &org() const { return config_.org; }
+    const std::string &bucket() const { return config_.bucket; }
+
+    /**
+     * @brief Current subscriber-queue depth (events awaiting batching)
+     *
+     * Safe to call from another thread: SubscriberQueue is internally locked, and
+     * the subscription handle is only reset in stop() after the HTTP server (and
+     * thus any in-flight reader) has already stopped.
+     */
+    size_t queue_depth() const { return subscription_ ? subscription_->queue_size() : 0; }
+
+    /**
+     * @brief Events dropped because the subscriber queue overflowed (flush fell behind)
+     */
+    size_t dropped_events() const { return subscription_ ? subscription_->dropped_count() : 0; }
+
 private:
     /**
      * @brief Background thread that collects events and flushes batches

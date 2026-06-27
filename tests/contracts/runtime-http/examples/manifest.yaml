@@ -10,6 +10,11 @@ examples:
     content_type: application/json
     file: providers-health.200.json
   - method: GET
+    path: /v0/telemetry/status
+    status: "200"
+    content_type: application/json
+    file: telemetry-status.200.json
+  - method: GET
     path: /v0/devices
     status: "200"
     content_type: application/json

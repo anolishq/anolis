@@ -522,6 +522,33 @@ TEST(InfluxConfigTest, RetryBufferDefaultValue) {
     EXPECT_EQ(config.max_retry_buffer_size, 1000);
 }
 
+TEST(InfluxSinkTest, HealthAccessorsBeforeStart) {
+    // A constructed-but-not-started sink reports its config and zeroed counters.
+    // This exercises the accessors backing GET /v0/telemetry/status without any
+    // network or running flush thread.
+    InfluxConfig config;
+    config.enabled = true;
+    config.url = "http://influx.example:8086";
+    config.org = "my_org";
+    config.bucket = "my_bucket";
+    config.token = "secret";  // not exposed by any accessor
+
+    InfluxSink sink(config);
+
+    EXPECT_TRUE(sink.enabled());
+    EXPECT_FALSE(sink.is_running());
+    EXPECT_FALSE(sink.is_connected());
+    EXPECT_EQ(sink.total_written(), 0u);
+    EXPECT_EQ(sink.total_failed(), 0u);
+    EXPECT_EQ(sink.current_batch_size(), 0u);
+    EXPECT_EQ(sink.queue_depth(), 0u);     // no subscription before start()
+    EXPECT_EQ(sink.dropped_events(), 0u);  // no subscription before start()
+
+    EXPECT_EQ(sink.url(), "http://influx.example:8086");
+    EXPECT_EQ(sink.org(), "my_org");
+    EXPECT_EQ(sink.bucket(), "my_bucket");
+}
+
 TEST(InfluxConfigTest, RetryBufferCustomValue) {
     InfluxConfig config;
     config.max_retry_buffer_size = 5000;

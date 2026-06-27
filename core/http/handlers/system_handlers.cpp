@@ -11,6 +11,7 @@
 #include "../../provider/i_provider_handle.hpp"    // Need provider definition for handle_get_runtime_status
 #include "../../provider/provider_supervisor.hpp"  // For ProviderSupervisionSnapshot
 #include "../../registry/device_registry.hpp"
+#include "../../telemetry/influx_sink.hpp"
 #include "../json.hpp"
 #include "../server.hpp"
 #include "utils.hpp"
@@ -550,6 +551,39 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
     }
 
     nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"providers", providers_json}};
+
+    send_json(res, StatusCode::OK, response);
+}
+
+void HttpServer::handle_get_telemetry_status(const httplib::Request &, httplib::Response &res) {
+    // Read-only view of the InfluxDB telemetry sink. The sink pointer is null when
+    // telemetry is disabled in config; report that plainly rather than 404-ing.
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)}};
+
+    if (telemetry_sink_ == nullptr) {
+        response["enabled"] = false;
+        response["running"] = false;
+        response["connected"] = false;
+        response["total_written"] = 0;
+        response["total_failed"] = 0;
+        response["pending_batch"] = 0;
+        response["queue_depth"] = 0;
+        response["dropped_events"] = 0;
+        send_json(res, StatusCode::OK, response);
+        return;
+    }
+
+    response["enabled"] = telemetry_sink_->enabled();
+    response["running"] = telemetry_sink_->is_running();
+    response["connected"] = telemetry_sink_->is_connected();
+    response["total_written"] = telemetry_sink_->total_written();
+    response["total_failed"] = telemetry_sink_->total_failed();
+    response["pending_batch"] = telemetry_sink_->current_batch_size();
+    response["queue_depth"] = telemetry_sink_->queue_depth();
+    response["dropped_events"] = telemetry_sink_->dropped_events();
+    // Backend coordinates for operator context. Never includes the API token.
+    response["backend"] = {
+        {"url", telemetry_sink_->url()}, {"org", telemetry_sink_->org()}, {"bucket", telemetry_sink_->bucket()}};
 
     send_json(res, StatusCode::OK, response);
 }
