@@ -1,0 +1,15 @@
+{
+  "measurement": "anolis_signal",
+  "timestamp_ms": 1711929601040,
+  "tags": {
+    "runtime_name": "bioreactor-telemetry",
+    "provider_id": "bread0",
+    "device_id": "rlht0",
+    "signal_id": "tc1_temp",
+    "run_id": "01J9Z0bioreactor-telemetry"
+  },
+  "fields": {
+    "quality": "OK",
+    "value_double": 22.2
+  }
+}

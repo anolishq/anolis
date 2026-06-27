@@ -22,7 +22,7 @@
     },
     "tags": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "runtime_name",
         "provider_id",
