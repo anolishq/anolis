@@ -99,11 +99,6 @@ curl -s http://127.0.0.1:8080/v0/state/sim0/motorctl0 | jq
 
 See [http-api.md](http-api.md) for full API details.
 
-## Operator UI
-
-The Operator UI has been extracted to [`anolis-hq/anolis-operator-ui`](https://github.com/anolis-hq/anolis-operator-ui).
-Clone that repo and follow its README to run the standalone tool.
-
 ## Automation Quickstart
 
 Enable automation in runtime config:

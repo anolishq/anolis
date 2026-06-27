@@ -7,8 +7,7 @@ Validates anolis-provider-sim configuration system requirements:
 3. Error handling for missing/invalid config files
 4. Device type validation and graceful degradation
 
-These tests ensure the provider configuration system works correctly
-before Operator UI integration.
+These tests ensure the provider configuration system works correctly.
 
 """
 

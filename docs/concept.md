@@ -56,7 +56,7 @@ The current runtime includes:
 - Runtime YAML contracts (schema + runtime semantic validation)
 - Runtime HTTP `/v0` surface for state, control, mode, parameters, and events
 - Behavior-tree automation layer with mode gating and runtime parameters
-- Contract-tested integration surfaces for Composer and Operator UI tooling
+- Contract-tested integration surfaces for Composer and Workbench tooling
 
 ## Use Cases
 
