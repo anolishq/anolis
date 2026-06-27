@@ -11,7 +11,7 @@ This document defines governance for dependency pinning, CI lanes, presets, and 
 
 1. **Single baseline source**: `vcpkg-configuration.json` is canonical.
 2. **No `builtin-baseline`** in manifests.
-3. **Lockfile pinning deferred** for now.
+3. **Lockfile pinning deferred** for now (org decision tracked in anolishq/.github#93).
 4. **Determinism source**: pinned baseline + reviewed `vcpkg.json` changes.
 
 ## Cross-Repo Pinning and Compatibility

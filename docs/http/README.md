@@ -16,7 +16,7 @@ Canonical machine-validated artifacts live under `schemas/` and `tests/contracts
 
 1. Config schema and HTTP contract are separate layers.
 2. Shared concepts (mode enums, status code semantics, parameter value shapes) are parity-checked.
-3. Shared cross-contract schema fragments are deferred to a later follow-up after HTTP contract stabilization.
+3. Shared cross-contract schema fragments are deferred to a later follow-up after HTTP contract stabilization (tracked in #103).
 
 ## Validation
 
