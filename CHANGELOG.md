@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- Telemetry contract: pin the `anolis_signal` tag key-set to exactly
+  `{runtime_name, provider_id, device_id, signal_id}` by setting
+  `tags.additionalProperties: false` in `telemetry-timeseries.schema.v1.json`
+  (fields stay forward-compatible). Machine-enforces the documented cardinality
+  guard — a stray tag such as `run_id` is now a contract failure rather than a
+  silently-accepted high-cardinality series. Conformant producers (the runtime
+  sink only ever emits the 4 tags) are unaffected. Downstream:
+  `anolis-telemetry-export` re-pins its vendored schema mirror on the next
+  release that carries this change. (anolishq/anolis#113)
+
 ## [0.1.23] - 2026-06-16
 
 ### Changed

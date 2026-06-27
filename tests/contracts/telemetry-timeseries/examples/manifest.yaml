@@ -38,3 +38,6 @@ examples:
   - file: tests/contracts/telemetry-timeseries/examples/invalid/05-wrong-measurement.json
     expect: invalid
     note: measurement must be anolis_signal
+  - file: tests/contracts/telemetry-timeseries/examples/invalid/06-extra-tag.json
+    expect: invalid
+    note: tag key-set is exactly the 4 identity tags; run_id (or any 5th tag) is forbidden (cardinality guard)
