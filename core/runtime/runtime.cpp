@@ -88,17 +88,21 @@ bool Runtime::initialize(std::string &error) {
         return false;
     }
 
-    if (!init_http(error)) {
-        return false;
-    }
-    if (!check_startup_deadline("init_http")) {
-        return false;
-    }
-
+    // Telemetry is started before HTTP so the sink handle can be injected into the
+    // HTTP server's dependencies (the /v0/telemetry/status health surface). The
+    // sink only needs the event emitter (from init_core_services); nothing in HTTP
+    // init depends on telemetry.
     if (!init_telemetry(error)) {
         return false;
     }
     if (!check_startup_deadline("init_telemetry")) {
+        return false;
+    }
+
+    if (!init_http(error)) {
+        return false;
+    }
+    if (!check_startup_deadline("init_http")) {
         return false;
     }
 
@@ -400,8 +404,9 @@ bool Runtime::init_http(std::string &error) {
     if (config_.http.enabled) {
         LOG_INFO("[Runtime] Creating HTTP server");
         http::HttpServerDependencies dependencies(*registry_, *state_cache_, *call_router_, provider_registry_);
-        dependencies.supervisor = supervisor_.get();  // optional: supervision snapshots
-        dependencies.event_emitter = event_emitter_;  // optional: SSE emitter
+        dependencies.supervisor = supervisor_.get();          // optional: supervision snapshots
+        dependencies.event_emitter = event_emitter_;          // optional: SSE emitter
+        dependencies.telemetry_sink = telemetry_sink_.get();  // optional: telemetry health surface
 #if ANOLIS_ENABLE_AUTOMATION
         dependencies.mode_manager = mode_manager_.get();            // optional: automation mode
         dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters

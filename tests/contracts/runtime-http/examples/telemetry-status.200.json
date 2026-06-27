@@ -1,0 +1,19 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "enabled": true,
+  "running": true,
+  "connected": true,
+  "total_written": 1024,
+  "total_failed": 0,
+  "pending_batch": 3,
+  "queue_depth": 0,
+  "dropped_events": 0,
+  "backend": {
+    "url": "http://localhost:8086",
+    "org": "anolis",
+    "bucket": "anolis"
+  }
+}

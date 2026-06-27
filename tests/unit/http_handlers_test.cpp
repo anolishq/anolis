@@ -549,6 +549,31 @@ TEST_F(HttpHandlersTest, GetProvidersHealthNullSupervisorShape) {
     EXPECT_TRUE(provider["devices"].is_array());
 }
 
+TEST_F(HttpHandlersTest, GetTelemetryStatusDisabledShape) {
+    // The test harness builds the server without a telemetry sink (nullptr), so the
+    // endpoint must report the disabled shape: enabled/running/connected false,
+    // zeroed counters, and no backend block (nothing to report).
+    auto res = client->Get("/v0/telemetry/status");
+
+    ASSERT_TRUE(res) << "Request failed";
+    EXPECT_EQ(200, res->status);
+
+    auto json = nlohmann::json::parse(res->body);
+    EXPECT_EQ("OK", json["status"]["code"]);
+
+    EXPECT_FALSE(json["enabled"].get<bool>());
+    EXPECT_FALSE(json["running"].get<bool>());
+    EXPECT_FALSE(json["connected"].get<bool>());
+    EXPECT_EQ(0, json["total_written"].get<int>());
+    EXPECT_EQ(0, json["total_failed"].get<int>());
+    EXPECT_EQ(0, json["pending_batch"].get<int>());
+    EXPECT_EQ(0, json["queue_depth"].get<int>());
+    EXPECT_EQ(0, json["dropped_events"].get<int>());
+
+    // No backend block when telemetry is disabled.
+    EXPECT_FALSE(json.contains("backend"));
+}
+
 TEST_F(HttpHandlersTest, GetRuntimeStatus) {
     RegisterMockDevice();
 

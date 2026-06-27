@@ -41,6 +41,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProvidersHealthResponse'
+  /v0/telemetry/status:
+    get:
+      tags: [telemetry]
+      operationId: getTelemetryStatus
+      summary: Get telemetry (InfluxDB sink) health and throughput counters
+      responses:
+        "200":
+          description: Telemetry sink health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryStatusResponse'
   /v0/devices:
     get:
       tags: [devices]
@@ -390,6 +402,50 @@ components:
             $ref: '#/components/schemas/RuntimeStatusProvider'
         device_count:
           type: integer
+    TelemetryBackend:
+      type: object
+      additionalProperties: false
+      required: [url, org, bucket]
+      properties:
+        url:
+          type: string
+        org:
+          type: string
+        bucket:
+          type: string
+    TelemetryStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [status, enabled, running, connected, total_written, total_failed, pending_batch, queue_depth, dropped_events]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        enabled:
+          type: boolean
+          description: Telemetry is enabled in config (the sink was configured to run)
+        running:
+          type: boolean
+          description: The sink background thread is running (false if start failed, e.g. no token)
+        connected:
+          type: boolean
+          description: Last InfluxDB write attempt succeeded
+        total_written:
+          type: integer
+        total_failed:
+          type: integer
+        pending_batch:
+          type: integer
+          description: Lines buffered awaiting the next flush
+        queue_depth:
+          type: integer
+          description: Events in the subscriber queue awaiting batching
+        dropped_events:
+          type: integer
+          description: Events dropped on subscriber-queue overflow (flush fell behind)
+        backend:
+          $ref: '#/components/schemas/TelemetryBackend'
+          description: Backend coordinates (omitted when telemetry is disabled); never includes the API token
     DeviceInfo:
       type: object
       additionalProperties: false
