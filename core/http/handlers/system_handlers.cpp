@@ -451,6 +451,14 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         execution_reason = "waiting";
     }
 
+    // The currently-open run, if any (single call — clang-tidy-safe optional use).
+    nlohmann::json run_id_json = nullptr;
+    if (run_journal_ != nullptr) {
+        if (const auto open_id = run_journal_->open_run_id()) {
+            run_id_json = *open_id;
+        }
+    }
+
     nlohmann::json response = {
         {"status", make_status(StatusCode::OK)},
         // Neutral fields (the forward contract).
@@ -458,9 +466,7 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         {"automation_version", automation_version},
         {"last_evaluation_at_epoch_ms", view.last_evaluation_at_epoch_ms},
         {"engine_diagnostics", view.engine_diagnostics},
-        {"run_id", (run_journal_ != nullptr && run_journal_->open_run_id().has_value())
-                       ? nlohmann::json(*run_journal_->open_run_id())
-                       : nlohmann::json()},
+        {"run_id", run_id_json},
         // Deprecated BT mirrors (retained one release).
         {"enabled", enabled},
         {"active", active},
