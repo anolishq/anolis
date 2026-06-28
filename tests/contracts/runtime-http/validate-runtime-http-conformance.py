@@ -42,6 +42,8 @@ REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/v0/providers/health"),
     ("get", "/v0/telemetry/status"),
     ("get", "/v0/runs"),
+    ("post", "/v0/runs/{run_id}/events"),
+    ("get", "/v0/runs/{run_id}/events"),
     ("get", "/v0/devices"),
     ("get", "/v0/devices/{provider_id}/{device_id}/capabilities"),
     ("get", "/v0/state"),
@@ -607,6 +609,74 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"{name}: {exc}"))
 
+    def run_marker_lifecycle_check() -> None:
+        """Open a run, append an operator marker, list its events, then close it —
+        exercising appendRunMarker + listRunEvents against their schemas live."""
+        nonlocal checks_run, checks_passed
+        try:
+            open_resp = _invoke_json(
+                "POST", f"{fixture.base_url}/v0/runs", json_body={"experiment_label": "conformance"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks_run += 2
+            failures.append(Failure("check", f"run_marker_lifecycle: open failed: {exc}"))
+            return
+        if open_resp.status_code != 200:
+            checks_run += 2
+            failures.append(Failure("status", f"run_marker_lifecycle: open returned {open_resp.status_code}"))
+            return
+        run_id = open_resp.json().get("run", {}).get("run_id")
+        if not isinstance(run_id, str):
+            checks_run += 2
+            failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
+            return
+
+        try:
+            # appendRunMarker
+            checks_run += 1
+            op = _resolve_operation(openapi_doc, "post", "/v0/runs/{run_id}/events")
+            resp = _invoke_json(
+                "POST",
+                f"{fixture.base_url}/v0/runs/{run_id}/events",
+                json_body={"type": "sample", "payload": {"note": "conformance"}},
+            )
+            schema = _resolve_response_schema(
+                openapi_doc=openapi_doc, operation=op, status_code=resp.status_code, content_type="application/json"
+            )
+            errs = _validate_json_instance(schema, resp.json())
+            if resp.status_code != 200:
+                failures.append(Failure("status", f"appendRunMarker: expected 200, got {resp.status_code}"))
+            elif errs:
+                failures.append(Failure("schema", f"appendRunMarker: {errs[0]}"))
+            else:
+                checks_passed += 1
+
+            # listRunEvents
+            checks_run += 1
+            op2 = _resolve_operation(openapi_doc, "get", "/v0/runs/{run_id}/events")
+            resp2 = _invoke_json("GET", f"{fixture.base_url}/v0/runs/{run_id}/events")
+            schema2 = _resolve_response_schema(
+                openapi_doc=openapi_doc, operation=op2, status_code=resp2.status_code, content_type="application/json"
+            )
+            errs2 = _validate_json_instance(schema2, resp2.json())
+            if resp2.status_code != 200:
+                failures.append(Failure("status", f"listRunEvents: expected 200, got {resp2.status_code}"))
+            elif errs2:
+                failures.append(Failure("schema", f"listRunEvents: {errs2[0]}"))
+            else:
+                checks_passed += 1
+        except Exception as exc:  # noqa: BLE001
+            failures.append(Failure("check", f"run_marker_lifecycle: {exc}"))
+        finally:
+            try:
+                _invoke_json(
+                    "POST",
+                    f"{fixture.base_url}/v0/runs/{run_id}/close",
+                    json_body={"close_reason": "operator_stop"},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
     try:
         started = fixture.start(wait_for_ready=True, provider_id="sim0", min_device_count=1, startup_timeout=20.0)
         if not started:
@@ -722,6 +792,7 @@ def main() -> int:
             actual_path="/v0/automation/status",
             expected_status=503,
         )
+        run_marker_lifecycle_check()
         run_events_check(name="events")
     finally:
         fixture.cleanup()

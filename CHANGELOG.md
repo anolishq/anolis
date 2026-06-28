@@ -13,6 +13,31 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- Neutral run event/marker stream (Phase 3 of the automation-platform epic). Each
+  run now has an append-only event stream persisted as `runs/{run_id}.events.jsonl`,
+  keyed by `run_id` + a per-run monotonic `sequence`. A closed neutral lifecycle
+  taxonomy (`run_opened`, `run_closed`, `mode_change`, `parameter_change`,
+  `automation_fault`, `annotation`) carries runtime-owned events; operator markers
+  ride as `annotation` with an open `{type, payload}` so no domain vocabulary is
+  baked into core. New endpoints: `POST /v0/runs/{id}/events` (append an operator
+  marker; rejected on a closed run) and `GET /v0/runs/{id}/events` (paginated,
+  oldest-first, for exporters). Mode and parameter changes are folded into the
+  stream. (anolishq/anolis#116)
+
+### Changed
+
+- The automation engine's abnormal-condition event is now the engine-neutral
+  `automation_fault` (a generic `locus`, never a behaviour-tree node). The SSE
+  stream renders both a neutral `automation_fault` frame and the **deprecated
+  `bt_error`** alias frame for one release. An ordinary behaviour-tree `FAILURE`
+  is no longer published as a fault — it is unsuccessful execution and surfaces
+  only through `execution_status`; faults are reserved for tick exceptions and
+  other engine-abnormal conditions. Faults are persisted to the open run's event
+  stream off the tick thread via a bounded async queue (overflow-counted), never
+  blocking or fsyncing on the 0.5 Hz tick thread. (anolishq/anolis#116)
+
 ## [0.1.24] - 2026-06-28
 
 ### Added

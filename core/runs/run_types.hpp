@@ -75,10 +75,43 @@ struct RunOpenSpec {
     TagScope tag_scope;
 };
 
+/// Closed neutral lifecycle taxonomy for the per-run event stream. Domain
+/// vocabulary (inoculation/feed/sample/…) is deliberately kept OUT of this enum —
+/// operator markers ride as `Annotation` with an open `type` + `payload` — so the
+/// core never bakes in bioprocess terms (the leak the BT vocabulary was).
+enum class RunEventCategory {
+    RunOpened,        ///< Run opened (the first event in a stream).
+    RunClosed,        ///< Run closed (the last event; `type` carries the close reason).
+    ModeChange,       ///< Runtime mode transition folded into the stream.
+    ParameterChange,  ///< Parameter update folded into the stream.
+    AutomationFault,  ///< Engine-abnormal fault (`type` carries the locus). Not unsuccessful execution.
+    Annotation        ///< Operator-supplied domain marker (open `type` + `payload`).
+};
+
+const char* to_string(RunEventCategory category);
+std::optional<RunEventCategory> run_event_category_from_string(const std::string& s);
+
+/// A durable, append-only run event. The durable identity is `run_id + sequence`
+/// (a per-run monotonic counter) — NOT the live EventEmitter's process-local ids,
+/// which reset on restart. `occurred_at` is when the source observed it;
+/// `recorded_at` is when the journal persisted it.
+struct RunEvent {
+    std::string run_id;
+    uint64_t sequence = 0;
+    RunEventCategory category = RunEventCategory::Annotation;
+    std::string type;  ///< Open string: marker type, close reason, or fault locus; may be empty.
+    uint64_t occurred_at_epoch_ms = 0;
+    uint64_t recorded_at_epoch_ms = 0;
+    nlohmann::json payload = nlohmann::json::object();
+    uint32_t schema_version = 1;
+};
+
 nlohmann::json to_json(const TagScope& scope);
 nlohmann::json to_json(const Run& run);
+nlohmann::json to_json(const RunEvent& event);
 /// Parse a durable record (index-rebuild path). Returns nullopt on a malformed line.
 std::optional<Run> run_from_json(const nlohmann::json& j);
+std::optional<RunEvent> run_event_from_json(const nlohmann::json& j);
 
 }  // namespace runs
 }  // namespace anolis

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -172,14 +173,26 @@ public:
     AutomationHealth get_health() const;
 
     /**
-     * @brief Set event emitter for error notifications
+     * @brief Set event emitter for fault notifications
      *
-     * When set, BTRuntime will emit BTErrorEvent on failures.
+     * When set, BTRuntime emits an AutomationFaultEvent on a tick exception.
      * Must be called before start().
      *
      * @param emitter Shared pointer to EventEmitter (can be nullptr to disable)
      */
     void set_event_emitter(const std::shared_ptr<events::EventEmitter>& emitter);
+
+    /**
+     * @brief A decoupled sink for engine faults, called as `(locus, message,
+     * occurred_at_epoch_ms)` from the tick thread on a tick exception.
+     *
+     * Keeps BTRuntime independent of the run subsystem: the runtime wires this to
+     * the RunJournal's non-blocking enqueue so a fault is journaled durably off
+     * the tick thread. The sink MUST NOT block or fsync on the calling thread.
+     */
+    using FaultSink =
+        std::function<void(const std::string& locus, const std::string& message, int64_t occurred_at_epoch_ms)>;
+    void set_fault_sink(FaultSink sink);
 
 private:
     /**
@@ -236,6 +249,7 @@ private:
 
     // Event emitter (optional, for error notifications)
     std::shared_ptr<events::EventEmitter> event_emitter_;
+    FaultSink fault_sink_;
     std::atomic<uint64_t> next_event_id_{1};
 };
 

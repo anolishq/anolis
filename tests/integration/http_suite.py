@@ -255,11 +255,38 @@ class HttpGatewayTester:
         got = self.http_get(f"/v0/runs/{run_id}")
         assert got["status_code"] == 200 and got["body"]["run"]["run_id"] == run_id, got
 
+        # Event stream: run_opened is present; an operator marker is appended as an
+        # annotation with the next monotonic sequence.
+        events0 = self.http_get(f"/v0/runs/{run_id}/events")
+        assert events0["status_code"] == 200, f"GET events failed: {events0}"
+        cats0 = [e["category"] for e in events0["body"]["events"]]
+        assert "run_opened" in cats0, f"run_opened missing from event stream: {cats0}"
+
+        marker = self.http_post(f"/v0/runs/{run_id}/events", {"type": "sample", "payload": {"volume_ml": 5}})
+        assert marker["status_code"] == 200, f"marker append failed: {marker}"
+        assert marker["body"]["event"]["category"] == "annotation", marker
+        assert marker["body"]["event"]["type"] == "sample", marker
+
+        events1 = self.http_get(f"/v0/runs/{run_id}/events")
+        seqs = [e["sequence"] for e in events1["body"]["events"]]
+        assert seqs == sorted(seqs) and len(seqs) == len(set(seqs)), f"sequences not strictly monotonic: {seqs}"
+        assert any(e["category"] == "annotation" and e["type"] == "sample" for e in events1["body"]["events"]), events1
+
+        # A bad marker (no type) is rejected.
+        bad = self.http_post(f"/v0/runs/{run_id}/events", {"payload": {}})
+        assert bad["status_code"] == 400, f"typeless marker should be 400: {bad}"
+
         # Close it (idempotently).
         closed = self.http_post(f"/v0/runs/{run_id}/close", {"close_reason": "completed"})
         assert closed["status_code"] == 200, f"close failed: {closed}"
         assert closed["body"]["run"]["state"] == "closed", closed
         assert closed["body"]["run"]["close_reason"] == "completed", closed
+
+        # Events are immutable once a run closes; run_closed is the final event.
+        on_closed = self.http_post(f"/v0/runs/{run_id}/events", {"type": "late"})
+        assert on_closed["status_code"] == 409, f"marker on closed run should be 409: {on_closed}"
+        final = self.http_get(f"/v0/runs/{run_id}/events")
+        assert final["body"]["events"][-1]["category"] == "run_closed", final
 
         # Listing now includes the closed run; another open is allowed.
         relist = self.http_get("/v0/runs")

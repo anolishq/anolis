@@ -79,6 +79,8 @@ void BTRuntime::set_event_sink(const std::shared_ptr<events::EventEmitter> &emit
 
 void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter) { set_event_sink(emitter); }
 
+void BTRuntime::set_fault_sink(FaultSink sink) { fault_sink_ = std::move(sink); }
+
 LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
     LoadOutcome outcome;
     const std::string &path = ref.source_path;
@@ -238,15 +240,11 @@ void BTRuntime::tick_loop() {
                 if (status == BT::NodeStatus::SUCCESS || status == BT::NodeStatus::RUNNING) {
                     ticks_since_progress_ = 0;
                 } else if (status == BT::NodeStatus::FAILURE) {
+                    // An ordinary BT FAILURE is NOT an automation fault — it is
+                    // unsuccessful execution and surfaces through execution_status
+                    // (the >N-tick stall heuristic -> blocked/failed), never as a
+                    // fault event.
                     ticks_since_progress_++;
-
-                    // Emit bt_error event on first failure in a sequence
-                    if (ticks_since_progress_ == 1 && event_emitter_) {
-                        events::BTErrorEvent error_event{next_event_id_.fetch_add(1),
-                                                         "",  // Node name not available without deep BT introspection
-                                                         "BT returned FAILURE", static_cast<int64_t>(last_tick_ms_)};
-                        event_emitter_->emit(error_event);
-                    }
                 }
             }
 
@@ -260,19 +258,25 @@ void BTRuntime::tick_loop() {
         } catch (const std::exception &e) {
             LOG_ERROR("[BTRuntime] Error during tick: " << e.what());
 
-            // Update error tracking
-            std::lock_guard<std::mutex> lock(health_mutex_);
-            last_error_ = e.what();
-            error_count_++;
-            last_tick_status_ = BT::NodeStatus::FAILURE;
+            const int64_t fault_ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+            {
+                // Update error tracking
+                std::lock_guard<std::mutex> lock(health_mutex_);
+                last_error_ = e.what();
+                error_count_++;
+                last_tick_status_ = BT::NodeStatus::FAILURE;
+            }
 
-            // Emit bt_error event
+            // A tick exception IS an engine fault. Emit the canonical neutral
+            // fault event (the SSE serializer renders the legacy bt_error alias),
+            // and notify the decoupled fault sink so it can be journaled durably
+            // off this tick thread (the sink never blocks/fsyncs here).
             if (event_emitter_) {
-                events::BTErrorEvent error_event{
-                    next_event_id_.fetch_add(1),
-                    "",  // Node name not available from exception
-                    e.what(), duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count()};
-                event_emitter_->emit(error_event);
+                events::AutomationFaultEvent fault_event{next_event_id_.fetch_add(1), "tick", e.what(), fault_ms};
+                event_emitter_->emit(fault_event);
+            }
+            if (fault_sink_) {
+                fault_sink_("tick", e.what(), fault_ms);
             }
         }
 

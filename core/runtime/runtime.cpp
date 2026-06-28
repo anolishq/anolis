@@ -348,6 +348,15 @@ bool Runtime::init_automation(std::string &error) {
                 event_emitter_->emit(event);
                 LOG_INFO("[Runtime] Mode change event emitted: " << event.previous_mode << " -> " << event.new_mode);
             }
+            // Fold the mode change into the open run's event stream (if any).
+            if (run_journal_) {
+                if (auto open_id = run_journal_->open_run_id()) {
+                    run_journal_->append_event(*open_id, runs::RunEventCategory::ModeChange, "",
+                                               nlohmann::json{{"previous_mode", automation::mode_to_string(prev)},
+                                                              {"new_mode", automation::mode_to_string(next)}},
+                                               0);
+                }
+            }
         });
     }
 
@@ -369,6 +378,17 @@ bool Runtime::init_automation(std::string &error) {
                 event_emitter_->emit(event);
                 LOG_INFO("[Runtime] Parameter '" << name << "' changed: " << event.old_value_str << " -> "
                                                  << event.new_value_str);
+            }
+            // Fold the parameter change into the open run's event stream (if any).
+            if (run_journal_) {
+                if (auto open_id = run_journal_->open_run_id()) {
+                    run_journal_->append_event(
+                        *open_id, runs::RunEventCategory::ParameterChange, name,
+                        nlohmann::json{{"parameter_name", name},
+                                       {"old_value", automation::parameter_value_to_string(old_value)},
+                                       {"new_value", automation::parameter_value_to_string(new_value)}},
+                        0);
+                }
             }
         });
     }
@@ -482,6 +502,18 @@ bool Runtime::init_runs(std::string & /*error*/) {
         run_journal_.reset();
     } else {
         LOG_INFO("[Runtime] Run registry ready (data_dir=" << data_dir << ")");
+#if ANOLIS_ENABLE_AUTOMATION
+        // Wire engine faults into the journal here (init_runs runs after
+        // init_automation, so the journal now exists). enqueue_fault is
+        // non-blocking, so the tick thread never fsyncs.
+        if (bt_runtime_) {
+            runs::RunJournal *journal = run_journal_.get();
+            bt_runtime_->set_fault_sink(
+                [journal](const std::string &locus, const std::string &message, int64_t occurred_at_epoch_ms) {
+                    journal->enqueue_fault(locus, message, static_cast<uint64_t>(occurred_at_epoch_ms));
+                });
+        }
+#endif
     }
     return true;
 }

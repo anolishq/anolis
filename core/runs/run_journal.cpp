@@ -106,8 +106,65 @@ std::optional<CloseReason> close_reason_from_string(const std::string& s) {
     return std::nullopt;
 }
 
+const char* to_string(RunEventCategory category) {
+    switch (category) {
+        case RunEventCategory::RunOpened:
+            return "run_opened";
+        case RunEventCategory::RunClosed:
+            return "run_closed";
+        case RunEventCategory::ModeChange:
+            return "mode_change";
+        case RunEventCategory::ParameterChange:
+            return "parameter_change";
+        case RunEventCategory::AutomationFault:
+            return "automation_fault";
+        case RunEventCategory::Annotation:
+            return "annotation";
+    }
+    return "annotation";
+}
+
+std::optional<RunEventCategory> run_event_category_from_string(const std::string& s) {
+    if (s == "run_opened") return RunEventCategory::RunOpened;
+    if (s == "run_closed") return RunEventCategory::RunClosed;
+    if (s == "mode_change") return RunEventCategory::ModeChange;
+    if (s == "parameter_change") return RunEventCategory::ParameterChange;
+    if (s == "automation_fault") return RunEventCategory::AutomationFault;
+    if (s == "annotation") return RunEventCategory::Annotation;
+    return std::nullopt;
+}
+
 nlohmann::json to_json(const TagScope& scope) {
     return {{"provider_ids", scope.provider_ids}, {"device_ids", scope.device_ids}, {"signal_ids", scope.signal_ids}};
+}
+
+nlohmann::json to_json(const RunEvent& event) {
+    return {{"schema_version", event.schema_version},
+            {"run_id", event.run_id},
+            {"sequence", event.sequence},
+            {"category", to_string(event.category)},
+            {"type", event.type},
+            {"occurred_at_epoch_ms", event.occurred_at_epoch_ms},
+            {"recorded_at_epoch_ms", event.recorded_at_epoch_ms},
+            {"payload", event.payload}};
+}
+
+std::optional<RunEvent> run_event_from_json(const nlohmann::json& j) {
+    if (!j.is_object() || !j.contains("run_id") || !j["run_id"].is_string()) {
+        return std::nullopt;
+    }
+    auto category = run_event_category_from_string(j.value("category", std::string("annotation")));
+    if (!category) return std::nullopt;
+    RunEvent event;
+    event.schema_version = j.value("schema_version", 1U);
+    event.run_id = j["run_id"].get<std::string>();
+    event.sequence = j.value("sequence", 0ULL);
+    event.category = *category;
+    event.type = j.value("type", std::string());
+    event.occurred_at_epoch_ms = j.value("occurred_at_epoch_ms", 0ULL);
+    event.recorded_at_epoch_ms = j.value("recorded_at_epoch_ms", 0ULL);
+    if (j.contains("payload") && j["payload"].is_object()) event.payload = j["payload"];
+    return event;
 }
 
 nlohmann::json to_json(const Run& run) {
@@ -175,6 +232,17 @@ RunJournal::RunJournal(std::filesystem::path data_dir, std::string runtime_name,
     index_path_ = data_dir_ / "runs" / "index.jsonl";
 }
 
+RunJournal::~RunJournal() {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        writer_stop_ = true;
+    }
+    queue_cv_.notify_all();
+    if (writer_thread_.joinable()) {
+        writer_thread_.join();
+    }
+}
+
 bool RunJournal::initialize(std::string& error) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::error_code ec;
@@ -224,8 +292,22 @@ bool RunJournal::initialize(std::string& error) {
                 error = "failed to persist abandoned-run recovery: " + werr;
                 return false;
             }
+            // A recovery marker closes the event stream too (sequence restored from
+            // the existing per-run events file by append_event_locked).
+            auto ev = append_event_locked(id, RunEventCategory::RunClosed, "abandoned",
+                                          nlohmann::json{{"recovery", true}}, *run.ended_at_epoch_ms);
+            if (!ev.ok) {
+                LOG_WARN("[RunJournal] Failed to record abandoned run_closed event: " << ev.error);
+            }
+            next_seq_.erase(id);
             LOG_INFO("[RunJournal] Recovered open run " << id << " as abandoned");
         }
+    }
+
+    // Start the background fault writer (idempotent: initialize runs once).
+    if (!writer_thread_.joinable()) {
+        writer_stop_ = false;
+        writer_thread_ = std::thread([this] { writer_loop(); });
     }
 
     LOG_INFO("[RunJournal] Initialized (" << runs_.size() << " run(s) known) at " << index_path_.string());
@@ -247,6 +329,143 @@ bool RunJournal::append_record(const Run& run, std::string& error) {
         return false;
     }
     return true;
+}
+
+std::filesystem::path RunJournal::events_path(const std::string& run_id) const {
+    return index_path_.parent_path() / (run_id + ".events.jsonl");
+}
+
+RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string& run_id, RunEventCategory category,
+                                                              const std::string& type, const nlohmann::json& payload,
+                                                              uint64_t occurred_at_epoch_ms) {
+    AppendEventResult result;
+
+    // Resolve the per-run sequence. If unknown (e.g. abandoned-run recovery after a
+    // restart), restore it from the existing stream so sequences stay monotonic.
+    uint64_t seq = 0;
+    auto seq_it = next_seq_.find(run_id);
+    if (seq_it != next_seq_.end()) {
+        seq = seq_it->second;
+    } else {
+        uint64_t max_seq = 0;
+        std::ifstream existing(events_path(run_id));
+        std::string line;
+        while (std::getline(existing, line)) {
+            if (line.empty()) continue;
+            try {
+                auto parsed = run_event_from_json(nlohmann::json::parse(line));
+                if (parsed && parsed->sequence > max_seq) max_seq = parsed->sequence;
+            } catch (const std::exception&) {
+                // torn/malformed line: ignore for the max-sequence scan
+            }
+        }
+        seq = max_seq + 1;
+    }
+
+    RunEvent event;
+    event.run_id = run_id;
+    event.sequence = seq;
+    event.category = category;
+    event.type = type;
+    event.occurred_at_epoch_ms = occurred_at_epoch_ms != 0 ? occurred_at_epoch_ms : now_epoch_ms();
+    event.recorded_at_epoch_ms = now_epoch_ms();
+    event.payload = payload.is_object() ? payload : nlohmann::json::object();
+
+    std::ofstream out(events_path(run_id), std::ios::app);
+    if (!out.good()) {
+        result.error = "cannot open run event log for append: " + events_path(run_id).string();
+        return result;
+    }
+    out << to_json(event).dump() << "\n";
+    out.flush();
+    if (!out.good()) {
+        result.error = "failed to write run event to " + events_path(run_id).string();
+        return result;
+    }
+
+    next_seq_[run_id] = seq + 1;
+    result.ok = true;
+    result.event = std::move(event);
+    return result;
+}
+
+RunJournal::AppendEventResult RunJournal::append_event(const std::string& run_id, RunEventCategory category,
+                                                       const std::string& type, const nlohmann::json& payload,
+                                                       uint64_t occurred_at_epoch_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    AppendEventResult result;
+    auto it = runs_.find(run_id);
+    if (it == runs_.end()) {
+        result.error = "unknown run: " + run_id;
+        return result;
+    }
+    if (it->second.state == RunState::Closed) {
+        result.error = "run is closed (events are immutable): " + run_id;
+        return result;
+    }
+    return append_event_locked(run_id, category, type, payload, occurred_at_epoch_ms);
+}
+
+void RunJournal::enqueue_fault(const std::string& locus, const std::string& message, uint64_t occurred_at_epoch_ms) {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (fault_queue_.size() >= kMaxFaultQueue) {
+            events_dropped_.fetch_add(1);
+            return;
+        }
+        fault_queue_.push_back({locus, message, occurred_at_epoch_ms});
+    }
+    queue_cv_.notify_one();
+}
+
+void RunJournal::writer_loop() {
+    for (;;) {
+        QueuedFault item;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            queue_cv_.wait(lock, [this] { return writer_stop_ || !fault_queue_.empty(); });
+            if (fault_queue_.empty()) {
+                if (writer_stop_) return;
+                continue;
+            }
+            item = std::move(fault_queue_.front());
+            fault_queue_.pop_front();
+        }
+        // Persist off the queue lock, against whichever run is open now.
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!open_run_id_.has_value()) {
+            events_dropped_.fetch_add(1);  // no run to attribute the fault to
+            continue;
+        }
+        auto res = append_event_locked(*open_run_id_, RunEventCategory::AutomationFault, item.locus,
+                                       nlohmann::json{{"message", item.message}}, item.occurred_at_epoch_ms);
+        if (!res.ok) {
+            LOG_WARN("[RunJournal] Failed to persist automation_fault: " << res.error);
+        }
+    }
+}
+
+std::vector<RunEvent> RunJournal::list_events(const std::string& run_id, size_t limit, size_t offset) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<RunEvent> out;
+    std::ifstream in(events_path(run_id));
+    if (!in.good()) return out;  // no events file yet => empty page
+    std::string line;
+    size_t index = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        std::optional<RunEvent> event;
+        try {
+            event = run_event_from_json(nlohmann::json::parse(line));
+        } catch (const std::exception&) {
+            event = std::nullopt;  // torn/malformed line: skip
+        }
+        if (!event) continue;
+        if (index++ < offset) continue;
+        if (out.size() >= limit) break;
+        out.push_back(*event);
+    }
+    return out;
 }
 
 RunJournal::OpenResult RunJournal::open(const RunOpenSpec& spec, std::optional<AutomationVersionRecord> version) {
@@ -277,6 +496,13 @@ RunJournal::OpenResult RunJournal::open(const RunOpenSpec& spec, std::optional<A
     runs_[run.run_id] = run;
     order_.push_back(run.run_id);
     open_run_id_ = run.run_id;
+
+    // run_opened is the first event in the stream (sequence 1).
+    auto ev = append_event_locked(run.run_id, RunEventCategory::RunOpened, "", nlohmann::json::object(),
+                                  run.started_at_epoch_ms);
+    if (!ev.ok) {
+        LOG_WARN("[RunJournal] Failed to record run_opened event: " << ev.error);
+    }
 
     result.ok = true;
     result.run = std::move(run);
@@ -309,6 +535,15 @@ RunJournal::CloseResult RunJournal::close(const std::string& run_id, CloseReason
     }
 
     it->second = updated;
+
+    // run_closed is the final event in the stream; the close reason rides as `type`.
+    auto ev = append_event_locked(run_id, RunEventCategory::RunClosed, to_string(reason), nlohmann::json::object(),
+                                  updated.ended_at_epoch_ms.value_or(now_epoch_ms()));
+    if (!ev.ok) {
+        LOG_WARN("[RunJournal] Failed to record run_closed event: " << ev.error);
+    }
+    next_seq_.erase(run_id);  // closed runs are immutable — no more events
+
     if (open_run_id_ == run_id) {
         open_run_id_.reset();
     }
