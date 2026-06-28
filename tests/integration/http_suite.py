@@ -227,6 +227,47 @@ class HttpGatewayTester:
         for expected in ["double", "bool", "string"]:
             assert expected in found, f"Expected value type '{expected}' in tempctl0 state, got {found}"
 
+    def check_run_lifecycle(self) -> None:
+        # Initially empty.
+        listing = self.http_get("/v0/runs")
+        assert listing["status_code"] == 200, f"GET /v0/runs failed: {listing}"
+        assert isinstance(listing["body"].get("runs"), list), listing
+
+        # Open a run.
+        opened = self.http_post("/v0/runs", {"experiment_label": "it-cycle", "tag_scope": {"provider_ids": ["sim0"]}})
+        assert opened["status_code"] == 200, f"open run failed: {opened}"
+        run = opened["body"]["run"]
+        run_id = run["run_id"]
+        assert run["state"] == "open", run
+        assert run["experiment_label"] == "it-cycle", run
+        assert run["tag_scope"]["provider_ids"] == ["sim0"], run
+
+        # The open run id is reflected on /v0/automation/status (when automation is enabled).
+        status = self.http_get("/v0/automation/status")
+        if status["status_code"] == 200:
+            assert status["body"].get("run_id") == run_id, f"run_id not reflected: {status['body'].get('run_id')}"
+
+        # A second open is rejected (at most one open run per runtime).
+        second = self.http_post("/v0/runs", {})
+        assert second["status_code"] != 200, f"second open should be rejected, got: {second}"
+
+        # Get by id.
+        got = self.http_get(f"/v0/runs/{run_id}")
+        assert got["status_code"] == 200 and got["body"]["run"]["run_id"] == run_id, got
+
+        # Close it (idempotently).
+        closed = self.http_post(f"/v0/runs/{run_id}/close", {"close_reason": "completed"})
+        assert closed["status_code"] == 200, f"close failed: {closed}"
+        assert closed["body"]["run"]["state"] == "closed", closed
+        assert closed["body"]["run"]["close_reason"] == "completed", closed
+
+        # Listing now includes the closed run; another open is allowed.
+        relist = self.http_get("/v0/runs")
+        assert any(r["run_id"] == run_id for r in relist["body"]["runs"]), relist
+        reopened = self.http_post("/v0/runs", {})
+        assert reopened["status_code"] == 200, f"open after close should succeed: {reopened}"
+        self.http_post(f"/v0/runs/{reopened['body']['run']['run_id']}/close", {})
+
     def check_sse_endpoint(self) -> None:
         try:
             resp = requests.get(
@@ -313,5 +354,6 @@ HTTP_CHECKS: List[HttpCheck] = [
     ("invalid_call_args", HttpGatewayTester.check_invalid_call_args),
     ("error_404_handling", HttpGatewayTester.check_404_handling),
     ("value_types", HttpGatewayTester.check_value_types),
+    ("run_lifecycle", HttpGatewayTester.check_run_lifecycle),
     ("sse_endpoint", HttpGatewayTester.check_sse_endpoint),
 ]

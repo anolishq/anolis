@@ -15,6 +15,26 @@ examples:
     content_type: application/json
     file: telemetry-status.200.json
   - method: GET
+    path: /v0/runs
+    status: "200"
+    content_type: application/json
+    file: runs-list.200.json
+  - method: POST
+    path: /v0/runs
+    status: "200"
+    content_type: application/json
+    file: run.200.json
+  - method: GET
+    path: /v0/runs/{run_id}
+    status: "200"
+    content_type: application/json
+    file: run.200.json
+  - method: POST
+    path: /v0/runs/{run_id}/close
+    status: "200"
+    content_type: application/json
+    file: run.200.json
+  - method: GET
     path: /v0/devices
     status: "200"
     content_type: application/json

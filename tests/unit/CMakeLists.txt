@@ -19,6 +19,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     device_registry_concurrency_test.cpp
     event_emitter_test.cpp
     influx_sink_test.cpp
+    run_journal_test.cpp
     signal_handler_test.cpp
 )
 
@@ -71,6 +72,7 @@ target_link_libraries(anolis_unit_tests PRIVATE
     anolis_http
     anolis_events
     anolis_telemetry
+    anolis_runs
     anolis_proto
     protobuf::libprotobuf
 )

@@ -15,6 +15,19 @@ commit messages only.
 
 ### Added
 
+- Run / experiment registry (Phase 2 of the automation-platform epic): a `run` is
+  an explicit operator primitive, decoupled from AUTO mode, with **at most one
+  open run per runtime**. New endpoints: `POST /v0/runs` (open — pins the loaded
+  automation version digest + build/timing provenance + operator-supplied
+  `tag_scope`; rejected while a run is open), `POST /v0/runs/{id}/close`
+  (idempotent), `GET /v0/runs` (paginated, newest-first), `GET /v0/runs/{id}`.
+  Persisted as append-only JSONL under `runtime.data_dir` (new config key) via a
+  single-writer journal that flushes open/close before the call returns, tolerates
+  a torn final line, and closes any run left open by a prior process as
+  `abandoned` on restart. `GET /v0/automation/status` now reports the open
+  `run_id`. Telemetry is correlated to runs by time window — `run_id` is never a
+  series tag. (anolishq/anolis#115)
+
 - `GET /v0/automation/status` now also returns engine-neutral fields
   (Phase 1 of the automation-platform epic): `execution_status`
   (`idle|running|blocked|failed|completed|unknown`), optional `execution_reason`,

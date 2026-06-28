@@ -269,3 +269,6 @@ working/
 
 # vcpkg manifest-mode artifacts (machine-local)
 vcpkg_installed/
+
+# Runtime data directory (run registry JSONL, etc.)
+anolis-data/

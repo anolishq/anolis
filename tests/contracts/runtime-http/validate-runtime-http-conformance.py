@@ -41,6 +41,7 @@ REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/v0/runtime/status"),
     ("get", "/v0/providers/health"),
     ("get", "/v0/telemetry/status"),
+    ("get", "/v0/runs"),
     ("get", "/v0/devices"),
     ("get", "/v0/devices/{provider_id}/{device_id}/capabilities"),
     ("get", "/v0/state"),
@@ -640,6 +641,13 @@ def main() -> int:
             path_template="/v0/providers/health",
             actual_path="/v0/providers/health",
         )
+        run_json_check(
+            name="telemetry_status",
+            method="GET",
+            path_template="/v0/telemetry/status",
+            actual_path="/v0/telemetry/status",
+        )
+        run_json_check(name="runs_list", method="GET", path_template="/v0/runs", actual_path="/v0/runs")
         run_json_check(name="devices", method="GET", path_template="/v0/devices", actual_path="/v0/devices")
         run_json_check(
             name="device_capabilities",

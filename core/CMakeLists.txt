@@ -73,6 +73,21 @@ target_include_directories(anolis_logging PUBLIC
 )
 anolis_apply_warnings(anolis_logging)
 
+# Run registry library (#7 run/experiment identity; append-only JSONL)
+find_package(nlohmann_json CONFIG REQUIRED)
+add_library(anolis_runs STATIC
+    runs/run_journal.cpp
+)
+target_include_directories(anolis_runs PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(anolis_runs PUBLIC
+    anolis_logging
+    nlohmann_json::nlohmann_json
+)
+anolis_apply_warnings(anolis_runs)
+
 # Automation support library (mode/parameter facilities without BehaviorTree dependency)
 add_library(anolis_automation_support STATIC
     automation/mode_manager.cpp
@@ -249,6 +264,7 @@ add_library(anolis_http STATIC
     http/handlers/state_handlers.cpp
     http/handlers/control_handlers.cpp
     http/handlers/system_handlers.cpp
+    http/handlers/run_handlers.cpp
 )
 
 target_include_directories(anolis_http PUBLIC
@@ -263,6 +279,7 @@ target_link_libraries(anolis_http PUBLIC
     anolis_state
     anolis_control
     anolis_automation_support
+    anolis_runs
     httplib::httplib
     nlohmann_json::nlohmann_json
     protobuf::libprotobuf
