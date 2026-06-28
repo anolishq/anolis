@@ -10,6 +10,7 @@
 // BehaviorTree.CPP includes
 #include <behaviortree_cpp/basic_types.h>
 
+#include "automation/automation_engine.hpp"
 #include "automation/bt_services.hpp"
 
 // BehaviorTree.CPP forward declarations
@@ -76,8 +77,12 @@ struct AutomationHealth {
  *
  * The BT engine is a CONSUMER of kernel services (StateCache, CallRouter),
  * not a new subsystem layered beneath them.
+ *
+ * Implements the neutral `IAutomationEngine` seam (Phase 0); the BT-specific
+ * surface (`tick`, `get_health`, `get_tree_path`) is retained for the HTTP layer
+ * + tests until Phase 1 (#114) moves the wire onto the neutral `status()` view.
  */
-class BTRuntime {
+class BTRuntime : public IAutomationEngine {
 public:
     /**
      * Construct BT runtime with kernel service dependencies.
@@ -108,6 +113,32 @@ public:
      */
     bool load_tree(const std::string& path);
 
+    // ---- IAutomationEngine seam (neutral; no BT types) ----
+    std::string_view engine_kind() const override { return "behavior_tree"; }
+
+    /// Atomic staged load: read bytes -> digest -> parse candidate -> build
+    /// version -> swap under def_mutex_. A failed load preserves the previous
+    /// active definition + version.
+    LoadOutcome load(const AutomationDefinitionRef& ref) override;
+
+    /// Start using the engine's configured tick rate (set via the BT-specific
+    /// start(int) or the construction default).
+    bool start(std::string& error) override;
+
+    void stop() override;
+    bool is_running() const override;
+
+    /// One coherent neutral status snapshot (read under def_mutex_).
+    AutomationStatusView status() const override;
+
+    /// The exact loaded definition snapshot (not a disk re-read).
+    std::optional<DefinitionArtifact> definition() const override;
+
+    void set_event_sink(const std::shared_ptr<events::EventEmitter>& emitter) override;
+
+    // ---- BT-specific surface (retained for tests + the not-yet-migrated HTTP
+    //      layer; removed in Phase 1 #114 / Phase 4 #117) ----
+
     /**
      * Start BT tick loop in dedicated thread.
      *
@@ -115,17 +146,6 @@ public:
      * @return true if started successfully, false if already running or not loaded
      */
     bool start(int tick_rate_hz = 10);
-
-    /**
-     * Stop BT tick loop gracefully.
-     * Waits for current tick to complete, then halts thread.
-     */
-    void stop();
-
-    /**
-     * Check if BT is currently running.
-     */
-    bool is_running() const;
 
     /**
      * Execute a single BT tick (for testing or manual control).
@@ -137,11 +157,12 @@ public:
     BT::NodeStatus tick();
 
     /**
-     * Get the path to the currently loaded BT file.
+     * Get the path to the currently loaded BT file (returned by value — the
+     * underlying field is guarded by def_mutex_).
      *
      * @return Path to loaded BT XML file, or empty string if not loaded
      */
-    const std::string& get_tree_path() const { return tree_path_; }
+    std::string get_tree_path() const;
 
     /**
      * Get current automation health status.
@@ -162,6 +183,12 @@ public:
 
 private:
     /**
+     * Non-virtual stop implementation (so the destructor and the virtual stop()
+     * override share one body without a virtual call during destruction).
+     */
+    void stop_impl();
+
+    /**
      * Tick loop thread function.
      * Runs continuously at configured rate until stop() is called.
      */
@@ -172,7 +199,7 @@ private:
      * Called before ticking to keep direct
      * tick() and threaded mode consistent.
      */
-    void populate_blackboard();
+    void populate_blackboard(BT::Tree& tree);
 
     // Kernel service references (non-owning)
     state::StateCache& state_cache_;
@@ -181,11 +208,17 @@ private:
     ModeManager& mode_manager_;
     ParameterManager* parameter_manager_;  // nullable
 
-    // BT state
+    // Active-definition state, guarded by def_mutex_. The mutex is taken only
+    // around the swap (never during file read / XML parse) and around reads in
+    // status()/definition()/get_health()/get_tree_path()/tick(). tree_ is a
+    // shared_ptr so an in-flight tick keeps its tree alive across a swap.
+    mutable std::mutex def_mutex_;
     std::unique_ptr<BT::BehaviorTreeFactory> factory_;
-    std::unique_ptr<BT::Tree> tree_;
+    std::shared_ptr<BT::Tree> tree_;
     std::string tree_path_;
     bool tree_loaded_ = false;
+    std::string loaded_def_bytes_;  ///< Exact bytes that produced tree_ (truthful snapshot).
+    AutomationVersion version_;     ///< Version of the active definition.
 
     // Threading
     std::atomic<bool> running_{false};

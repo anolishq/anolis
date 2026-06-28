@@ -197,6 +197,7 @@ if(ANOLIS_ENABLE_AUTOMATION)
     find_package(behaviortree_cpp CONFIG REQUIRED)
 
     add_library(anolis_automation STATIC
+        automation/automation_engine.cpp
         automation/bt_runtime.cpp
         automation/bt_nodes.cpp
     )
@@ -205,11 +206,15 @@ if(ANOLIS_ENABLE_AUTOMATION)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    find_package(OpenSSL REQUIRED)
+    find_package(nlohmann_json CONFIG REQUIRED)
     target_link_libraries(anolis_automation PUBLIC
         anolis_state
         anolis_control
         anolis_automation_support
         BT::behaviortree_cpp
+        nlohmann_json::nlohmann_json
+        OpenSSL::Crypto
     )
     anolis_apply_warnings(anolis_automation)
 

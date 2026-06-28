@@ -2,9 +2,11 @@
 
 #include <behaviortree_cpp/blackboard.h>
 #include <behaviortree_cpp/bt_factory.h>
+#include <openssl/evp.h>
 
 #include <chrono>
 #include <fstream>
+#include <iterator>
 #include <thread>
 
 #include "automation/bt_nodes.hpp"
@@ -17,6 +19,33 @@
 
 namespace anolis {
 namespace automation {
+
+namespace {
+
+std::string sha256_hex(const std::string &data) {
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int md_len = 0;
+    if (EVP_Digest(data.data(), data.size(), md, &md_len, EVP_sha256(), nullptr) != 1) {
+        return "";
+    }
+    static const char *hex = "0123456789abcdef";
+    std::string out;
+    out.reserve(static_cast<size_t>(md_len) * 2);
+    for (unsigned int i = 0; i < md_len; ++i) {
+        out.push_back(hex[md[i] >> 4]);
+        out.push_back(hex[md[i] & 0x0F]);
+    }
+    return out;
+}
+
+std::string file_basename(const std::string &path) {
+    auto slash = path.find_last_of("/\\");
+    std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    auto dot = name.find_last_of('.');
+    return (dot == std::string::npos) ? name : name.substr(0, dot);
+}
+
+}  // namespace
 
 BTRuntime::BTRuntime(state::StateCache &state_cache, control::CallRouter &call_router,
                      provider::ProviderRegistry &provider_registry, ModeManager &mode_manager,
@@ -44,33 +73,61 @@ BTRuntime::BTRuntime(state::StateCache &state_cache, control::CallRouter &call_r
     LOG_INFO("[BTRuntime] Registered custom node types");
 }
 
-BTRuntime::~BTRuntime() { stop(); }
+BTRuntime::~BTRuntime() { stop_impl(); }
 
-void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter) { event_emitter_ = emitter; }
+void BTRuntime::set_event_sink(const std::shared_ptr<events::EventEmitter> &emitter) { event_emitter_ = emitter; }
 
-bool BTRuntime::load_tree(const std::string &path) {
-    // Verify file exists
-    std::ifstream file(path);
+void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter) { set_event_sink(emitter); }
+
+LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
+    LoadOutcome outcome;
+    const std::string &path = ref.source_path;
+
+    // --- Slow work, done WITHOUT the lock so a swap never holds it during I/O. ---
+    std::ifstream file(path, std::ios::binary);
     if (!file.good()) {
-        LOG_ERROR("[BTRuntime] Cannot open BT file: " << path);
-        return false;
+        outcome.error = "cannot open automation definition: " + path;
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
     }
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-    tree_path_ = path;
-
+    std::shared_ptr<BT::Tree> candidate;
     try {
-        tree_ = std::make_unique<BT::Tree>(factory_->createTreeFromFile(path));
-        populate_blackboard();
-        tree_loaded_ = true;
-
-        LOG_INFO("[BTRuntime] BT loaded successfully: " << path);
-        return true;
+        // Parse from the file (so <include> subtrees resolve); digest_scope stays
+        // "top_level_file" because only the top-level bytes are hashed/snapshotted.
+        candidate = std::make_shared<BT::Tree>(factory_->createTreeFromFile(path));
     } catch (const std::exception &e) {
-        LOG_ERROR("[BTRuntime] Error loading BT: " << e.what());
-        tree_loaded_ = false;
-        return false;
+        outcome.error = std::string("failed to parse automation definition: ") + e.what();
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
     }
+
+    AutomationVersion version;
+    version.engine_kind = "behavior_tree";
+    version.id = file_basename(path);
+    version.digest = sha256_hex(bytes);
+    version.digest_scope = "top_level_file";
+
+    // --- Atomic swap: take the lock only to publish the new active definition. ---
+    {
+        std::lock_guard<std::mutex> lock(def_mutex_);
+        tree_ = std::move(candidate);
+        tree_path_ = path;
+        loaded_def_bytes_ = std::move(bytes);
+        version_ = version;
+        tree_loaded_ = true;
+        populate_blackboard(*tree_);
+    }
+
+    outcome.ok = true;
+    outcome.version = version;
+    LOG_INFO("[BTRuntime] Loaded automation definition: " << path << " (digest " << version.digest.substr(0, 12)
+                                                          << "…)");
+    return outcome;
 }
+
+bool BTRuntime::load_tree(const std::string &path) { return load(AutomationDefinitionRef{path}).ok; }
 
 bool BTRuntime::start(int tick_rate_hz) {
     if (running_) {
@@ -78,9 +135,12 @@ bool BTRuntime::start(int tick_rate_hz) {
         return false;
     }
 
-    if (!tree_loaded_) {
-        LOG_ERROR("[BTRuntime] No BT loaded, call load_tree() first");
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(def_mutex_);
+        if (!tree_loaded_) {
+            LOG_ERROR("[BTRuntime] No BT loaded, call load() first");
+            return false;
+        }
     }
 
     if (tick_rate_hz <= 0 || tick_rate_hz > 1000) {
@@ -97,7 +157,17 @@ bool BTRuntime::start(int tick_rate_hz) {
     return true;
 }
 
-void BTRuntime::stop() {
+bool BTRuntime::start(std::string &error) {
+    if (!start(tick_rate_hz_)) {
+        error = "automation engine failed to start (already running, no definition loaded, or invalid tick rate)";
+        return false;
+    }
+    return true;
+}
+
+void BTRuntime::stop() { stop_impl(); }
+
+void BTRuntime::stop_impl() {
     if (!running_) {
         return;
     }
@@ -116,13 +186,22 @@ void BTRuntime::stop() {
 bool BTRuntime::is_running() const { return running_; }
 
 BT::NodeStatus BTRuntime::tick() {
-    if (!tree_) {
+    // Grab the active tree under the lock so a concurrent load() swap can't free
+    // it mid-tick (the shared_ptr keeps our copy alive). Parsing/swap happen
+    // elsewhere; here we only copy the handle.
+    std::shared_ptr<BT::Tree> tree;
+    {
+        std::lock_guard<std::mutex> lock(def_mutex_);
+        tree = tree_;
+    }
+
+    if (!tree) {
         LOG_ERROR("[BTRuntime] Cannot tick, no tree loaded");
         return BT::NodeStatus::FAILURE;
     }
 
-    populate_blackboard();
-    return tree_->tickOnce();
+    populate_blackboard(*tree);
+    return tree->tickOnce();
 }
 
 void BTRuntime::tick_loop() {
@@ -204,12 +283,9 @@ void BTRuntime::tick_loop() {
 
     LOG_INFO("[BTRuntime] Tick loop exiting");
 }
-void BTRuntime::populate_blackboard() {
-    if (!tree_) {
-        return;
-    }
 
-    auto blackboard = tree_->rootBlackboard();
+void BTRuntime::populate_blackboard(BT::Tree &tree) {
+    auto blackboard = tree.rootBlackboard();
     if (!blackboard) {
         LOG_ERROR("[BTRuntime] Cannot populate blackboard, root blackboard is null");
         return;
@@ -223,8 +299,15 @@ void BTRuntime::populate_blackboard() {
     blackboard->set(kBTServiceContextKey, services);
 }
 
+std::string BTRuntime::get_tree_path() const {
+    std::lock_guard<std::mutex> lock(def_mutex_);
+    return tree_path_;
+}
+
 AutomationHealth BTRuntime::get_health() const {
-    std::lock_guard<std::mutex> lock(health_mutex_);
+    // Lock order: def_mutex_ then health_mutex_ (consistent everywhere both held).
+    std::lock_guard<std::mutex> def_lock(def_mutex_);
+    std::lock_guard<std::mutex> health_lock(health_mutex_);
 
     AutomationHealth health;
     health.last_tick_ms = last_tick_ms_;
@@ -247,6 +330,48 @@ AutomationHealth BTRuntime::get_health() const {
     }
 
     return health;
+}
+
+AutomationStatusView BTRuntime::status() const {
+    // One coherent snapshot. Lock order: def_mutex_ then health_mutex_.
+    std::lock_guard<std::mutex> def_lock(def_mutex_);
+    std::lock_guard<std::mutex> health_lock(health_mutex_);
+
+    AutomationStatusView view;
+    view.version = version_;
+    view.last_evaluation_at_epoch_ms = last_tick_ms_;
+    view.last_error = last_error_;
+
+    // Neutral mapping of the BT status (the failure-vs-fault refinement that
+    // splits an exception from an ordinary FAILURE lands in Phase 1 #114).
+    if (!tree_loaded_ || !running_) {
+        view.status = AutomationStatus::Idle;
+    } else if (error_count_ > 0 && last_tick_status_ == BT::NodeStatus::FAILURE) {
+        view.status = AutomationStatus::Failed;
+    } else if (ticks_since_progress_ > 10) {
+        view.status = AutomationStatus::Blocked;
+    } else {
+        view.status = AutomationStatus::Running;
+    }
+
+    // engine_diagnostics is UNSTABLE / non-contractual.
+    view.engine_diagnostics = {{"ticks_since_progress", ticks_since_progress_},
+                               {"total_ticks", total_ticks_},
+                               {"error_count", error_count_},
+                               {"stall_suspected", ticks_since_progress_ > 10}};
+    return view;
+}
+
+std::optional<DefinitionArtifact> BTRuntime::definition() const {
+    std::lock_guard<std::mutex> lock(def_mutex_);
+    if (!tree_loaded_) {
+        return std::nullopt;
+    }
+    DefinitionArtifact artifact;
+    artifact.media_type = "application/xml";
+    artifact.digest = version_.digest;
+    artifact.bytes = loaded_def_bytes_;
+    return artifact;
 }
 
 }  // namespace automation
