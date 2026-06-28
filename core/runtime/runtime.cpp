@@ -99,6 +99,15 @@ bool Runtime::initialize(std::string &error) {
         return false;
     }
 
+    // Run registry before HTTP so its handle can be injected into the server deps
+    // (the /v0/runs surface + run_id on /v0/automation/status).
+    if (!init_runs(error)) {
+        return false;
+    }
+    if (!check_startup_deadline("init_runs")) {
+        return false;
+    }
+
     if (!init_http(error)) {
         return false;
     }
@@ -407,6 +416,7 @@ bool Runtime::init_http(std::string &error) {
         dependencies.supervisor = supervisor_.get();          // optional: supervision snapshots
         dependencies.event_emitter = event_emitter_;          // optional: SSE emitter
         dependencies.telemetry_sink = telemetry_sink_.get();  // optional: telemetry health surface
+        dependencies.run_journal = run_journal_.get();        // optional: run registry
 #if ANOLIS_ENABLE_AUTOMATION
         dependencies.mode_manager = mode_manager_.get();            // optional: automation mode
         dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters
@@ -454,6 +464,24 @@ bool Runtime::init_telemetry(std::string & /*error*/) {
         }
     } else {
         LOG_INFO("[Runtime] Telemetry disabled in config");
+    }
+    return true;
+}
+
+bool Runtime::init_runs(std::string & /*error*/) {
+    const std::string data_dir = config_.runtime.data_dir.empty() ? "anolis-data" : config_.runtime.data_dir;
+    const std::string runtime_name = config_.runtime.name.empty() ? "default" : config_.runtime.name;
+
+    run_journal_ = std::make_unique<runs::RunJournal>(data_dir, runtime_name, config_.polling.interval_ms);
+
+    std::string runs_error;
+    if (!run_journal_->initialize(runs_error)) {
+        // Non-fatal: the runtime stays up without the run registry; /v0/runs then
+        // reports UNAVAILABLE rather than blocking startup on a data-dir problem.
+        LOG_WARN("[Runtime] Run registry unavailable: " << runs_error);
+        run_journal_.reset();
+    } else {
+        LOG_INFO("[Runtime] Run registry ready (data_dir=" << data_dir << ")");
     }
     return true;
 }

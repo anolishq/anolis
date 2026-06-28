@@ -41,6 +41,7 @@ struct RuntimeModeConfig {
     std::string name;                // Instance identifier (optional, for multi-runtime deployments)
     int shutdown_timeout_ms = 2000;  // Provider graceful shutdown timeout (500-30000ms)
     int startup_timeout_ms = 30000;  // Overall startup timeout for fail-fast (5000-300000ms)
+    std::string data_dir;            // Runtime data directory (run registry JSONL, etc.); empty => ./anolis-data
 };
 
 /**

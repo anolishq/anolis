@@ -1,0 +1,20 @@
+{
+  "status": { "code": "OK", "message": "ok" },
+  "runs": [
+    {
+      "schema_version": 1,
+      "run_id": "bioreactor-telemetry-01J9Z7K3QH8M2N4P6R8T0V2X4A",
+      "state": "open",
+      "close_reason": null,
+      "started_at_epoch_ms": 1711929600000,
+      "ended_at_epoch_ms": null,
+      "automation_version": null,
+      "runtime_version": "0.1.23",
+      "polling_interval_ms": 2000,
+      "params": {},
+      "tag_scope": { "provider_ids": [], "device_ids": [], "signal_ids": [] },
+      "experiment_label": null
+    }
+  ],
+  "count": 1
+}

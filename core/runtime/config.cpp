@@ -427,10 +427,13 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 return false;
             }
             warn_unknown_keys(yaml["runtime"], "runtime",
-                              {"name", "shutdown_timeout_ms", "startup_timeout_ms", "mode"});
+                              {"name", "shutdown_timeout_ms", "startup_timeout_ms", "data_dir", "mode"});
 
             if (yaml["runtime"]["name"]) {
                 config.runtime.name = yaml["runtime"]["name"].as<std::string>();
+            }
+            if (yaml["runtime"]["data_dir"]) {
+                config.runtime.data_dir = yaml["runtime"]["data_dir"].as<std::string>();
             }
             if (yaml["runtime"]["shutdown_timeout_ms"]) {
                 config.runtime.shutdown_timeout_ms = yaml["runtime"]["shutdown_timeout_ms"].as<int>();

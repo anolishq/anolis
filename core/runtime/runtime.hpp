@@ -18,6 +18,7 @@
 #include "provider/provider_registry.hpp"
 #include "provider/provider_supervisor.hpp"
 #include "registry/device_registry.hpp"
+#include "runs/run_journal.hpp"
 #include "state/state_cache.hpp"
 #include "telemetry/influx_sink.hpp"
 
@@ -99,6 +100,7 @@ private:
     bool init_automation(std::string &error);
     bool init_http(std::string &error);
     bool init_telemetry(std::string &error);
+    bool init_runs(std::string &error);
 
     /**
      * @brief Restart one provider and atomically publish its replacement inventory.
@@ -118,6 +120,7 @@ private:
     std::unique_ptr<control::CallRouter> call_router_;
     std::unique_ptr<http::HttpServer> http_server_;
     std::unique_ptr<telemetry::InfluxSink> telemetry_sink_;
+    std::unique_ptr<runs::RunJournal> run_journal_;
 #if ANOLIS_ENABLE_AUTOMATION
     std::unique_ptr<automation::ModeManager> mode_manager_;
     std::unique_ptr<automation::ParameterManager> parameter_manager_;

@@ -198,6 +198,10 @@
           "minimum": 5000,
           "maximum": 300000
         },
+        "data_dir": {
+          "type": "string",
+          "description": "Runtime data directory (run registry JSONL, etc.). Empty/absent => ./anolis-data."
+        },
         "mode": false
       },
       "additionalProperties": true

@@ -32,7 +32,8 @@ HttpServer::HttpServer(const runtime::HttpConfig &config, int polling_interval_m
       parameter_manager_(dependencies.parameter_manager),
       event_emitter_(std::move(dependencies.event_emitter)),
       mode_manager_(dependencies.mode_manager),
-      telemetry_sink_(dependencies.telemetry_sink)
+      telemetry_sink_(dependencies.telemetry_sink),
+      run_journal_(dependencies.run_journal)
 #if ANOLIS_ENABLE_AUTOMATION
       ,
       bt_runtime_(dependencies.bt_runtime)
@@ -312,6 +313,16 @@ void HttpServer::setup_routes() {
     server_->Get("/v0/telemetry/status", [this](const httplib::Request &req, httplib::Response &res) {
         handle_get_telemetry_status(req, res);
     });
+
+    // Run registry (#7)
+    server_->Post("/v0/runs",
+                  [this](const httplib::Request &req, httplib::Response &res) { handle_post_runs(req, res); });
+    server_->Get("/v0/runs",
+                 [this](const httplib::Request &req, httplib::Response &res) { handle_get_runs(req, res); });
+    server_->Post(R"(/v0/runs/([^/]+)/close)",
+                  [this](const httplib::Request &req, httplib::Response &res) { handle_post_run_close(req, res); });
+    server_->Get(R"(/v0/runs/([^/]+))",
+                 [this](const httplib::Request &req, httplib::Response &res) { handle_get_run(req, res); });
 
     // GET /v0/events - SSE event stream
     server_->Get("/v0/events",

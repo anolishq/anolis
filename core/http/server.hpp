@@ -50,6 +50,9 @@ class ProviderSupervisor;
 namespace telemetry {
 class InfluxSink;
 }  // namespace telemetry
+namespace runs {
+class RunJournal;
+}  // namespace runs
 }  // namespace anolis
 
 namespace anolis {
@@ -73,6 +76,7 @@ struct HttpServerDependencies {
     automation::ModeManager *mode_manager = nullptr;
     automation::ParameterManager *parameter_manager = nullptr;
     telemetry::InfluxSink *telemetry_sink = nullptr;  // optional: telemetry health surface
+    runs::RunJournal *run_journal = nullptr;          // optional: run registry
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -155,6 +159,7 @@ private:
     std::shared_ptr<events::EventEmitter> event_emitter_;
     automation::ModeManager *mode_manager_;  // optional
     telemetry::InfluxSink *telemetry_sink_;  // optional: nullptr when telemetry disabled
+    runs::RunJournal *run_journal_;          // optional: nullptr when run registry unavailable
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif
@@ -187,6 +192,12 @@ private:
     void handle_get_automation_status(const httplib::Request &req, httplib::Response &res);
     void handle_get_providers_health(const httplib::Request &req, httplib::Response &res);
     void handle_get_telemetry_status(const httplib::Request &req, httplib::Response &res);
+
+    // Run registry (#7)
+    void handle_post_runs(const httplib::Request &req, httplib::Response &res);
+    void handle_get_runs(const httplib::Request &req, httplib::Response &res);
+    void handle_get_run(const httplib::Request &req, httplib::Response &res);
+    void handle_post_run_close(const httplib::Request &req, httplib::Response &res);
 
     // SSE handler
     void handle_get_events(const httplib::Request &req, httplib::Response &res);

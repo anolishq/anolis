@@ -53,6 +53,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TelemetryStatusResponse'
+  /v0/runs:
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: List runs (newest first)
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunsListResponse'
+    post:
+      tags: [runs]
+      operationId: openRun
+      summary: Open a run (at most one open per runtime)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunOpenRequest'
+      responses:
+        "200":
+          description: The opened run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "412":
+          description: A run is already open
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v0/runs/{run_id}:
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: Get a run by id
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v0/runs/{run_id}/close:
+    post:
+      tags: [runs]
+      operationId: closeRun
+      summary: Close a run (idempotent)
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCloseRequest'
+      responses:
+        "200":
+          description: The closed run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v0/devices:
     get:
       tags: [devices]
@@ -767,6 +851,92 @@ components:
             What the digest covers. "top_level_file" hashes only the top-level
             definition bytes (a known limitation until include-closure hashing
             lands) and must not be relied on as full provenance.
+    TagScope:
+      type: object
+      additionalProperties: false
+      required: [provider_ids, device_ids, signal_ids]
+      description: Operator-supplied selector for which series a run owns (auto-capture deferred).
+      properties:
+        provider_ids: { type: array, items: { type: string } }
+        device_ids: { type: array, items: { type: string } }
+        signal_ids: { type: array, items: { type: string } }
+    Run:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - run_id
+        - state
+        - close_reason
+        - started_at_epoch_ms
+        - ended_at_epoch_ms
+        - automation_version
+        - runtime_version
+        - polling_interval_ms
+        - params
+        - tag_scope
+        - experiment_label
+      properties:
+        schema_version: { type: integer }
+        run_id:
+          type: string
+          description: Time-sortable, runtime-name-prefixed id.
+        state:
+          type: string
+          enum: [open, closed]
+        close_reason:
+          oneOf:
+            - { type: string, enum: [operator_stop, completed, failed, superseded, abandoned] }
+            - { type: "null" }
+        started_at_epoch_ms: { type: integer }
+        ended_at_epoch_ms:
+          oneOf:
+            - { type: integer }
+            - { type: "null" }
+        automation_version:
+          oneOf:
+            - $ref: '#/components/schemas/AutomationVersion'
+            - { type: "null" }
+          description: The immutable automation version this run executed, or null for a manual-only run.
+        runtime_version: { type: string }
+        polling_interval_ms:
+          type: integer
+          description: Recorded so a consumer can reason about time-window boundary fuzz.
+        params: { type: object, additionalProperties: true }
+        tag_scope: { $ref: '#/components/schemas/TagScope' }
+        experiment_label:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+    RunResponse:
+      type: object
+      additionalProperties: false
+      required: [status, run]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        run: { $ref: '#/components/schemas/Run' }
+    RunsListResponse:
+      type: object
+      additionalProperties: false
+      required: [status, runs, count]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        runs: { type: array, items: { $ref: '#/components/schemas/Run' } }
+        count: { type: integer }
+    RunOpenRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        experiment_label: { type: string }
+        params: { type: object, additionalProperties: true }
+        tag_scope: { $ref: '#/components/schemas/TagScope' }
+    RunCloseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        close_reason:
+          type: string
+          enum: [operator_stop, completed, failed, superseded]
     AutomationStatusResponse:
       type: object
       additionalProperties: false
