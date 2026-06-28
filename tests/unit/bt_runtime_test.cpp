@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -199,4 +200,28 @@ TEST(BTRuntimeTest, ConcurrentStatusReadsDuringReloadAreRaceFree) {
 
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
+}
+
+// Pins the C++ AutomationStatus -> wire-string mapping. The wire side
+// (execution_status enum in runtime-http.openapi.v0.yaml) is validated against a
+// live response by the runtime-http conformance check; this guards the C++ half
+// so the two cannot drift silently.
+TEST(AutomationStatusEnumTest, ToStringIsTotalAndMatchesWireEnum) {
+    using anolis::automation::AutomationStatus;
+    using anolis::automation::to_string;
+    EXPECT_STREQ(to_string(AutomationStatus::Idle), "idle");
+    EXPECT_STREQ(to_string(AutomationStatus::Running), "running");
+    EXPECT_STREQ(to_string(AutomationStatus::Blocked), "blocked");
+    EXPECT_STREQ(to_string(AutomationStatus::Failed), "failed");
+    EXPECT_STREQ(to_string(AutomationStatus::Completed), "completed");
+    EXPECT_STREQ(to_string(AutomationStatus::Unknown), "unknown");
+
+    // The exact wire enum set (must equal execution_status in the OpenAPI contract).
+    const std::set<std::string> wire_enum{"idle", "running", "blocked", "failed", "completed", "unknown"};
+    std::set<std::string> mapped;
+    for (auto s : {AutomationStatus::Idle, AutomationStatus::Running, AutomationStatus::Blocked,
+                   AutomationStatus::Failed, AutomationStatus::Completed, AutomationStatus::Unknown}) {
+        mapped.insert(to_string(s));
+    }
+    EXPECT_EQ(mapped, wire_enum);
 }

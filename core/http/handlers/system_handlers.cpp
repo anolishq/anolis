@@ -424,8 +424,41 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         }
     }
 
+    // Neutral, engine-agnostic view (Phase 1 #114). Sourced from the
+    // IAutomationEngine seam; the BT-specific fields below are deprecated mirrors.
+    const automation::AutomationStatusView view = bt_runtime_->status();
+
+    nlohmann::json automation_version = nullptr;
+    if (!view.version.engine_kind.empty()) {
+        automation_version = {{"engine_kind", view.version.engine_kind},
+                              {"id", view.version.id},
+                              {"digest", view.version.digest},
+                              {"digest_scope", view.version.digest_scope}};
+    }
+
+    // Optional coarse reason qualifying execution_status (enumerated, not free text).
+    std::string execution_reason;
+    if (view.version.engine_kind.empty()) {
+        execution_reason = "no_definition";
+    } else if (!active) {
+        execution_reason = "stopped";
+    } else if (mode_manager_->current_mode() != automation::RuntimeMode::AUTO) {
+        execution_reason = "mode_gate";
+    } else if (view.status == automation::AutomationStatus::Failed) {
+        execution_reason = "terminal_failure";
+    } else if (view.status == automation::AutomationStatus::Blocked) {
+        execution_reason = "waiting";
+    }
+
     nlohmann::json response = {
         {"status", make_status(StatusCode::OK)},
+        // Neutral fields (the forward contract).
+        {"execution_status", automation::to_string(view.status)},
+        {"automation_version", automation_version},
+        {"last_evaluation_at_epoch_ms", view.last_evaluation_at_epoch_ms},
+        {"engine_diagnostics", view.engine_diagnostics},
+        {"run_id", nullptr},  // run registry lands in Phase 2 (#115)
+        // Deprecated BT mirrors (retained one release).
         {"enabled", enabled},
         {"active", active},
         {"bt_status", bt_status_str},
@@ -435,6 +468,10 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         {"last_error", health.last_error.empty() ? nlohmann::json() : nlohmann::json(health.last_error)},
         {"error_count", health.error_count},
         {"current_tree", tree_name}};
+
+    if (!execution_reason.empty()) {
+        response["execution_reason"] = execution_reason;
+    }
 
     send_json(res, StatusCode::OK, response);
 #else
