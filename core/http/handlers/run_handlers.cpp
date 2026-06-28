@@ -180,5 +180,81 @@ void HttpServer::handle_get_run(const httplib::Request &req, httplib::Response &
     send_json(res, StatusCode::OK, run_envelope(*run));
 }
 
+void HttpServer::handle_post_run_events(const httplib::Request &req, httplib::Response &res) {
+    if (run_journal_ == nullptr) {
+        send_json(res, StatusCode::UNAVAILABLE,
+                  make_error_response(StatusCode::UNAVAILABLE, "Run registry not enabled"));
+        return;
+    }
+    const std::string run_id = req.matches.size() > 1 ? req.matches[1].str() : "";
+
+    nlohmann::json body;
+    try {
+        body = req.body.empty() ? nlohmann::json::object() : nlohmann::json::parse(req.body);
+    } catch (const std::exception &e) {
+        send_json(res, StatusCode::INVALID_ARGUMENT,
+                  make_error_response(StatusCode::INVALID_ARGUMENT, std::string("Invalid JSON: ") + e.what()));
+        return;
+    }
+
+    // Operators may only append open `annotation` markers — the closed lifecycle
+    // categories (run_opened/closed, mode/parameter changes, faults) are owned by
+    // the runtime, so they can never be forged through this endpoint.
+    if (!body.contains("type") || !body["type"].is_string() || body["type"].get<std::string>().empty()) {
+        send_json(res, StatusCode::INVALID_ARGUMENT,
+                  make_error_response(StatusCode::INVALID_ARGUMENT, "marker requires a non-empty string 'type'"));
+        return;
+    }
+    const std::string type = body["type"].get<std::string>();
+    nlohmann::json payload =
+        (body.contains("payload") && body["payload"].is_object()) ? body["payload"] : nlohmann::json::object();
+    uint64_t occurred_at = 0;
+    if (body.contains("occurred_at_epoch_ms") && body["occurred_at_epoch_ms"].is_number_unsigned()) {
+        occurred_at = body["occurred_at_epoch_ms"].get<uint64_t>();
+    }
+
+    auto result = run_journal_->append_event(run_id, runs::RunEventCategory::Annotation, type, payload, occurred_at);
+    if (!result.ok) {
+        // Unknown run => 404; closed run (immutable) => 409.
+        auto run = run_journal_->get(run_id);
+        const StatusCode code = run.has_value() ? StatusCode::FAILED_PRECONDITION : StatusCode::NOT_FOUND;
+        send_json(res, code, make_error_response(code, result.error));
+        return;
+    }
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"event", runs::to_json(result.event)}};
+    send_json(res, StatusCode::OK, response);
+}
+
+void HttpServer::handle_get_run_events(const httplib::Request &req, httplib::Response &res) {
+    if (run_journal_ == nullptr) {
+        send_json(res, StatusCode::UNAVAILABLE,
+                  make_error_response(StatusCode::UNAVAILABLE, "Run registry not enabled"));
+        return;
+    }
+    const std::string run_id = req.matches.size() > 1 ? req.matches[1].str() : "";
+    if (!run_journal_->get(run_id).has_value()) {
+        send_json(res, StatusCode::NOT_FOUND, make_error_response(StatusCode::NOT_FOUND, "Unknown run: " + run_id));
+        return;
+    }
+
+    auto parse_size = [](const std::string &s, size_t fallback) -> size_t {
+        size_t value = 0;
+        const char *begin = s.data();
+        const char *end = begin + s.size();
+        auto [ptr, errc] = std::from_chars(begin, end, value);
+        return (errc == std::errc() && ptr == end) ? value : fallback;
+    };
+    size_t limit = 200;
+    size_t offset = 0;
+    if (req.has_param("limit")) limit = std::min<size_t>(parse_size(req.get_param_value("limit"), 200), 1000);
+    if (req.has_param("offset")) offset = parse_size(req.get_param_value("offset"), 0);
+
+    auto events = run_journal_->list_events(run_id, limit, offset);
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto &event : events) arr.push_back(runs::to_json(event));
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"events", arr}, {"count", arr.size()}};
+    send_json(res, StatusCode::OK, response);
+}
+
 }  // namespace http
 }  // namespace anolis

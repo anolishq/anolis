@@ -220,6 +220,9 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
             using T = std::decay_t<decltype(e)>;
 
             nlohmann::json data;
+            // Most events render one frame from `data` below; the fault case writes
+            // its (two) frames inline and sets this so the default append is skipped.
+            bool data_written_inline = false;
 
             if constexpr (std::is_same_v<T, events::StateUpdateEvent>) {
                 result = "event: state_update\n";
@@ -286,13 +289,26 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["new_value"] = e.new_value_str;
                 data["timestamp_ms"] = e.timestamp_ms;
 
-            } else if constexpr (std::is_same_v<T, events::BTErrorEvent>) {
-                result = "event: bt_error\n";
-                result += "id: " + std::to_string(e.event_id) + "\n";
+            } else if constexpr (std::is_same_v<T, events::AutomationFaultEvent>) {
+                // One canonical fault event renders TWO SSE frames: the neutral
+                // `automation_fault` frame and a deprecated `bt_error` alias frame
+                // (retained one release), sharing the same event id. Persistence
+                // records the fault only once — the alias lives only on the wire.
+                const std::string id_line = "id: " + std::to_string(e.event_id) + "\n";
 
-                data["node"] = e.node;
-                data["error"] = e.error;
-                data["timestamp_ms"] = e.timestamp_ms;
+                nlohmann::json fault;
+                fault["locus"] = e.locus;
+                fault["error"] = e.error;
+                fault["timestamp_ms"] = e.timestamp_ms;
+                result = "event: automation_fault\n" + id_line + "data: " + fault.dump() + "\n\n";
+
+                nlohmann::json legacy;
+                legacy["node"] = e.locus;  // deprecated: BT-specific name, now the generic locus
+                legacy["error"] = e.error;
+                legacy["timestamp_ms"] = e.timestamp_ms;
+                result += "event: bt_error\n" + id_line + "data: " + legacy.dump() + "\n\n";
+
+                data_written_inline = true;
 
             } else if constexpr (std::is_same_v<T, events::ProviderHealthChangeEvent>) {
                 result = "event: provider_health_change\n";
@@ -303,7 +319,9 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["timestamp_ms"] = e.timestamp_ms;
             }
 
-            result += "data: " + data.dump() + "\n\n";
+            if (!data_written_inline) {
+                result += "data: " + data.dump() + "\n\n";
+            }
         },
         event);
 

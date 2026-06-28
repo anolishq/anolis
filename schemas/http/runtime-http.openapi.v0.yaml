@@ -137,6 +137,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v0/runs/{run_id}/events:
+    get:
+      tags: [runs]
+      operationId: listRunEvents
+      summary: List a run's event/marker stream (oldest-first)
+      description: >-
+        The append-only neutral event stream for a run, correlated by `run_id` +
+        per-run monotonic `sequence`. Includes runtime-owned lifecycle events
+        (run_opened/run_closed, mode_change, parameter_change, automation_fault)
+        and operator `annotation` markers. Consumed by exporters to render run
+        annotations; telemetry is correlated to runs by time window, never by tag.
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 200, maximum: 1000 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: A page of run events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunEventsListResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [runs]
+      operationId: appendRunMarker
+      summary: Append an operator marker (annotation) to a run
+      description: >-
+        Operators append open-vocabulary domain markers (`category` is fixed to
+        `annotation`; the marker's domain meaning rides in `type` + `payload`).
+        The closed lifecycle categories are runtime-owned and cannot be created
+        here. Rejected for a closed run (events are immutable once a run closes).
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunMarkerRequest'
+      responses:
+        "200":
+          description: The persisted event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunEventResponse'
+        "400":
+          description: Invalid marker
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Run is closed (events are immutable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v0/devices:
     get:
       tags: [devices]
@@ -356,6 +426,14 @@ paths:
         SSE endpoint. Response body is a text/event-stream stream.
         Initial contract depth is provisional and validates endpoint presence
         plus top-level streaming media type.
+
+        Event types: state_update, quality_change, device_availability,
+        mode_change, parameter_change, provider_health_change, and
+        automation_fault. `automation_fault` (engine-abnormal only — a generic
+        `locus`, never a BT node) replaces the former `bt_error`; the deprecated
+        `bt_error` frame is still emitted alongside it for one release as a
+        compatibility alias. An ordinary unsuccessful execution is NOT a fault
+        (it surfaces via `execution_status=failed`).
       parameters:
         - name: provider_id
           in: query
@@ -937,6 +1015,65 @@ components:
         close_reason:
           type: string
           enum: [operator_stop, completed, failed, superseded]
+    RunEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - run_id
+        - sequence
+        - category
+        - type
+        - occurred_at_epoch_ms
+        - recorded_at_epoch_ms
+        - payload
+      properties:
+        schema_version: { type: integer }
+        run_id: { type: string }
+        sequence:
+          type: integer
+          description: Per-run monotonic sequence; (run_id, sequence) is the durable event key.
+        category:
+          type: string
+          enum: [run_opened, run_closed, mode_change, parameter_change, automation_fault, annotation]
+          description: Closed neutral lifecycle taxonomy. Domain vocabulary stays out — markers ride as `annotation`.
+        type:
+          type: string
+          description: Open string — marker type, close reason, or fault locus; may be empty.
+        occurred_at_epoch_ms:
+          type: integer
+          description: When the source observed the event.
+        recorded_at_epoch_ms:
+          type: integer
+          description: When the journal persisted the event.
+        payload: { type: object, additionalProperties: true }
+    RunEventResponse:
+      type: object
+      additionalProperties: false
+      required: [status, event]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        event: { $ref: '#/components/schemas/RunEvent' }
+    RunEventsListResponse:
+      type: object
+      additionalProperties: false
+      required: [status, events, count]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        events: { type: array, items: { $ref: '#/components/schemas/RunEvent' } }
+        count: { type: integer }
+    RunMarkerRequest:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: Operator-defined marker type (open vocabulary), e.g. "feed" or "sample".
+        payload: { type: object, additionalProperties: true }
+        occurred_at_epoch_ms:
+          type: integer
+          description: When the marker occurred; defaults to the time the runtime records it.
     AutomationStatusResponse:
       type: object
       additionalProperties: false

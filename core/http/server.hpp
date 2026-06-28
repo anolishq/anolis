@@ -198,6 +198,8 @@ private:
     void handle_get_runs(const httplib::Request &req, httplib::Response &res);
     void handle_get_run(const httplib::Request &req, httplib::Response &res);
     void handle_post_run_close(const httplib::Request &req, httplib::Response &res);
+    void handle_post_run_events(const httplib::Request &req, httplib::Response &res);
+    void handle_get_run_events(const httplib::Request &req, httplib::Response &res);
 
     // SSE handler
     void handle_get_events(const httplib::Request &req, httplib::Response &res);

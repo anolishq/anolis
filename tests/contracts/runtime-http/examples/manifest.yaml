@@ -34,6 +34,16 @@ examples:
     status: "200"
     content_type: application/json
     file: run.200.json
+  - method: POST
+    path: /v0/runs/{run_id}/events
+    status: "200"
+    content_type: application/json
+    file: run-event.200.json
+  - method: GET
+    path: /v0/runs/{run_id}/events
+    status: "200"
+    content_type: application/json
+    file: run-events-list.200.json
   - method: GET
     path: /v0/devices
     status: "200"

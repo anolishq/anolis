@@ -321,6 +321,12 @@ void HttpServer::setup_routes() {
                  [this](const httplib::Request &req, httplib::Response &res) { handle_get_runs(req, res); });
     server_->Post(R"(/v0/runs/([^/]+)/close)",
                   [this](const httplib::Request &req, httplib::Response &res) { handle_post_run_close(req, res); });
+    // Run event/marker stream (#116). Register the more specific /events routes
+    // before the generic by-id GET.
+    server_->Post(R"(/v0/runs/([^/]+)/events)",
+                  [this](const httplib::Request &req, httplib::Response &res) { handle_post_run_events(req, res); });
+    server_->Get(R"(/v0/runs/([^/]+)/events)",
+                 [this](const httplib::Request &req, httplib::Response &res) { handle_get_run_events(req, res); });
     server_->Get(R"(/v0/runs/([^/]+))",
                  [this](const httplib::Request &req, httplib::Response &res) { handle_get_run(req, res); });
 

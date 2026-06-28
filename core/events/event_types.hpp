@@ -209,13 +209,21 @@ struct ParameterChangeEvent {
 };
 
 /**
- * @brief BT error event
+ * @brief Automation fault event (engine-abnormal only)
  *
- * Emitted when behavior tree encounters an error (node failure, exception).
+ * Emitted when the automation engine itself hits an abnormal condition — a tick
+ * exception, a corrupt/unparseable definition, or an invariant violation. This
+ * is NOT an ordinary unsuccessful execution: a behaviour tree returning FAILURE
+ * surfaces as `execution_status=failed`, not a fault.
+ *
+ * Engine-neutral by design: `locus` is a generic location hint (e.g. "tick"),
+ * never a BT-specific node path. During the deprecation window the SSE serializer
+ * renders both a neutral `automation_fault` frame and a legacy `bt_error` alias
+ * frame from this single canonical event.
  */
-struct BTErrorEvent {
+struct AutomationFaultEvent {
     uint64_t event_id;
-    std::string node;   // Node that failed or empty if general error
+    std::string locus;  // Generic location hint (e.g. "tick"); empty if unknown
     std::string error;  // Error message
     int64_t timestamp_ms;
 };
@@ -238,7 +246,7 @@ struct ProviderHealthChangeEvent {
  * Subscribers receive Event variants and can dispatch on type.
  */
 using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
-                           ParameterChangeEvent, BTErrorEvent, ProviderHealthChangeEvent>;
+                           ParameterChangeEvent, AutomationFaultEvent, ProviderHealthChangeEvent>;
 
 /**
  * @brief Get event ID from any event type

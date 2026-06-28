@@ -1,0 +1,13 @@
+{
+  "status": { "code": "OK", "message": "ok" },
+  "event": {
+    "schema_version": 1,
+    "run_id": "bioreactor-telemetry-01J9Z7K3QH8M2N4P6R8T0V2X4A",
+    "sequence": 4,
+    "category": "annotation",
+    "type": "sample",
+    "occurred_at_epoch_ms": 1711931400000,
+    "recorded_at_epoch_ms": 1711931400012,
+    "payload": { "volume_ml": 5, "operator": "cam" }
+  }
+}
