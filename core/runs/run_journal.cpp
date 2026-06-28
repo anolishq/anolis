@@ -356,7 +356,7 @@ RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string&
                 auto parsed = run_event_from_json(nlohmann::json::parse(line));
                 if (parsed && parsed->sequence > max_seq) max_seq = parsed->sequence;
             } catch (const std::exception&) {
-                // torn/malformed line: ignore for the max-sequence scan
+                continue;  // torn/malformed line: skip it in the max-sequence scan
             }
         }
         seq = max_seq + 1;
