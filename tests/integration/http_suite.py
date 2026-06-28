@@ -234,9 +234,7 @@ class HttpGatewayTester:
         assert isinstance(listing["body"].get("runs"), list), listing
 
         # Open a run.
-        opened = self.http_post(
-            "/v0/runs", {"experiment_label": "it-cycle", "tag_scope": {"provider_ids": ["sim0"]}}
-        )
+        opened = self.http_post("/v0/runs", {"experiment_label": "it-cycle", "tag_scope": {"provider_ids": ["sim0"]}})
         assert opened["status_code"] == 200, f"open run failed: {opened}"
         run = opened["body"]["run"]
         run_id = run["run_id"]
