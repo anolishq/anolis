@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v0/automation/status` now also returns engine-neutral fields
+  (Phase 1 of the automation-platform epic): `execution_status`
+  (`idle|running|blocked|failed|completed|unknown`), optional `execution_reason`,
+  `automation_version{engine_kind,id,digest,digest_scope}` (the immutable content
+  digest of the loaded definition), `last_evaluation_at_epoch_ms`,
+  `engine_diagnostics` (unstable/non-contractual), and `run_id` (null until the
+  run registry lands). Additive: the behaviour-tree fields (`bt_status`,
+  `ticks_since_progress`, `total_ticks`, `current_tree`, …) are retained as
+  **deprecated mirrors** for one release. (anolishq/anolis#114)
+
 ### Changed
 
 - Telemetry contract: pin the `anolis_signal` tag key-set to exactly

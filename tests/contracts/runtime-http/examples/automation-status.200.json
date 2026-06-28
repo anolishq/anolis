@@ -3,6 +3,21 @@
     "code": "OK",
     "message": "ok"
   },
+  "execution_status": "running",
+  "automation_version": {
+    "engine_kind": "behavior_tree",
+    "id": "bioreactor_stir_feed",
+    "digest": "e27b40e21a8f7c2d9b1f0a3e5c6d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "digest_scope": "top_level_file"
+  },
+  "last_evaluation_at_epoch_ms": 1710000000444,
+  "engine_diagnostics": {
+    "ticks_since_progress": 0,
+    "total_ticks": 987,
+    "error_count": 0,
+    "stall_suspected": false
+  },
+  "run_id": null,
   "enabled": true,
   "active": true,
   "bt_status": "RUNNING",

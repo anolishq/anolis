@@ -746,6 +746,27 @@ components:
           $ref: '#/components/schemas/Status'
         tree:
           type: string
+    AutomationVersion:
+      type: object
+      additionalProperties: false
+      required: [engine_kind, id, digest, digest_scope]
+      properties:
+        engine_kind:
+          type: string
+          description: Engine implementation, e.g. "behavior_tree".
+        id:
+          type: string
+          description: Human label (e.g. definition basename) — NOT an identity.
+        digest:
+          type: string
+          description: Hex sha256 of the loaded definition bytes.
+        digest_scope:
+          type: string
+          enum: [include_closure, top_level_file]
+          description: >-
+            What the digest covers. "top_level_file" hashes only the top-level
+            definition bytes (a known limitation until include-closure hashing
+            lands) and must not be relied on as full provenance.
     AutomationStatusResponse:
       type: object
       additionalProperties: false
@@ -759,30 +780,87 @@ components:
         - total_ticks
         - error_count
         - current_tree
+        - execution_status
+        - automation_version
+        - last_evaluation_at_epoch_ms
+        - engine_diagnostics
+        - run_id
       properties:
         status:
           $ref: '#/components/schemas/Status'
+        # ---- Neutral, engine-agnostic fields (the forward contract) ----
+        execution_status:
+          type: string
+          enum: [idle, running, blocked, failed, completed, unknown]
+          description: >-
+            Engine-neutral execution status. "blocked" means "not advancing"
+            (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
+            necessarily benign waiting). "completed" is emitted ONLY when the
+            engine declares a terminal completed state (a behaviour tree may
+            never emit it until terminal capture lands). Engine faults
+            (exceptions, corrupt definitions) are NOT a status value — they
+            surface as automation_fault events.
+        execution_reason:
+          type: string
+          enum: [mode_gate, waiting, terminal_failure, engine_fault, no_definition, stopped]
+          description: Optional coarse reason qualifying execution_status (enumerated, not free text).
+        automation_version:
+          oneOf:
+            - $ref: '#/components/schemas/AutomationVersion'
+            - type: "null"
+          description: Identity of the loaded definition, or null when none is loaded.
+        last_evaluation_at_epoch_ms:
+          type: integer
+          description: Last engine evaluation time (NOT last observable progress).
+        engine_diagnostics:
+          type: object
+          additionalProperties: true
+          description: >-
+            UNSTABLE / non-contractual engine internals (e.g. BT tick counters).
+            Do not depend on its keys; they may change or disappear.
+        run_id:
+          oneOf:
+            - type: string
+            - type: "null"
+          description: The currently-open run, or null (run registry lands in a later phase).
+        # ---- Deprecated behaviour-tree mirrors (retained one release; removed in the deprecation phase) ----
         enabled:
           type: boolean
+          deprecated: true
+          description: Deprecated — derive from the global mode + execution_status.
         active:
           type: boolean
+          deprecated: true
+          description: Deprecated — use execution_status.
         bt_status:
           type: string
           enum: [IDLE, RUNNING, STALLED, ERROR, UNKNOWN]
+          deprecated: true
+          description: Deprecated — use execution_status.
         last_tick_ms:
           type: integer
+          deprecated: true
+          description: Deprecated — use last_evaluation_at_epoch_ms.
         ticks_since_progress:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         total_ticks:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         last_error:
           oneOf:
             - type: string
             - type: "null"
         error_count:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         current_tree:
           type: string
+          deprecated: true
+          description: Deprecated — a filename, not identity; use automation_version.
     ProviderSupervision:
       type: object
       additionalProperties: false
