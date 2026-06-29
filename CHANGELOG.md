@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-06-28
+
 ### Added
 
 - Neutral run event/marker stream (Phase 3 of the automation-platform epic). Each
@@ -377,7 +379,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/anolishq/anolis/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/anolishq/anolis/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/anolishq/anolis/compare/v0.1.20...v0.1.23
 [0.1.20]: https://github.com/anolishq/anolis/compare/v0.1.19...v0.1.20
