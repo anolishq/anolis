@@ -290,23 +290,16 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["timestamp_ms"] = e.timestamp_ms;
 
             } else if constexpr (std::is_same_v<T, events::AutomationFaultEvent>) {
-                // One canonical fault event renders TWO SSE frames: the neutral
-                // `automation_fault` frame and a deprecated `bt_error` alias frame
-                // (retained one release), sharing the same event id. Persistence
-                // records the fault only once — the alias lives only on the wire.
-                const std::string id_line = "id: " + std::to_string(e.event_id) + "\n";
-
+                // Neutral engine-fault event. Rendered inline because it carries a
+                // generic `locus` field rather than the default payload shape. The
+                // deprecated `bt_error` alias frame was removed in v0.1.26 (#117).
                 nlohmann::json fault;
                 fault["locus"] = e.locus;
                 fault["error"] = e.error;
                 fault["timestamp_ms"] = e.timestamp_ms;
-                result = "event: automation_fault\n" + id_line + "data: " + fault.dump() + "\n\n";
-
-                nlohmann::json legacy;
-                legacy["node"] = e.locus;  // deprecated: BT-specific name, now the generic locus
-                legacy["error"] = e.error;
-                legacy["timestamp_ms"] = e.timestamp_ms;
-                result += "event: bt_error\n" + id_line + "data: " + legacy.dump() + "\n\n";
+                result = "event: automation_fault\n";
+                result += "id: " + std::to_string(e.event_id) + "\n";
+                result += "data: " + fault.dump() + "\n\n";
 
                 data_written_inline = true;
 

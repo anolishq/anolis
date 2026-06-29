@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Removed
+
+- The deprecated behaviour-tree mirror fields on `GET /v0/automation/status`
+  (`enabled`, `active`, `bt_status`, `last_tick_ms`, `ticks_since_progress`,
+  `total_ticks`, `error_count`, `current_tree`) and the deprecated `bt_error`
+  SSE alias frame are removed (Phase 4 of the automation-platform epic). The
+  forward contract is the neutral set (`execution_status`, `execution_reason`,
+  `automation_version`, `last_evaluation_at_epoch_ms`, `engine_diagnostics`,
+  `run_id`, `last_error`) and the neutral `automation_fault` SSE event. The sole
+  remaining consumer (Workbench) migrated and re-pinned in v0.1.25's one-release
+  compatibility window; operator-ui is archived. (anolishq/anolis#117)
+
 ## [0.1.25] - 2026-06-28
 
 ### Added

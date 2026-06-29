@@ -384,49 +384,14 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         return;
     }
 
-    // Get health status from BT runtime
+    // Health is still consulted for the neutral last_error field.
     auto health = bt_runtime_->get_health();
 
-    // Convert BTStatus enum to string
-    std::string bt_status_str;
-    switch (health.bt_status) {
-        case automation::BTStatus::BT_IDLE:
-            bt_status_str = "IDLE";
-            break;
-        case automation::BTStatus::BT_RUNNING:
-            bt_status_str = "RUNNING";
-            break;
-        case automation::BTStatus::BT_STALLED:
-            bt_status_str = "STALLED";
-            break;
-        case automation::BTStatus::BT_ERROR:
-            bt_status_str = "ERROR";
-            break;
-        default:
-            bt_status_str = "UNKNOWN";
-            break;
-    }
-
-    // Get current mode
-    bool enabled = (mode_manager_->current_mode() == automation::RuntimeMode::AUTO);
+    // Whether the engine is currently running (qualifies execution_reason).
     bool active = bt_runtime_->is_running();
 
-    // Extract tree name from path (just filename without extension)
-    std::string tree_name;
-    if (!health.current_tree.empty()) {
-        size_t last_slash = health.current_tree.find_last_of("/\\");
-        size_t last_dot = health.current_tree.find_last_of('.');
-        if (last_slash != std::string::npos && last_dot != std::string::npos && last_dot > last_slash) {
-            tree_name = health.current_tree.substr(last_slash + 1, last_dot - last_slash - 1);
-        } else if (last_slash != std::string::npos) {
-            tree_name = health.current_tree.substr(last_slash + 1);
-        } else {
-            tree_name = health.current_tree;
-        }
-    }
-
     // Neutral, engine-agnostic view (Phase 1 #114). Sourced from the
-    // IAutomationEngine seam; the BT-specific fields below are deprecated mirrors.
+    // IAutomationEngine seam.
     const automation::AutomationStatusView view = bt_runtime_->status();
 
     nlohmann::json automation_version = nullptr;
@@ -461,22 +426,14 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
 
     nlohmann::json response = {
         {"status", make_status(StatusCode::OK)},
-        // Neutral fields (the forward contract).
+        // Neutral, engine-agnostic fields (the forward contract). The deprecated
+        // BT mirrors were removed in v0.1.26 (Phase 4 #117).
         {"execution_status", automation::to_string(view.status)},
         {"automation_version", automation_version},
         {"last_evaluation_at_epoch_ms", view.last_evaluation_at_epoch_ms},
         {"engine_diagnostics", view.engine_diagnostics},
         {"run_id", run_id_json},
-        // Deprecated BT mirrors (retained one release).
-        {"enabled", enabled},
-        {"active", active},
-        {"bt_status", bt_status_str},
-        {"last_tick_ms", health.last_tick_ms},
-        {"ticks_since_progress", health.ticks_since_progress},
-        {"total_ticks", health.total_ticks},
-        {"last_error", health.last_error.empty() ? nlohmann::json() : nlohmann::json(health.last_error)},
-        {"error_count", health.error_count},
-        {"current_tree", tree_name}};
+        {"last_error", health.last_error.empty() ? nlohmann::json() : nlohmann::json(health.last_error)}};
 
     if (!execution_reason.empty()) {
         response["execution_reason"] = execution_reason;

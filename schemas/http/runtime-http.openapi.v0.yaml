@@ -430,10 +430,9 @@ paths:
         Event types: state_update, quality_change, device_availability,
         mode_change, parameter_change, provider_health_change, and
         automation_fault. `automation_fault` (engine-abnormal only — a generic
-        `locus`, never a BT node) replaces the former `bt_error`; the deprecated
-        `bt_error` frame is still emitted alongside it for one release as a
-        compatibility alias. An ordinary unsuccessful execution is NOT a fault
-        (it surfaces via `execution_status=failed`).
+        `locus`, never a BT node) carries the engine fault; the former `bt_error`
+        compatibility alias was removed in v0.1.26. An ordinary unsuccessful
+        execution is NOT a fault (it surfaces via `execution_status=failed`).
       parameters:
         - name: provider_id
           in: query
@@ -1079,14 +1078,6 @@ components:
       additionalProperties: false
       required:
         - status
-        - enabled
-        - active
-        - bt_status
-        - last_tick_ms
-        - ticks_since_progress
-        - total_ticks
-        - error_count
-        - current_tree
         - execution_status
         - automation_version
         - last_evaluation_at_epoch_ms
@@ -1130,44 +1121,11 @@ components:
             - type: string
             - type: "null"
           description: The currently-open run, or null (run registry lands in a later phase).
-        # ---- Deprecated behaviour-tree mirrors (retained one release; removed in the deprecation phase) ----
-        enabled:
-          type: boolean
-          deprecated: true
-          description: Deprecated — derive from the global mode + execution_status.
-        active:
-          type: boolean
-          deprecated: true
-          description: Deprecated — use execution_status.
-        bt_status:
-          type: string
-          enum: [IDLE, RUNNING, STALLED, ERROR, UNKNOWN]
-          deprecated: true
-          description: Deprecated — use execution_status.
-        last_tick_ms:
-          type: integer
-          deprecated: true
-          description: Deprecated — use last_evaluation_at_epoch_ms.
-        ticks_since_progress:
-          type: integer
-          deprecated: true
-          description: Deprecated — BT-specific; see engine_diagnostics.
-        total_ticks:
-          type: integer
-          deprecated: true
-          description: Deprecated — BT-specific; see engine_diagnostics.
         last_error:
           oneOf:
             - type: string
             - type: "null"
-        error_count:
-          type: integer
-          deprecated: true
-          description: Deprecated — BT-specific; see engine_diagnostics.
-        current_tree:
-          type: string
-          deprecated: true
-          description: Deprecated — a filename, not identity; use automation_version.
+          description: Last automation error message, or null when none is recorded.
     ProviderSupervision:
       type: object
       additionalProperties: false

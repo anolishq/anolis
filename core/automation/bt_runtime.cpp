@@ -268,7 +268,7 @@ void BTRuntime::tick_loop() {
             }
 
             // A tick exception IS an engine fault. Emit the canonical neutral
-            // fault event (the SSE serializer renders the legacy bt_error alias),
+            // fault event (the SSE serializer renders the `automation_fault` frame),
             // and notify the decoupled fault sink so it can be journaled durably
             // off this tick thread (the sink never blocks/fsyncs here).
             if (event_emitter_) {
