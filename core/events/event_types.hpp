@@ -217,9 +217,8 @@ struct ParameterChangeEvent {
  * surfaces as `execution_status=failed`, not a fault.
  *
  * Engine-neutral by design: `locus` is a generic location hint (e.g. "tick"),
- * never a BT-specific node path. During the deprecation window the SSE serializer
- * renders both a neutral `automation_fault` frame and a legacy `bt_error` alias
- * frame from this single canonical event.
+ * never a BT-specific node path. The SSE serializer renders this as a neutral
+ * `automation_fault` frame (the legacy `bt_error` alias was removed in v0.1.26).
  */
 struct AutomationFaultEvent {
     uint64_t event_id;
