@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-06-28
+
 ### Removed
 
 - The deprecated behaviour-tree mirror fields on `GET /v0/automation/status`
@@ -391,7 +393,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.25...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.26...HEAD
+[0.1.26]: https://github.com/anolishq/anolis/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/anolishq/anolis/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/anolishq/anolis/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/anolishq/anolis/compare/v0.1.20...v0.1.23
