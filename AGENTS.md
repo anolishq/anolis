@@ -21,7 +21,7 @@ C++20 control runtime for the Anolis system.
 ## Tooling
 
 - **C++ repos:** clang-format / clang-tidy are pinned to **18.1.8** via the
-  shared `setup-clang-tools` action (matches workstation-configs) — do NOT use
+  shared `setup-clang-tools` action (install the same pinned binary locally) — do NOT use
   pip/apt/pre-commit/container versions. Run `clang-format -i` before **every**
   commit (CI fails otherwise). vcpkg comes from the shared `setup-vcpkg` action.
 - Shared `.github` actions/workflows are SHA-pinned with a `# <tag>` comment so
