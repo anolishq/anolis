@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Install pinned clang-tools
         # SHA-verified static LLVM 18.1.8 clang-format on PATH — the org source of
-        # truth, matching workstation-configs apps/clang-tools on dev boxes. See
+        # truth; install the same pinned binary on dev boxes to match CI. See
         # anolishq/.github#69.
         uses: anolishq/.github/.github/actions/setup-clang-tools@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # setup-clang-tools
       - name: Check formatting

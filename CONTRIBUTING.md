@@ -279,22 +279,19 @@ Prefer running analysis from Linux/WSL instead.
 
 #### Formatting (clang-format)
 
-We use `clang-format` to enforce C++ style. **CI uses clang-format 19** - ensure you use the same version locally to avoid format mismatches.
+We use `clang-format` to enforce C++ style. **CI uses a SHA-pinned static LLVM
+clang-format 18.1.8** (via the org `setup-clang-tools` action, see
+`.github/workflows/ci.yml`). Use the same pinned build locally to avoid format
+mismatches — do **not** use the distro/apt `clang-format`, which drifts (Debian
+18.1.8 vs Ubuntu 18.1.3).
 
 **Installation:**
 
-- **Linux**: Install from LLVM apt repository:
-
-  ```bash
-  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-  sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main"
-  sudo apt-get update
-  sudo apt-get install clang-format-19
-  sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-19 100
-  ```
-
-- **Windows**: Download from [LLVM releases](https://github.com/llvm/llvm-project/releases/tag/llvmorg-19.1.5)
-- **Verify**: `clang-format --version` should show version 19.x
+- **Dev boxes**: install the same SHA-pinned static LLVM 18.1.8 binary the
+  `setup-clang-tools` action uses (from the public
+  `muttleyxd/clang-tools-static-binaries` release), so local formatting matches
+  CI byte-for-byte.
+- **Verify**: `clang-format --version` should show version 18.1.8.
 
 ```bash
 # Apply formatting
