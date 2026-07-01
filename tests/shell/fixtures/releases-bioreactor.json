@@ -1,0 +1,6 @@
+[
+  {"tag_name":"bioreactor-v1-0.2.0","assets":[{"name":"anolis-bioreactor-v1-0.2.0-arm64.tar.gz","browser_download_url":"https://example.invalid/old.tar.gz"}]},
+  {"tag_name":"bioreactor-v1-0.10.0","assets":[{"name":"anolis-bioreactor-v1-0.10.0-arm64.tar.gz","browser_download_url":"https://example.invalid/newest.tar.gz"}]},
+  {"tag_name":"bioreactor-v1-0.3.0","assets":[{"name":"anolis-bioreactor-v1-0.3.0-arm64.tar.gz","browser_download_url":"https://example.invalid/mid.tar.gz"}]},
+  {"tag_name":"other-profile-9.9.9","assets":[]}
+]
