@@ -147,75 +147,65 @@ phase_resolve() {
         return
     fi
 
-    # Online mode — need profile
+    # Online mode — need a profile
     if [[ -z "${PROFILE}" ]]; then
         die "Either --profile or --local is required"
     fi
 
-    # Query GitHub API for the release
-    local api_url="${GITHUB_API}/repos/${PROJECTS_REPO}/releases"
-    local auth_header=""
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        auth_header="Authorization: Bearer ${GITHUB_TOKEN}"
-    fi
+    local found_tag=""
 
-    local releases
-    if [[ -n "${auth_header}" ]]; then
-        releases=$(curl -fsSL -H "Accept: application/vnd.github+json" -H "${auth_header}" "${api_url}" 2>/dev/null) || {
-            log_err "GitHub API request failed"
-            log_info "Download manually from: https://github.com/${PROJECTS_REPO}/releases"
-            log_info "Then run: sudo $0 --local <downloaded-file>"
-            exit 1
-        }
+    if [[ -n "${VERSION}" ]]; then
+        # Explicit pin — the release tag is fully determined by the version, so
+        # no API call is needed. (Previously the tag was resolved but the asset
+        # URL was grepped unscoped from the whole releases list, so a pinned
+        # --version silently downloaded the *latest* bundle instead.)
+        found_tag="${PROFILE}-${VERSION}"
     else
-        releases=$(curl -fsSL -H "Accept: application/vnd.github+json" "${api_url}" 2>/dev/null) || {
+        # Latest — list releases and pick the highest SEMVER tag for this
+        # profile. GitHub orders releases by date, not version, so we sort
+        # explicitly rather than taking the first match.
+        local api_url="${GITHUB_API}/repos/${PROJECTS_REPO}/releases?per_page=100"
+        local curl_args=(-fsSL -H "Accept: application/vnd.github+json")
+        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+        fi
+
+        local releases
+        releases=$(curl "${curl_args[@]}" "${api_url}" 2>/dev/null) || {
             log_err "GitHub API request failed (rate limited or offline?)"
-            log_info "Set GITHUB_TOKEN to avoid rate limits, or download manually:"
+            log_info "Set GITHUB_TOKEN to avoid rate limits, or download the bundle manually:"
             log_info "  https://github.com/${PROJECTS_REPO}/releases"
             log_info "Then run: sudo $0 --local <downloaded-file>"
             exit 1
         }
-    fi
 
-    # Find the matching release
-    local tag_prefix="${PROFILE}-"
-    local target_tag=""
+        # Extract every tag_name (tolerating whitespace in the JSON), keep the
+        # ones that are exactly <profile>-<semver>, and pick the highest.
+        local best_ver="" tag ver
+        while IFS= read -r tag; do
+            if [[ "${tag}" =~ ^${PROFILE}-([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+                ver="${BASH_REMATCH[1]}"
+                if [[ -z "${best_ver}" || "$(printf '%s\n%s\n' "${best_ver}" "${ver}" | sort -V | tail -1)" == "${ver}" ]]; then
+                    best_ver="${ver}"
+                fi
+            fi
+        done < <(printf '%s' "${releases}" \
+            | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+            | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
 
-    if [[ -n "${VERSION}" ]]; then
-        # Exact version requested
-        target_tag="${PROFILE}-${VERSION}"
-    fi
-
-    # Parse releases JSON to find the right one
-    # Uses a simple grep/sed approach to avoid jq dependency
-    local found_tag=""
-    local found_url=""
-
-    if [[ -n "${target_tag}" ]]; then
-        # Look for exact tag
-        found_tag=$(printf '%s' "${releases}" | grep -o "\"tag_name\":\"${target_tag}\"" | head -1 | sed 's/.*"tag_name":"\(.*\)"/\1/' || true)
-    else
-        # Look for latest tag with our prefix
-        found_tag=$(printf '%s' "${releases}" | grep -o "\"tag_name\":\"${tag_prefix}[^\"]*\"" | head -1 | sed 's/.*"tag_name":"\(.*\)"/\1/' || true)
-    fi
-
-    if [[ -z "${found_tag}" ]]; then
-        if [[ -n "${VERSION}" ]]; then
-            die "Release not found: ${target_tag}"
-        else
-            die "No releases found for profile: ${PROFILE}"
+        if [[ -z "${best_ver}" ]]; then
+            die "No releases found for profile '${PROFILE}'. See https://github.com/${PROJECTS_REPO}/releases"
         fi
+        found_tag="${PROFILE}-${best_ver}"
     fi
 
-    # Find the asset URL for our architecture
-    local asset_pattern="anolis-${PROFILE}-.*-${ARCH}\\.tar\\.gz"
-    found_url=$(printf '%s' "${releases}" | grep -o "\"browser_download_url\":\"[^\"]*${asset_pattern}\"" | head -1 | sed 's/.*"browser_download_url":"\(.*\)"/\1/' || true)
-
-    if [[ -z "${found_url}" ]]; then
-        die "No ${ARCH} bundle asset found in release ${found_tag}"
-    fi
-
-    BUNDLE_URL="${found_url}"
+    # The bundle asset name is fully determined by the tag — this is the
+    # contract with anolis-projects/.github/workflows/bundle-release.yml: the
+    # release tagged <profile>-<version> carries the asset
+    # anolis-<tag>-<arch>.tar.gz. Deriving the URL from the resolved tag (rather
+    # than grepping an asset URL out of a releases list) makes it impossible to
+    # fetch a different release's bundle than the one requested.
+    BUNDLE_URL="https://github.com/${PROJECTS_REPO}/releases/download/${found_tag}/anolis-${found_tag}-${ARCH}.tar.gz"
     BUNDLE_TAG="${found_tag}"
     log_ok "resolve: ${found_tag} (${ARCH})"
 }
@@ -252,7 +242,11 @@ phase_download() {
 
     curl -fsSL "${auth_args[@]}" -o "${tmp_tarball}" "${BUNDLE_URL}" || {
         rm -f "${tmp_tarball}"
-        die "Failed to download bundle from ${BUNDLE_URL}"
+        log_err "Failed to download bundle for ${BUNDLE_TAG} (${ARCH})."
+        log_info "Verify the release and its ${ARCH} asset exist:"
+        log_info "  https://github.com/${PROJECTS_REPO}/releases/tag/${BUNDLE_TAG}"
+        log_info "Or download the bundle manually and install with: sudo $0 --local <file>"
+        exit 1
     }
 
     tar -xzf "${tmp_tarball}" -C "${BUNDLE_DIR}" --strip-components=1
@@ -785,4 +779,11 @@ main() {
     phase_summary
 }
 
-main "$@"
+# Run main() in every real invocation — direct (`bash install.sh`), piped
+# (`curl ... | bash -s --`), and `bash -c`. A BASH_SOURCE==$0 guard cannot be
+# used here: the primary install path pipes the script to `bash -s`, where
+# BASH_SOURCE is empty (and would trip `set -u`). Unit tests that source this
+# file for function-level testing set ANOLIS_INSTALL_SH_NO_MAIN=1 to skip main.
+if [[ -z "${ANOLIS_INSTALL_SH_NO_MAIN:-}" ]]; then
+    main "$@"
+fi
