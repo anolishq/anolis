@@ -1,0 +1,28 @@
+# Canonical Anolis service unit — ONE unit for the whole stack.
+#
+# The runtime spawns and supervises each provider as a child subprocess
+# (per the `providers:` block in runtime.yaml: command/args + restart_policy),
+# communicating over the child's stdin/stdout. Providers are therefore NOT
+# independent systemd services — there is no connect-to-running-provider mode
+# in the runtime. Do not add per-provider units or `Wants=` them; that would
+# double-spawn each provider and contend for the I2C bus.
+#
+# The provider children inherit this unit's SupplementaryGroups, which is how
+# they get I2C/GPIO/serial bus access without separate units.
+[Unit]
+Description=Anolis Runtime
+After=network.target
+
+[Service]
+Type=simple
+User=anolis
+Group=anolis
+SupplementaryGroups=i2c gpio dialout
+ExecStart=/opt/anolis/bin/anolis-runtime --config /opt/anolis/config/runtime.yaml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

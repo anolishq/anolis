@@ -1,0 +1,267 @@
+name: Bundle Build
+
+# Packaging layer (anolishq/anolis#140). Builds a deployment bundle from a
+# descriptor profile in anolishq/anolis-projects + released component binaries.
+# This is the migrated home of the former anolis-projects bundle-release
+# machinery — anolis-projects is descriptors-only.
+#
+# STEP 1 (this workflow): stand up the machinery here, validated via
+# workflow_dispatch, producing the bundle as an ARTIFACT. Release publishing,
+# repointing install.sh, and stripping anolis-projects follow in later PRs of
+# #140. The reusable (workflow_call) trigger is provided so a future caller can
+# drive it once the release step lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Deployment profile in anolis-projects (e.g. bioreactor-v1)"
+        required: true
+        type: string
+      version:
+        description: "Bundle version (component versions come from the profile's machine-profile.yaml)"
+        required: true
+        type: string
+      projects_ref:
+        description: "anolis-projects ref to read descriptors from"
+        required: false
+        default: main
+        type: string
+  workflow_call:
+    inputs:
+      profile:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      projects_ref:
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: x86_64
+            runner: ubuntu-24.04
+    steps:
+      - name: Checkout anolis (packaging machinery)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Checkout anolis-projects (deployment descriptors)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: anolishq/anolis-projects
+          ref: ${{ inputs.projects_ref }}
+          path: anolis-projects
+
+      - name: Validate profile directory
+        run: |
+          PROFILE="${{ inputs.profile }}"
+          if [ ! -f "anolis-projects/projects/${PROFILE}/machine-profile.yaml" ]; then
+            echo "::error::machine-profile.yaml not found in anolis-projects/projects/${PROFILE}/" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Read component versions
+        id: components
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+          import yaml
+
+          profile = os.environ["PROFILE"]
+          mp_path = f"anolis-projects/projects/{profile}/machine-profile.yaml"
+          with open(mp_path) as f:
+              mp = yaml.safe_load(f)
+
+          components = mp.get("components")
+          if not components:
+              print(f"ERROR: No 'components:' block in {mp_path}", file=sys.stderr)
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"runtime_repo={components['runtime']['repo']}\n")
+              out.write(f"runtime_version={components['runtime']['version']}\n")
+              for name, cfg in components.get("providers", {}).items():
+                  out.write(f"provider_{name}_repo={cfg['repo']}\n")
+                  out.write(f"provider_{name}_version={cfg['version']}\n")
+          EOF
+
+      - name: Download runtime binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ steps.components.outputs.runtime_repo }}"
+          VERSION="${{ steps.components.outputs.runtime_version }}"
+          ARCH="${{ matrix.arch }}"
+          ASSET="anolis-${VERSION}-linux-${ARCH}.tar.gz"
+          echo "Downloading ${ASSET} from ${REPO} v${VERSION}..."
+          mkdir -p /tmp/downloads /tmp/runtime-extract staging/bin
+          gh release download "v${VERSION}" \
+            --repo "${REPO}" \
+            --pattern "${ASSET}" \
+            --dir /tmp/downloads
+          tar -xzf "/tmp/downloads/${ASSET}" -C /tmp/runtime-extract
+          cp /tmp/runtime-extract/bin/anolis-runtime staging/bin/
+
+      - name: Download install.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ steps.components.outputs.runtime_repo }}"
+          VERSION="${{ steps.components.outputs.runtime_version }}"
+          gh release download "v${VERSION}" \
+            --repo "${REPO}" \
+            --pattern "install.sh" \
+            --dir staging/
+          chmod +x staging/install.sh
+
+      - name: Download provider binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARCH="${{ matrix.arch }}"
+          download_provider() {
+            local name="$1" repo="$2" version="$3"
+            local asset="anolis-provider-${name}-${version}-linux-${ARCH}.tar.gz"
+            echo "Downloading ${asset} from ${repo} v${version}..."
+            gh release download "v${version}" \
+              --repo "${repo}" \
+              --pattern "${asset}" \
+              --dir /tmp/downloads
+            mkdir -p "/tmp/provider-${name}-extract"
+            tar -xzf "/tmp/downloads/${asset}" -C "/tmp/provider-${name}-extract"
+            cp "/tmp/provider-${name}-extract/bin/anolis-provider-${name}" staging/bin/
+          }
+
+          download_provider "bread" \
+            "${{ steps.components.outputs.provider_bread_repo }}" \
+            "${{ steps.components.outputs.provider_bread_version }}"
+
+          download_provider "ezo" \
+            "${{ steps.components.outputs.provider_ezo_repo }}" \
+            "${{ steps.components.outputs.provider_ezo_version }}"
+
+      - name: Render production configs
+        run: |
+          python3 packaging/render-production-configs.py \
+            "${{ inputs.profile }}" staging --projects-root anolis-projects
+
+      - name: Copy systemd unit
+        run: |
+          mkdir -p staging/systemd
+          cp packaging/systemd/*.service staging/systemd/
+
+      - name: Generate manifest
+        run: |
+          PROFILE="${{ inputs.profile }}"
+          VERSION="${{ inputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          jq -n \
+            --argjson schema_version 1 \
+            --arg profile "${PROFILE}" \
+            --arg version "${VERSION}" \
+            --arg arch "${ARCH}" \
+            --arg runtime_version "${{ steps.components.outputs.runtime_version }}" \
+            --arg provider_bread_version "${{ steps.components.outputs.provider_bread_version }}" \
+            --arg provider_ezo_version "${{ steps.components.outputs.provider_ezo_version }}" \
+            --arg git_sha "${{ github.sha }}" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg ci_run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              schema_version: $schema_version,
+              profile: $profile,
+              version: $version,
+              arch: $arch,
+              components: {
+                runtime: { version: $runtime_version },
+                providers: {
+                  bread: { version: $provider_bread_version },
+                  ezo: { version: $provider_ezo_version }
+                }
+              },
+              build: {
+                git_sha: $git_sha,
+                built_at: $built_at,
+                ci_run: $ci_run
+              }
+            }' > staging/manifest.json
+
+      - name: Generate bundle README
+        run: |
+          PROFILE="${{ inputs.profile }}"
+          VERSION="${{ inputs.version }}"
+          cat > staging/README.txt <<EOF
+          Anolis Bundle: ${PROFILE} v${VERSION}
+          ========================================
+
+          Quick Install (offline)
+          -----------------------
+          From the directory containing this README:
+
+              sudo ./install.sh --local .
+
+          This installs all components to /opt/anolis and enables systemd
+          services.
+
+          Verify
+          ------
+              anolis-runtime --version
+              systemctl status anolis-runtime
+
+          More Info
+          ---------
+          See manifest.json for component versions and build metadata.
+          Online docs: https://anolishq.github.io
+          EOF
+          # Strip leading whitespace from heredoc indentation
+          sed -i 's/^          //' staging/README.txt
+
+      - name: Generate checksums
+        run: |
+          cd staging
+          find . -type f -not -name 'checksums.sha256' | sort | xargs sha256sum > checksums.sha256
+
+      - name: Package bundle
+        id: package
+        run: |
+          PROFILE="${{ inputs.profile }}"
+          VERSION="${{ inputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          BUNDLE_NAME="anolis-${PROFILE}-${VERSION}-${ARCH}"
+          ARTIFACT="${BUNDLE_NAME}.tar.gz"
+          mv staging "${BUNDLE_NAME}"
+          tar -czf "${ARTIFACT}" "${BUNDLE_NAME}/"
+          sha256sum "${ARTIFACT}" > "${ARTIFACT}.sha256"
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+          echo "bundle_name=${BUNDLE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.package.outputs.bundle_name }}
+          path: |
+            ${{ steps.package.outputs.artifact }}
+            ${{ steps.package.outputs.artifact }}.sha256
+          if-no-files-found: error
