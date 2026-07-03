@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-07-03
+
+### Fixed
+
+- `install.sh` no longer copies `/etc/skel` into the install prefix when
+  creating the `anolis` system user on first install (found by the workbench
+  deploy-parity gate). (#152)
+
 ## [0.1.28] - 2026-07-03
 
 ### Added
@@ -426,7 +434,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.28...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.29...HEAD
+[0.1.29]: https://github.com/anolishq/anolis/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/anolishq/anolis/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/anolishq/anolis/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/anolishq/anolis/compare/v0.1.25...v0.1.26
