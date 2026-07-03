@@ -9,6 +9,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/02-components.yaml
     expect: valid
     note: profile with a components section pinning runtime/provider/optional artifact versions
+  - file: tests/contracts/machine-profile/valid/03-custom-variant.yaml
+    expect: valid
+    note: custom runtime_profiles variant name alongside the required manual entry
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -16,6 +19,9 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/02-components-missing-runtime.yaml
     expect: invalid/schema
     note: components section present but missing the required runtime pin
+  - file: tests/contracts/machine-profile/invalid/schema/03-missing-manual-profile.yaml
+    expect: invalid/schema
+    note: runtime_profiles has variants but lacks the required manual entry
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references

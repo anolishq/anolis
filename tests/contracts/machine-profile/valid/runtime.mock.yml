@@ -1,0 +1,9 @@
+providers:
+  - id: provider0
+    command: ./provider0
+
+http:
+  enabled: false
+
+logging:
+  level: info
