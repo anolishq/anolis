@@ -23,6 +23,9 @@ Define machine profile manifest structure and lock manifest behavior for validat
    - provider config references
    - optional behavior asset references
    - runtime contract references and compatibility notes
+   - optional pinned component versions (`components`: runtime/provider/optional
+     artifact `repo`+`version` pairs, read by `tools/install.sh` and auto-bumped
+     by Renovate)
 4. Validator enforces:
    - schema correctness
    - referenced file existence
