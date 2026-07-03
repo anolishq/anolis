@@ -1,0 +1,39 @@
+schema_version: 1
+machine_id: fixture-machine-components
+display_name: Fixture Machine With Components
+
+runtime_profiles:
+  manual: runtime.manual.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+behaviors:
+  - behavior.xml
+
+validation:
+  expected_providers:
+    - provider0
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: pinned-ref
+      version: 0.2.5
+
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: 0.1.26
+  providers:
+    sim:
+      repo: anolishq/anolis-provider-sim
+      version: 0.2.5
+  optional:
+    telemetry_export:
+      package: anolis-telemetry-export
+      version: 0.1.0
