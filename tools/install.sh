@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034  # unused vars are future flags (telemetry, observability)
 # Anolis Runtime — Standalone Provisioning Script
-# Downloads and installs the anolis runtime + providers from a bundle.
+#
+# Config-driven: a deployment is a config (a machine-profile + configs + behaviors).
+# install.sh is the one generic engine — it builds a bundle from a config (from the
+# component versions the machine-profile pins) and installs it. Providers are read
+# from the config; nothing is hardcoded.
 #
 # Usage:
-#   Online:  curl -fsSL https://github.com/anolishq/anolis/releases/latest/download/install.sh | sudo bash -s -- --profile bioreactor-v1
-#   Offline: sudo ./install.sh --local ./anolis-bioreactor-v1-0.3.0-arm64.tar.gz
+#   Online (host has internet):  sudo ./install.sh --project ./my-config
+#   Offline — build on a dev box, install on the device:
+#     ./install.sh --stage ./out --project ./my-config --arch arm64        # dev box
+#     sudo ./install.sh --local ./out/anolis-<profile>-<ver>-arm64.tar.gz  # device
 #
 # See --help for all options.
 
@@ -19,8 +25,6 @@ readonly DEFAULT_PREFIX="/opt/anolis"
 readonly DEFAULT_PORT=8080
 readonly HEALTH_TIMEOUT=30
 readonly HEALTH_INTERVAL=2
-readonly GITHUB_API="https://api.github.com"
-readonly PROJECTS_REPO="anolishq/anolis-projects"
 readonly ANOLIS_USER="anolis"
 readonly ANOLIS_GROUPS="i2c,gpio,dialout"
 readonly SYSTEMD_DIR="/etc/systemd/system"
@@ -29,8 +33,6 @@ readonly SYSTEMD_DIR="/etc/systemd/system"
 # Globals (set by argument parsing)
 # =============================================================================
 
-PROFILE=""
-VERSION=""
 LOCAL_PATH=""
 WITH_TELEMETRY=0
 WITH_OBSERVABILITY=0
@@ -45,6 +47,8 @@ STAGE_DIR=""
 PROJECT_DIR=""
 TARGET_ARCH=""
 STAGE_TMP=""
+ASSEMBLED_PROFILE=""
+ASSEMBLED_RUNTIME_VERSION=""
 
 # =============================================================================
 # Output helpers
@@ -70,10 +74,20 @@ show_help() {
     cat <<'EOF'
 Usage: install.sh [OPTIONS]
 
-Options:
-  --profile <name>       Machine profile to install (required in online mode)
-  --version <ver>        Pin bundle version (default: latest)
-  --local <path>         Install from local bundle tarball or directory
+Config-driven provisioning: a deployment is a config (machine-profile.yaml +
+config/ + behaviors/). install.sh builds a bundle from that config — at the
+component versions the machine-profile pins — and installs it.
+
+Install:
+  --project <dir>        Install online from a config: assemble + install
+                         (needs internet + python3/pyyaml on this machine)
+  --local <path>         Install a pre-built bundle tarball or directory (offline)
+
+Build only (no install; run on a dev box, no root):
+  --stage <out-dir>      Build an offline bundle into <out-dir> from --project
+  --arch <arm64|x86_64>  Target architecture for --stage (default: host)
+
+Common:
   --with-telemetry       Also install telemetry-export service
   --with-observability   Also install observability stack (Docker Compose)
   --no-start             Install but don't start services
@@ -82,23 +96,14 @@ Options:
   --prefix <path>        Override install prefix (default: /opt/anolis)
   --help, -h             Show this help
 
-Offline staging (build a bundle to install air-gapped; run locally, no root):
-  --stage <out-dir>      Build an offline bundle into <out-dir>
-  --project <dir>        Config to stage (machine-profile.yaml + config/ + behaviors/)
-  --arch <arm64|x86_64>  Target architecture (default: host)
-
 Environment:
-  GITHUB_TOKEN           GitHub API token (optional, avoids rate limits)
+  GITHUB_TOKEN           GitHub token (optional, avoids release-download rate limits)
 
 Examples:
-  # Online install (Pi has internet):
-  curl -fsSL https://github.com/anolishq/anolis/releases/latest/download/install.sh | \
-    sudo bash -s -- --profile bioreactor-v1
+  # Online install from a config (host has internet):
+  sudo ./install.sh --project ./my-bioreactor
 
-  # Offline install from bundle:
-  sudo ./install.sh --local ./anolis-bioreactor-v1-0.3.0-arm64.tar.gz
-
-  # Build an offline bundle from a config, then install it air-gapped:
+  # Offline — build a bundle on a dev box, then install it on the device:
   ./install.sh --stage ./out --project ./my-bioreactor --arch arm64
   sudo ./install.sh --local ./out/anolis-my-bioreactor-<ver>-arm64.tar.gz
 EOF
@@ -108,8 +113,6 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --profile)   PROFILE="${2:-}"; shift 2 ;;
-            --version)   VERSION="${2:-}"; shift 2 ;;
             --local)     LOCAL_PATH="${2:-}"; shift 2 ;;
             --with-telemetry)    WITH_TELEMETRY=1; shift ;;
             --with-observability) WITH_OBSERVABILITY=1; shift ;;
@@ -152,89 +155,25 @@ phase_detect() {
 }
 
 # =============================================================================
-# Phase 3: Resolve bundle source
+# Phase 3: Prepare the bundle to install (sets BUNDLE_DIR)
+#
+#   --project <dir>  → config-driven online install: assemble a bundle from the
+#                      config (download components + render) into a temp dir.
+#   --local <path>   → offline: use a pre-built bundle tarball or directory.
 # =============================================================================
 
-phase_resolve() {
-    if [[ -n "${LOCAL_PATH}" ]]; then
-        # Local mode — validate path
-        if [[ ! -e "${LOCAL_PATH}" ]]; then
-            die "Local path not found: ${LOCAL_PATH}"
-        fi
-        log_ok "resolve: local path ${LOCAL_PATH}"
+phase_prepare_bundle() {
+    if [[ -n "${PROJECT_DIR}" ]]; then
+        # Config-driven online install: build the bundle from the config, here.
+        stage_check_deps
+        BUNDLE_DIR=$(mktemp -d)
+        trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+        assemble_bundle "${BUNDLE_DIR}" "${ARCH}"
+        log_ok "prepare: assembled bundle from ${PROJECT_DIR}"
         return
     fi
 
-    # Online mode — need a profile
-    if [[ -z "${PROFILE}" ]]; then
-        die "Either --profile or --local is required"
-    fi
-
-    local found_tag=""
-
-    if [[ -n "${VERSION}" ]]; then
-        # Explicit pin — the release tag is fully determined by the version, so
-        # no API call is needed. (Previously the tag was resolved but the asset
-        # URL was grepped unscoped from the whole releases list, so a pinned
-        # --version silently downloaded the *latest* bundle instead.)
-        found_tag="${PROFILE}-${VERSION}"
-    else
-        # Latest — list releases and pick the highest SEMVER tag for this
-        # profile. GitHub orders releases by date, not version, so we sort
-        # explicitly rather than taking the first match.
-        local api_url="${GITHUB_API}/repos/${PROJECTS_REPO}/releases?per_page=100"
-        local curl_args=(-fsSL -H "Accept: application/vnd.github+json")
-        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-            curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-        fi
-
-        local releases
-        releases=$(curl "${curl_args[@]}" "${api_url}" 2>/dev/null) || {
-            log_err "GitHub API request failed (rate limited or offline?)"
-            log_info "Set GITHUB_TOKEN to avoid rate limits, or download the bundle manually:"
-            log_info "  https://github.com/${PROJECTS_REPO}/releases"
-            log_info "Then run: sudo $0 --local <downloaded-file>"
-            exit 1
-        }
-
-        # Extract every tag_name (tolerating whitespace in the JSON), keep the
-        # ones that are exactly <profile>-<semver>, and pick the highest.
-        local best_ver="" tag ver
-        while IFS= read -r tag; do
-            if [[ "${tag}" =~ ^${PROFILE}-([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-                ver="${BASH_REMATCH[1]}"
-                if [[ -z "${best_ver}" || "$(printf '%s\n%s\n' "${best_ver}" "${ver}" | sort -V | tail -1)" == "${ver}" ]]; then
-                    best_ver="${ver}"
-                fi
-            fi
-        done < <(printf '%s' "${releases}" \
-            | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-            | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
-
-        if [[ -z "${best_ver}" ]]; then
-            die "No releases found for profile '${PROFILE}'. See https://github.com/${PROJECTS_REPO}/releases"
-        fi
-        found_tag="${PROFILE}-${best_ver}"
-    fi
-
-    # The bundle asset name is fully determined by the tag — this is the
-    # contract with anolis-projects/.github/workflows/bundle-release.yml: the
-    # release tagged <profile>-<version> carries the asset
-    # anolis-<tag>-<arch>.tar.gz. Deriving the URL from the resolved tag (rather
-    # than grepping an asset URL out of a releases list) makes it impossible to
-    # fetch a different release's bundle than the one requested.
-    BUNDLE_URL="https://github.com/${PROJECTS_REPO}/releases/download/${found_tag}/anolis-${found_tag}-${ARCH}.tar.gz"
-    BUNDLE_TAG="${found_tag}"
-    log_ok "resolve: ${found_tag} (${ARCH})"
-}
-
-# =============================================================================
-# Phase 4: Download bundle
-# =============================================================================
-
-phase_download() {
     if [[ -n "${LOCAL_PATH}" ]]; then
-        # Local mode — extract if tarball, use directly if directory
         if [[ -d "${LOCAL_PATH}" ]]; then
             BUNDLE_DIR="${LOCAL_PATH}"
         elif [[ -f "${LOCAL_PATH}" ]]; then
@@ -244,32 +183,11 @@ phase_download() {
         else
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
-        log_ok "download: using local bundle"
+        log_ok "prepare: using local bundle"
         return
     fi
 
-    # Online mode — download
-    BUNDLE_DIR=$(mktemp -d)
-    trap 'rm -rf "${BUNDLE_DIR}"' EXIT
-
-    local tmp_tarball="${BUNDLE_DIR}.tar.gz"
-    local auth_args=()
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    fi
-
-    curl -fsSL "${auth_args[@]}" -o "${tmp_tarball}" "${BUNDLE_URL}" || {
-        rm -f "${tmp_tarball}"
-        log_err "Failed to download bundle for ${BUNDLE_TAG} (${ARCH})."
-        log_info "Verify the release and its ${ARCH} asset exist:"
-        log_info "  https://github.com/${PROJECTS_REPO}/releases/tag/${BUNDLE_TAG}"
-        log_info "Or download the bundle manually and install with: sudo $0 --local <file>"
-        exit 1
-    }
-
-    tar -xzf "${tmp_tarball}" -C "${BUNDLE_DIR}" --strip-components=1
-    rm -f "${tmp_tarball}"
-    log_ok "download: bundle extracted"
+    die "one of --project <dir> (online) or --local <bundle> (offline) is required"
 }
 
 # =============================================================================
@@ -777,28 +695,28 @@ _stage_fetch() {
         || die "stage: failed to download ${asset} from ${repo} ${tag}"
 }
 
-do_stage() {
+# Tools needed to build a bundle from a config (staging / online install).
+stage_check_deps() {
     local tool
     for tool in curl tar python3 sha256sum; do
-        command -v "${tool}" >/dev/null 2>&1 || die "stage: '${tool}' is required"
+        command -v "${tool}" >/dev/null 2>&1 \
+            || die "'${tool}' is required to build a bundle from a config"
     done
     python3 -c 'import yaml' 2>/dev/null \
-        || die "stage: python3 'pyyaml' is required for --stage (pip install pyyaml)"
+        || die "python3 'pyyaml' is required to build from a config (pip install pyyaml)"
+}
 
-    [[ -n "${PROJECT_DIR}" ]] || die "stage: --project <config-dir> is required"
-    [[ -d "${PROJECT_DIR}" ]] || die "stage: project dir not found: ${PROJECT_DIR}"
+# Assemble a bundle (bin + rendered config + systemd + manifest + checksums)
+# from the --project config into <dest> for <arch>. Shared by --stage (offline
+# build) and config-driven online install. Generic over the profile's providers.
+# Sets ASSEMBLED_PROFILE / ASSEMBLED_RUNTIME_VERSION for the caller.
+assemble_bundle() {
+    local dest="$1" arch="$2"
+
+    [[ -n "${PROJECT_DIR}" ]] || die "--project <config-dir> is required"
+    [[ -d "${PROJECT_DIR}" ]] || die "project dir not found: ${PROJECT_DIR}"
     local mp="${PROJECT_DIR}/machine-profile.yaml"
-    [[ -f "${mp}" ]] || die "stage: machine-profile.yaml not found in ${PROJECT_DIR}"
-
-    local arch="${TARGET_ARCH:-}"
-    if [[ -z "${arch}" ]]; then
-        arch=$(uname -m)
-        case "${arch}" in
-            aarch64|arm64) arch="arm64" ;;
-            x86_64)        arch="x86_64" ;;
-            *) die "stage: unsupported host arch '${arch}' — pass --arch arm64|x86_64" ;;
-        esac
-    fi
+    [[ -f "${mp}" ]] || die "machine-profile.yaml not found in ${PROJECT_DIR}"
 
     local profile
     profile=$(basename "$(cd "${PROJECT_DIR}" && pwd)")
@@ -816,7 +734,7 @@ print(f"runtime\t{r['repo']}\t{r['version']}")
 for name, cfg in (c.get("providers") or {}).items():
     print(f"provider\t{name}\t{cfg['repo']}\t{cfg['version']}")
 PY
-) || die "stage: could not parse ${mp}"
+) || die "could not parse ${mp}"
 
     local runtime_repo="" runtime_version=""
     local -a p_names=() p_repos=() p_vers=()
@@ -827,24 +745,23 @@ PY
             provider) p_names+=("${f1}"); p_repos+=("${f2}"); p_vers+=("${f3}") ;;
         esac
     done <<< "${parsed}"
-    [[ -n "${runtime_version}" ]] || die "stage: no runtime component in ${mp}"
+    [[ -n "${runtime_version}" ]] || die "no runtime component in ${mp}"
+    ASSEMBLED_PROFILE="${profile}"
+    ASSEMBLED_RUNTIME_VERSION="${runtime_version}"
 
-    log_ok "stage: profile=${profile} arch=${arch} runtime=v${runtime_version} providers=(${p_names[*]-})"
+    log_ok "assemble: profile=${profile} arch=${arch} runtime=v${runtime_version} providers=(${p_names[*]-})"
 
-    STAGE_TMP=$(mktemp -d)
-    # Cleanup fires at script exit; STAGE_TMP is a global so it is still set then
-    # (function-locals would be out of scope and unbound under `set -u`).
-    trap 'rm -rf "${STAGE_TMP:-}"' EXIT
-    local staging="${STAGE_TMP}/staging" dl="${STAGE_TMP}/dl"
-    mkdir -p "${staging}/bin" "${staging}/systemd" "${dl}"
+    local dl
+    dl=$(mktemp -d)
+    mkdir -p "${dest}/bin" "${dest}/systemd"
 
-    # Runtime binary + install.sh (this script rides in the bundle for --local).
+    # Runtime binary + install.sh (rides in the bundle for later --local).
     _stage_fetch "${runtime_repo}" "v${runtime_version}" "anolis-${runtime_version}-linux-${arch}.tar.gz" "${dl}"
     mkdir -p "${dl}/rt"
     tar -xzf "${dl}/anolis-${runtime_version}-linux-${arch}.tar.gz" -C "${dl}/rt"
-    cp "${dl}/rt/bin/anolis-runtime" "${staging}/bin/"
-    _stage_fetch "${runtime_repo}" "v${runtime_version}" "install.sh" "${staging}"
-    chmod +x "${staging}/install.sh"
+    cp "${dl}/rt/bin/anolis-runtime" "${dest}/bin/"
+    _stage_fetch "${runtime_repo}" "v${runtime_version}" "install.sh" "${dest}"
+    chmod +x "${dest}/install.sh"
 
     # Provider binaries — generic over the declared providers (no hardcoding).
     local i
@@ -854,11 +771,11 @@ PY
         _stage_fetch "${repo}" "v${ver}" "${asset}" "${dl}"
         mkdir -p "${dl}/p-${n}"
         tar -xzf "${dl}/${asset}" -C "${dl}/p-${n}"
-        cp "${dl}/p-${n}/bin/anolis-provider-${n}" "${staging}/bin/"
+        cp "${dl}/p-${n}/bin/anolis-provider-${n}" "${dest}/bin/"
     done
 
     # Render production configs (dev-relative → ${PREFIX} absolute; bind 0.0.0.0).
-    if ! python3 - "${PROJECT_DIR}" "${staging}" "${profile}" "${PREFIX}" <<'PY'
+    if ! python3 - "${PROJECT_DIR}" "${dest}" "${profile}" "${PREFIX}" <<'PY'
 import re, shutil, sys
 from pathlib import Path
 project, out, profile, prefix = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4]
@@ -900,13 +817,13 @@ if mp.exists():
     shutil.copy2(mp, out / "projects" / profile / "machine-profile.yaml")
 PY
     then
-        die "stage: config render failed"
+        die "config render failed"
     fi
 
-    emit_systemd_unit > "${staging}/systemd/anolis-runtime.service"
+    emit_systemd_unit > "${dest}/systemd/anolis-runtime.service"
 
     # Manifest — generic over providers.
-    if ! python3 - "${staging}/manifest.json" "${profile}" "${runtime_version}" "${arch}" "${p_names[*]-}" "${p_vers[*]-}" <<'PY'
+    if ! python3 - "${dest}/manifest.json" "${profile}" "${runtime_version}" "${arch}" "${p_names[*]-}" "${p_vers[*]-}" <<'PY'
 import json, sys
 out, profile, version, arch, names, vers = sys.argv[1:7]
 names, vers = names.split(), vers.split()
@@ -926,10 +843,10 @@ json.dump(
 )
 PY
     then
-        die "stage: manifest generation failed"
+        die "manifest generation failed"
     fi
 
-    cat > "${staging}/README.txt" <<EOF
+    cat > "${dest}/README.txt" <<EOF
 Anolis Bundle: ${profile} v${runtime_version} (${arch})
 
 Offline install:
@@ -942,10 +859,41 @@ Verify:
 See manifest.json for component versions.
 EOF
 
-    ( cd "${staging}" && find . -type f -not -name 'checksums.sha256' | sort \
+    ( cd "${dest}" && find . -type f -not -name 'checksums.sha256' | sort \
         | xargs sha256sum > checksums.sha256 )
 
-    local bundle="anolis-${profile}-${runtime_version}-${arch}"
+    rm -rf "${dl}"
+}
+
+# Resolve a target architecture: explicit --arch, else the host.
+resolve_target_arch() {
+    local arch="${TARGET_ARCH:-}"
+    if [[ -z "${arch}" ]]; then
+        arch=$(uname -m)
+        case "${arch}" in
+            aarch64|arm64) arch="arm64" ;;
+            x86_64)        arch="x86_64" ;;
+            *) die "unsupported host arch '${arch}' — pass --arch arm64|x86_64" ;;
+        esac
+    fi
+    printf '%s' "${arch}"
+}
+
+# --stage: build an offline bundle from a config and tar it (no install).
+do_stage() {
+    stage_check_deps
+    local arch
+    arch=$(resolve_target_arch)
+
+    STAGE_TMP=$(mktemp -d)
+    # Cleanup fires at script exit; STAGE_TMP is a global so it is still set then
+    # (function-locals would be out of scope and unbound under `set -u`).
+    trap 'rm -rf "${STAGE_TMP:-}"' EXIT
+    local staging="${STAGE_TMP}/staging"
+
+    assemble_bundle "${staging}" "${arch}"
+
+    local bundle="anolis-${ASSEMBLED_PROFILE}-${ASSEMBLED_RUNTIME_VERSION}-${arch}"
     mkdir -p "${STAGE_DIR}"
     local abs_out
     abs_out=$(cd "${STAGE_DIR}" && pwd)
@@ -995,8 +943,11 @@ main() {
         log_info "DRY RUN — no changes will be made"
         echo ""
         dry_run_phase "detect architecture"
-        dry_run_phase "resolve bundle (profile=${PROFILE:-<from bundle>}, version=${VERSION:-latest})"
-        dry_run_phase "download/extract bundle"
+        if [[ -n "${PROJECT_DIR}" ]]; then
+            dry_run_phase "assemble bundle from config ${PROJECT_DIR} (online)"
+        else
+            dry_run_phase "use local bundle ${LOCAL_PATH:-<required: --project or --local>}"
+        fi
         dry_run_phase "verify checksums"
         dry_run_phase "create system user ${ANOLIS_USER}"
         dry_run_phase "enable I2C"
@@ -1018,8 +969,7 @@ main() {
 
     # Execute phases
     phase_detect
-    phase_resolve
-    phase_download
+    phase_prepare_bundle
     phase_verify
     phase_system_user
     phase_i2c
