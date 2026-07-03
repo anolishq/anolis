@@ -1,0 +1,25 @@
+schema_version: 1
+machine_id: fixture-machine-bad-components
+display_name: Invalid Fixture Components Without Runtime
+
+runtime_profiles:
+  manual: runtime.manual.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local
+
+components:
+  providers:
+    sim:
+      repo: anolishq/anolis-provider-sim
+      version: 0.2.5
