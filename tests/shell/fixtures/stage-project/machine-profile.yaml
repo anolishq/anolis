@@ -1,0 +1,12 @@
+# Minimal fixture — do_stage only reads the components: block.
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: "9.9.9"
+  providers:
+    foo:
+      repo: anolishq/anolis-provider-foo
+      version: "1.0.0"
+    bar:
+      repo: anolishq/anolis-provider-bar
+      version: "2.0.0"

@@ -40,6 +40,12 @@ DRY_RUN=0
 PREFIX="${DEFAULT_PREFIX}"
 REBOOT_NEEDED=0
 
+# Stage mode (build an offline bundle from a local config; dev-side, no root)
+STAGE_DIR=""
+PROJECT_DIR=""
+TARGET_ARCH=""
+STAGE_TMP=""
+
 # =============================================================================
 # Output helpers
 # =============================================================================
@@ -76,6 +82,11 @@ Options:
   --prefix <path>        Override install prefix (default: /opt/anolis)
   --help, -h             Show this help
 
+Offline staging (build a bundle to install air-gapped; run locally, no root):
+  --stage <out-dir>      Build an offline bundle into <out-dir>
+  --project <dir>        Config to stage (machine-profile.yaml + config/ + behaviors/)
+  --arch <arm64|x86_64>  Target architecture (default: host)
+
 Environment:
   GITHUB_TOKEN           GitHub API token (optional, avoids rate limits)
 
@@ -86,6 +97,10 @@ Examples:
 
   # Offline install from bundle:
   sudo ./install.sh --local ./anolis-bioreactor-v1-0.3.0-arm64.tar.gz
+
+  # Build an offline bundle from a config, then install it air-gapped:
+  ./install.sh --stage ./out --project ./my-bioreactor --arch arm64
+  sudo ./install.sh --local ./out/anolis-my-bioreactor-<ver>-arm64.tar.gz
 EOF
     exit 0
 }
@@ -102,6 +117,9 @@ parse_args() {
             --uninstall) UNINSTALL=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
             --prefix)    PREFIX="${2:-}"; shift 2 ;;
+            --stage)     STAGE_DIR="${2:-}"; shift 2 ;;
+            --project)   PROJECT_DIR="${2:-}"; shift 2 ;;
+            --arch)      TARGET_ARCH="${2:-}"; shift 2 ;;
             --help|-h)   show_help ;;
             *)           die "Unknown option: $1 (use --help for usage)" ;;
         esac
@@ -708,11 +726,252 @@ dry_run_phase() {
 }
 
 # =============================================================================
+# Stage: build an offline bundle from a local config
+#
+# Dev-side (no root, no install): given a config directory (a machine-profile +
+# its configs + behaviors — e.g. a tweaked copy of an example), fetch the pinned
+# component binaries, render production configs, and package a self-contained
+# bundle that `install.sh --local` installs offline. Generic over whatever
+# providers the machine-profile declares.
+# =============================================================================
+
+# The canonical single service unit, shipped with install.sh (not the examples
+# repo). The runtime supervises providers as child subprocesses, so there are no
+# per-provider units.
+emit_systemd_unit() {
+    cat <<'UNIT'
+# Canonical Anolis service unit — ONE unit for the whole stack.
+#
+# The runtime spawns and supervises each provider as a child subprocess (per the
+# `providers:` block in runtime.yaml), over the child's stdin/stdout. Providers
+# are NOT independent systemd services. Do not add per-provider units or `Wants=`
+# them; that double-spawns each provider and contends for the I2C bus. The
+# provider children inherit this unit's SupplementaryGroups for bus access.
+[Unit]
+Description=Anolis Runtime
+After=network.target
+
+[Service]
+Type=simple
+User=anolis
+Group=anolis
+SupplementaryGroups=i2c gpio dialout
+ExecStart=/opt/anolis/bin/anolis-runtime --config /opt/anolis/config/runtime.yaml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+# Download one release asset into <dir>.
+_stage_fetch() {
+    local repo="$1" tag="$2" asset="$3" dir="$4"
+    local auth=()
+    [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    curl -fsSL "${auth[@]}" -o "${dir}/${asset}" \
+        "https://github.com/${repo}/releases/download/${tag}/${asset}" \
+        || die "stage: failed to download ${asset} from ${repo} ${tag}"
+}
+
+do_stage() {
+    local tool
+    for tool in curl tar python3 sha256sum; do
+        command -v "${tool}" >/dev/null 2>&1 || die "stage: '${tool}' is required"
+    done
+    python3 -c 'import yaml' 2>/dev/null \
+        || die "stage: python3 'pyyaml' is required for --stage (pip install pyyaml)"
+
+    [[ -n "${PROJECT_DIR}" ]] || die "stage: --project <config-dir> is required"
+    [[ -d "${PROJECT_DIR}" ]] || die "stage: project dir not found: ${PROJECT_DIR}"
+    local mp="${PROJECT_DIR}/machine-profile.yaml"
+    [[ -f "${mp}" ]] || die "stage: machine-profile.yaml not found in ${PROJECT_DIR}"
+
+    local arch="${TARGET_ARCH:-}"
+    if [[ -z "${arch}" ]]; then
+        arch=$(uname -m)
+        case "${arch}" in
+            aarch64|arm64) arch="arm64" ;;
+            x86_64)        arch="x86_64" ;;
+            *) die "stage: unsupported host arch '${arch}' — pass --arch arm64|x86_64" ;;
+        esac
+    fi
+
+    local profile
+    profile=$(basename "$(cd "${PROJECT_DIR}" && pwd)")
+
+    # Parse components generically from the machine-profile.
+    local parsed
+    parsed=$(python3 - "${mp}" <<'PY'
+import sys, yaml
+mp = yaml.safe_load(open(sys.argv[1]))
+c = (mp or {}).get("components")
+if not c:
+    sys.exit("no 'components:' block")
+r = c["runtime"]
+print(f"runtime\t{r['repo']}\t{r['version']}")
+for name, cfg in (c.get("providers") or {}).items():
+    print(f"provider\t{name}\t{cfg['repo']}\t{cfg['version']}")
+PY
+) || die "stage: could not parse ${mp}"
+
+    local runtime_repo="" runtime_version=""
+    local -a p_names=() p_repos=() p_vers=()
+    local kind f1 f2 f3
+    while IFS=$'\t' read -r kind f1 f2 f3; do
+        case "${kind}" in
+            runtime)  runtime_repo="${f1}"; runtime_version="${f2}" ;;
+            provider) p_names+=("${f1}"); p_repos+=("${f2}"); p_vers+=("${f3}") ;;
+        esac
+    done <<< "${parsed}"
+    [[ -n "${runtime_version}" ]] || die "stage: no runtime component in ${mp}"
+
+    log_ok "stage: profile=${profile} arch=${arch} runtime=v${runtime_version} providers=(${p_names[*]-})"
+
+    STAGE_TMP=$(mktemp -d)
+    # Cleanup fires at script exit; STAGE_TMP is a global so it is still set then
+    # (function-locals would be out of scope and unbound under `set -u`).
+    trap 'rm -rf "${STAGE_TMP:-}"' EXIT
+    local staging="${STAGE_TMP}/staging" dl="${STAGE_TMP}/dl"
+    mkdir -p "${staging}/bin" "${staging}/systemd" "${dl}"
+
+    # Runtime binary + install.sh (this script rides in the bundle for --local).
+    _stage_fetch "${runtime_repo}" "v${runtime_version}" "anolis-${runtime_version}-linux-${arch}.tar.gz" "${dl}"
+    mkdir -p "${dl}/rt"
+    tar -xzf "${dl}/anolis-${runtime_version}-linux-${arch}.tar.gz" -C "${dl}/rt"
+    cp "${dl}/rt/bin/anolis-runtime" "${staging}/bin/"
+    _stage_fetch "${runtime_repo}" "v${runtime_version}" "install.sh" "${staging}"
+    chmod +x "${staging}/install.sh"
+
+    # Provider binaries — generic over the declared providers (no hardcoding).
+    local i
+    for i in "${!p_names[@]}"; do
+        local n="${p_names[$i]}" repo="${p_repos[$i]}" ver="${p_vers[$i]}"
+        local asset="anolis-provider-${n}-${ver}-linux-${arch}.tar.gz"
+        _stage_fetch "${repo}" "v${ver}" "${asset}" "${dl}"
+        mkdir -p "${dl}/p-${n}"
+        tar -xzf "${dl}/${asset}" -C "${dl}/p-${n}"
+        cp "${dl}/p-${n}/bin/anolis-provider-${n}" "${staging}/bin/"
+    done
+
+    # Render production configs (dev-relative → ${PREFIX} absolute; bind 0.0.0.0).
+    if ! python3 - "${PROJECT_DIR}" "${staging}" "${profile}" "${PREFIX}" <<'PY'
+import re, shutil, sys
+from pathlib import Path
+project, out, profile, prefix = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+pd = Path(project)
+cfg = pd / "config"
+pcmd = re.compile(r"\.\./anolis-provider-([a-z0-9-]+)/build/[^/]+/anolis-provider-([a-z0-9-]+)")
+ppath = re.compile(r"\.\./anolis-projects/projects/([a-z0-9-]+)/(config|behaviors)/([^\s\"']+)")
+
+
+def render(c):
+    c = pcmd.sub(lambda m: f"{prefix}/bin/anolis-provider-{m.group(2)}", c)
+    c = ppath.sub(lambda m: f"{prefix}/projects/{m.group(1)}/{m.group(2)}/{m.group(3)}", c)
+    return re.sub(r"^(\s*bind:\s*)127\.0\.0\.1\s*$", r"\g<1>0.0.0.0", c, flags=re.M)
+
+
+(out / "config" / "providers").mkdir(parents=True, exist_ok=True)
+pcfg = out / "projects" / profile / "config"
+pcfg.mkdir(parents=True, exist_ok=True)
+beh = pd / "behaviors"
+if beh.is_dir():
+    bo = out / "projects" / profile / "behaviors"
+    bo.mkdir(parents=True, exist_ok=True)
+    for f in beh.iterdir():
+        if f.is_file():
+            shutil.copy2(f, bo / f.name)
+rts = sorted(cfg.glob("anolis-runtime.*.yaml"))
+if not rts:
+    sys.exit(f"no runtime configs in {cfg}")
+for rc in rts:
+    (pcfg / rc.name).write_text(render(rc.read_text()))
+manual = [rc for rc in rts if ".manual." in rc.name] or rts
+(out / "config" / "runtime.yaml").write_text(render(manual[0].read_text()))
+for pc in sorted(cfg.glob("provider-*.yaml")):
+    name = pc.stem.removeprefix("provider-").split(".")[0]
+    (out / "config" / "providers" / f"{name}.yaml").write_text(render(pc.read_text()))
+    (pcfg / pc.name).write_text(render(pc.read_text()))
+mp = pd / "machine-profile.yaml"
+if mp.exists():
+    shutil.copy2(mp, out / "projects" / profile / "machine-profile.yaml")
+PY
+    then
+        die "stage: config render failed"
+    fi
+
+    emit_systemd_unit > "${staging}/systemd/anolis-runtime.service"
+
+    # Manifest — generic over providers.
+    if ! python3 - "${staging}/manifest.json" "${profile}" "${runtime_version}" "${arch}" "${p_names[*]-}" "${p_vers[*]-}" <<'PY'
+import json, sys
+out, profile, version, arch, names, vers = sys.argv[1:7]
+names, vers = names.split(), vers.split()
+json.dump(
+    {
+        "schema_version": 1,
+        "profile": profile,
+        "version": version,
+        "arch": arch,
+        "components": {
+            "runtime": {"version": version},
+            "providers": {n: {"version": v} for n, v in zip(names, vers)},
+        },
+    },
+    open(out, "w"),
+    indent=2,
+)
+PY
+    then
+        die "stage: manifest generation failed"
+    fi
+
+    cat > "${staging}/README.txt" <<EOF
+Anolis Bundle: ${profile} v${runtime_version} (${arch})
+
+Offline install:
+    sudo ./install.sh --local <this-bundle>.tar.gz
+
+Verify:
+    anolis-runtime --version
+    systemctl status anolis-runtime
+
+See manifest.json for component versions.
+EOF
+
+    ( cd "${staging}" && find . -type f -not -name 'checksums.sha256' | sort \
+        | xargs sha256sum > checksums.sha256 )
+
+    local bundle="anolis-${profile}-${runtime_version}-${arch}"
+    mkdir -p "${STAGE_DIR}"
+    local abs_out
+    abs_out=$(cd "${STAGE_DIR}" && pwd)
+    ( cd "$(dirname "${staging}")" \
+        && cp -r "$(basename "${staging}")" "${bundle}" \
+        && tar -czf "${abs_out}/${bundle}.tar.gz" "${bundle}" \
+        && rm -rf "${bundle}" )
+    sha256sum "${abs_out}/${bundle}.tar.gz" | awk '{print $1}' > "${abs_out}/${bundle}.tar.gz.sha256"
+
+    log_ok "stage: ${abs_out}/${bundle}.tar.gz"
+    log_info "Install offline with: sudo ./install.sh --local ${abs_out}/${bundle}.tar.gz"
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 
 main() {
     parse_args "$@"
+
+    # Stage mode: build an offline bundle from a local config. Dev-side — no
+    # root, no install, no network beyond fetching release assets.
+    if [[ -n "${STAGE_DIR}" ]]; then
+        do_stage
+        exit 0
+    fi
 
     # Phase 1: root check
     phase_root_check
