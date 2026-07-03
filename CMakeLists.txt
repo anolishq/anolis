@@ -1,6 +1,6 @@
 # Anolis Runtime - CMake Build Configuration
 cmake_minimum_required(VERSION 3.20)
-project(anolis VERSION 0.1.28 LANGUAGES CXX)
+project(anolis VERSION 0.1.29 LANGUAGES CXX)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
