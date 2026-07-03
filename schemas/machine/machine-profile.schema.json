@@ -15,6 +15,7 @@
   ],
   "properties": {
     "schema_version": {
+      "description": "Profile format version.",
       "type": "integer",
       "const": 1
     },
@@ -28,8 +29,11 @@
       "minLength": 1
     },
     "runtime_profiles": {
+      "description": "Named runtime config variants mapped to their YAML paths. 'manual' is the required default; additional variant names are free-form (install.sh handles any anolis-runtime.*.yaml).",
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": {
+        "$ref": "#/definitions/relativePath"
+      },
       "required": [
         "manual"
       ],
@@ -49,6 +53,7 @@
       }
     },
     "providers": {
+      "description": "Provider instances and their config paths.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
@@ -71,6 +76,7 @@
       }
     },
     "behaviors": {
+      "description": "Behavior-tree XML paths relative to the project directory.",
       "type": "array",
       "items": {
         "$ref": "#/definitions/relativePath"

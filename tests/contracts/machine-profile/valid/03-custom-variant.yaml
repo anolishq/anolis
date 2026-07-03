@@ -1,0 +1,20 @@
+schema_version: 1
+machine_id: fixture-machine-custom-variant
+display_name: Fixture Machine With Custom Variant
+
+runtime_profiles:
+  manual: runtime.manual.yml
+  bench_mock: runtime.mock.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local

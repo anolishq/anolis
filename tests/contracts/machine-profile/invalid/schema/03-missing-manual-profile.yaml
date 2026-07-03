@@ -1,0 +1,19 @@
+schema_version: 1
+machine_id: fixture-machine-no-manual
+display_name: Invalid Fixture Without Manual Profile
+
+runtime_profiles:
+  bench_mock: runtime.mock.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local
