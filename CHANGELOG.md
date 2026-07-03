@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-07-03
+
+### Changed
+
+- machine-profile schema: `runtime_profiles` now allows arbitrary additional
+  variant names (`manual` remains required); richer field descriptions ported
+  from the anolis-projects fork; consumer list documented in the baseline.
+  (#156, #147)
+- `install.sh` sets umask 022 and creates the prefix tree with explicit 755
+  modes; `--with-telemetry`/`--with-observability` warn that they are not
+  implemented yet instead of silently no-oping. (#155)
+
 ## [0.1.29] - 2026-07-03
 
 ### Fixed
@@ -434,7 +446,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.29...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.30...HEAD
+[0.1.30]: https://github.com/anolishq/anolis/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/anolishq/anolis/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/anolishq/anolis/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/anolishq/anolis/compare/v0.1.26...v0.1.27
