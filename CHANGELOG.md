@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-07-03
+
+### Added
+
+- `install.sh --rollback`: restore the previous binaries from
+  `<prefix>/.prev` (backed up on every install), restart the runtime
+  service, and health-check — the restore verb the workbench rollback
+  delegation routes through. (#136)
+
 ## [0.1.27] - 2026-07-03
 
 ### Added
@@ -417,7 +426,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.27...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.28...HEAD
+[0.1.28]: https://github.com/anolishq/anolis/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/anolishq/anolis/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/anolishq/anolis/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/anolishq/anolis/compare/v0.1.24...v0.1.25
