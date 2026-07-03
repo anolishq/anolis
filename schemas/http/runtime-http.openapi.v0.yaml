@@ -5,17 +5,36 @@ info:
   description: |
     Normative contract for the currently shipped `/v0` runtime HTTP surface.
     This contract is compatibility-first and reflects implementation behavior.
+
+    Security: every endpoint is guarded by an optional Bearer token
+    (`bearerAuth`). Auth is opt-in via `http.auth_enabled`; the token comes
+    from `http.auth_token` or, when that is empty, the `ANOLIS_API_TOKEN`
+    environment variable (the env var supplies the token only — it does not
+    enable auth). Loopback clients are exempt by default
+    (`http.auth_exempt_loopback: true`). When enabled, unauthorized requests
+    receive `401` with `WWW-Authenticate: Bearer`. TLS is available via
+    `http.tls_cert_path` + `http.tls_key_path` (the server then speaks
+    https); the runtime refuses non-loopback binds without auth unless
+    `http.allow_insecure_bind` is set. Operator guidance: docs/security.md.
 servers:
   - url: http://127.0.0.1:8080
     description: Default local runtime bind
 tags:
   - name: runtime
   - name: providers
+  - name: telemetry
+  - name: runs
   - name: devices
   - name: state
   - name: control
   - name: automation
   - name: events
+# Auth is deploy-time optional: the empty requirement ({}) documents that
+# anonymous access is permitted when auth is disabled or the client is
+# loopback-exempt; bearerAuth applies whenever http.auth_enabled is set.
+security:
+  - {}
+  - bearerAuth: []
 paths:
   /v0/runtime/status:
     get:
@@ -23,6 +42,8 @@ paths:
       operationId: getRuntimeStatus
       summary: Get runtime health and provider availability summary
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Runtime status
           content:
@@ -35,6 +56,8 @@ paths:
       operationId: getProvidersHealth
       summary: Get provider health, supervision, and per-device freshness
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Provider health summary
           content:
@@ -47,6 +70,8 @@ paths:
       operationId: getTelemetryStatus
       summary: Get telemetry (InfluxDB sink) health and throughput counters
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Telemetry sink health
           content:
@@ -62,6 +87,8 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: A page of runs
           content:
@@ -79,6 +106,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunOpenRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The opened run
           content:
@@ -99,6 +128,8 @@ paths:
       parameters:
         - { name: run_id, in: path, required: true, schema: { type: string } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The run
           content:
@@ -125,6 +156,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunCloseRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The closed run
           content:
@@ -153,6 +186,8 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, default: 200, maximum: 1000 } }
         - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: A page of run events
           content:
@@ -183,6 +218,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunMarkerRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The persisted event
           content:
@@ -213,6 +250,8 @@ paths:
       operationId: getDevices
       summary: List discovered devices
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device inventory
           content:
@@ -228,6 +267,8 @@ paths:
         - $ref: '#/components/parameters/provider_id'
         - $ref: '#/components/parameters/device_id'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device capabilities
           content:
@@ -244,6 +285,8 @@ paths:
       operationId: getAllState
       summary: Get cached state for all devices with available state
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Aggregated device state
           content:
@@ -269,6 +312,8 @@ paths:
             items:
               type: string
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device state snapshot
           content:
@@ -293,6 +338,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CallRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Call accepted/executed
           content:
@@ -317,6 +364,8 @@ paths:
       operationId: getMode
       summary: Get current runtime mode
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Current mode
           content:
@@ -336,6 +385,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetModeRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Mode set
           content:
@@ -354,6 +405,8 @@ paths:
       operationId: getParameters
       summary: Get runtime automation parameters
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Parameter inventory
           content:
@@ -373,6 +426,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetParameterRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Parameter updated
           content:
@@ -391,6 +446,8 @@ paths:
       operationId: getAutomationTree
       summary: Get loaded behavior tree XML
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Behavior tree content
           content:
@@ -409,6 +466,8 @@ paths:
       operationId: getAutomationStatus
       summary: Get automation runtime status
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Automation status
           content:
@@ -450,6 +509,8 @@ paths:
           schema:
             type: string
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: SSE stream
           content:
@@ -459,6 +520,17 @@ paths:
         "503":
           $ref: '#/components/responses/Unavailable'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Static token compared in constant time (`Authorization: Bearer <token>`).
+        Configured via `http.auth_token` or the `ANOLIS_API_TOKEN` environment
+        variable; enforced for every endpoint by a global pre-routing check
+        when `http.auth_enabled` is true. Loopback clients (textual
+        `127.*`, `::1`, `::ffff:127.0.0.1`) are exempt unless
+        `http.auth_exempt_loopback` is false.
   parameters:
     provider_id:
       name: provider_id
@@ -473,6 +545,27 @@ components:
       schema:
         type: string
   responses:
+    Unauthorized:
+      description: |
+        Missing or invalid Bearer token while auth is enabled (and the client
+        is not loopback-exempt). Carries `WWW-Authenticate: Bearer`. The body
+        is a flat error string, not the Status-shaped ErrorResponse — the
+        auth gate runs before routing.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: unauthorized
     BadRequest:
       description: Invalid argument or malformed payload
       content:
