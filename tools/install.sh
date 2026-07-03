@@ -241,7 +241,10 @@ phase_system_user() {
         usermod -aG "${ANOLIS_GROUPS}" "${ANOLIS_USER}" 2>/dev/null || true
         log_skip "system user: ${ANOLIS_USER} already exists"
     else
-        useradd --system --shell /usr/sbin/nologin --home-dir "${PREFIX}" --create-home "${ANOLIS_USER}" || \
+        # No --create-home: it copies /etc/skel into ${PREFIX}, polluting the
+        # install tree (found by the workbench deploy-parity gate). The prefix
+        # is created explicitly in phase_directories.
+        useradd --system --shell /usr/sbin/nologin --home-dir "${PREFIX}" "${ANOLIS_USER}" || \
             die "Failed to create system user: ${ANOLIS_USER}"
         usermod -aG "${ANOLIS_GROUPS}" "${ANOLIS_USER}" 2>/dev/null || \
             log_warn "system user: could not add to all groups (${ANOLIS_GROUPS}) — some may not exist yet"
