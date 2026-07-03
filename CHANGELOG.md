@@ -13,6 +13,30 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-07-03
+
+### Added
+
+- `install.sh --stage`: build an offline install bundle from a project config
+  (machine-profile + configs + behaviors) on a dev machine, generic over the
+  providers the profile declares. (#143)
+- `install.sh --project <dir>`: config-driven online install — assemble the
+  bundle from the config at install time and install it in one step. (#145)
+- The machine-profile schema now declares the optional `components:` section
+  (pinned runtime/provider/optional artifact versions) that `install.sh` reads
+  and Renovate auto-bumps in project configs, with contract fixtures. (#147)
+
+### Removed
+
+- `install.sh --profile`/`--version` bundle-download mode (replaced by
+  `--project`; the bundle a deployment needs is derived from its config, not
+  published per example project). (#145)
+
+### Fixed
+
+- `install.sh` derived the bundle download URL from the requested version
+  rather than the resolved release tag, breaking `--version` pinning. (#135)
+
 ## [0.1.26] - 2026-06-28
 
 ### Removed
@@ -393,7 +417,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.26...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.27...HEAD
+[0.1.27]: https://github.com/anolishq/anolis/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/anolishq/anolis/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/anolishq/anolis/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/anolishq/anolis/compare/v0.1.23...v0.1.24
