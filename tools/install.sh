@@ -116,8 +116,16 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --local)     LOCAL_PATH="${2:-}"; shift 2 ;;
-            --with-telemetry)    WITH_TELEMETRY=1; shift ;;
-            --with-observability) WITH_OBSERVABILITY=1; shift ;;
+            --with-telemetry)
+                # Not implemented yet (#137, Stage 2) — warn loudly instead of
+                # silently accepting a flag that does nothing.
+                WITH_TELEMETRY=1
+                log_warn "--with-telemetry is not implemented yet (anolishq/anolis#137) — ignored"
+                shift ;;
+            --with-observability)
+                WITH_OBSERVABILITY=1
+                log_warn "--with-observability is not implemented yet (anolishq/anolis#137) — ignored"
+                shift ;;
             --no-start)  NO_START=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
@@ -325,7 +333,10 @@ phase_deps() {
 # =============================================================================
 
 phase_directories() {
-    mkdir -p "${PREFIX}"/{bin,config/providers,projects,.prev}
+    # Explicit modes — mkdir -p inherits the caller's umask, and a permissive
+    # caller left bin/ world-writable (777) on CI (#154).
+    install -d -m 755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/config" \
+        "${PREFIX}/config/providers" "${PREFIX}/projects" "${PREFIX}/.prev"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
 }
@@ -947,6 +958,10 @@ do_stage() {
 # =============================================================================
 
 main() {
+    # Don't inherit a permissive caller umask — installed file/dir modes must
+    # not depend on the invoking environment (#154).
+    umask 022
+
     parse_args "$@"
 
     # Stage mode: build an offline bundle from a local config. Dev-side — no
