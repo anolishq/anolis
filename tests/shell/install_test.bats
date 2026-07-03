@@ -12,8 +12,9 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
     run bash "${INSTALL_SH}" --help
     [ "$status" -eq 0 ]
     [[ "${output}" == *"Usage: install.sh"* ]]
-    [[ "${output}" == *"--profile"* ]]
+    [[ "${output}" == *"--project"* ]]
     [[ "${output}" == *"--local"* ]]
+    [[ "${output}" == *"--stage"* ]]
 }
 
 @test "-h is an alias for --help" {
@@ -33,11 +34,10 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 }
 
 @test "non-root execution fails" {
-    # Skip if somehow running as root in CI
     if [ "$EUID" -eq 0 ]; then
         skip "running as root"
     fi
-    run bash "${INSTALL_SH}" --profile test
+    run bash "${INSTALL_SH}" --project ./cfg
     [ "$status" -ne 0 ]
     [[ "${output}" == *"must be run as root"* ]]
 }
@@ -46,13 +46,12 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 # Dry-run mode (no root needed — we fake EUID)
 # ===========================================================================
 
-@test "--dry-run --profile prints all phases without acting" {
-    run bash -c 'EUID=0; source "'"${INSTALL_SH%/*}"'/../tools/install.sh" 2>/dev/null; EUID=0 DRY_RUN=1 PROFILE=bioreactor-v1 main --dry-run --profile bioreactor-v1'
-    # The above is fragile; use the wrapper approach instead:
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --profile bioreactor-v1
+@test "--dry-run --project prints the online assemble + install phases" {
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --project ./cfg
     [ "$status" -eq 0 ]
     [[ "${output}" == *"DRY RUN"* ]]
     [[ "${output}" == *"detect architecture"* ]]
+    [[ "${output}" == *"assemble bundle from config"* ]]
     [[ "${output}" == *"install binaries"* ]]
     [[ "${output}" == *"install systemd units"* ]]
 }
@@ -60,14 +59,15 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 @test "--dry-run --local prints phases for local bundle" {
     local tmpdir
     tmpdir=$(mktemp -d)
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --local "${tmpdir}"
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --local "${tmpdir}"
     [ "$status" -eq 0 ]
     [[ "${output}" == *"DRY RUN"* ]]
+    [[ "${output}" == *"local bundle"* ]]
     rmdir "${tmpdir}"
 }
 
 @test "--dry-run --uninstall prints uninstall message" {
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --uninstall
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --uninstall
     [ "$status" -eq 0 ]
     [[ "${output}" == *"dry-run"* ]]
     [[ "${output}" == *"uninstall"* ]]
@@ -78,25 +78,24 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 # ===========================================================================
 
 @test "--prefix changes install prefix in dry-run output" {
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --profile test --prefix /usr/local/anolis
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --project ./cfg --prefix /usr/local/anolis
     [ "$status" -eq 0 ]
     [[ "${output}" == *"/usr/local/anolis"* ]]
 }
 
 @test "--no-start omits start and health from dry-run" {
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --profile test --no-start
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --project ./cfg --no-start
     [ "$status" -eq 0 ]
     [[ "${output}" != *"start services"* ]]
     [[ "${output}" != *"health check"* ]]
 }
 
 # ===========================================================================
-# Validation: require --profile or --local
+# Validation: require --project or --local
 # ===========================================================================
 
-@test "online mode without --profile fails" {
-    run env BATS_INSTALL_FAKE_ROOT=1 bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}"
-    # It should fail at phase_resolve because no profile and no local
+@test "install without --project or --local fails" {
+    run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}"
     [ "$status" -ne 0 ]
-    [[ "${output}" == *"--profile"* ]] || [[ "${output}" == *"--local"* ]]
+    [[ "${output}" == *"--project"* ]] || [[ "${output}" == *"--local"* ]]
 }
