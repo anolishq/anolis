@@ -6,8 +6,9 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 
 1. [getting-started.md](getting-started.md) - Build, run, and first validation.
 2. [architecture.md](architecture.md) - Runtime architecture and subsystem boundaries.
-3. [configuration.md](configuration.md) - How to author and validate runtime YAML.
-4. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
+3. [system-surfaces.md](system-surfaces.md) - Boundary & ownership map of every external surface (org-wide).
+4. [configuration.md](configuration.md) - How to author and validate runtime YAML.
+5. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
 
 ## Contracts and Schemas
 
