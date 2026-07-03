@@ -38,6 +38,7 @@ WITH_TELEMETRY=0
 WITH_OBSERVABILITY=0
 NO_START=0
 UNINSTALL=0
+ROLLBACK=0
 DRY_RUN=0
 PREFIX="${DEFAULT_PREFIX}"
 REBOOT_NEEDED=0
@@ -92,6 +93,7 @@ Common:
   --with-observability   Also install observability stack (Docker Compose)
   --no-start             Install but don't start services
   --uninstall            Remove anolis installation
+  --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
   --prefix <path>        Override install prefix (default: /opt/anolis)
   --help, -h             Show this help
@@ -118,6 +120,7 @@ parse_args() {
             --with-observability) WITH_OBSERVABILITY=1; shift ;;
             --no-start)  NO_START=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
+            --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
             --prefix)    PREFIX="${2:-}"; shift 2 ;;
             --stage)     STAGE_DIR="${2:-}"; shift 2 ;;
@@ -635,6 +638,35 @@ do_uninstall() {
 }
 
 # =============================================================================
+# Rollback: restore the previous binaries backed up by phase_backup
+# =============================================================================
+
+do_rollback() {
+    log_info "Rolling back binaries in ${PREFIX}..."
+
+    [[ -f "${PREFIX}/.prev/anolis-runtime" ]] \
+        || die "nothing to roll back: ${PREFIX}/.prev/anolis-runtime not found (no previous install was backed up)"
+
+    cp "${PREFIX}/.prev/"* "${PREFIX}/bin/" \
+        || die "rollback: failed to restore binaries from ${PREFIX}/.prev/"
+    chmod +x "${PREFIX}"/bin/* 2>/dev/null || true
+    chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
+    log_ok "restored binaries from .prev/"
+
+    if command -v systemctl >/dev/null 2>&1 \
+        && [[ -f "${SYSTEMD_DIR}/anolis-runtime.service" ]]; then
+        systemctl restart anolis-runtime.service \
+            || die "rollback: binaries restored but 'systemctl restart anolis-runtime' failed"
+        log_ok "restarted anolis-runtime.service"
+        phase_health
+    else
+        log_warn "systemd unit not found — binaries restored, restart the runtime manually"
+    fi
+
+    log_ok "rollback complete"
+}
+
+# =============================================================================
 # Dry run wrapper
 # =============================================================================
 
@@ -931,6 +963,16 @@ main() {
             exit 0
         fi
         do_uninstall
+        exit 0
+    fi
+
+    # Handle rollback early
+    if [[ ${ROLLBACK} -eq 1 ]]; then
+        if [[ ${DRY_RUN} -eq 1 ]]; then
+            log_info "[dry-run] would roll back binaries from ${PREFIX}/.prev"
+            exit 0
+        fi
+        do_rollback
         exit 0
     fi
 
