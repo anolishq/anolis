@@ -175,8 +175,9 @@ how the engines diverged):
   weekly and on deploy-surface PRs.
 - `anolis-projects` holds example deployment descriptors only (stability:
   **examples**); the observability stack (InfluxDB+Grafana compose) ships as
-  `anolis-<v>-observability.tar.gz`. `--with-telemetry`/`--with-observability`
-  warn as not-implemented (#137, Stage 2).
+  `anolis-<v>-observability.tar.gz`. `--with-telemetry-export` installs the
+  telemetry-export service (venv + systemd unit, inert until secrets; #137);
+  `--with-observability` still warns as not-implemented (#162).
 
 ## Workbench / UI
 

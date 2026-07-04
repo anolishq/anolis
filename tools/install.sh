@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034  # unused vars are future flags (telemetry, observability)
+# shellcheck disable=SC2034  # WITH_OBSERVABILITY is a future flag (anolishq/anolis#162)
 # Anolis Runtime — Standalone Provisioning Script
 #
 # Config-driven: a deployment is a config (a machine-profile + configs + behaviors).
@@ -28,13 +28,18 @@ readonly HEALTH_INTERVAL=2
 readonly ANOLIS_USER="anolis"
 readonly ANOLIS_GROUPS="i2c,gpio,dialout"
 readonly SYSTEMD_DIR="/etc/systemd/system"
+# Telemetry-export secrets live here — OUTSIDE ${PREFIX}, so phase_directories'
+# `chown -R anolis` never touches this root-only file. See #137.
+readonly TELEMETRY_ENV_FILE="/etc/anolis/telemetry-export.env"
+# Pinned for reproducible installs; override via the environment if needed.
+TELEMETRY_EXPORT_VERSION="${TELEMETRY_EXPORT_VERSION:-0.1.1}"
 
 # =============================================================================
 # Globals (set by argument parsing)
 # =============================================================================
 
 LOCAL_PATH=""
-WITH_TELEMETRY=0
+WITH_TELEMETRY_EXPORT=0
 WITH_OBSERVABILITY=0
 NO_START=0
 UNINSTALL=0
@@ -89,8 +94,9 @@ Build only (no install; run on a dev box, no root):
   --arch <arm64|x86_64>  Target architecture for --stage (default: host)
 
 Common:
-  --with-telemetry       Also install telemetry-export service
-  --with-observability   Also install observability stack (Docker Compose)
+  --with-telemetry-export  Also install the telemetry-export service (online;
+                           installed inert until secrets are provided)
+  --with-observability     Also install observability stack (not yet — #162)
   --no-start             Install but don't start services
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
@@ -116,15 +122,13 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --local)     LOCAL_PATH="${2:-}"; shift 2 ;;
-            --with-telemetry)
-                # Not implemented yet (#137, Stage 2) — warn loudly instead of
-                # silently accepting a flag that does nothing.
-                WITH_TELEMETRY=1
-                log_warn "--with-telemetry is not implemented yet (anolishq/anolis#137) — ignored"
+            --with-telemetry-export)
+                WITH_TELEMETRY_EXPORT=1
                 shift ;;
             --with-observability)
+                # Observability provisioning is tracked separately (#162).
                 WITH_OBSERVABILITY=1
-                log_warn "--with-observability is not implemented yet (anolishq/anolis#137) — ignored"
+                log_warn "--with-observability is not implemented yet (anolishq/anolis#162) — ignored"
                 shift ;;
             --no-start)  NO_START=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
@@ -508,6 +512,155 @@ phase_systemd() {
 }
 
 # =============================================================================
+# Phase 16b: telemetry-export service (opt-in, --with-telemetry-export)
+# =============================================================================
+
+# The telemetry-export systemd unit. Unquoted heredoc so ${PREFIX} and the user
+# expand. Secrets are NOT here — the EnvironmentFile supplies the tokens, which
+# the service prefers over any config value (anolishq/anolis#175).
+emit_telemetry_unit() {
+    cat <<UNIT
+[Unit]
+Description=Anolis Telemetry Export
+After=network.target
+# Park in 'failed' after repeated quick failures instead of restarting forever
+# — a mis-provisioned service (e.g. tokens set but no InfluxDB yet, #162) would
+# otherwise crash-loop every RestartSec and churn journald/flash indefinitely.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=${ANOLIS_USER}
+Group=${ANOLIS_USER}
+EnvironmentFile=${TELEMETRY_ENV_FILE}
+ExecStart=${PREFIX}/telemetry-export/venv/bin/anolis-telemetry-export --config ${PREFIX}/config/telemetry-export.yaml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+# Render the telemetry-export config to <dest>. Emits exactly the contract the
+# service's load_config requires — server + influxdb + limits — and deliberately
+# no secrets (resolved from the environment). Mirrors the workbench renderer that
+# this replaces (anolishq/anolis#175); the limits are the reference defaults.
+render_telemetry_config() {
+    local dest="$1"
+    cat > "${dest}" <<'YAML'
+# Anolis Telemetry Export configuration.
+# Secrets are NOT stored here — the service reads them from the environment,
+# wired via the systemd EnvironmentFile (/etc/anolis/telemetry-export.env):
+#   ANOLIS_EXPORT_AUTH_TOKEN    export API auth token (required)
+#   ANOLIS_EXPORT_INFLUX_TOKEN  InfluxDB token (required)
+server:
+  host: 127.0.0.1
+  port: 8091
+influxdb:
+  url: http://127.0.0.1:8086
+  org: anolis
+  bucket: anolis
+limits:
+  max_span_seconds: 86400
+  max_rows: 50000
+  max_response_bytes: 10000000
+  max_stream_bytes: 10000000
+  max_selector_items: 128
+  request_timeout_seconds: 15
+  max_request_bytes: 200000
+  max_manifest_entries: 10000
+  manifest_ttl_seconds: 86400
+YAML
+}
+
+phase_telemetry_export() {
+    [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] || return 0
+
+    local venv="${PREFIX}/telemetry-export/venv"
+
+    # Online-only in v1: the venv is populated from PyPI. Offline (bundled
+    # wheels) is tracked separately (anolishq/anolis#100). On the offline
+    # --local path with no PyPI reachability, skip rather than fail the install.
+    if [[ -n "${LOCAL_PATH}" ]] \
+        && ! curl -fsS --connect-timeout 3 https://pypi.org/simple/ &>/dev/null; then
+        log_warn "telemetry-export: needs network (online install) — skipped; offline support is anolishq/anolis#100"
+        return
+    fi
+
+    # python3 -m venv needs the python3-venv package (ensurepip); install.sh
+    # otherwise ships only i2c-tools. Non-fatal — skip the feature if it fails.
+    if ! dpkg -s python3-venv &>/dev/null 2>&1; then
+        if ! { apt-get update -qq && apt-get install -y -qq python3-venv; }; then
+            log_warn "telemetry-export: could not install python3-venv — skipped"
+            return
+        fi
+    fi
+
+    if [[ ! -x "${venv}/bin/anolis-telemetry-export" ]]; then
+        python3 -m venv "${venv}" || {
+            log_warn "telemetry-export: venv creation failed — skipped"
+            return
+        }
+        # Ambient pip3 would trip PEP-668 (externally-managed) on Bookworm; the
+        # venv sidesteps that. Pinned for reproducibility.
+        "${venv}/bin/pip" install --quiet "anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}" || {
+            log_warn "telemetry-export: pip install failed — skipped"
+            return
+        }
+        log_ok "telemetry-export: installed anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}"
+    else
+        log_skip "telemetry-export: venv present (preserved)"
+    fi
+    chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/telemetry-export"
+
+    # Config — skip-if-exists so operator edits (influxdb url/bucket) survive.
+    local cfg="${PREFIX}/config/telemetry-export.yaml"
+    if [[ -f "${cfg}" ]]; then
+        log_skip "telemetry-export: config exists (preserved)"
+    else
+        render_telemetry_config "${cfg}"
+        chown "${ANOLIS_USER}:${ANOLIS_USER}" "${cfg}"
+    fi
+
+    # Secrets EnvironmentFile — root-only, outside ${PREFIX}. Preserve an
+    # operator/workbench-provided file; always re-assert 0600 root:root.
+    install -d -m 755 /etc/anolis
+    if [[ ! -f "${TELEMETRY_ENV_FILE}" ]]; then
+        cat > "${TELEMETRY_ENV_FILE}" <<'ENV'
+# Anolis telemetry-export secrets — read by the systemd unit (EnvironmentFile).
+# Populate both, then: sudo systemctl enable --now anolis-telemetry-export.service
+ANOLIS_EXPORT_AUTH_TOKEN=
+ANOLIS_EXPORT_INFLUX_TOKEN=
+ENV
+    fi
+    chmod 600 "${TELEMETRY_ENV_FILE}"
+    chown root:root "${TELEMETRY_ENV_FILE}"
+
+    emit_telemetry_unit > "${SYSTEMD_DIR}/anolis-telemetry-export.service"
+    systemctl daemon-reload
+
+    # Start only when both secrets are present — the service hard-fails on empty
+    # tokens, so a bare install stays inert (no crash loop) until they are set.
+    if [[ ${NO_START} -eq 1 ]]; then
+        log_skip "telemetry-export: installed, not started (--no-start)"
+    elif grep -qE '^ANOLIS_EXPORT_AUTH_TOKEN=[^[:space:]]' "${TELEMETRY_ENV_FILE}" \
+        && grep -qE '^ANOLIS_EXPORT_INFLUX_TOKEN=[^[:space:]]' "${TELEMETRY_ENV_FILE}"; then
+        if systemctl enable --now anolis-telemetry-export.service 2>/dev/null; then
+            log_ok "telemetry-export: service started"
+        else
+            log_warn "telemetry-export: failed to start (check: journalctl -u anolis-telemetry-export)"
+        fi
+    else
+        log_info "telemetry-export: installed (inert). Add tokens to ${TELEMETRY_ENV_FILE}, then:"
+        log_info "  sudo systemctl enable --now anolis-telemetry-export.service"
+    fi
+}
+
+# =============================================================================
 # Phase 17: Hostname
 # =============================================================================
 
@@ -607,6 +760,9 @@ phase_summary() {
     log_info "Prefix:   ${PREFIX}"
     log_info "Profile:  ${INSTALLED_PROFILE:-unknown}"
     log_info "Port:     ${DEFAULT_PORT}"
+    if [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]]; then
+        log_info "Telemetry: anolis-telemetry-export (secrets: ${TELEMETRY_ENV_FILE})"
+    fi
 
     if [[ "${ARCH}" != "x86_64" ]]; then
         local hostname_display
@@ -645,6 +801,13 @@ do_uninstall() {
     if [[ -d "${PREFIX}" ]]; then
         rm -rf "${PREFIX}"
         log_ok "removed ${PREFIX}"
+    fi
+
+    # telemetry-export secrets live outside ${PREFIX}.
+    if [[ -f "${TELEMETRY_ENV_FILE}" ]]; then
+        rm -f "${TELEMETRY_ENV_FILE}"
+        rmdir /etc/anolis 2>/dev/null || true
+        log_ok "removed ${TELEMETRY_ENV_FILE}"
     fi
 
     log_ok "uninstall complete"
@@ -1020,6 +1183,7 @@ main() {
         dry_run_phase "install provider configs (skip each if exists)"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
+        [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] && dry_run_phase "provision telemetry-export service (venv + config + unit; inert until secrets)"
         dry_run_phase "set hostname"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "start services"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "health check"
@@ -1042,6 +1206,7 @@ main() {
     phase_config_providers
     phase_manifest
     phase_systemd
+    phase_telemetry_export
     phase_hostname
     phase_start
     phase_health
