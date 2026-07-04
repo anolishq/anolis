@@ -129,20 +129,31 @@ jobs:
         run: uv run mypy .
 
   shell-tests:
-    name: Shell Lint & Smoke Tests
+    name: Shell Lint & Smoke Tests (${{ matrix.os }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # arm64 is the Pi deployment arch. arch_test.bats exercises install.sh's
+        # uname -m mapping natively on each leg, so the arm64 leg proves the
+        # aarch64->arm64 branch on real Pi-class hardware. See anolishq/.github#104.
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install tools
-        run: sudo apt-get install -y shellcheck bats
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck bats
 
       - name: ShellCheck
+        # shellcheck is static analysis (arch-independent) — run it once, on x64.
+        if: matrix.os == 'ubuntu-24.04'
         run: shellcheck tools/install.sh
 
       - name: BATS smoke tests
