@@ -216,28 +216,15 @@ phase_verify() {
         return
     fi
 
-    # Verify each file listed in checksums
-    local failed=0
-    while IFS='  ' read -r expected_hash filepath; do
-        [[ -z "${expected_hash}" ]] && continue
-        [[ "${expected_hash}" =~ ^# ]] && continue
-        local full_path="${BUNDLE_DIR}/${filepath}"
-        if [[ ! -f "${full_path}" ]]; then
-            log_err "verify: file missing: ${filepath}"
-            failed=1
-            continue
-        fi
-        local actual_hash
-        actual_hash=$(sha256sum "${full_path}" | awk '{print $1}')
-        if [[ "${actual_hash}" != "${expected_hash}" ]]; then
-            log_err "verify: checksum mismatch: ${filepath}"
-            log_info "  expected: ${expected_hash}"
-            log_info "  actual:   ${actual_hash}"
-            failed=1
-        fi
-    done < "${checksums_file}"
-
-    if [[ ${failed} -ne 0 ]]; then
+    # checksums.sha256 is standard `sha256sum` output with ./-relative paths
+    # generated from the bundle root, so verify it there. --quiet prints only
+    # failures; the captured output names any mismatched/missing file.
+    local report
+    if ! report=$(cd "${BUNDLE_DIR}" && sha256sum -c --quiet checksums.sha256 2>&1); then
+        local line
+        while IFS= read -r line; do
+            [[ -n "${line}" ]] && log_err "verify: ${line}"
+        done <<< "${report}"
         die "Checksum verification failed — bundle may be corrupted"
     fi
     log_ok "verify: all checksums pass"
@@ -718,13 +705,34 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
+# Read the runtime HTTP port from the installed runtime config, falling back to
+# DEFAULT_PORT. Dependency-free (awk, no python) so it works on an offline
+# --local host that has no pyyaml. Parses the `port:` under the top-level
+# `http:` block of ${PREFIX}/config/runtime.yaml.
+_runtime_port() {
+    local cfg="${PREFIX}/config/runtime.yaml" port=""
+    if [[ -f "${cfg}" ]]; then
+        port=$(awk '
+            /^[[:alpha:]]/ { in_http = ($1 == "http:") }
+            in_http && $1 == "port:" { print $2; exit }
+        ' "${cfg}")
+    fi
+    if [[ "${port}" =~ ^[0-9]+$ ]]; then
+        printf '%s' "${port}"
+    else
+        printf '%s' "${DEFAULT_PORT}"
+    fi
+}
+
 phase_health() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "health: skipped (services not started)"
         return
     fi
 
-    local url="http://localhost:${DEFAULT_PORT}/v0/runtime/status"
+    local port
+    port=$(_runtime_port)
+    local url="http://localhost:${port}/v0/runtime/status"
     local elapsed=0
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
@@ -757,9 +765,11 @@ phase_summary() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo " Anolis installation complete"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local port
+    port=$(_runtime_port)
     log_info "Prefix:   ${PREFIX}"
     log_info "Profile:  ${INSTALLED_PROFILE:-unknown}"
-    log_info "Port:     ${DEFAULT_PORT}"
+    log_info "Port:     ${port}"
     if [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]]; then
         log_info "Telemetry: anolis-telemetry-export (secrets: ${TELEMETRY_ENV_FILE})"
     fi
@@ -768,7 +778,7 @@ phase_summary() {
         local hostname_display
         hostname_display=$(hostname)
         log_info "Hostname: ${hostname_display}"
-        log_info "Access:   http://${hostname_display}.local:${DEFAULT_PORT}"
+        log_info "Access:   http://${hostname_display}.local:${port}"
     fi
 
     if [[ ${REBOOT_NEEDED} -eq 1 ]]; then
@@ -865,13 +875,16 @@ dry_run_phase() {
 # The canonical single service unit, shipped with install.sh (not the examples
 # repo). The runtime supervises providers as child subprocesses, so there are no
 # per-provider units.
+# Unquoted heredoc so ${PREFIX} expands — the unit must point at the actual
+# install prefix (--prefix), not a hardcoded /opt/anolis. Backticks in the
+# comment are escaped so they are not treated as command substitution.
 emit_systemd_unit() {
-    cat <<'UNIT'
+    cat <<UNIT
 # Canonical Anolis service unit — ONE unit for the whole stack.
 #
 # The runtime spawns and supervises each provider as a child subprocess (per the
-# `providers:` block in runtime.yaml), over the child's stdin/stdout. Providers
-# are NOT independent systemd services. Do not add per-provider units or `Wants=`
+# \`providers:\` block in runtime.yaml), over the child's stdin/stdout. Providers
+# are NOT independent systemd services. Do not add per-provider units or \`Wants=\`
 # them; that double-spawns each provider and contends for the I2C bus. The
 # provider children inherit this unit's SupplementaryGroups for bus access.
 [Unit]
@@ -880,10 +893,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=anolis
-Group=anolis
+User=${ANOLIS_USER}
+Group=${ANOLIS_USER}
 SupplementaryGroups=i2c gpio dialout
-ExecStart=/opt/anolis/bin/anolis-runtime --config /opt/anolis/config/runtime.yaml
+ExecStart=${PREFIX}/bin/anolis-runtime --config ${PREFIX}/config/runtime.yaml
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
