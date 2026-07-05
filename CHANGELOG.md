@@ -13,6 +13,28 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-07-04
+
+### Added
+
+- `install.sh` gained `--with-telemetry-export`, which provisions the
+  telemetry-export service (a venv built from the pinned PyPI package)
+  alongside the runtime. It is installed inert and only starts once the
+  export/InfluxDB tokens are supplied. (#163)
+
+### Fixed
+
+- `install.sh`: the runtime systemd unit's `ExecStart` now honors `--prefix`
+  instead of hardcoding `/opt/anolis`; the post-install health check and
+  summary read the HTTP port from the installed `runtime.yaml` rather than
+  assuming `8080`; and bundle verification uses `sha256sum -c`, naming any
+  file that fails. (#168)
+
+### Changed
+
+- The OpenAPI contract now represents the auth/TLS surface. (#160)
+- Added `docs/system-surfaces.md`, a component boundary & ownership map. (#159)
+
 ## [0.1.30] - 2026-07-03
 
 ### Changed
@@ -446,7 +468,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.30...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.31...HEAD
+[0.1.31]: https://github.com/anolishq/anolis/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/anolishq/anolis/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/anolishq/anolis/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/anolishq/anolis/compare/v0.1.27...v0.1.28
