@@ -9,7 +9,7 @@
       "started_at_epoch_ms": 1711929600000,
       "ended_at_epoch_ms": null,
       "automation_version": null,
-      "runtime_version": "0.1.31",
+      "runtime_version": "0.1.32",
       "polling_interval_ms": 2000,
       "params": {},
       "tag_scope": { "provider_ids": [], "device_ids": [], "signal_ids": [] },

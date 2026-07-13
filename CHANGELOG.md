@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-07-13
+
 ### Security
 
 - `install.sh` now provisions the runtime with authentication enabled whenever it
@@ -503,7 +505,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.31...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.32...HEAD
+[0.1.32]: https://github.com/anolishq/anolis/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/anolishq/anolis/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/anolishq/anolis/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/anolishq/anolis/compare/v0.1.28...v0.1.29
