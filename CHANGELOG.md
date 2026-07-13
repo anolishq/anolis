@@ -13,6 +13,41 @@ commit messages only.
 
 ## [Unreleased]
 
+### Security
+
+- `install.sh` now provisions the runtime with authentication enabled whenever it
+  exposes the HTTP API on a non-loopback address. The bundle renderer emits
+  `http.auth_enabled: true` alongside the `0.0.0.0` bind, and a new install phase
+  generates a per-device 256-bit API token into `/etc/anolis/runtime.env`
+  (`0600 root:root`), injected into the service via systemd `EnvironmentFile=`.
+  The secret never enters `runtime.yaml` and is never baked into a bundle, which
+  is a redistributable artifact. The token is reused across upgrades, so an
+  upgrade does not invalidate tokens already issued to clients. Requests from the
+  device itself remain exempt (`auth_exempt_loopback`), so on-device access and
+  the health probe are unaffected. (#172)
+
+### Fixed
+
+- `install.sh` rewrote the runtime's `bind` to `0.0.0.0` without enabling
+  authentication, producing a config the runtime is **guaranteed** to reject at
+  startup ("non-loopback but authentication is disabled"). The online `--project`
+  path therefore installed a runtime that could never start; it crash-looped while
+  the installer reported success. Found on real hardware during the #138
+  acceptance run. (#172)
+- `install.sh` now preflights the runtime config against the constraint the
+  runtime enforces at startup and refuses to install one that cannot start,
+  instead of shipping a boot loop. This also covers operator-edited configs
+  preserved across upgrades. (#172)
+- `install.sh` no longer prints "installation complete" and exits `0` when the
+  runtime failed to come up. A failed health check is now a failed install, so
+  `curl … | sudo bash` and workbench's `deploy.py` see a non-zero exit. The
+  I2C-just-enabled/reboot-pending case is still reported as advisory, not a
+  failure. (#172)
+- `install.sh` set the device hostname without updating `/etc/hosts`, leaving the
+  machine unable to resolve its own name (`sudo: unable to resolve host
+  anolis-<serial>`) and undermining the `http://anolis-<serial>.local:8080` access
+  URL it prints. (#172)
+
 ## [0.1.31] - 2026-07-04
 
 ### Added

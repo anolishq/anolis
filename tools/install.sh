@@ -31,6 +31,11 @@ readonly SYSTEMD_DIR="/etc/systemd/system"
 # Telemetry-export secrets live here — OUTSIDE ${PREFIX}, so phase_directories'
 # `chown -R anolis` never touches this root-only file. See #137.
 readonly TELEMETRY_ENV_FILE="/etc/anolis/telemetry-export.env"
+# The runtime's API token, same rationale. systemd reads this as root and injects
+# ANOLIS_API_TOKEN into the (User=anolis) runtime process, so the secret never
+# enters runtime.yaml — which is world-readable, preserved across upgrades, and
+# copied around. Generated per-device at install time, never baked into a bundle.
+readonly RUNTIME_ENV_FILE="/etc/anolis/runtime.env"
 # Pinned for reproducible installs; override via the environment if needed.
 TELEMETRY_EXPORT_VERSION="${TELEMETRY_EXPORT_VERSION:-0.1.1}"
 
@@ -47,6 +52,7 @@ ROLLBACK=0
 DRY_RUN=0
 PREFIX="${DEFAULT_PREFIX}"
 REBOOT_NEEDED=0
+HEALTH_FAILED=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -403,12 +409,80 @@ phase_config_runtime() {
 
     if [[ -f "${dest}" ]]; then
         log_skip "config (runtime): ${dest} exists (preserved)"
+    else
+        cp "${src}" "${dest}"
+        chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
+        log_ok "config (runtime): written"
+    fi
+
+    preflight_runtime_config "${dest}"
+}
+
+# Refuse to install a runtime config the runtime is guaranteed to reject at
+# startup. install.sh once emitted `bind: 0.0.0.0` with auth off — a combination
+# the runtime always refuses — and nothing here noticed; the service simply
+# crash-looped while the install reported success (#172). This mirrors the guard
+# in core/runtime/config.cpp so the failure surfaces as an actionable install
+# error instead of a boot loop, and it covers operator-edited configs preserved
+# across upgrades too.
+preflight_runtime_config() {
+    local cfg="$1"
+    local bind
+    bind=$(_http_value "${cfg}" bind)
+
+    # Matches is_loopback_bind() in core/runtime/config.cpp.
+    case "${bind:-127.0.0.1}" in
+        127.* | ::1 | localhost) return 0 ;;
+    esac
+
+    if [[ "$(_http_value "${cfg}" auth_enabled)" == "true" ]] \
+        || [[ "$(_http_value "${cfg}" allow_insecure_bind)" == "true" ]]; then
+        return 0
+    fi
+
+    log_err "config (runtime): http.bind '${bind}' is non-loopback but authentication is disabled"
+    log_info "The runtime would refuse to start. In ${cfg}, set:"
+    log_info "  http.auth_enabled: true       (recommended)"
+    log_info "  http.allow_insecure_bind: true  (exposes an unauthenticated control API)"
+    die "refusing to install a runtime config that cannot start"
+}
+
+# Provision the runtime's API token. Generated per-device at install time — never
+# baked into a bundle, which is a redistributable artifact that may be installed
+# on many machines. Reused when already present, so upgrading does not invalidate
+# tokens already issued to clients.
+phase_runtime_auth() {
+    install -d -m 755 /etc/anolis
+
+    if [[ -f "${RUNTIME_ENV_FILE}" ]] \
+        && grep -qE '^ANOLIS_API_TOKEN=[^[:space:]]' "${RUNTIME_ENV_FILE}"; then
+        chmod 600 "${RUNTIME_ENV_FILE}"
+        chown root:root "${RUNTIME_ENV_FILE}"
+        log_skip "auth: existing API token preserved (${RUNTIME_ENV_FILE})"
         return
     fi
 
-    cp "${src}" "${dest}"
-    chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-    log_ok "config (runtime): written"
+    local token
+    token=$(_generate_api_token) || die "auth: failed to generate an API token"
+
+    # Create with the restrictive mode BEFORE the secret is written into it — a
+    # plain redirect would briefly leave the token world-readable.
+    install -m 600 -o root -g root /dev/null "${RUNTIME_ENV_FILE}"
+    printf 'ANOLIS_API_TOKEN=%s\n' "${token}" > "${RUNTIME_ENV_FILE}"
+    log_ok "auth: API token generated (${RUNTIME_ENV_FILE})"
+}
+
+# 256 bits of hex. openssl is not guaranteed on a minimal image; /dev/urandom is.
+_generate_api_token() {
+    local token
+    if command -v openssl &>/dev/null; then
+        token=$(openssl rand -hex 32)
+    else
+        token=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+    fi
+
+    [[ "${token}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s' "${token}"
 }
 
 # =============================================================================
@@ -681,7 +755,26 @@ phase_hostname() {
         echo "${new_hostname}" > /etc/hostname
         hostname "${new_hostname}"
     }
+    _update_etc_hosts "${new_hostname}"
     log_ok "hostname: ${new_hostname}"
+}
+
+# Point 127.0.1.1 at the new hostname. Renaming the host without this leaves the
+# machine unable to resolve its own name — Pi OS ships `127.0.1.1 raspberrypi`,
+# so every sudo pays a resolver timeout and warns, and anything that resolves its
+# own hostname (mDNS advertisement of <host>.local, telemetry host tags) breaks.
+# Idempotent: rewrites the existing 127.0.1.1 line if there is one, else appends.
+_update_etc_hosts() {
+    local new_hostname="$1"
+    local hosts="${ETC_HOSTS:-/etc/hosts}"
+
+    [[ -f "${hosts}" ]] || return 0
+
+    if grep -qE '^127\.0\.1\.1[[:space:]]' "${hosts}"; then
+        sed -i -E "s/^127\.0\.1\.1[[:space:]]+.*/127.0.1.1\t${new_hostname}/" "${hosts}"
+    else
+        printf '127.0.1.1\t%s\n' "${new_hostname}" >> "${hosts}"
+    fi
 }
 
 # =============================================================================
@@ -705,18 +798,23 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
+# Read a scalar key from the top-level `http:` block of a runtime config. Prints
+# the empty string when absent. Dependency-free (awk, no python) so it works on an
+# offline --local host that has no pyyaml.
+_http_value() {
+    local cfg="$1" key="$2"
+    [[ -f "${cfg}" ]] || return 0
+    awk -v key="${key}:" '
+        /^[[:alpha:]]/ { in_http = ($1 == "http:") }
+        in_http && $1 == key { print $2; exit }
+    ' "${cfg}"
+}
+
 # Read the runtime HTTP port from the installed runtime config, falling back to
-# DEFAULT_PORT. Dependency-free (awk, no python) so it works on an offline
-# --local host that has no pyyaml. Parses the `port:` under the top-level
-# `http:` block of ${PREFIX}/config/runtime.yaml.
+# DEFAULT_PORT.
 _runtime_port() {
-    local cfg="${PREFIX}/config/runtime.yaml" port=""
-    if [[ -f "${cfg}" ]]; then
-        port=$(awk '
-            /^[[:alpha:]]/ { in_http = ($1 == "http:") }
-            in_http && $1 == "port:" { print $2; exit }
-        ' "${cfg}")
-    fi
+    local port
+    port=$(_http_value "${PREFIX}/config/runtime.yaml" port)
     if [[ "${port}" =~ ^[0-9]+$ ]]; then
         printf '%s' "${port}"
     else
@@ -748,8 +846,14 @@ phase_health() {
 
     log_warn "health: runtime not responding after ${HEALTH_TIMEOUT}s"
     if [[ ${REBOOT_NEEDED} -eq 1 ]]; then
+        # I2C was just enabled and the bus is not live until the reboot — the
+        # runtime being down is expected here, not an install failure.
         log_info "This may be normal — I2C was just enabled. Reboot and check:"
     else
+        # A runtime that never came up is a failed install. Do not exit 0 here:
+        # `curl | sudo bash` and workbench's deploy.py both read the exit code,
+        # and a green exit on a crash-looping service hides the breakage (#172).
+        HEALTH_FAILED=1
         log_info "Check logs:"
     fi
     log_info "  sudo systemctl status anolis-runtime"
@@ -781,10 +885,23 @@ phase_summary() {
         log_info "Access:   http://${hostname_display}.local:${port}"
     fi
 
+    # Deliberately prints the path, never the token — installs are routinely piped
+    # through `tee` into a logfile, and a secret must not land there.
+    if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+        log_info "API token: ${RUNTIME_ENV_FILE} (read it with: sudo cat ${RUNTIME_ENV_FILE})"
+        log_info "           Remote clients must send it as: Authorization: Bearer <token>"
+        log_info "           Requests from the device itself are exempt."
+    fi
+
     if [[ ${REBOOT_NEEDED} -eq 1 ]]; then
         echo ""
         log_warn "REBOOT REQUIRED for I2C changes to take effect"
         log_info "  sudo reboot"
+    fi
+
+    if [[ ${HEALTH_FAILED} -eq 1 ]]; then
+        echo ""
+        log_err "Runtime did not come up — the install did NOT succeed."
     fi
     echo ""
 }
@@ -813,12 +930,14 @@ do_uninstall() {
         log_ok "removed ${PREFIX}"
     fi
 
-    # telemetry-export secrets live outside ${PREFIX}.
-    if [[ -f "${TELEMETRY_ENV_FILE}" ]]; then
-        rm -f "${TELEMETRY_ENV_FILE}"
-        rmdir /etc/anolis 2>/dev/null || true
-        log_ok "removed ${TELEMETRY_ENV_FILE}"
-    fi
+    # Secrets live outside ${PREFIX}, so they survive the rm -rf above.
+    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}"; do
+        if [[ -f "${secret}" ]]; then
+            rm -f "${secret}"
+            log_ok "removed ${secret}"
+        fi
+    done
+    rmdir /etc/anolis 2>/dev/null || true
 
     log_ok "uninstall complete"
     log_info "Note: system user '${ANOLIS_USER}' was preserved"
@@ -896,6 +1015,9 @@ Type=simple
 User=${ANOLIS_USER}
 Group=${ANOLIS_USER}
 SupplementaryGroups=i2c gpio dialout
+# Injects ANOLIS_API_TOKEN. Read by systemd as root, so the secret stays out of
+# runtime.yaml (which is world-readable and preserved across upgrades).
+EnvironmentFile=${RUNTIME_ENV_FILE}
 ExecStart=${PREFIX}/bin/anolis-runtime --config ${PREFIX}/config/runtime.yaml
 Restart=on-failure
 RestartSec=5
@@ -1010,7 +1132,20 @@ ppath = re.compile(r"\.\./anolis-projects/projects/([a-z0-9-]+)/(config|behavior
 def render(c):
     c = pcmd.sub(lambda m: f"{prefix}/bin/anolis-provider-{m.group(2)}", c)
     c = ppath.sub(lambda m: f"{prefix}/projects/{m.group(1)}/{m.group(2)}/{m.group(3)}", c)
-    return re.sub(r"^(\s*bind:\s*)127\.0\.0\.1\s*$", r"\g<1>0.0.0.0", c, flags=re.M)
+    # The appliance is LAN-reachable, and the runtime refuses a non-loopback bind
+    # when auth is off (the startup guard in core/runtime/config.cpp). Emit the two
+    # together — never the bind without the auth, or the runtime will not start
+    # (#172). auth_enabled is policy, not a secret, so it is safe to ship in a
+    # redistributable bundle; the per-device token is generated at install time
+    # into /etc/anolis/runtime.env and injected via systemd.
+    has_auth = re.search(r"^[ \t]*auth_enabled:", c, flags=re.M) is not None
+
+    def expose(m):
+        indent = m.group(1)
+        bind = f"{indent}bind: 0.0.0.0"
+        return bind if has_auth else f"{bind}\n{indent}auth_enabled: true"
+
+    return re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
 
 
 (out / "config" / "providers").mkdir(parents=True, exist_ok=True)
@@ -1193,6 +1328,7 @@ main() {
         dry_run_phase "install binaries to ${PREFIX}/bin/"
         dry_run_phase "install project config"
         dry_run_phase "install runtime config (skip if exists)"
+        dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
         dry_run_phase "install provider configs (skip each if exists)"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
@@ -1216,6 +1352,7 @@ main() {
     phase_install_binaries
     phase_config_project
     phase_config_runtime
+    phase_runtime_auth
     phase_config_providers
     phase_manifest
     phase_systemd
@@ -1224,6 +1361,9 @@ main() {
     phase_start
     phase_health
     phase_summary
+
+    # A crash-looping runtime is a failed install, not a warning (#172).
+    [[ ${HEALTH_FAILED} -eq 0 ]] || exit 1
 }
 
 # Run main() in every real invocation — direct (`bash install.sh`), piped
