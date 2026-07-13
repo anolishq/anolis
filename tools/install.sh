@@ -746,6 +746,12 @@ phase_hostname() {
     current_hostname=$(hostname)
 
     if [[ "${current_hostname}" == "${new_hostname}" ]]; then
+        # The hostname is already right, but /etc/hosts may not be: a device
+        # renamed by an install.sh predating the /etc/hosts fix has the new name
+        # and no matching hosts entry, so it cannot resolve itself. Repair that
+        # here rather than returning early — this is the state every already-
+        # provisioned device is in.
+        _update_etc_hosts "${new_hostname}"
         log_skip "hostname: already ${new_hostname}"
         return
     fi
