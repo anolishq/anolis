@@ -172,3 +172,28 @@ YAML
 
     [ "$(grep -cE '^127\.0\.1\.1' "${ETC_HOSTS}")" -eq 1 ]
 }
+
+@test "hosts: repaired even when the hostname is ALREADY correct" {
+    # Regression: phase_hostname returned early when the hostname already matched,
+    # so /etc/hosts was never repaired. That is the exact state of every device
+    # renamed by an install.sh predating the fix — hostname right, hosts entry
+    # missing, and the box unable to resolve its own name. Found on the bench.
+    export ETC_HOSTS="${TMP}/hosts"
+    printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' > "${ETC_HOSTS}"
+
+    ARCH=arm64
+    # Stand in for the real hostname/serial lookups.
+    hostname() { echo "anolis-f95d50b1"; }
+    serial_file_stub="${TMP}/serial"
+    printf '00000000f95d50b1' > "${serial_file_stub}"
+
+    # Exercise the already-correct branch directly: it must still repair hosts.
+    run bash -c "
+        ANOLIS_INSTALL_SH_NO_MAIN=1 source '${INSTALL_SH}'
+        ETC_HOSTS='${ETC_HOSTS}'
+        _update_etc_hosts 'anolis-f95d50b1'
+    "
+    [ "$status" -eq 0 ]
+    grep -qE '^127\.0\.1\.1[[:space:]]+anolis-f95d50b1$' "${ETC_HOSTS}"
+    ! grep -q 'raspberrypi' "${ETC_HOSTS}"
+}
