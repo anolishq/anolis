@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-07-14
+
 ### Added
 
 - `/v0/providers/health` now carries the provider's own health report (#185).
