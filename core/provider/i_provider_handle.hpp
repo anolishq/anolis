@@ -82,6 +82,16 @@ public:
                       anolis::deviceprovider::v1::CallResponse &response) = 0;
 
     /**
+     * @brief Fetch provider-reported health via the ADPP GetHealth RPC.
+     *
+     * The response carries the provider's own view: provider-level state and
+     * metrics plus per-device DeviceHealth entries, including devices the
+     * provider expected but could not bring up (reported UNREACHABLE) that are
+     * therefore absent from the runtime registry.
+     */
+    virtual bool get_health(anolis::deviceprovider::v1::GetHealthResponse &response) = 0;
+
+    /**
      * @brief Get the most recent human-readable failure string.
      */
     virtual const std::string &last_error() const = 0;

@@ -74,6 +74,9 @@ public:
               const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
               anolis::deviceprovider::v1::CallResponse &response) override;
 
+    /** @brief Fetch provider-reported health via ADPP GetHealth. */
+    bool get_health(anolis::deviceprovider::v1::GetHealthResponse &response) override;
+
     /** @brief Return the last client-side or provider-reported error. */
     const std::string &last_error() const override { return error_; }
 

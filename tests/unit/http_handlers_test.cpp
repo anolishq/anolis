@@ -87,6 +87,8 @@ protected:
 
         EXPECT_CALL(*mock_provider, provider_id()).WillRepeatedly(ReturnRef(mock_provider->_id));
         EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Return(true));
+        // Default: no provider-reported health; individual tests override.
+        EXPECT_CALL(*mock_provider, get_health(_)).WillRepeatedly(Return(false));
 
         provider_registry = std::make_unique<provider::ProviderRegistry>();
         provider_registry->add_provider("test_provider", mock_provider);
@@ -513,6 +515,39 @@ TEST_F(HttpHandlersTest, PostCallFunctionNotFound) {
     EXPECT_TRUE(json["status"]["message"].get<std::string>().find("Function ID not found") != std::string::npos);
 }
 
+TEST_F(HttpHandlersTest, ProvidersHealthMergesReportedIntoRegisteredDevice) {
+    // A registered device's entry carries the provider-reported DeviceHealth
+    // (metrics + last_seen) alongside the runtime's freshness view (#185).
+    RegisterMockDevice();
+
+    EXPECT_CALL(*mock_provider, get_health(_))
+        .WillRepeatedly(Invoke([](anolis::deviceprovider::v1::GetHealthResponse& response) {
+            response.mutable_provider()->set_state(anolis::deviceprovider::v1::ProviderHealth::STATE_OK);
+            auto* dh = response.add_devices();
+            dh->set_device_id("test_device");
+            dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_OK);
+            (*dh->mutable_metrics())["io_ok"] = "5";
+            (*dh->mutable_metrics())["io_retried_attempts"] = "2";
+            dh->mutable_last_seen()->set_seconds(1710000000);
+            dh->mutable_last_seen()->set_nanos(123000000);
+            return true;
+        }));
+
+    auto res = client->Get("/v0/providers/health");
+    ASSERT_TRUE(res);
+    auto json = nlohmann::json::parse(res->body);
+    const auto& devices = json["providers"][0]["devices"];
+    ASSERT_EQ(1u, devices.size());
+
+    const auto& dev = devices[0];
+    EXPECT_TRUE(dev["registered"].get<bool>());
+    ASSERT_FALSE(dev["reported"].is_null());
+    EXPECT_EQ("STATE_OK", dev["reported"]["state"]);
+    EXPECT_EQ("5", dev["reported"]["metrics"]["io_ok"]);
+    EXPECT_EQ("2", dev["reported"]["metrics"]["io_retried_attempts"]);
+    EXPECT_EQ(1710000000123, dev["reported"]["last_seen_epoch_ms"].get<int64_t>());
+}
+
 TEST_F(HttpHandlersTest, GetProvidersHealthNullSupervisorShape) {
     // With nullptr supervisor, endpoint must still return a well-formed response.
     // supervision block is always present as an object (never null), containing
@@ -721,6 +756,8 @@ protected:
         mock_provider->_id = "test_provider";
         EXPECT_CALL(*mock_provider, provider_id()).WillRepeatedly(ReturnRef(mock_provider->_id));
         EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Return(true));
+        // Default: no provider-reported health; individual tests override.
+        EXPECT_CALL(*mock_provider, get_health(_)).WillRepeatedly(Return(false));
 
         provider_registry = std::make_unique<provider::ProviderRegistry>();
         provider_registry->add_provider("test_provider", mock_provider);
@@ -789,6 +826,61 @@ TEST_F(HttpHandlersProvidersHealthTest, SupervisionIsAlwaysAnObject) {
     ASSERT_TRUE(provider["supervision"].is_object());
     EXPECT_EQ("AVAILABLE", provider["state"]);
     EXPECT_EQ("RUNNING", provider["lifecycle_state"]);
+}
+
+TEST_F(HttpHandlersProvidersHealthTest, ReportedHealthAbsentWhenRpcUnavailable) {
+    // Default fixture mock returns false from get_health: the passthrough
+    // fields must exist with their empty shapes (#185).
+    auto res = client->Get("/v0/providers/health");
+    ASSERT_TRUE(res);
+    auto json = nlohmann::json::parse(res->body);
+    const auto& provider = json["providers"][0];
+
+    EXPECT_TRUE(provider["reported"].is_null());
+    EXPECT_FALSE(provider["degraded"].get<bool>());
+    EXPECT_EQ(0, provider["failed_device_count"].get<int>());
+}
+
+TEST_F(HttpHandlersProvidersHealthTest, ReportedHealthSurfacesUnregisteredFailedDevice) {
+    // The provider reports a device the registry does not carry (an expected
+    // device that failed its startup probe): it must appear in the devices
+    // array with registered=false, and the provider must read degraded (#185).
+    EXPECT_CALL(*mock_provider, get_health(_))
+        .WillRepeatedly(Invoke([](anolis::deviceprovider::v1::GetHealthResponse& response) {
+            response.mutable_provider()->set_state(anolis::deviceprovider::v1::ProviderHealth::STATE_OK);
+            response.mutable_provider()->set_message("ok");
+            (*response.mutable_provider()->mutable_metrics())["impl"] = "test";
+
+            auto* dh = response.add_devices();
+            dh->set_device_id("ghost0");
+            dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_UNREACHABLE);
+            dh->set_message("probe failed (version_read_failed): unexpected opcode in version reply: 0x80");
+            (*dh->mutable_metrics())["missing"] = "true";
+            return true;
+        }));
+
+    auto res = client->Get("/v0/providers/health");
+    ASSERT_TRUE(res);
+    auto json = nlohmann::json::parse(res->body);
+    const auto& provider = json["providers"][0];
+
+    EXPECT_TRUE(provider["degraded"].get<bool>());
+    EXPECT_EQ(1, provider["failed_device_count"].get<int>());
+    ASSERT_FALSE(provider["reported"].is_null());
+    EXPECT_EQ("STATE_OK", provider["reported"]["state"]);
+    EXPECT_EQ("test", provider["reported"]["metrics"]["impl"]);
+
+    const nlohmann::json* ghost = nullptr;
+    for (const auto& dev : provider["devices"]) {
+        if (dev["device_id"] == "ghost0") ghost = &dev;
+    }
+    ASSERT_NE(ghost, nullptr) << "provider-reported unregistered device missing from devices array";
+    EXPECT_FALSE((*ghost)["registered"].get<bool>());
+    EXPECT_EQ("UNKNOWN", (*ghost)["health"]);
+    EXPECT_EQ("STATE_UNREACHABLE", (*ghost)["reported"]["state"]);
+    EXPECT_TRUE((*ghost)["reported"]["last_seen_epoch_ms"].is_null());
+    EXPECT_NE(std::string::npos,
+              (*ghost)["reported"]["message"].get<std::string>().find("version_read_failed"));
 }
 
 TEST_F(HttpHandlersProvidersHealthTest, SupervisionContainsAllRequiredKeys) {

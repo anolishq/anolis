@@ -18,6 +18,7 @@ using Device = anolis::deviceprovider::v1::Device;
 using DescribeDeviceResponse = anolis::deviceprovider::v1::DescribeDeviceResponse;
 using ReadSignalsResponse = anolis::deviceprovider::v1::ReadSignalsResponse;
 using CallResponse = anolis::deviceprovider::v1::CallResponse;
+using GetHealthResponse = anolis::deviceprovider::v1::GetHealthResponse;
 using ValueMap = std::map<std::string, ProtoValue>;
 
 class MockProviderHandle : public provider::IProviderHandle {
@@ -32,6 +33,7 @@ public:
                 (override));
     MOCK_METHOD(bool, call, (const std::string &, uint32_t, const std::string &, const ValueMap &, CallResponse &),
                 (override));
+    MOCK_METHOD(bool, get_health, (GetHealthResponse &), (override));
 
     MOCK_METHOD(const std::string &, last_error, (), (const, override));
     MOCK_METHOD(anolis::deviceprovider::v1::Status_Code, last_status_code, (), (const, override));
