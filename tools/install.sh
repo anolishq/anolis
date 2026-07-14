@@ -359,12 +359,32 @@ phase_backup() {
 # Phase 11: Install binaries
 # =============================================================================
 
+# Replace binaries without writing a running executable in place: overwriting
+# the text of an executing ELF fails with ETXTBSY (#181), so copy to a temp
+# name in the same directory and rename over the destination. The rename swaps
+# the directory entry while a running process keeps its old inode until the
+# service restart that install and rollback both perform.
+replace_binaries() {
+    local src_dir="$1" dest_dir="$2"
+    local src name tmp
+    for src in "${src_dir}"/*; do
+        [[ -f "${src}" ]] || continue
+        name=$(basename "${src}")
+        tmp="${dest_dir}/.${name}.tmp.$$"
+        if ! cp "${src}" "${tmp}" || ! mv -f "${tmp}" "${dest_dir}/${name}"; then
+            rm -f "${tmp}"
+            return 1
+        fi
+    done
+}
+
 phase_install_binaries() {
     if [[ ! -d "${BUNDLE_DIR}/bin" ]]; then
         die "Bundle missing bin/ directory"
     fi
 
-    cp "${BUNDLE_DIR}"/bin/* "${PREFIX}/bin/"
+    replace_binaries "${BUNDLE_DIR}/bin" "${PREFIX}/bin" \
+        || die "install binaries: failed to replace binaries in ${PREFIX}/bin"
     chmod +x "${PREFIX}"/bin/*
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/*
     log_ok "install binaries: $(find "${BUNDLE_DIR}/bin/" -maxdepth 1 -type f -printf '%f ' 2>/dev/null || ls "${BUNDLE_DIR}/bin/")"
@@ -959,7 +979,7 @@ do_rollback() {
     [[ -f "${PREFIX}/.prev/anolis-runtime" ]] \
         || die "nothing to roll back: ${PREFIX}/.prev/anolis-runtime not found (no previous install was backed up)"
 
-    cp "${PREFIX}/.prev/"* "${PREFIX}/bin/" \
+    replace_binaries "${PREFIX}/.prev" "${PREFIX}/bin" \
         || die "rollback: failed to restore binaries from ${PREFIX}/.prev/"
     chmod +x "${PREFIX}"/bin/* 2>/dev/null || true
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
