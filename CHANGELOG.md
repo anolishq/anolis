@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-07-14
+
 ### Fixed
 
 - `install.sh` no longer fails with `Text file busy` when installing over a
