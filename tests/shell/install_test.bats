@@ -99,3 +99,94 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
     [ "$status" -ne 0 ]
     [[ "${output}" == *"--project"* ]] || [[ "${output}" == *"--local"* ]]
 }
+
+# ===========================================================================
+# replace_binaries — installing over a RUNNING executable (#181)
+# ===========================================================================
+# Linux refuses to write the text of an executing ELF (ETXTBSY), so a plain
+# `cp` over the binaries of a live service fails — which broke idempotent
+# re-runs, upgrades, and --rollback on the #138 bench. replace_binaries must
+# rename over the destination instead.
+
+_setup_running_binary() {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +e +u +o pipefail
+
+    SRC="${BATS_TEST_TMPDIR}/bundle-bin"
+    DEST="${BATS_TEST_TMPDIR}/prefix-bin"
+    mkdir -p "${SRC}" "${DEST}"
+
+    # Simulate the running service: the destination binary is a real ELF
+    # that is currently executing.
+    cp /bin/sleep "${DEST}/anolis-runtime"
+    "${DEST}/anolis-runtime" 30 &
+    RUNNING_PID=$!
+
+    # The replacement the bundle ships.
+    printf 'new-binary-content\n' > "${SRC}/anolis-runtime"
+}
+
+_teardown_running_binary() {
+    kill "${RUNNING_PID}" 2>/dev/null || true
+    wait "${RUNNING_PID}" 2>/dev/null || true
+}
+
+@test "replace_binaries: plain cp over a running ELF fails (simulation is real)" {
+    _setup_running_binary
+
+    run cp "${SRC}/anolis-runtime" "${DEST}/anolis-runtime"
+
+    _teardown_running_binary
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"Text file busy"* ]]
+}
+
+@test "replace_binaries: replaces a running ELF and leaves no temp litter" {
+    _setup_running_binary
+
+    run replace_binaries "${SRC}" "${DEST}"
+    replaced=$(cat "${DEST}/anolis-runtime")
+    leftovers=$(find "${DEST}" -name '.*.tmp.*' | wc -l)
+    kill -0 "${RUNNING_PID}"  # old inode still executing until the restart
+
+    _teardown_running_binary
+    [ "$status" -eq 0 ]
+    [ "${replaced}" = "new-binary-content" ]
+    [ "${leftovers}" -eq 0 ]
+}
+
+@test "replace_binaries: copies every regular file and skips subdirectories" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +e +u +o pipefail
+
+    src="${BATS_TEST_TMPDIR}/multi-src"
+    dest="${BATS_TEST_TMPDIR}/multi-dest"
+    mkdir -p "${src}/subdir" "${dest}"
+    printf 'a\n' > "${src}/anolis-runtime"
+    printf 'b\n' > "${src}/anolis-provider-bread"
+
+    run replace_binaries "${src}" "${dest}"
+    [ "$status" -eq 0 ]
+    [ "$(cat "${dest}/anolis-runtime")" = "a" ]
+    [ "$(cat "${dest}/anolis-provider-bread")" = "b" ]
+    [ ! -e "${dest}/subdir" ]
+}
+
+@test "replace_binaries: fails cleanly when the destination is unwritable" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +e +u +o pipefail
+
+    src="${BATS_TEST_TMPDIR}/ro-src"
+    dest="${BATS_TEST_TMPDIR}/ro-dest"
+    mkdir -p "${src}" "${dest}"
+    printf 'x\n' > "${src}/anolis-runtime"
+    chmod 555 "${dest}"
+
+    run replace_binaries "${src}" "${dest}"
+    chmod 755 "${dest}"
+    [ "$status" -ne 0 ]
+    [ "$(find "${dest}" -type f | wc -l)" -eq 0 ]
+}

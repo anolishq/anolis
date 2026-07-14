@@ -13,6 +13,20 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.sh` no longer fails with `Text file busy` when installing over a
+  running service (#181). Re-install, upgrade, and `--rollback` all wrote the
+  new binaries onto the executing ELFs in place; binaries are now staged to a
+  temp name and renamed over the destination, so the running process keeps its
+  old inode until the restart both flows already perform. Found on the #138
+  bench — every prior hardware install had followed an `--uninstall`, so the
+  in-place path had never run against a live service.
+- `install.sh` repairs `/etc/hosts` even when the device already carries its
+  `anolis-<serial>` hostname (#180). The early-return in `phase_hostname`
+  skipped the hosts fix from #173 on exactly the devices that needed it,
+  leaving `sudo: unable to resolve host` warnings on re-installs.
+
 ## [0.1.32] - 2026-07-13
 
 ### Security
