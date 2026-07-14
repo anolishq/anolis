@@ -1,6 +1,6 @@
 #include <chrono>
-#include <map>
 #include <fstream>
+#include <map>
 
 #include "anolis_build_config.hpp"
 #if ANOLIS_ENABLE_AUTOMATION
@@ -545,12 +545,9 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
                 health_status = "UNKNOWN";
             }
 
-            nlohmann::json device_json = {{"device_id", device.device_id},
-                                          {"health", health_status},
-                                          {"last_poll_ms", last_poll_ms},
-                                          {"staleness_ms", staleness_ms},
-                                          {"registered", true},
-                                          {"reported", nullptr}};
+            nlohmann::json device_json = {
+                {"device_id", device.device_id}, {"health", health_status}, {"last_poll_ms", last_poll_ms},
+                {"staleness_ms", staleness_ms},  {"registered", true},      {"reported", nullptr}};
             const auto reported_it = reported_by_id.find(device.device_id);
             if (reported_it != reported_by_id.end()) {
                 device_json["reported"] = reported_device_health_json(*reported_it->second);
@@ -618,8 +615,7 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
             reported_provider_json = {{"state", adpp::ProviderHealth::State_Name(reported.provider().state())},
                                       {"message", reported.provider().message()},
                                       {"metrics", provider_metrics}};
-            degraded = failed_device_count > 0 ||
-                       reported.provider().state() == adpp::ProviderHealth::STATE_DEGRADED ||
+            degraded = failed_device_count > 0 || reported.provider().state() == adpp::ProviderHealth::STATE_DEGRADED ||
                        reported.provider().state() == adpp::ProviderHealth::STATE_FAULT;
         }
 

@@ -879,8 +879,7 @@ TEST_F(HttpHandlersProvidersHealthTest, ReportedHealthSurfacesUnregisteredFailed
     EXPECT_EQ("UNKNOWN", (*ghost)["health"]);
     EXPECT_EQ("STATE_UNREACHABLE", (*ghost)["reported"]["state"]);
     EXPECT_TRUE((*ghost)["reported"]["last_seen_epoch_ms"].is_null());
-    EXPECT_NE(std::string::npos,
-              (*ghost)["reported"]["message"].get<std::string>().find("version_read_failed"));
+    EXPECT_NE(std::string::npos, (*ghost)["reported"]["message"].get<std::string>().find("version_read_failed"));
 }
 
 TEST_F(HttpHandlersProvidersHealthTest, SupervisionContainsAllRequiredKeys) {
