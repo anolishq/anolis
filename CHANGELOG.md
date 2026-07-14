@@ -13,6 +13,20 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- `/v0/providers/health` now carries the provider's own health report (#185).
+  The runtime fetches ADPP `GetHealth` from each available provider on demand
+  and merges it into the response: a per-provider `reported` block (state,
+  message, metrics) plus `degraded` and `failed_device_count`; per-device
+  `reported` blocks (state, message, metrics, `last_seen_epoch_ms`) alongside
+  the runtime's own freshness view; and devices the provider reports but the
+  registry does not carry — e.g. expected devices that failed their startup
+  probe — appended with `registered: false`. Previously a provider could sit
+  at `AVAILABLE` with a silently missing configured device, and
+  provider-reported metrics (such as bread 0.3.3's `io_*` counters and real
+  `last_seen`) were invisible over HTTP.
+
 ## [0.1.33] - 2026-07-14
 
 ### Fixed

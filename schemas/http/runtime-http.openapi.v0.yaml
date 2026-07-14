@@ -1238,10 +1238,47 @@ components:
           oneOf:
             - type: integer
             - type: "null"
+    ReportedDeviceHealth:
+      description: >-
+        Provider-reported ADPP DeviceHealth for one device: the provider's own
+        view, carrying its diagnostic metrics and the timestamp of the last
+        successful communication with the device.
+      type: object
+      additionalProperties: false
+      required: [state, message, metrics, last_seen_epoch_ms]
+      properties:
+        state:
+          type: string
+          enum: [STATE_UNSPECIFIED, STATE_OK, STATE_STALE, STATE_UNREACHABLE, STATE_FAULT]
+        message:
+          type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: string
+        last_seen_epoch_ms:
+          oneOf:
+            - type: integer
+            - type: "null"
+    ReportedProviderHealth:
+      description: Provider-reported ADPP ProviderHealth (the provider's own state and metrics).
+      type: object
+      additionalProperties: false
+      required: [state, message, metrics]
+      properties:
+        state:
+          type: string
+          enum: [STATE_UNSPECIFIED, STATE_OK, STATE_DEGRADED, STATE_FAULT]
+        message:
+          type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: string
     ProviderDeviceHealth:
       type: object
       additionalProperties: false
-      required: [device_id, health, last_poll_ms, staleness_ms]
+      required: [device_id, health, last_poll_ms, staleness_ms, registered, reported]
       properties:
         device_id:
           type: string
@@ -1252,6 +1289,15 @@ components:
           type: integer
         staleness_ms:
           type: integer
+        registered:
+          description: >-
+            False for devices the provider reports (e.g. expected devices that
+            failed their startup probe) but the runtime registry does not carry.
+          type: boolean
+        reported:
+          oneOf:
+            - $ref: '#/components/schemas/ReportedDeviceHealth'
+            - type: "null"
     ProviderHealth:
       type: object
       additionalProperties: false
@@ -1262,6 +1308,9 @@ components:
         - last_seen_ago_ms
         - uptime_seconds
         - device_count
+        - degraded
+        - failed_device_count
+        - reported
         - supervision
         - devices
       properties:
@@ -1281,6 +1330,19 @@ components:
           type: integer
         device_count:
           type: integer
+        degraded:
+          description: >-
+            True when the provider is available but its own health report shows
+            trouble - an unreachable/faulted device or a self-reported
+            DEGRADED/FAULT state.
+          type: boolean
+        failed_device_count:
+          description: Number of provider-reported devices in UNREACHABLE or FAULT state.
+          type: integer
+        reported:
+          oneOf:
+            - $ref: '#/components/schemas/ReportedProviderHealth'
+            - type: "null"
         supervision:
           $ref: '#/components/schemas/ProviderSupervision'
         devices:

@@ -24,9 +24,45 @@
           "device_id": "tempctl0",
           "health": "OK",
           "last_poll_ms": 1710000000123,
-          "staleness_ms": 150
+          "staleness_ms": 150,
+          "registered": true,
+          "reported": {
+            "state": "STATE_OK",
+            "message": "ok",
+            "metrics": {
+              "io_ok": "1204",
+              "io_failed": "0",
+              "io_retried_attempts": "3"
+            },
+            "last_seen_epoch_ms": 1710000000123
+          }
+        },
+        {
+          "device_id": "tempctl9",
+          "health": "UNKNOWN",
+          "last_poll_ms": 0,
+          "staleness_ms": 0,
+          "registered": false,
+          "reported": {
+            "state": "STATE_UNREACHABLE",
+            "message": "probe failed (version_read_failed): unexpected opcode in version reply: 0x80",
+            "metrics": {
+              "missing": "true"
+            },
+            "last_seen_epoch_ms": null
+          }
         }
-      ]
+      ],
+      "degraded": true,
+      "failed_device_count": 1,
+      "reported": {
+        "state": "STATE_OK",
+        "message": "ok",
+        "metrics": {
+          "impl": "sim",
+          "startup_configured_devices": "5"
+        }
+      }
     }
   ]
 }

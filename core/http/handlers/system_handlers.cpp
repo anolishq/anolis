@@ -1,5 +1,6 @@
 #include <chrono>
 #include <fstream>
+#include <map>
 
 #include "anolis_build_config.hpp"
 #if ANOLIS_ENABLE_AUTOMATION
@@ -449,6 +450,28 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
 //=============================================================================
 // GET /v0/providers/health
 //=============================================================================
+namespace {
+
+namespace adpp = anolis::deviceprovider::v1;
+
+// JSON for one provider-reported ADPP DeviceHealth entry (#185).
+nlohmann::json reported_device_health_json(const adpp::DeviceHealth &dh) {
+    nlohmann::json metrics = nlohmann::json::object();
+    for (const auto &[key, value] : dh.metrics()) {
+        metrics[key] = value;
+    }
+    nlohmann::json last_seen = nullptr;
+    if (dh.has_last_seen()) {
+        last_seen = static_cast<int64_t>(dh.last_seen().seconds()) * 1000 + dh.last_seen().nanos() / 1000000;
+    }
+    return {{"state", adpp::DeviceHealth::State_Name(dh.state())},
+            {"message", dh.message()},
+            {"metrics", metrics},
+            {"last_seen_epoch_ms", last_seen}};
+}
+
+}  // namespace
+
 void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::Response &res) {
     using namespace std::chrono;
     using SupervisionSnapshot = provider::ProviderSupervisor::ProviderSupervisionSnapshot;
@@ -469,6 +492,24 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
 
         // Get devices for this provider
         auto devices = registry_.get_devices_for_provider(provider_id);
+
+        // Provider-reported ADPP health (#185), fetched on demand: the
+        // provider's own view — per-device metrics and last_seen, plus devices
+        // it expected but could not bring up (absent from the registry,
+        // reported UNREACHABLE by the provider).
+        adpp::GetHealthResponse reported;
+        const bool has_reported = is_available && provider->get_health(reported);
+        std::map<std::string, const adpp::DeviceHealth *> reported_by_id;
+        int failed_device_count = 0;
+        if (has_reported) {
+            for (const auto &dh : reported.devices()) {
+                reported_by_id[dh.device_id()] = &dh;
+                if (dh.state() == adpp::DeviceHealth::STATE_UNREACHABLE ||
+                    dh.state() == adpp::DeviceHealth::STATE_FAULT) {
+                    ++failed_device_count;
+                }
+            }
+        }
 
         nlohmann::json devices_json = nlohmann::json::array();
 
@@ -504,10 +545,28 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
                 health_status = "UNKNOWN";
             }
 
-            devices_json.push_back({{"device_id", device.device_id},
-                                    {"health", health_status},
-                                    {"last_poll_ms", last_poll_ms},
-                                    {"staleness_ms", staleness_ms}});
+            nlohmann::json device_json = {
+                {"device_id", device.device_id}, {"health", health_status}, {"last_poll_ms", last_poll_ms},
+                {"staleness_ms", staleness_ms},  {"registered", true},      {"reported", nullptr}};
+            const auto reported_it = reported_by_id.find(device.device_id);
+            if (reported_it != reported_by_id.end()) {
+                device_json["reported"] = reported_device_health_json(*reported_it->second);
+                reported_by_id.erase(reported_it);
+            }
+            devices_json.push_back(std::move(device_json));
+        }
+
+        // Devices the provider reports but the registry does not carry — e.g.
+        // expected devices that failed their startup probe. Surfacing them is
+        // the point of #185: a "successful" install with a missing device is
+        // otherwise invisible here.
+        for (const auto &[reported_id, dh] : reported_by_id) {
+            devices_json.push_back({{"device_id", reported_id},
+                                    {"health", "UNKNOWN"},
+                                    {"last_poll_ms", 0},
+                                    {"staleness_ms", 0},
+                                    {"registered", false},
+                                    {"reported", reported_device_health_json(*dh)}});
         }
 
         // Build provider-level timing fields and supervision block.
@@ -543,12 +602,32 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
                                 {"crash_detected", false}, {"circuit_open", false}, {"next_restart_in_ms", nullptr}};
         }
 
+        // Provider-level reported block + degraded flag (#185). degraded means
+        // the provider is up but its own health report says something is wrong:
+        // a failed/unreachable device or a self-reported DEGRADED/FAULT state.
+        nlohmann::json reported_provider_json = nullptr;
+        bool degraded = false;
+        if (has_reported) {
+            nlohmann::json provider_metrics = nlohmann::json::object();
+            for (const auto &[key, value] : reported.provider().metrics()) {
+                provider_metrics[key] = value;
+            }
+            reported_provider_json = {{"state", adpp::ProviderHealth::State_Name(reported.provider().state())},
+                                      {"message", reported.provider().message()},
+                                      {"metrics", provider_metrics}};
+            degraded = failed_device_count > 0 || reported.provider().state() == adpp::ProviderHealth::STATE_DEGRADED ||
+                       reported.provider().state() == adpp::ProviderHealth::STATE_FAULT;
+        }
+
         providers_json.push_back({{"provider_id", provider_id},
                                   {"state", state},
                                   {"lifecycle_state", lifecycle_state},
                                   {"last_seen_ago_ms", last_seen_ago_ms_json},
                                   {"uptime_seconds", uptime_seconds},
                                   {"device_count", devices.size()},
+                                  {"degraded", degraded},
+                                  {"failed_device_count", failed_device_count},
+                                  {"reported", reported_provider_json},
                                   {"supervision", supervision_json},
                                   {"devices", devices_json}});
     }

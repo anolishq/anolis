@@ -223,6 +223,26 @@ bool ProviderHandle::call(const std::string &device_id, uint32_t function_id, co
     return true;
 }
 
+bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &response) {
+    anolis::deviceprovider::v1::Request request;
+    uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+    request.set_request_id(request_id);
+    request.mutable_get_health();
+
+    anolis::deviceprovider::v1::Response resp;
+    if (!send_request(request, resp, request_id)) {
+        return false;
+    }
+
+    if (!resp.has_get_health()) {
+        error_ = "Response missing get_health field";
+        return false;
+    }
+
+    response = resp.get_health();
+    return true;
+}
+
 bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &request,
                                   anolis::deviceprovider::v1::Response &response, uint64_t request_id) {
     std::lock_guard<std::mutex> lock(mutex_);
