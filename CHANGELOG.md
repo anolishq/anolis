@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-07-15
+
 ### Added
 
 - Mode-transition hook executions are now logged on success (#188), one INFO
