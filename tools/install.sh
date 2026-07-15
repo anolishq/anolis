@@ -348,6 +348,26 @@ phase_backup() {
         return
     fi
 
+    # A same-version re-run must not overwrite .prev: doing so replaces the
+    # last *different* install with a copy of the current binaries and turns
+    # --rollback into a no-op (#184). Skip the backup when the incoming bin/
+    # payload is byte-identical to what is already installed.
+    if [[ -d "${BUNDLE_DIR}/bin" ]]; then
+        local identical=1 src dest
+        for src in "${BUNDLE_DIR}"/bin/*; do
+            [[ -f "${src}" ]] || continue
+            dest="${PREFIX}/bin/$(basename "${src}")"
+            if [[ ! -f "${dest}" ]] || ! cmp -s "${src}" "${dest}"; then
+                identical=0
+                break
+            fi
+        done
+        if [[ ${identical} -eq 1 ]]; then
+            log_skip "backup: incoming binaries identical to installed — .prev preserved for rollback"
+            return
+        fi
+    fi
+
     cp "${PREFIX}"/bin/* "${PREFIX}/.prev/" 2>/dev/null || {
         log_warn "backup: failed to copy binaries to .prev/"
         return
