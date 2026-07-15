@@ -1080,9 +1080,14 @@ _stage_fetch() {
     local repo="$1" tag="$2" asset="$3" dir="$4"
     local auth=()
     [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    curl -fsSL "${auth[@]}" -o "${dir}/${asset}" \
-        "https://github.com/${repo}/releases/download/${tag}/${asset}" \
-        || die "stage: failed to download ${asset} from ${repo} ${tag}"
+    if ! curl -fsSL "${auth[@]}" -o "${dir}/${asset}" \
+        "https://github.com/${repo}/releases/download/${tag}/${asset}"; then
+        log_err "stage: failed to download ${asset} from ${repo} ${tag}"
+        log_info "Check the release exists: https://github.com/${repo}/releases/tag/${tag}"
+        log_info "If GitHub is rate-limiting unauthenticated downloads, set GITHUB_TOKEN and retry."
+        log_info "Fully offline? Build a bundle elsewhere with --stage and install it here with --local."
+        exit 1
+    fi
 }
 
 # Tools needed to build a bundle from a config (staging / online install).
