@@ -13,6 +13,25 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- Mode-transition hook executions are now logged on success (#188), one INFO
+  line per call (`Before/After-transition hook (AUTO -> MANUAL):
+  bread0/dcmt0 set_open_loop OK`). The safe-state hooks that zero actuators
+  on AUTO exit were running silently — failures logged, successes left no
+  evidence, which is both an operator-confidence problem during supervised
+  actuation sessions and how the hooks were mistaken for missing in the
+  first place.
+
+### Fixed
+
+- `install.sh` no longer overwrites `.prev` on a same-version re-run (#184).
+  The backup phase previously snapshotted the running binaries on every
+  install, so an idempotent re-run after an upgrade silently replaced the
+  real rollback point with a copy of the current binaries — `--rollback`
+  then "succeeded" as a no-op. The backup is now skipped when the incoming
+  `bin/` payload is byte-identical to what is installed.
+
 ## [0.1.34] - 2026-07-14
 
 ### Added
