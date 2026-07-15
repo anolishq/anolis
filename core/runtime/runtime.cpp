@@ -287,6 +287,15 @@ bool Runtime::init_automation(std::string &error) {
                                     return false;
                                 }
                                 LOG_WARN("[Runtime] " << hook_msg.str());
+                            } else {
+                                // Safe-state hooks are load-bearing during operator sessions:
+                                // success must leave evidence, not just failures (#188).
+                                LOG_INFO("[Runtime] Before-transition hook ("
+                                         << automation::mode_to_string(prev) << " -> "
+                                         << automation::mode_to_string(next) << "): " << call.device_handle << " "
+                                         << (call.function_name.empty() ? std::to_string(call.function_id)
+                                                                        : call.function_name)
+                                         << " OK");
                             }
                         }
                     }
@@ -326,6 +335,13 @@ bool Runtime::init_automation(std::string &error) {
                             } else {
                                 LOG_WARN("[Runtime] " << hook_msg.str());
                             }
+                        } else {
+                            LOG_INFO(
+                                "[Runtime] After-transition hook ("
+                                << automation::mode_to_string(prev) << " -> " << automation::mode_to_string(next)
+                                << "): " << call.device_handle << " "
+                                << (call.function_name.empty() ? std::to_string(call.function_id) : call.function_name)
+                                << " OK");
                         }
                     }
                 }
