@@ -72,3 +72,63 @@ teardown() {
     [[ "${output}" == *"would roll back"* ]]
     [ "$(cat "${PREFIX_DIR}/bin/anolis-runtime")" = "new-runtime" ]
 }
+
+# ===========================================================================
+# phase_backup: same-version re-run must not clobber the rollback point (#184)
+# ===========================================================================
+
+_setup_backup_dirs() {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +e +u +o pipefail
+
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/bundle"
+    mkdir -p "${PREFIX}/bin" "${PREFIX}/.prev" "${BUNDLE_DIR}/bin"
+
+    # Installed: v2 binaries. .prev: the v1 binaries from the last upgrade —
+    # the rollback point that must survive a same-version re-run.
+    printf 'runtime-v2\n' > "${PREFIX}/bin/anolis-runtime"
+    printf 'bread-v2\n'   > "${PREFIX}/bin/anolis-provider-bread"
+    printf 'runtime-v1\n' > "${PREFIX}/.prev/anolis-runtime"
+    printf 'bread-v1\n'   > "${PREFIX}/.prev/anolis-provider-bread"
+}
+
+@test "phase_backup: identical incoming payload preserves .prev (#184)" {
+    _setup_backup_dirs
+    # Incoming bundle == installed binaries (idempotent re-run).
+    cp "${PREFIX}/bin/anolis-runtime" "${BUNDLE_DIR}/bin/anolis-runtime"
+    cp "${PREFIX}/bin/anolis-provider-bread" "${BUNDLE_DIR}/bin/anolis-provider-bread"
+
+    run phase_backup
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *".prev preserved"* ]]
+    # The v1 rollback point is untouched.
+    [ "$(cat "${PREFIX}/.prev/anolis-runtime")" = "runtime-v1" ]
+    [ "$(cat "${PREFIX}/.prev/anolis-provider-bread")" = "bread-v1" ]
+}
+
+@test "phase_backup: differing incoming payload still snapshots to .prev" {
+    _setup_backup_dirs
+    # Incoming bundle carries a new version.
+    printf 'runtime-v3\n' > "${BUNDLE_DIR}/bin/anolis-runtime"
+    printf 'bread-v3\n'   > "${BUNDLE_DIR}/bin/anolis-provider-bread"
+
+    run phase_backup
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"saved to .prev"* ]]
+    # .prev now holds the currently-installed (v2) binaries.
+    [ "$(cat "${PREFIX}/.prev/anolis-runtime")" = "runtime-v2" ]
+}
+
+@test "phase_backup: new binary in the bundle forces a snapshot" {
+    _setup_backup_dirs
+    # Same payload for existing files, plus one binary not installed yet.
+    cp "${PREFIX}/bin/anolis-runtime" "${BUNDLE_DIR}/bin/anolis-runtime"
+    cp "${PREFIX}/bin/anolis-provider-bread" "${BUNDLE_DIR}/bin/anolis-provider-bread"
+    printf 'ezo-v1\n' > "${BUNDLE_DIR}/bin/anolis-provider-ezo"
+
+    run phase_backup
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"saved to .prev"* ]]
+}
