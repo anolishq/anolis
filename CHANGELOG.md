@@ -13,6 +13,13 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- Release-asset download failures now say what to do next (#138 matrix row
+  13): the error names the asset and points at the release page, suggests
+  `GITHUB_TOKEN` for rate-limited unauthenticated downloads, and reminds that
+  `--stage`/`--local` covers fully-offline installs.
+
 ## [0.1.35] - 2026-07-15
 
 ### Added

@@ -190,3 +190,21 @@ _teardown_running_binary() {
     [ "$status" -ne 0 ]
     [ "$(find "${dest}" -type f | wc -l)" -eq 0 ]
 }
+
+# ===========================================================================
+# _stage_fetch failure messaging (#138 matrix row 13)
+# ===========================================================================
+
+@test "_stage_fetch failure names the release page, GITHUB_TOKEN, and --local" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +e +u +o pipefail
+
+    run _stage_fetch "anolishq/definitely-not-a-repo" "v9.9.9" "nope.tar.gz" "${BATS_TEST_TMPDIR}"
+
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"failed to download nope.tar.gz"* ]]
+    [[ "${output}" == *"releases/tag/v9.9.9"* ]]
+    [[ "${output}" == *"GITHUB_TOKEN"* ]]
+    [[ "${output}" == *"--local"* ]]
+}
