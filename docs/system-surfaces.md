@@ -3,7 +3,7 @@
 Every place an external actor, subsystem, or developer interacts with Anolis:
 the file that IS the contract today, who owns it, and how stable it is. This
 describes **today**, not target state. It links to existing inventories
-([schemas/README.md](../schemas/README.md),
+([schemas/README.md](https://github.com/anolishq/anolis/blob/main/schemas/README.md),
 [docs/contracts/README.md](contracts/README.md),
 [architecture.md](architecture.md)) rather than duplicating them.
 
@@ -92,7 +92,7 @@ providers[], polling, telemetry, logging, automation`) and
 `components:` pins are what `install.sh` installs and Renovate bumps).
 Authority note: the schemas are structural; the yaml-cpp loader
 (`core/runtime/config.cpp`) is semantically authoritative — unknown keys warn,
-deprecated aliases are honored ([schemas/README.md](../schemas/README.md)).
+deprecated aliases are honored ([schemas/README.md](https://github.com/anolishq/anolis/blob/main/schemas/README.md)).
 Point-in-time behavior freezes live in [docs/contracts/](contracts/README.md).
 
 **Schema consumers** (a schema change must be released, then propagated —
