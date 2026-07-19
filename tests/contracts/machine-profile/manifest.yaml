@@ -12,6 +12,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/03-custom-variant.yaml
     expect: valid
     note: custom runtime_profiles variant name alongside the required manual entry
+  - file: tests/contracts/machine-profile/valid/04-safety-estop-topology.yaml
+    expect: valid
+    note: optional informational safety.estop_topology declaration (power_cut)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -22,6 +25,9 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/03-missing-manual-profile.yaml
     expect: invalid/schema
     note: runtime_profiles has variants but lacks the required manual entry
+  - file: tests/contracts/machine-profile/invalid/schema/04-bad-estop-topology.yaml
+    expect: invalid/schema
+    note: safety.estop_topology outside the power_cut|signal enum
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references

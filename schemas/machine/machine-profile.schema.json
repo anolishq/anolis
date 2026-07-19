@@ -239,6 +239,21 @@
           }
         }
       }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Informational machine-integration facts. Nothing may branch runtime behavior on these fields beyond presentation/interpretation; absence is always valid.",
+      "properties": {
+        "estop_topology": {
+          "type": "string",
+          "enum": [
+            "power_cut",
+            "signal"
+          ],
+          "description": "How the physical e-stop is wired. power_cut: e-stop cuts actuator-board power (software signature: device blackout, io_failed accrual, recovery on release). signal: e-stop drives the boards' ESTOP inputs (signature: estop=true in device state, bus stays alive). Both are first-class supported wirings."
+        }
+      }
     }
   },
   "definitions": {
