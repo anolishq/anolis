@@ -184,6 +184,7 @@ BT::PortsList CallDeviceNode::providedPorts() {
     return {BT::InputPort<std::string>("device_handle", "Device handle (provider_id/device_id)"),
             BT::InputPort<std::string>("function_name", "Function identifier"),
             BT::InputPort<std::string>("args", "{}", "Arguments as JSON object (e.g., '{\"target\":30.0}')"),
+            BT::InputPort<std::string>("reason", "", "Optional emission reason included in the success log"),
             BT::OutputPort<bool>("success", "Call result (true/false)"),
             BT::OutputPort<std::string>("error", "Error message if call failed")};
 }
@@ -272,7 +273,16 @@ BT::NodeStatus CallDeviceNode::tick() {
     setOutput("error", result.error_message);
 
     if (result.success) {
-        LOG_INFO("[CallDeviceNode] Call succeeded: " << device_handle.value() << "/" << function_name.value());
+        // Emission reason (change vs keepalive, from EmitOnChangeOrInterval)
+        // disambiguates real command changes from liveness re-emissions in the
+        // journal (#196).
+        const auto reason = getInput<std::string>("reason").value_or("");
+        if (reason.empty()) {
+            LOG_INFO("[CallDeviceNode] Call succeeded: " << device_handle.value() << "/" << function_name.value());
+        } else {
+            LOG_INFO("[CallDeviceNode] Call succeeded: " << device_handle.value() << "/" << function_name.value()
+                                                         << " (reason=" << reason << ")");
+        }
         return BT::NodeStatus::SUCCESS;
     }
 

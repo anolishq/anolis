@@ -37,7 +37,7 @@ int main() {
             return 1;
         }
         if (!has_port(call_ports, "device_handle") || !has_port(call_ports, "function_name") ||
-            !has_port(call_ports, "args")) {
+            !has_port(call_ports, "args") || !has_port(call_ports, "reason")) {
             std::cerr << "CallDeviceNode ports missing\n";
             return 1;
         }
