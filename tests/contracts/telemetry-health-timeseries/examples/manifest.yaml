@@ -1,0 +1,37 @@
+schema: schemas/telemetry/telemetry-health-timeseries.schema.v1.json
+
+examples:
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/01-provider-nominal.json
+    expect: valid
+    note: nominal provider health row with startup diagnostics
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/02-device-full-metrics.json
+    expect: valid
+    note: device row with io counters and watchdog state (bread vocabulary)
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/03-device-minimal-never-polled.json
+    expect: valid
+    note: never-polled missing device omits staleness_ms by design
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/04-device-ezo-protocol-counters.json
+    expect: valid
+    note: device row with ezo protocol-level sample/call counters
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/05-extra-field-forward-compatible.json
+    expect: valid
+    note: additive metadata in fields should stay forward-compatible
+
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
+    expect: invalid
+    note: measurement must be anolis_provider_health or anolis_device_health
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/02-extra-tag.json
+    expect: invalid
+    note: tag key-set is exactly the identity tags; run_id (or any extra tag) is forbidden (cardinality guard)
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/03-missing-health-field.json
+    expect: invalid
+    note: health field is required on device rows
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/04-negative-io-counter.json
+    expect: invalid
+    note: io counters are cumulative and non-negative
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/05-bad-lifecycle-state.json
+    expect: invalid
+    note: lifecycle_state is a closed enum
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/06-empty-runtime-name.json
+    expect: invalid
+    note: required tag values must be non-empty

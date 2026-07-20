@@ -20,6 +20,7 @@
 #include "registry/device_registry.hpp"
 #include "runs/run_journal.hpp"
 #include "state/state_cache.hpp"
+#include "telemetry/health_snapshot_task.hpp"
 #include "telemetry/influx_sink.hpp"
 
 namespace anolis {
@@ -120,6 +121,7 @@ private:
     std::unique_ptr<control::CallRouter> call_router_;
     std::unique_ptr<http::HttpServer> http_server_;
     std::unique_ptr<telemetry::InfluxSink> telemetry_sink_;
+    std::unique_ptr<telemetry::HealthSnapshotTask> health_snapshot_task_;
     std::unique_ptr<runs::RunJournal> run_journal_;
 #if ANOLIS_ENABLE_AUTOMATION
     std::unique_ptr<automation::ModeManager> mode_manager_;

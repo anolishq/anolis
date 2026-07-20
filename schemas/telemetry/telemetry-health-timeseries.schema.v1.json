@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://anolishq.github.io/schemas/anolis/telemetry/telemetry-health-timeseries.schema.v1.json",
+  "title": "Anolis Health Timeseries Contract v1",
+  "description": "Logical row contracts for the anolis_provider_health and anolis_device_health measurements ingested by the runtime health snapshot task. Metric fields are parsed from the provider metrics map using the reserved-key vocabulary (anolis-provider-sdk docs/metrics.md plus bread watchdog keys); unknown or unparseable keys are never written.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measurement",
+        "timestamp_ms",
+        "tags",
+        "fields"
+      ],
+      "properties": {
+        "measurement": {
+          "type": "string",
+          "const": "anolis_provider_health"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime_name",
+            "provider_id"
+          ],
+          "properties": {
+            "runtime_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "state",
+            "lifecycle_state",
+            "degraded",
+            "failed_device_count",
+            "device_count",
+            "uptime_seconds",
+            "supervision_enabled",
+            "attempt_count",
+            "crash_detected",
+            "circuit_open"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "AVAILABLE",
+                "UNAVAILABLE"
+              ]
+            },
+            "lifecycle_state": {
+              "type": "string",
+              "enum": [
+                "RUNNING",
+                "RECOVERING",
+                "RESTARTING",
+                "CIRCUIT_OPEN",
+                "DOWN"
+              ]
+            },
+            "degraded": {
+              "type": "boolean"
+            },
+            "failed_device_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "device_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uptime_seconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "supervision_enabled": {
+              "type": "boolean"
+            },
+            "attempt_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "crash_detected": {
+              "type": "boolean"
+            },
+            "circuit_open": {
+              "type": "boolean"
+            },
+            "startup_configured_devices": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "startup_initialized_devices": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "startup_failed_devices": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measurement",
+        "timestamp_ms",
+        "tags",
+        "fields"
+      ],
+      "properties": {
+        "measurement": {
+          "type": "string",
+          "const": "anolis_device_health"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime_name",
+            "provider_id",
+            "device_id"
+          ],
+          "properties": {
+            "runtime_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "device_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "health",
+            "registered"
+          ],
+          "properties": {
+            "health": {
+              "type": "string",
+              "enum": [
+                "OK",
+                "WARNING",
+                "STALE",
+                "UNAVAILABLE",
+                "UNKNOWN"
+              ]
+            },
+            "registered": {
+              "type": "boolean"
+            },
+            "staleness_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "io_ok": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "io_failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "io_retried_attempts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "watchdog_armed": {
+              "type": "boolean"
+            },
+            "watchdog_timeout_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "watchdog_tripped": {
+              "type": "boolean"
+            },
+            "watchdog_trip_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sample_success_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sample_failure_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "call_success_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "call_failure_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "missing": {
+              "type": "boolean"
+            },
+            "excluded": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

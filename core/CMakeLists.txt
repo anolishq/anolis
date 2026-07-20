@@ -187,6 +187,27 @@ target_link_libraries(anolis_state PUBLIC
 )
 anolis_apply_warnings(anolis_state)
 
+# Health snapshot library: the shared provider/device health view consumed by
+# both /v0/providers/health and the InfluxDB health ingestion (#203).
+add_library(anolis_health STATIC
+    health/health_snapshot.cpp
+    telemetry/health_snapshot_task.cpp
+)
+
+target_include_directories(anolis_health PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(anolis_health PUBLIC
+    anolis_proto
+    anolis_provider
+    anolis_registry
+    anolis_state
+    anolis_telemetry
+    protobuf::libprotobuf
+)
+anolis_apply_warnings(anolis_health)
+
 # Call router library
 add_library(anolis_control STATIC
     control/call_router.cpp
@@ -277,6 +298,7 @@ target_link_libraries(anolis_http PUBLIC
     anolis_provider
     anolis_registry
     anolis_state
+    anolis_health
     anolis_control
     anolis_automation_support
     anolis_runs
@@ -312,6 +334,7 @@ target_link_libraries(anolis_runtime PUBLIC
     anolis_control
     anolis_http
     anolis_telemetry
+    anolis_health
     anolis_automation_support
     yaml-cpp::yaml-cpp
     protobuf::libprotobuf

@@ -196,6 +196,9 @@ jobs:
       - name: Validate telemetry timeseries contract
         run: uv run python tests/contracts/telemetry-timeseries/validate-telemetry-timeseries.py
 
+      - name: Validate telemetry health timeseries contract
+        run: uv run python tests/contracts/telemetry-timeseries/validate-telemetry-timeseries.py --manifest tests/contracts/telemetry-health-timeseries/examples/manifest.yaml
+
   core-build-test:
     name: ${{ matrix.lane }}
     needs: [changes]

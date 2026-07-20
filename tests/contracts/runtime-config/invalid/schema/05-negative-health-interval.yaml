@@ -1,0 +1,13 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+telemetry:
+  enabled: true
+  health_interval_ms: -1
+
+http:
+  enabled: false
+
+logging:
+  level: info

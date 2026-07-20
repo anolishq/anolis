@@ -330,6 +330,18 @@ public:
     bool enabled() const { return config_.enabled; }
 
     /**
+     * @brief Enqueue pre-formatted line-protocol rows onto the current batch.
+     *
+     * Used by the health snapshot task (#203); rows share the sink's batching,
+     * flush cadence, and retry buffer with event-driven telemetry.
+     */
+    void enqueue_lines(const std::vector<std::string> &lines) {
+        if (lines.empty()) return;
+        std::lock_guard<std::mutex> lock(batch_mutex_);
+        batch_.insert(batch_.end(), lines.begin(), lines.end());
+    }
+
+    /**
      * @brief Backend coordinates (never includes the API token)
      */
     const std::string &url() const { return config_.url; }

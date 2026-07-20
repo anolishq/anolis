@@ -135,7 +135,12 @@ The runtime is **store-less by default**. Optional telemetry sink:
 `core/telemetry/influx_sink` writes InfluxDB v2 line protocol per the released
 contract `schemas/telemetry/telemetry-timeseries.schema.v1.json`
 (`anolis_signal` measurement); disabled unless `telemetry.enabled` and a token
-(`INFLUXDB_TOKEN`). Run identity persists in an append-only JSONL journal
+(`INFLUXDB_TOKEN`). When the sink runs, a health snapshot task also ingests
+`anolis_provider_health` / `anolis_device_health` rows every
+`telemetry.health_interval_ms` (default 15 s, `0` disables) per
+`schemas/telemetry/telemetry-health-timeseries.schema.v1.json` — the retained
+form of the `/v0/providers/health` view (io counters, watchdog state,
+degraded/failed-device flags), both derived from one shared collector. Run identity persists in an append-only JSONL journal
 (`<data_dir>/runs/index.jsonl`, fsync-per-transition, abandoned-run recovery,
 one open run at a time) — an internal file format, reached externally only via
 `/v0/runs*`. Historian *export* is `anolis-telemetry-export` (separate repo,
