@@ -13,6 +13,22 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-07-20
+
+### Added
+
+- `CallDeviceNode` gained an optional `reason` input, logged as
+  `(reason=first|force|changed|keepalive)` on success when wired from
+  `EmitOnChangeOrInterval`'s existing reason output (#196). Makes real
+  command changes journal-distinguishable from liveness re-emissions;
+  trees that don't wire the port are unchanged.
+- Machine profiles may declare `safety.estop_topology: power_cut | signal`
+  (#197) — an optional, purely informational record of how the physical
+  e-stop is wired, with both wirings' software signatures documented in
+  the machine-profile baseline. Nothing branches runtime behavior on it;
+  absence is valid. Additive schema change (downstream: anolis-projects
+  `schema-source.json` pin, workbench schema re-lock).
+
 ### Changed
 
 - Release-asset download failures now say what to do next (#138 matrix row
