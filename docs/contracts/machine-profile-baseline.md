@@ -26,6 +26,13 @@ Define machine profile manifest structure and lock manifest behavior for validat
    - optional pinned component versions (`components`: runtime/provider/optional
      artifact `repo`+`version` pairs, read by `tools/install.sh` and auto-bumped
      by Renovate)
+   - optional informational safety facts (`safety.estop_topology:
+     power_cut | signal` — how the physical e-stop is wired, so operators and
+     monitoring can interpret an e-stop event's software signature: `power_cut`
+     shows as device blackout with `io_failed` accrual and recovery on
+     release; `signal` shows as `estop=true` in device state with the bus
+     alive. Both wirings are first-class; nothing may branch runtime behavior
+     on this field beyond presentation/interpretation, and absence is valid)
 4. Validator enforces:
    - schema correctness
    - referenced file existence

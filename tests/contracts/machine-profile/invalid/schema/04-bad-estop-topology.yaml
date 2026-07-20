@@ -1,0 +1,29 @@
+schema_version: 1
+machine_id: fixture-machine-bad-safety
+display_name: Fixture Machine Bad Safety
+
+runtime_profiles:
+  manual: runtime.manual.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+behaviors:
+  - behavior.xml
+
+validation:
+  expected_providers:
+    - provider0
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local
+
+safety:
+  estop_topology: cuts-the-power
