@@ -13,6 +13,21 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- Provider/device health metrics are now ingested into InfluxDB (#203): when
+  telemetry is enabled, a snapshot task writes `anolis_provider_health` and
+  `anolis_device_health` rows every `telemetry.health_interval_ms` (default
+  15000, `0` disables). Device rows carry the typed reserved-key metrics
+  (`io_*`, `watchdog_*`, `sample_*`/`call_*`, `missing`/`excluded`) parsed
+  from provider health reports via a strict allowlist; provider rows carry
+  availability, lifecycle, `degraded`/`failed_device_count`, supervision, and
+  startup counters. New contract
+  `schemas/telemetry/telemetry-health-timeseries.schema.v1.json` ships in the
+  telemetry schema release artifact (the `anolis_signal` v1 file is
+  unchanged). `GET /v0/providers/health` and the ingestion path now share one
+  snapshot collector, so the HTTP and timeseries views cannot drift.
+
 ## [0.1.36] - 2026-07-20
 
 ### Added

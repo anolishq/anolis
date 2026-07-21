@@ -1,0 +1,23 @@
+{
+  "measurement": "anolis_provider_health",
+  "timestamp_ms": 1700000000000,
+  "tags": {
+    "runtime_name": "bioreactor",
+    "provider_id": "bread0"
+  },
+  "fields": {
+    "state": "AVAILABLE",
+    "lifecycle_state": "RUNNING",
+    "degraded": false,
+    "failed_device_count": 0,
+    "device_count": 3,
+    "uptime_seconds": 1200,
+    "supervision_enabled": true,
+    "attempt_count": 0,
+    "crash_detected": false,
+    "circuit_open": false,
+    "startup_configured_devices": 3,
+    "startup_initialized_devices": 3,
+    "startup_failed_devices": 0
+  }
+}

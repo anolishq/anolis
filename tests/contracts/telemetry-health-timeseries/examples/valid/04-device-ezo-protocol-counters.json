@@ -1,0 +1,21 @@
+{
+  "measurement": "anolis_device_health",
+  "timestamp_ms": 1700000000000,
+  "tags": {
+    "runtime_name": "bioreactor",
+    "provider_id": "ezo0",
+    "device_id": "ph0"
+  },
+  "fields": {
+    "health": "OK",
+    "registered": true,
+    "staleness_ms": 900,
+    "io_ok": 5000,
+    "io_failed": 5,
+    "io_retried_attempts": 0,
+    "sample_success_count": 4800,
+    "sample_failure_count": 5,
+    "call_success_count": 12,
+    "call_failure_count": 0
+  }
+}

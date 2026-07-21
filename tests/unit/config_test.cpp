@@ -640,6 +640,64 @@ logging:
     EXPECT_NE(error.find("must be >= 0"), std::string::npos);
 }
 
+TEST_F(ConfigTest, TelemetryNegativeHealthIntervalRejected) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+telemetry:
+  enabled: true
+  health_interval_ms: -1
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("telemetry_negative_health_interval.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_NE(error.find("health_interval_ms"), std::string::npos);
+    EXPECT_NE(error.find("must be >= 0"), std::string::npos);
+}
+
+TEST_F(ConfigTest, TelemetryHealthIntervalDefaultAndOverride) {
+    std::string config_content = R"(
+runtime:
+
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+telemetry:
+  enabled: false
+  health_interval_ms: 30000
+
+logging:
+  level: info
+)";
+
+    std::string config_path = create_config_file("telemetry_health_interval.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << error;
+    EXPECT_EQ(config.telemetry.health_interval_ms, 30000);
+
+    RuntimeConfig defaults;
+    EXPECT_EQ(defaults.telemetry.health_interval_ms, 15000);
+}
+
 TEST_F(ConfigTest, RestartPolicyInvalidMaxAttempts) {
     std::string config_content = R"(
 runtime:

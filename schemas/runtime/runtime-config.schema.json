@@ -365,6 +365,11 @@
         "influxdb": {
           "$ref": "#/$defs/influxdb"
         },
+        "health_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Provider/device health snapshot ingestion cadence in milliseconds (anolis_provider_health / anolis_device_health measurements). Each snapshot performs a live provider GetHealth round-trip. 0 disables ingestion. Default 15000."
+        },
         "influx_url": {
           "type": "string",
           "deprecated": true

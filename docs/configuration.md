@@ -87,6 +87,8 @@ automation:
 1. Telemetry is off by default.
 2. Use nested `telemetry.influxdb.*` settings.
 3. Flat `telemetry.influx_*` keys remain accepted for compatibility, but are deprecated.
+4. When telemetry is enabled, provider/device health is also ingested every
+   `telemetry.health_interval_ms` (default 15000; `0` disables).
 
 ### Compatibility behavior
 

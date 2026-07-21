@@ -8,6 +8,7 @@
 #endif
 #include "../../automation/mode_manager.hpp"
 #include "../../automation/parameter_manager.hpp"
+#include "../../health/health_snapshot.hpp"
 #include "../../logging/logger.hpp"
 #include "../../provider/i_provider_handle.hpp"    // Need provider definition for handle_get_runtime_status
 #include "../../provider/provider_supervisor.hpp"  // For ProviderSupervisionSnapshot
@@ -20,25 +21,6 @@
 
 namespace anolis {
 namespace http {
-
-namespace {
-std::string derive_lifecycle_state(bool is_available,
-                                   const provider::ProviderSupervisor::ProviderSupervisionSnapshot &snap) {
-    if (is_available) {
-        return snap.attempt_count > 0 ? "RECOVERING" : "RUNNING";
-    }
-
-    if (snap.circuit_open) {
-        return "CIRCUIT_OPEN";
-    }
-
-    if (snap.crash_detected || snap.attempt_count > 0 || snap.next_restart_in_ms.has_value()) {
-        return "RESTARTING";
-    }
-
-    return "DOWN";
-}
-}  // namespace
 
 //=============================================================================
 // GET /v0/runtime/status
@@ -452,184 +434,74 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
 //=============================================================================
 namespace {
 
-namespace adpp = anolis::deviceprovider::v1;
-
 // JSON for one provider-reported ADPP DeviceHealth entry (#185).
-nlohmann::json reported_device_health_json(const adpp::DeviceHealth &dh) {
+nlohmann::json reported_device_health_json(const health::ReportedDeviceHealth &rd) {
     nlohmann::json metrics = nlohmann::json::object();
-    for (const auto &[key, value] : dh.metrics()) {
+    for (const auto &[key, value] : rd.metrics) {
         metrics[key] = value;
     }
-    nlohmann::json last_seen = nullptr;
-    if (dh.has_last_seen()) {
-        last_seen = static_cast<int64_t>(dh.last_seen().seconds()) * 1000 + dh.last_seen().nanos() / 1000000;
-    }
-    return {{"state", adpp::DeviceHealth::State_Name(dh.state())},
-            {"message", dh.message()},
+    return {{"state", rd.state},
+            {"message", rd.message},
             {"metrics", metrics},
-            {"last_seen_epoch_ms", last_seen}};
+            {"last_seen_epoch_ms", rd.last_seen_epoch_ms.has_value() ? nlohmann::json(rd.last_seen_epoch_ms.value())
+                                                                     : nlohmann::json(nullptr)}};
 }
 
 }  // namespace
 
 void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::Response &res) {
-    using namespace std::chrono;
-    using SupervisionSnapshot = provider::ProviderSupervisor::ProviderSupervisionSnapshot;
-
-    // Collect all supervision snapshots once (thread-safe copy).
-    std::unordered_map<std::string, SupervisionSnapshot> snapshots;
-    if (supervisor_) {
-        snapshots = supervisor_->get_all_snapshots();
-    }
+    // Shared collector (#203): the same snapshot feeds the InfluxDB health
+    // ingestion, so the HTTP and timeseries views cannot drift.
+    auto snapshot = health::collect_providers_health(provider_registry_, registry_, state_cache_, supervisor_);
 
     nlohmann::json providers_json = nlohmann::json::array();
 
-    // Iterate through all providers
-    for (const auto &[provider_id, provider] : provider_registry_.get_all_providers()) {
-        // Get provider availability
-        bool is_available = provider->is_available();
-        std::string state = is_available ? "AVAILABLE" : "UNAVAILABLE";
-
-        // Get devices for this provider
-        auto devices = registry_.get_devices_for_provider(provider_id);
-
-        // Provider-reported ADPP health (#185), fetched on demand: the
-        // provider's own view — per-device metrics and last_seen, plus devices
-        // it expected but could not bring up (absent from the registry,
-        // reported UNREACHABLE by the provider).
-        adpp::GetHealthResponse reported;
-        const bool has_reported = is_available && provider->get_health(reported);
-        std::map<std::string, const adpp::DeviceHealth *> reported_by_id;
-        int failed_device_count = 0;
-        if (has_reported) {
-            for (const auto &dh : reported.devices()) {
-                reported_by_id[dh.device_id()] = &dh;
-                if (dh.state() == adpp::DeviceHealth::STATE_UNREACHABLE ||
-                    dh.state() == adpp::DeviceHealth::STATE_FAULT) {
-                    ++failed_device_count;
-                }
-            }
-        }
-
+    for (const auto &ps : snapshot) {
         nlohmann::json devices_json = nlohmann::json::array();
-
-        // Check health of each device
-        for (const auto &device : devices) {
-            std::string device_handle = provider_id + "/" + device.device_id;
-            auto device_state = state_cache_.get_device_state(device_handle);
-
-            std::string health_status = "UNKNOWN";
-            uint64_t last_poll_ms = 0;
-            uint64_t staleness_ms = 0;
-
-            if (device_state) {
-                last_poll_ms = duration_cast<milliseconds>(device_state->last_poll_time.time_since_epoch()).count();
-
-                auto now = system_clock::now();
-                auto age_ms = duration_cast<milliseconds>(now - device_state->last_poll_time).count();
-
-                staleness_ms = age_ms;
-
-                // Determine health based on staleness
-                // OK: < 2 seconds, WARNING: 2-5 seconds, STALE: > 5 seconds
-                if (!is_available) {
-                    health_status = "UNAVAILABLE";
-                } else if (age_ms < 2000) {
-                    health_status = "OK";
-                } else if (age_ms < 5000) {
-                    health_status = "WARNING";
-                } else {
-                    health_status = "STALE";
-                }
-            } else {
-                health_status = "UNKNOWN";
-            }
-
-            nlohmann::json device_json = {
-                {"device_id", device.device_id}, {"health", health_status}, {"last_poll_ms", last_poll_ms},
-                {"staleness_ms", staleness_ms},  {"registered", true},      {"reported", nullptr}};
-            const auto reported_it = reported_by_id.find(device.device_id);
-            if (reported_it != reported_by_id.end()) {
-                device_json["reported"] = reported_device_health_json(*reported_it->second);
-                reported_by_id.erase(reported_it);
+        for (const auto &ds : ps.devices) {
+            nlohmann::json device_json = {{"device_id", ds.device_id},       {"health", ds.health},
+                                          {"last_poll_ms", ds.last_poll_ms}, {"staleness_ms", ds.staleness_ms},
+                                          {"registered", ds.registered},     {"reported", nullptr}};
+            if (ds.reported) {
+                device_json["reported"] = reported_device_health_json(*ds.reported);
             }
             devices_json.push_back(std::move(device_json));
         }
 
-        // Devices the provider reports but the registry does not carry — e.g.
-        // expected devices that failed their startup probe. Surfacing them is
-        // the point of #185: a "successful" install with a missing device is
-        // otherwise invisible here.
-        for (const auto &[reported_id, dh] : reported_by_id) {
-            devices_json.push_back({{"device_id", reported_id},
-                                    {"health", "UNKNOWN"},
-                                    {"last_poll_ms", 0},
-                                    {"staleness_ms", 0},
-                                    {"registered", false},
-                                    {"reported", reported_device_health_json(*dh)}});
-        }
-
-        // Build provider-level timing fields and supervision block.
         // supervision is always emitted as an object, never null.
-        nlohmann::json last_seen_ago_ms_json = nullptr;
-        int64_t uptime_seconds = 0;
-        nlohmann::json supervision_json;
-        std::string lifecycle_state = is_available ? "RUNNING" : "DOWN";
+        nlohmann::json supervision_json = {
+            {"enabled", ps.supervision.enabled},
+            {"attempt_count", ps.supervision.attempt_count},
+            {"max_attempts", ps.supervision.max_attempts},
+            {"crash_detected", ps.supervision.crash_detected},
+            {"circuit_open", ps.supervision.circuit_open},
+            {"next_restart_in_ms", ps.supervision.next_restart_in_ms.has_value()
+                                       ? nlohmann::json(ps.supervision.next_restart_in_ms.value())
+                                       : nlohmann::json(nullptr)}};
 
-        auto snap_it = snapshots.find(provider_id);
-        if (snap_it != snapshots.end()) {
-            const auto &snap = snap_it->second;
-            lifecycle_state = derive_lifecycle_state(is_available, snap);
-
-            // last_seen_ago_ms: null before first heartbeat, otherwise duration.
-            last_seen_ago_ms_json = snap.last_seen_ago_ms.has_value() ? nlohmann::json(snap.last_seen_ago_ms.value())
-                                                                      : nlohmann::json(nullptr);
-
-            // uptime_seconds forced to 0 when UNAVAILABLE (process may have crashed).
-            uptime_seconds = is_available ? snap.uptime_seconds : 0;
-
-            supervision_json = {{"enabled", snap.supervision_enabled},
-                                {"attempt_count", snap.attempt_count},
-                                {"max_attempts", snap.max_attempts},
-                                {"crash_detected", snap.crash_detected},
-                                {"circuit_open", snap.circuit_open},
-                                {"next_restart_in_ms", snap.next_restart_in_ms.has_value()
-                                                           ? nlohmann::json(snap.next_restart_in_ms.value())
-                                                           : nlohmann::json(nullptr)}};
-        } else {
-            // No supervisor or provider not yet registered: emit zeroed supervision.
-            supervision_json = {{"enabled", false},        {"attempt_count", 0},    {"max_attempts", 0},
-                                {"crash_detected", false}, {"circuit_open", false}, {"next_restart_in_ms", nullptr}};
-        }
-
-        // Provider-level reported block + degraded flag (#185). degraded means
-        // the provider is up but its own health report says something is wrong:
-        // a failed/unreachable device or a self-reported DEGRADED/FAULT state.
         nlohmann::json reported_provider_json = nullptr;
-        bool degraded = false;
-        if (has_reported) {
+        if (ps.reported) {
             nlohmann::json provider_metrics = nlohmann::json::object();
-            for (const auto &[key, value] : reported.provider().metrics()) {
+            for (const auto &[key, value] : ps.reported->metrics) {
                 provider_metrics[key] = value;
             }
-            reported_provider_json = {{"state", adpp::ProviderHealth::State_Name(reported.provider().state())},
-                                      {"message", reported.provider().message()},
-                                      {"metrics", provider_metrics}};
-            degraded = failed_device_count > 0 || reported.provider().state() == adpp::ProviderHealth::STATE_DEGRADED ||
-                       reported.provider().state() == adpp::ProviderHealth::STATE_FAULT;
+            reported_provider_json = {
+                {"state", ps.reported->state}, {"message", ps.reported->message}, {"metrics", provider_metrics}};
         }
 
-        providers_json.push_back({{"provider_id", provider_id},
-                                  {"state", state},
-                                  {"lifecycle_state", lifecycle_state},
-                                  {"last_seen_ago_ms", last_seen_ago_ms_json},
-                                  {"uptime_seconds", uptime_seconds},
-                                  {"device_count", devices.size()},
-                                  {"degraded", degraded},
-                                  {"failed_device_count", failed_device_count},
-                                  {"reported", reported_provider_json},
-                                  {"supervision", supervision_json},
-                                  {"devices", devices_json}});
+        providers_json.push_back(
+            {{"provider_id", ps.provider_id},
+             {"state", ps.state},
+             {"lifecycle_state", ps.lifecycle_state},
+             {"last_seen_ago_ms",
+              ps.last_seen_ago_ms.has_value() ? nlohmann::json(ps.last_seen_ago_ms.value()) : nlohmann::json(nullptr)},
+             {"uptime_seconds", ps.uptime_seconds},
+             {"device_count", ps.device_count},
+             {"degraded", ps.degraded},
+             {"failed_device_count", ps.failed_device_count},
+             {"reported", reported_provider_json},
+             {"supervision", supervision_json},
+             {"devices", devices_json}});
     }
 
     nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"providers", providers_json}};

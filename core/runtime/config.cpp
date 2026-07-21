@@ -647,10 +647,18 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             warn_unknown_keys(yaml["telemetry"], "telemetry",
                               {"enabled", "influxdb", "influx_url", "influx_org", "influx_bucket", "influx_token",
-                               "batch_size", "flush_interval_ms"});
+                               "batch_size", "flush_interval_ms", "health_interval_ms"});
 
             if (yaml["telemetry"]["enabled"]) {
                 config.telemetry.enabled = yaml["telemetry"]["enabled"].as<bool>();
+            }
+
+            if (yaml["telemetry"]["health_interval_ms"]) {
+                config.telemetry.health_interval_ms = yaml["telemetry"]["health_interval_ms"].as<int>();
+                if (config.telemetry.health_interval_ms < 0) {
+                    error = "telemetry.health_interval_ms must be >= 0";
+                    return false;
+                }
             }
 
             // Accept the older flat telemetry shape long enough to warn and map

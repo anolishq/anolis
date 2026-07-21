@@ -103,6 +103,11 @@ Fields:
    - `url`, `org`, `bucket`, `token`
    - `batch_size`, `flush_interval_ms`
    - `max_retry_buffer_size`
+3. `health_interval_ms` (int, default 15000, `0` disables): cadence of
+   provider/device health snapshot ingestion into InfluxDB
+   (`anolis_provider_health` / `anolis_device_health`). Each snapshot performs
+   a live provider GetHealth round-trip (bread: a GET_WATCHDOG bus query per
+   armed device), so raise/lower deliberately.
 
 Compatibility aliases (deprecated but accepted):
 

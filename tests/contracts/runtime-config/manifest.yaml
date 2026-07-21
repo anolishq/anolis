@@ -19,6 +19,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/06-hooks-scalar-edge-cases.yaml
     expect: valid
     note: hook args with bool-like and text scalar edge cases
+  - file: tests/contracts/runtime-config/valid/07-telemetry-health-interval.yaml
+    expect: valid
+    note: telemetry health snapshot ingestion cadence (health_interval_ms, #203)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -32,6 +35,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/04-duplicate-keys-provider-command.yaml
     expect: invalid/schema
     note: duplicate mapping key in provider command block
+  - file: tests/contracts/runtime-config/invalid/schema/05-negative-health-interval.yaml
+    expect: invalid/schema
+    note: telemetry.health_interval_ms must be >= 0
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime

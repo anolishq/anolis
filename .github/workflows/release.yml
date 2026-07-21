@@ -228,11 +228,14 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           SCHEMA_ARTIFACT="anolis-${VERSION}-telemetry-schema.tar.gz"
           SCHEMA_PATH="schemas/telemetry/telemetry-timeseries.schema.v1.json"
+          HEALTH_SCHEMA_PATH="schemas/telemetry/telemetry-health-timeseries.schema.v1.json"
           BASELINE_PATH="docs/contracts/telemetry-timeseries-baseline.md"
+          HEALTH_BASELINE_PATH="docs/contracts/telemetry-health-timeseries-baseline.md"
           FIXTURE_MANIFEST_PATH="tests/contracts/telemetry-timeseries/examples/manifest.yaml"
+          HEALTH_FIXTURE_MANIFEST_PATH="tests/contracts/telemetry-health-timeseries/examples/manifest.yaml"
           VALIDATOR_PATH="tests/contracts/telemetry-timeseries/validate-telemetry-timeseries.py"
 
-          for path in "${SCHEMA_PATH}" "${BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" "${VALIDATOR_PATH}"; do
+          for path in "${SCHEMA_PATH}" "${HEALTH_SCHEMA_PATH}" "${BASELINE_PATH}" "${HEALTH_BASELINE_PATH}" "${FIXTURE_MANIFEST_PATH}" "${HEALTH_FIXTURE_MANIFEST_PATH}" "${VALIDATOR_PATH}"; do
             if [ ! -f "${path}" ]; then
               echo "ERROR: required schema artifact input missing: ${path}" >&2
               exit 1
@@ -242,10 +245,14 @@ jobs:
           mkdir -p schema-staging/schemas/telemetry
           mkdir -p schema-staging/docs/contracts
           mkdir -p schema-staging/tests/contracts/telemetry-timeseries/examples
+          mkdir -p schema-staging/tests/contracts/telemetry-health-timeseries/examples
 
           cp "${SCHEMA_PATH}" schema-staging/schemas/telemetry/
+          cp "${HEALTH_SCHEMA_PATH}" schema-staging/schemas/telemetry/
           cp "${BASELINE_PATH}" schema-staging/docs/contracts/
+          cp "${HEALTH_BASELINE_PATH}" schema-staging/docs/contracts/
           cp "${FIXTURE_MANIFEST_PATH}" schema-staging/tests/contracts/telemetry-timeseries/examples/
+          cp "${HEALTH_FIXTURE_MANIFEST_PATH}" schema-staging/tests/contracts/telemetry-health-timeseries/examples/
           cp "${VALIDATOR_PATH}" schema-staging/tests/contracts/telemetry-timeseries/
 
           tar -czf "${SCHEMA_ARTIFACT}" -C schema-staging .

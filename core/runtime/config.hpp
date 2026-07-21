@@ -91,6 +91,11 @@ struct TelemetryConfig {
     // Queue settings
     size_t queue_size = 10000;            // Event queue size
     size_t max_retry_buffer_size = 1000;  // Max events to buffer on write failure
+
+    // Health snapshot ingestion cadence (#203). Each snapshot is a live ADPP
+    // GetHealth round-trip per provider (bread: a GET_WATCHDOG bus query per
+    // armed device). 0 disables ingestion.
+    int health_interval_ms = 15000;
 };
 
 /**

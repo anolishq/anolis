@@ -1,0 +1,17 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+telemetry:
+  enabled: true
+  health_interval_ms: 30000
+  influxdb:
+    url: http://localhost:8086
+    org: anolis
+    bucket: anolis
+
+http:
+  enabled: false
+
+logging:
+  level: info

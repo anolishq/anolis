@@ -497,6 +497,14 @@ bool Runtime::init_telemetry(std::string & /*error*/) {
             // Don't fail runtime initialization - telemetry is optional
         } else {
             LOG_INFO("[Runtime] Telemetry sink started");
+
+            // Health snapshot ingestion (#203) rides the running sink.
+            if (config_.telemetry.health_interval_ms > 0) {
+                health_snapshot_task_ = std::make_unique<telemetry::HealthSnapshotTask>(
+                    config_.telemetry.health_interval_ms, influx_config.runtime_name, provider_registry_, *registry_,
+                    *state_cache_, supervisor_.get(), *telemetry_sink_);
+                health_snapshot_task_->start();
+            }
         }
     } else {
         LOG_INFO("[Runtime] Telemetry disabled in config");
@@ -643,6 +651,12 @@ void Runtime::shutdown() {
     if (http_server_) {
         LOG_INFO("[Runtime] Stopping HTTP server");
         http_server_->stop();
+    }
+
+    // Stop health ingestion before its sink
+    if (health_snapshot_task_) {
+        LOG_INFO("[Runtime] Stopping health snapshot task");
+        health_snapshot_task_->stop();
     }
 
     // Stop telemetry sink

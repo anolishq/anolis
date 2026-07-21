@@ -24,6 +24,9 @@ Out of scope in this wave:
 1. `mode_change`
 2. `parameter_change`
 
+The `anolis_provider_health` / `anolis_device_health` measurements have their
+own companion baseline: `telemetry-health-timeseries-baseline.md`.
+
 ## Locked Contract Summary
 
 ## Measurement
