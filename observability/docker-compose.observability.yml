@@ -48,6 +48,13 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/signal-history.json
+      # Datasource provisioning inputs (expanded by Grafana in
+      # provisioning/datasources/influxdb.yml — shared with the native
+      # install path, which sets the same variables via systemd).
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_ORG=${INFLUXDB_ORG:-anolis}
+      - INFLUX_BUCKET=${INFLUXDB_BUCKET:-anolis}
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN:-dev-token}
     depends_on:
       influxdb:
         condition: service_healthy
