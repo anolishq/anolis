@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034  # WITH_OBSERVABILITY is a future flag (anolishq/anolis#162)
 # Anolis Runtime — Standalone Provisioning Script
 #
 # Config-driven: a deployment is a config (a machine-profile + configs + behaviors).
@@ -38,6 +37,16 @@ readonly TELEMETRY_ENV_FILE="/etc/anolis/telemetry-export.env"
 readonly RUNTIME_ENV_FILE="/etc/anolis/runtime.env"
 # Pinned for reproducible installs; override via the environment if needed.
 TELEMETRY_EXPORT_VERSION="${TELEMETRY_EXPORT_VERSION:-0.1.1}"
+# Observability provisioning (#162): secrets/config outside ${PREFIX}, same
+# rationale as the two env files above.
+readonly OBSERVABILITY_ENV_FILE="/etc/anolis/observability.env"
+readonly GRAFANA_ENV_FILE="/etc/anolis/observability-grafana.env"
+readonly GRAFANA_DROPIN_DIR="/etc/systemd/system/grafana-server.service.d"
+readonly INFLUX_HOST="http://127.0.0.1:8086"
+# Co-located Pi bucket retention (30 d). Raising it is a real trade-off (SD
+# wear, disk growth, query cost) — see observability/README.md "Data
+# Retention". Override via the environment at install time if you must.
+OBSERVABILITY_RETENTION="${OBSERVABILITY_RETENTION:-720h}"
 
 # =============================================================================
 # Globals (set by argument parsing)
@@ -102,7 +111,11 @@ Build only (no install; run on a dev box, no root):
 Common:
   --with-telemetry-export  Also install the telemetry-export service (online;
                            installed inert until secrets are provided)
-  --with-observability     Also install observability stack (not yet — #162)
+  --with-observability     Also install the observability stack: InfluxDB 2.x +
+                           Grafana as native apt packages + systemd services
+                           (online; 30 d bucket retention; scoped tokens).
+                           These services start immediately — the global
+                           --no-start gates only the runtime.
   --no-start             Install but don't start services
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
@@ -112,6 +125,9 @@ Common:
 
 Environment:
   GITHUB_TOKEN           GitHub token (optional, avoids release-download rate limits)
+  OBSERVABILITY_RETENTION  InfluxDB bucket retention for --with-observability
+                           (default 720h = 30 d; see observability/README.md
+                           for the trade-offs before raising it)
 
 Examples:
   # Online install from a config (host has internet):
@@ -132,9 +148,7 @@ parse_args() {
                 WITH_TELEMETRY_EXPORT=1
                 shift ;;
             --with-observability)
-                # Observability provisioning is tracked separately (#162).
                 WITH_OBSERVABILITY=1
-                log_warn "--with-observability is not implemented yet (anolishq/anolis#162) — ignored"
                 shift ;;
             --no-start)  NO_START=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
@@ -762,6 +776,271 @@ ENV
 }
 
 # =============================================================================
+# Phase: Observability stack (InfluxDB 2.x + Grafana, native apt) — #162
+# =============================================================================
+# Co-located topology: both services on this device, runtime writes to
+# localhost. The separate-host topology stays the compose stack from the
+# observability release asset, run on the monitoring host.
+#
+# Online-only in v1 (vendor apt repos + release asset); offline provisioning
+# (mirrored repos / bundled debs) is tracked with #100. Unlike the runtime
+# start, these services start even under --no-start: `influx setup` needs a
+# running influxd, and storage carries no actuation-safety surface.
+
+# Pure emitters (stdout only) so the bats suite can cover them without root.
+emit_grafana_dropin() {
+    cat <<EOF
+# Managed by anolis install.sh (--with-observability). Do not edit here;
+# connection details live in ${GRAFANA_ENV_FILE}.
+# The '-' prefix: a missing env file leaves Grafana up (datasource degraded)
+# instead of hard-failing the unit — the already-set-up-influx path can
+# legitimately lack the file until the operator writes it.
+[Service]
+EnvironmentFile=-${GRAFANA_ENV_FILE}
+EOF
+}
+
+emit_grafana_env() {
+    # $1 = read-scoped InfluxDB token, $2 = Grafana admin password.
+    # Grafana expands \${INFLUX_*} in the provisioned datasource yml; the
+    # GF_* vars mirror the compose stack's viewer experience. The admin
+    # password only takes effect on Grafana's FIRST boot (it seeds the db);
+    # afterwards it is inert and the db is authoritative.
+    cat <<EOF
+# Grafana -> InfluxDB connection (READ-scoped token; never the admin token).
+# 0600 root:root — systemd reads this as root and injects it into the
+# grafana-server process.
+INFLUX_URL=${INFLUX_HOST}
+INFLUX_ORG=anolis
+INFLUX_BUCKET=anolis
+INFLUX_TOKEN=$1
+GF_SECURITY_ADMIN_PASSWORD=$2
+GF_AUTH_ANONYMOUS_ENABLED=true
+GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/signal-history.json
+EOF
+}
+
+# Add the InfluxData + Grafana apt repos with dearmored keyrings. Idempotent.
+_obs_apt_repos() {
+    if ! command -v gpg &>/dev/null; then
+        apt-get install -y -qq gnupg || return 1
+    fi
+    install -d -m 755 /etc/apt/keyrings || return 1
+    # Keyrings are written via temp+mv: a mid-stream curl failure must not
+    # leave a partial .gpg that the [[ -f ]] guard treats as done forever.
+    if [[ ! -f /etc/apt/keyrings/influxdata-archive.gpg ]]; then
+        if ! curl -fsSL https://repos.influxdata.com/influxdata-archive.key \
+            | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg.tmp; then
+            rm -f /etc/apt/keyrings/influxdata-archive.gpg.tmp
+            return 1
+        fi
+        mv /etc/apt/keyrings/influxdata-archive.gpg.tmp /etc/apt/keyrings/influxdata-archive.gpg || return 1
+    fi
+    if [[ ! -f /etc/apt/sources.list.d/influxdata.list ]]; then
+        echo "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main" \
+            > /etc/apt/sources.list.d/influxdata.list || return 1
+    fi
+    if [[ ! -f /etc/apt/keyrings/grafana.gpg ]]; then
+        if ! curl -fsSL https://apt.grafana.com/gpg.key \
+            | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg.tmp; then
+            rm -f /etc/apt/keyrings/grafana.gpg.tmp
+            return 1
+        fi
+        mv /etc/apt/keyrings/grafana.gpg.tmp /etc/apt/keyrings/grafana.gpg || return 1
+    fi
+    if [[ ! -f /etc/apt/sources.list.d/grafana.list ]]; then
+        echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
+            > /etc/apt/sources.list.d/grafana.list || return 1
+    fi
+    return 0
+}
+
+# Bootstrap a FRESH InfluxDB instance: non-interactive setup (org/bucket at
+# the pinned retention, generated admin credentials), then two scoped tokens —
+# write-only for the runtime, read-only for Grafana/telemetry-export. An
+# already-set-up instance is left entirely alone (the operator owns it).
+_obs_setup_influx() {
+    local i
+    for i in $(seq 1 15); do
+        curl -fsS "${INFLUX_HOST}/health" &>/dev/null && break
+        [[ ${i} -eq 15 ]] && { log_warn "observability: influxdb did not come up on ${INFLUX_HOST}"; return 1; }
+        sleep 2
+    done
+
+    local setup_allowed
+    setup_allowed=$(curl -fsS "${INFLUX_HOST}/api/v2/setup" 2>/dev/null | grep -o '"allowed": *[a-z]*' | grep -o 'true\|false' || true)
+    if [[ "${setup_allowed}" != "true" ]]; then
+        log_skip "observability: influxdb already set up — bucket/tokens left alone"
+        if [[ ! -f "${GRAFANA_ENV_FILE}" ]]; then
+            log_warn "observability: no ${GRAFANA_ENV_FILE} — create a read-scoped token and write the file manually (see observability/README.md)"
+        fi
+        return 0
+    fi
+
+    local admin_pw admin_token
+    admin_pw=$(_generate_api_token)
+    admin_token=$(_generate_api_token)
+
+    # Note: `influx setup` also writes a CLI config with the admin token to
+    # /root/.influxdbv2/configs (0600). That is the influx CLI's own state.
+    influx setup --force --host "${INFLUX_HOST}" \
+        --username admin --password "${admin_pw}" \
+        --org anolis --bucket anolis --retention "${OBSERVABILITY_RETENTION}" \
+        --token "${admin_token}" >/dev/null || { log_warn "observability: influx setup failed"; return 1; }
+
+    local bucket_id write_token read_token
+    bucket_id=$(influx bucket list --host "${INFLUX_HOST}" --token "${admin_token}" --name anolis --hide-headers | awk '{print $1}')
+    [[ -n "${bucket_id}" ]] || { log_warn "observability: could not resolve bucket id"; return 1; }
+    write_token=$(influx auth create --host "${INFLUX_HOST}" --token "${admin_token}" --org anolis \
+        --write-bucket "${bucket_id}" --description "anolis-runtime telemetry write" --json \
+        | grep -o '"token": *"[^"]*"' | cut -d'"' -f4)
+    read_token=$(influx auth create --host "${INFLUX_HOST}" --token "${admin_token}" --org anolis \
+        --read-bucket "${bucket_id}" --description "anolis grafana/export read" --json \
+        | grep -o '"token": *"[^"]*"' | cut -d'"' -f4)
+    [[ -n "${write_token}" && -n "${read_token}" ]] || { log_warn "observability: token creation failed"; return 1; }
+
+    # Operator reference file (0600 root:root, created before the secrets land).
+    install -m 600 -o root -g root /dev/null "${OBSERVABILITY_ENV_FILE}"
+    {
+        echo "# InfluxDB admin credentials + scoped tokens, generated by install.sh."
+        echo "# The runtime uses the write token; Grafana/telemetry-export the read token."
+        echo "INFLUXDB_ADMIN_USERNAME=admin"
+        echo "INFLUXDB_ADMIN_PASSWORD=${admin_pw}"
+        echo "INFLUXDB_ADMIN_TOKEN=${admin_token}"
+        echo "INFLUXDB_WRITE_TOKEN=${write_token}"
+        echo "INFLUXDB_READ_TOKEN=${read_token}"
+        echo "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}"
+    } >> "${OBSERVABILITY_ENV_FILE}"
+
+    # Grafana connection env (read token + first-boot admin password).
+    install -m 600 -o root -g root /dev/null "${GRAFANA_ENV_FILE}"
+    emit_grafana_env "${read_token}" "${_OBS_GRAFANA_PW}" >> "${GRAFANA_ENV_FILE}"
+
+    # Wire the runtime's write token (config.cpp reads INFLUXDB_TOKEN from the
+    # environment when the yaml carries no token). Unconditional on this path:
+    # we only get here after a FRESH influx bootstrap, so any pre-existing
+    # token belongs to a wiped instance and is guaranteed dead.
+    if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+        sed -i '/^INFLUXDB_TOKEN=/d' "${RUNTIME_ENV_FILE}"
+        echo "INFLUXDB_TOKEN=${write_token}" >> "${RUNTIME_ENV_FILE}"
+        log_ok "observability: runtime write token set in ${RUNTIME_ENV_FILE}"
+    fi
+
+    # Fill the telemetry-export read token if the service is installed inert.
+    if [[ -f "${TELEMETRY_ENV_FILE}" ]] && grep -qE '^ANOLIS_EXPORT_INFLUX_TOKEN=$' "${TELEMETRY_ENV_FILE}"; then
+        sed -i "s|^ANOLIS_EXPORT_INFLUX_TOKEN=$|ANOLIS_EXPORT_INFLUX_TOKEN=${read_token}|" "${TELEMETRY_ENV_FILE}"
+        log_ok "observability: telemetry-export read token filled in ${TELEMETRY_ENV_FILE}"
+    fi
+
+    log_ok "observability: influxdb bootstrapped (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
+    return 0
+}
+
+# Install dashboards + provisioning from the release observability asset at
+# the installed runtime's version, and wire the Grafana service environment.
+_obs_provision_grafana() {
+    local ver
+    ver=$("${PREFIX}/bin/anolis-runtime" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    [[ -n "${ver}" ]] || { log_warn "observability: could not determine runtime version for the dashboard asset"; return 1; }
+
+    # Refresh on every run: dashboards/provisioning are release artifacts, not
+    # operator-owned files (UI edits live in Grafana's db, not here).
+    # Fetched inline, NOT via _stage_fetch — that helper exit-1s on failure,
+    # which would abort the whole install after the runtime is already
+    # provisioned; this optional phase must only ever warn-skip.
+    local tmp asset auth=()
+    asset="anolis-${ver}-observability.tar.gz"
+    tmp=$(mktemp -d) || return 1
+    [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    if ! curl -fsSL "${auth[@]}" -o "${tmp}/${asset}" \
+        "https://github.com/anolishq/anolis/releases/download/v${ver}/${asset}"; then
+        log_warn "observability: could not download ${asset} (unreleased dev version, or GitHub unreachable)"
+        rm -rf "${tmp}"
+        return 1
+    fi
+    # Extract to the temp dir first — a corrupt download must not destroy the
+    # previously provisioned copy.
+    install -d "${tmp}/extract" || { rm -rf "${tmp}"; return 1; }
+    if ! tar -xzf "${tmp}/${asset}" -C "${tmp}/extract"; then
+        log_warn "observability: ${asset} is not a valid tarball"
+        rm -rf "${tmp}"
+        return 1
+    fi
+    rm -rf "${PREFIX}/observability"
+    mv "${tmp}/extract" "${PREFIX}/observability" || { rm -rf "${tmp}"; return 1; }
+    rm -rf "${tmp}"
+
+    # The datasource yml must be the env-templated form (assets >= the same
+    # release that carries this phase). A hardcoded pre-templating asset
+    # would silently point Grafana at a dead host/token.
+    if ! grep -q 'INFLUX_URL' "${PREFIX}/observability/grafana/provisioning/datasources/influxdb.yml"; then
+        log_warn "observability: asset datasource is not env-templated (pre-#162 asset?) — Grafana panels will not connect"
+    fi
+
+    install -d -m 755 /var/lib/grafana/dashboards || return 1
+    install -m 644 "${PREFIX}"/observability/grafana/dashboards/*.json /var/lib/grafana/dashboards/ || return 1
+    install -d -m 755 /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards || return 1
+    install -m 644 "${PREFIX}/observability/grafana/provisioning/datasources/influxdb.yml" /etc/grafana/provisioning/datasources/ || return 1
+    install -m 644 "${PREFIX}/observability/grafana/provisioning/dashboards/default.yml" /etc/grafana/provisioning/dashboards/ || return 1
+
+    install -d -m 755 "${GRAFANA_DROPIN_DIR}" || return 1
+    emit_grafana_dropin > "${GRAFANA_DROPIN_DIR}/anolis.conf" || return 1
+    systemctl daemon-reload
+    return 0
+}
+
+phase_observability() {
+    [[ ${WITH_OBSERVABILITY} -eq 1 ]] || return 0
+
+    if ! command -v apt-get &>/dev/null || ! command -v systemctl &>/dev/null; then
+        log_warn "observability: apt/systemd not available — skipped"
+        return 0
+    fi
+    if ! curl -fsS --connect-timeout 3 https://repos.influxdata.com/influxdata-archive.key &>/dev/null \
+        || ! curl -fsS --connect-timeout 3 https://apt.grafana.com/gpg.key &>/dev/null; then
+        log_warn "observability: vendor apt repos unreachable (offline?) — skipped"
+        log_info "  The runtime install is unaffected; re-run with --with-observability once online."
+        return 0
+    fi
+
+    _obs_apt_repos || { log_warn "observability: apt repo setup failed — skipped"; return 0; }
+
+    if ! dpkg -s influxdb2 &>/dev/null || ! dpkg -s influxdb2-cli &>/dev/null || ! dpkg -s grafana &>/dev/null; then
+        log_info "observability: installing influxdb2 + grafana (this can take a few minutes)"
+        # shellcheck disable=SC2015  # intentional: error handler covers both failures
+        apt-get update -qq && apt-get install -y -qq influxdb2 influxdb2-cli grafana || {
+            log_warn "observability: package install failed — skipped"
+            return 0
+        }
+    else
+        log_skip "observability: influxdb2 + grafana already installed"
+    fi
+
+    # Grafana admin password: generated once here so both the operator file
+    # and the Grafana env agree; only Grafana's first boot consumes it (an
+    # existing grafana.db keeps its own password — observability.env records
+    # what was offered, not necessarily what the db holds).
+    _OBS_GRAFANA_PW=$(_generate_api_token) || { log_warn "observability: secret generation failed — skipped"; return 0; }
+
+    systemctl enable --now influxdb 2>/dev/null || { log_warn "observability: failed to start influxdb"; return 0; }
+    _obs_setup_influx || return 0
+    _obs_provision_grafana || { log_warn "observability: grafana provisioning failed — grafana-server NOT enabled/started"; return 0; }
+    systemctl enable --now grafana-server 2>/dev/null || { log_warn "observability: failed to start grafana"; return 0; }
+
+    local i
+    for i in $(seq 1 15); do
+        if curl -fsS http://127.0.0.1:3000/api/health &>/dev/null; then
+            log_ok "observability: influxdb (:8086) and grafana (:3000) up"
+            return 0
+        fi
+        sleep 2
+    done
+    log_warn "observability: grafana health check timed out (check: journalctl -u grafana-server)"
+    return 0
+}
+
+# =============================================================================
 # Phase 17: Hostname
 # =============================================================================
 
@@ -923,6 +1202,15 @@ phase_summary() {
     if [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]]; then
         log_info "Telemetry: anolis-telemetry-export (secrets: ${TELEMETRY_ENV_FILE})"
     fi
+    if [[ ${WITH_OBSERVABILITY} -eq 1 ]]; then
+        # Paths only, never secrets — installs are routinely piped through tee.
+        local grafana_host="localhost"
+        if [[ "${ARCH}" != "x86_64" ]]; then
+            grafana_host="$(hostname 2>/dev/null || echo localhost).local"
+        fi
+        log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
+        log_info "InfluxDB:  ${INFLUX_HOST} (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
+    fi
 
     if [[ "${ARCH}" != "x86_64" ]]; then
         local hostname_display
@@ -977,13 +1265,33 @@ do_uninstall() {
     fi
 
     # Secrets live outside ${PREFIX}, so they survive the rm -rf above.
-    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}"; do
+    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}" "${OBSERVABILITY_ENV_FILE}" "${GRAFANA_ENV_FILE}"; do
         if [[ -f "${secret}" ]]; then
             rm -f "${secret}"
             log_ok "removed ${secret}"
         fi
     done
     rmdir /etc/anolis 2>/dev/null || true
+
+    # Observability (#162): stop what we enabled and remove what we
+    # provisioned. The apt packages and the DATA are deliberately kept — an
+    # uninstall must not silently destroy recorded telemetry.
+    if [[ -d "${GRAFANA_DROPIN_DIR}" || -f /etc/apt/sources.list.d/influxdata.list ]]; then
+        systemctl disable --now grafana-server 2>/dev/null || true
+        systemctl disable --now influxdb 2>/dev/null || true
+        rm -rf "${GRAFANA_DROPIN_DIR}"
+        rm -f /etc/grafana/provisioning/datasources/influxdb.yml
+        rm -f /etc/grafana/provisioning/dashboards/default.yml
+        rm -rf /var/lib/grafana/dashboards
+        systemctl daemon-reload 2>/dev/null || true
+        log_ok "observability: services disabled, provisioning removed"
+        log_info "Kept: influxdb2/grafana packages, /var/lib/influxdb2 and /var/lib/grafana (data)."
+        log_info "Full purge (DESTROYS recorded data):"
+        log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
+        log_info "  rm -rf /var/lib/influxdb2 /var/lib/grafana /root/.influxdbv2"
+        log_info "  rm -f /etc/apt/sources.list.d/influxdata.list /etc/apt/sources.list.d/grafana.list"
+        log_info "  rm -f /etc/apt/keyrings/influxdata-archive.gpg /etc/apt/keyrings/grafana.gpg"
+    fi
 
     log_ok "uninstall complete"
     log_info "Note: system user '${ANOLIS_USER}' was preserved"
@@ -1384,6 +1692,7 @@ main() {
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
         [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] && dry_run_phase "provision telemetry-export service (venv + config + unit; inert until secrets)"
+        [[ ${WITH_OBSERVABILITY} -eq 1 ]] && dry_run_phase "provision observability stack (influxdb2 + grafana via vendor apt; retention ${OBSERVABILITY_RETENTION}; scoped tokens; services start regardless of --no-start)"
         dry_run_phase "set hostname"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "start services"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "health check"
@@ -1408,6 +1717,7 @@ main() {
     phase_manifest
     phase_systemd
     phase_telemetry_export
+    phase_observability
     phase_hostname
     phase_start
     phase_health

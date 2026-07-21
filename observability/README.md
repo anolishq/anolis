@@ -125,9 +125,9 @@ older runtimes or with ingestion disabled):
 
 The compose stack creates the `anolis` bucket with **infinite retention**
 (InfluxDB's default). The native co-located install (`install.sh
---with-observability`, #162 — pending) will default to **30 days**. To
-change retention (the `update` subcommand selects by `--id`; `--name` there
-means *rename*):
+--with-observability`) defaults to **30 days** (`OBSERVABILITY_RETENTION`
+env at install time). To change retention afterwards (the `update`
+subcommand selects by `--id`; `--name` there means *rename*):
 
 ```bash
 influx bucket update \

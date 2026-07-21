@@ -182,7 +182,12 @@ how the engines diverged):
   **examples**); the observability stack (InfluxDB+Grafana compose) ships as
   `anolis-<v>-observability.tar.gz`. `--with-telemetry-export` installs the
   telemetry-export service (venv + systemd unit, inert until secrets; #137);
-  `--with-observability` still warns as not-implemented (#162).
+  `--with-observability` provisions the co-located stack natively (#162):
+  influxdb2 + grafana from the vendor apt repos as systemd services, 30 d
+  bucket retention, scoped tokens (write for the runtime, read for
+  Grafana/telemetry-export), dashboards from the observability release
+  asset. Online-only; warn-skips offline. The compose stack remains the
+  separate-host topology, run on the monitoring host.
 
 ## Workbench / UI
 
@@ -210,7 +215,8 @@ Logs: plain-text stderr only (internal format). Health: `/v0/runtime/status`
 Prometheus endpoint** (the `metrics.json` release asset is repo engineering
 metrics from CI, not runtime telemetry). Live events: SSE `/v0/events` with
 quality states `OK/STALE/UNAVAILABLE/FAULT`. Operator dashboards: the
-released observability stack (Grafana + InfluxDB compose).
+released observability stack (Grafana + InfluxDB) — compose on a monitoring
+host, or natively on the device via `install.sh --with-observability`.
 
 ---
 

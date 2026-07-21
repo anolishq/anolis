@@ -29,6 +29,20 @@ commit messages only.
   with the previous defaults, so existing docker workflows are unchanged.
   The observability README gained a data-retention section (30 d native
   default, override command, and the trade-offs of raising it).
+- `install.sh --with-observability` is implemented (#162): provisions the
+  co-located observability stack natively — influxdb2 + grafana from the
+  vendor apt repos as systemd services (no Docker on the device), a
+  non-interactive InfluxDB bootstrap (org/bucket `anolis`, **30 d bucket
+  retention**, generated admin credentials in a 0600 root env file), and
+  **scoped tokens**: a write-only token wired into the runtime's env file
+  and a read-only token for Grafana (via a systemd drop-in) and
+  telemetry-export. Dashboards/datasource provisioning come from the
+  release observability asset at the installed runtime version. Online-only
+  (warn-skips offline, preserving the `--local` guarantee); services start
+  even under `--no-start` (that flag gates only the runtime); uninstall
+  disables the services and removes provisioning but deliberately keeps the
+  apt packages and recorded data, with purge steps printed. The compose
+  stack remains the separate-host topology.
 
 - Provider/device health metrics are now ingested into InfluxDB (#203): when
   telemetry is enabled, a snapshot task writes `anolis_provider_health` and

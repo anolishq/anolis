@@ -348,8 +348,10 @@ Higher-level orchestration and UI layers build on top of this foundation.
 ### Observability Stack (Optional)
 
 - **InfluxDB** (v2.x) — Time-series telemetry storage
-- **Grafana** (v9.x+) — Visualization dashboards
-- **Docker** + **Docker Compose** — Container orchestration
+- **Grafana** (v13.x) — Visualization dashboards
+- **Docker** + **Docker Compose** — for the compose (separate-host) form;
+  the co-located device form installs both natively via
+  `install.sh --with-observability` (no Docker required)
 
 ### Build & Development
 
