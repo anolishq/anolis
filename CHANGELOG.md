@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-07-21
+
 ### Added
 
 - New Grafana dashboard `I/O & Watchdog Health` (`anolis-io-health`) in the
