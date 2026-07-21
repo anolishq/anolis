@@ -1,5 +1,17 @@
 # Grafana Datasource Provisioning
-# Auto-configures InfluxDB connection on startup
+# Auto-configures InfluxDB connection on startup.
+#
+# Connection details come from the environment (Grafana expands ${VAR} in
+# provisioning files; no defaults are possible here, so every deployment must
+# set all four):
+#   INFLUX_URL    — e.g. http://influxdb:8086 (compose) / http://127.0.0.1:8086 (native)
+#   INFLUX_ORG    — e.g. anolis
+#   INFLUX_BUCKET — e.g. anolis
+#   INFLUX_TOKEN  — a READ-scoped token; never the admin token
+#
+# The compose file sets these from .env; the native install (install.sh
+# --with-observability, anolishq/anolis#162) sets them via the Grafana
+# service environment.
 
 apiVersion: 1
 
@@ -7,13 +19,13 @@ datasources:
   - name: InfluxDB
     type: influxdb
     access: proxy
-    url: http://influxdb:8086
+    url: ${INFLUX_URL}
     jsonData:
       version: Flux
-      organization: anolis
-      defaultBucket: anolis
+      organization: ${INFLUX_ORG}
+      defaultBucket: ${INFLUX_BUCKET}
       tlsSkipVerify: true
     secureJsonData:
-      token: dev-token
+      token: ${INFLUX_TOKEN}
     isDefault: true
     editable: true

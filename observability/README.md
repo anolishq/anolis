@@ -2,8 +2,8 @@
 
 This directory contains Docker configuration for the Anolis telemetry stack:
 
-- **InfluxDB 2.7**: Time-series database for signal history
-- **Grafana 10.3.1**: Visualization dashboards
+- **InfluxDB 2.9**: Time-series database for signal history
+- **Grafana 13.1.0**: Visualization dashboards
 
 ## Quick Start
 
@@ -74,6 +74,11 @@ telemetry:
 
 ## Dashboards
 
+All bundled dashboards query bucket `anolis` directly (matching the
+provisioned default); if you change `INFLUXDB_BUCKET`, the datasource will
+follow but the bundled dashboard queries will not — keep the bucket named
+`anolis` unless you also edit the dashboards.
+
 ### Signal History
 
 Time-series visualization of signal values:
@@ -96,7 +101,64 @@ Status overview of all devices:
 - **Quality table**: Per-signal quality status
 - **Staleness gauge**: Time since last update
 
+### I/O & Watchdog Health
+
+Transport and safety-layer health from the runtime's health ingestion
+(`telemetry.health_interval_ms`, anolis 0.1.37+; the panels are empty on
+older runtimes or with ingestion disabled):
+
+- **Status table**: latest io counters, watchdog state, missing/excluded
+  flags per device
+- **I/O failure rate** and **retried-attempts slope** per device — the
+  retried-attempts slope is the leading indicator for bus degradation
+  (rising retries while `io_failed` stays flat means the retry budget is
+  masking a failing bus)
+- **Watchdog**: armed state, cumulative trip count, and per-trip
+  annotations derived from `watchdog_trip_count` steps
+- **Provider degraded / failed-device count** — the alerting primitive for
+  silent device loss
+- E-stop signatures: a power-cut e-stop shows as `io_failed` accrual and
+  device blackout; a signal-wired e-stop keeps the bus alive (see the
+  machine-profile `safety.estop_topology` docs)
+
+## Data Retention
+
+The compose stack creates the `anolis` bucket with **infinite retention**
+(InfluxDB's default). The native co-located install (`install.sh
+--with-observability`, #162 — pending) will default to **30 days**. To
+change retention (the `update` subcommand selects by `--id`; `--name` there
+means *rename*):
+
+```bash
+influx bucket update \
+  --id "$(influx bucket list --name anolis --hide-headers | cut -f1)" \
+  --retention 30d   # or 90d, 0 (infinite), ...
+```
+
+Raising retention is a deliberate trade-off, not a free knob:
+
+- **Disk growth and (on a Pi) SD-card wear**: the TSM engine compacts
+  continuously; more retained data means more storage and more write
+  amplification on flash.
+- **Query cost**: long-window Flux queries over months of data get slow on
+  small hosts; dashboards default to bounded windows for a reason.
+- **The real fix for long experiments**: if you need months of history,
+  prefer the separate-host topology (run this stack on a monitoring host
+  and point the runtime's `telemetry.influxdb.url` at it) or add a
+  downsampling task, rather than growing the co-located Pi bucket
+  unboundedly.
+
+Shortening retention deletes data older than the new window at the next
+retention enforcement pass — export anything you need first
+(`anolis-telemetry-export`).
+
 ## Data Schema
+
+Health measurements (`anolis_provider_health`, `anolis_device_health`) are
+documented in `docs/contracts/telemetry-health-timeseries-baseline.md` in
+the anolis repository (also shipped in the
+`anolis-<version>-telemetry-schema.tar.gz` release artifact — not inside
+this observability tarball); the signal measurement is below.
 
 InfluxDB measurement: `anolis_signal`
 

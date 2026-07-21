@@ -15,6 +15,21 @@ commit messages only.
 
 ### Added
 
+- New Grafana dashboard `I/O & Watchdog Health` (`anolis-io-health`) in the
+  observability asset (#162): per-device io counters and watchdog state, I/O
+  failure rate and retried-attempts slope (the bus-degradation leading
+  indicator), watchdog-trip annotations derived from `watchdog_trip_count`
+  steps, device staleness, and provider degraded/failed-device panels — all
+  over the `anolis_*_health` measurements added in #203.
+- Observability asset: the Grafana datasource is now provisioned from
+  environment variables (`INFLUX_URL`/`INFLUX_ORG`/`INFLUX_BUCKET`/
+  `INFLUX_TOKEN`) instead of a hardcoded Docker-DNS URL and `dev-token`,
+  so the same provisioning files serve the compose stack and the native
+  install path (#162). The compose file supplies the values from `.env`
+  with the previous defaults, so existing docker workflows are unchanged.
+  The observability README gained a data-retention section (30 d native
+  default, override command, and the trade-offs of raising it).
+
 - Provider/device health metrics are now ingested into InfluxDB (#203): when
   telemetry is enabled, a snapshot task writes `anolis_provider_health` and
   `anolis_device_health` rows every `telemetry.health_interval_ms` (default
