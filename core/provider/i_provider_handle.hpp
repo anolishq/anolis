@@ -93,8 +93,11 @@ public:
 
     /**
      * @brief Get the most recent human-readable failure string.
+     *
+     * Returned by value: implementations may be called concurrently and copy
+     * the string under their own lock, so a reference could not stay valid.
      */
-    virtual const std::string &last_error() const = 0;
+    virtual std::string last_error() const = 0;
 
     /**
      * @brief Get the most recent provider status code associated with a call.
