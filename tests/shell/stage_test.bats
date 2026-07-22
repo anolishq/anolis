@@ -11,7 +11,7 @@ PROJECT="${BATS_TEST_DIRNAME}/fixtures/stage-project"
 setup() {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     STAGE_DIR=""
     PROJECT_DIR="${PROJECT}"
