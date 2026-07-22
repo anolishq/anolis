@@ -33,7 +33,7 @@ bool ProviderHandle::start() {
 
     // Spawn process
     if (!process_.spawn()) {
-        error_ = process_.last_error();
+        set_error(process_.last_error());
         return false;
     }
     session_healthy_.store(true, std::memory_order_release);
@@ -43,7 +43,7 @@ bool ProviderHandle::start() {
     anolis::deviceprovider::v1::HelloResponse hello_response;
     if (!hello(hello_response)) {
         session_healthy_.store(false, std::memory_order_release);
-        LOG_ERROR("[" << process_.provider_id() << "] Hello handshake failed: " << error_);
+        LOG_ERROR("[" << process_.provider_id() << "] Hello handshake failed: " << last_error());
         return false;
     }
 
@@ -60,7 +60,7 @@ bool ProviderHandle::start() {
         anolis::deviceprovider::v1::WaitReadyResponse ready_response;
         if (!wait_ready(ready_response)) {
             session_healthy_.store(false, std::memory_order_release);
-            LOG_ERROR("[" << process_.provider_id() << "] WaitReady failed: " << error_);
+            LOG_ERROR("[" << process_.provider_id() << "] WaitReady failed: " << last_error());
             return false;
         }
 
@@ -91,13 +91,13 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
     }
 
     if (!resp.has_hello()) {
-        error_ = "Response missing hello field";
+        set_error("Response missing hello field");
         return false;
     }
 
     response = resp.hello();
     if (response.protocol_version() != "v1") {
-        error_ = "Protocol version mismatch: runtime expects v1, provider reported " + response.protocol_version();
+        set_error("Protocol version mismatch: runtime expects v1, provider reported " + response.protocol_version());
         return false;
     }
 
@@ -118,7 +118,7 @@ bool ProviderHandle::wait_ready(anolis::deviceprovider::v1::WaitReadyResponse &r
     }
 
     if (!resp.has_wait_ready()) {
-        error_ = "Response missing wait_ready field";
+        set_error("Response missing wait_ready field");
         return false;
     }
 
@@ -138,7 +138,7 @@ bool ProviderHandle::list_devices(std::vector<anolis::deviceprovider::v1::Device
     }
 
     if (!resp.has_list_devices()) {
-        error_ = "Response missing list_devices field";
+        set_error("Response missing list_devices field");
         return false;
     }
 
@@ -162,7 +162,7 @@ bool ProviderHandle::describe_device(const std::string &device_id,
     }
 
     if (!resp.has_describe_device()) {
-        error_ = "Response missing describe_device field";
+        set_error("Response missing describe_device field");
         return false;
     }
 
@@ -187,7 +187,7 @@ bool ProviderHandle::read_signals(const std::string &device_id, const std::vecto
     }
 
     if (!resp.has_read_signals()) {
-        error_ = "Response missing read_signals field";
+        set_error("Response missing read_signals field");
         return false;
     }
 
@@ -215,7 +215,7 @@ bool ProviderHandle::call(const std::string &device_id, uint32_t function_id, co
     }
 
     if (!resp.has_call()) {
-        error_ = "Response missing call field";
+        set_error("Response missing call field");
         return false;
     }
 
@@ -235,7 +235,7 @@ bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &r
     }
 
     if (!resp.has_get_health()) {
-        error_ = "Response missing get_health field";
+        set_error("Response missing get_health field");
         return false;
     }
 
