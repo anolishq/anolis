@@ -111,7 +111,7 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 _setup_running_binary() {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     SRC="${BATS_TEST_TMPDIR}/bundle-bin"
     DEST="${BATS_TEST_TMPDIR}/prefix-bin"
@@ -159,7 +159,7 @@ _teardown_running_binary() {
 @test "replace_binaries: copies every regular file and skips subdirectories" {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     src="${BATS_TEST_TMPDIR}/multi-src"
     dest="${BATS_TEST_TMPDIR}/multi-dest"
@@ -177,7 +177,7 @@ _teardown_running_binary() {
 @test "replace_binaries: fails cleanly when the destination is unwritable" {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     src="${BATS_TEST_TMPDIR}/ro-src"
     dest="${BATS_TEST_TMPDIR}/ro-dest"
@@ -198,7 +198,7 @@ _teardown_running_binary() {
 @test "_stage_fetch failure names the release page, GITHUB_TOKEN, and --local" {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     run _stage_fetch "anolishq/definitely-not-a-repo" "v9.9.9" "nope.tar.gz" "${BATS_TEST_TMPDIR}"
 

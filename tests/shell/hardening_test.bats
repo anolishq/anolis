@@ -13,7 +13,7 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 setup() {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 }
 
 # ---------------------------------------------------------------------------

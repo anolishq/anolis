@@ -80,7 +80,7 @@ teardown() {
 _setup_backup_dirs() {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
     source "${INSTALL_SH}"
-    set +e +u +o pipefail
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 
     PREFIX="${BATS_TEST_TMPDIR}/prefix"
     BUNDLE_DIR="${BATS_TEST_TMPDIR}/bundle"
