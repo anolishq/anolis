@@ -77,11 +77,32 @@ public:
     /** @brief Fetch provider-reported health via ADPP GetHealth. */
     bool get_health(anolis::deviceprovider::v1::GetHealthResponse &response) override;
 
-    /** @brief Return the last client-side or provider-reported error. */
-    const std::string &last_error() const override { return error_; }
+    /**
+     * @brief Return the last client-side or provider-reported error.
+     *
+     * By value under `mutex_`: `get_health`/`read_signals`/etc. may be called
+     * from the health-snapshot task, the poller, and HTTP threads at once, so
+     * `error_` is only ever touched while holding the lock. Because `mutex_`
+     * also serializes the in-flight request, this can block until a concurrent
+     * RPC on another thread finishes (bounded by that op's timeout) — an
+     * accepted fault-path latency, since blocking-but-correct beats the prior
+     * data race.
+     */
+    std::string last_error() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return error_;
+    }
 
-    /** @brief Return the last ADPP status code observed from the provider. */
-    anolis::deviceprovider::v1::Status_Code last_status_code() const override { return last_status_code_; }
+    /**
+     * @brief Return the last ADPP status code observed from the provider.
+     *
+     * Under `mutex_` for the same reason as last_error(): it is written in
+     * send_request under the lock and read here from other threads.
+     */
+    anolis::deviceprovider::v1::Status_Code last_status_code() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_status_code_;
+    }
 
     /** @brief Return the runtime-local provider identifier. */
     const std::string &provider_id() const override { return process_.provider_id(); }
@@ -92,11 +113,24 @@ private:
     std::string error_;
     anolis::deviceprovider::v1::Status_Code last_status_code_ = anolis::deviceprovider::v1::Status_Code_CODE_OK;
     std::atomic<uint32_t> next_request_id_;
-    std::mutex mutex_;
+    // Guards error_ and serializes the one-in-flight request. `mutable` so the
+    // const last_error() can copy error_ under the lock.
+    mutable std::mutex mutex_;
 
     int timeout_ms_;        // ADPP operation timeout
     int hello_timeout_ms_;  // Process liveness check timeout
     int ready_timeout_ms_;  // Hardware initialization timeout
+
+    /**
+     * @brief Set error_ under mutex_.
+     *
+     * For the failure paths OUTSIDE send_request (which already holds mutex_
+     * while writing error_ directly — calling this there would self-deadlock).
+     */
+    void set_error(std::string message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        error_ = std::move(message);
+    }
 
     /** @brief Serialize, send, and validate one ADPP request/response exchange. */
     bool send_request(const anolis::deviceprovider::v1::Request &request,

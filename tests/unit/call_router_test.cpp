@@ -175,7 +175,7 @@ TEST_F(CallRouterTest, PreconditionFailure) {
         .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION));
 
     // Router also retrieves error message
-    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(ReturnRef(mock_provider->_err));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(ReturnPointee(&mock_provider->_err));
     mock_provider->_err = "Precondition failed";
 
     auto result = router->execute_call(req, *provider_registry);
@@ -326,7 +326,7 @@ TEST_F(CallRouterTest, InvalidArgumentPropagation) {
         .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT));
 
     mock_provider->_err = "Invalid voltage";
-    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(ReturnRef(mock_provider->_err));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(ReturnPointee(&mock_provider->_err));
 
     auto result = router->execute_call(req, *provider_registry);
     EXPECT_FALSE(result.success);

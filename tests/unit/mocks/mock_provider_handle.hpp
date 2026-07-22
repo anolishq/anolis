@@ -35,7 +35,7 @@ public:
                 (override));
     MOCK_METHOD(bool, get_health, (GetHealthResponse &), (override));
 
-    MOCK_METHOD(const std::string &, last_error, (), (const, override));
+    MOCK_METHOD(std::string, last_error, (), (const, override));
     MOCK_METHOD(anolis::deviceprovider::v1::Status_Code, last_status_code, (), (const, override));
     MOCK_METHOD(const std::string &, provider_id, (), (const, override));
 

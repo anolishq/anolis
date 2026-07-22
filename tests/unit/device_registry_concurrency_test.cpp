@@ -138,7 +138,7 @@ TEST_F(DeviceRegistryConcurrencyTest, DiscoverProviderReplaceFailureKeepsPreviou
         return true;
     }));
     EXPECT_CALL(*mock, describe_device("replacement0", _)).WillOnce(Return(false));
-    EXPECT_CALL(*mock, last_error()).WillOnce(ReturnRef(mock->_err));
+    EXPECT_CALL(*mock, last_error()).WillOnce(ReturnPointee(&mock->_err));
 
     ASSERT_FALSE(registry->discover_provider("sim0", *mock, true));
 
