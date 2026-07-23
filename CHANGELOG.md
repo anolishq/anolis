@@ -13,6 +13,24 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-07-22
+
+### Fixed
+
+- `install.sh --with-observability`: `influx setup` could fail on a cold data
+  dir (first boot). InfluxDB 2.x reports `/health` OK before its KV/onboarding
+  store is ready to service setup, so the single-shot setup call raced that
+  window; a `>/dev/null` on the call then masked the error — the operator saw
+  only "influx setup failed" while Grafana provisioning was skipped and the
+  runtime/read tokens were left unwired. The setup is now retried with a
+  bounded backoff that absorbs the readiness window, its output is captured so
+  a genuine failure is diagnosable (with the generated admin secrets scrubbed),
+  and an idempotency guard treats a server-side onboard that still returns a
+  non-zero CLI exit as success — safe because the admin token is pinned before
+  the loop, so downstream scoped-token creation still authenticates. Verified
+  from zero on a Pi: fresh influxd first-boot now provisions turnkey (setup,
+  tokens, Grafana datasource, dashboards, end-to-end telemetry) (#213).
+
 ## [0.1.37] - 2026-07-21
 
 ### Added
