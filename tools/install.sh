@@ -884,10 +884,30 @@ _obs_setup_influx() {
 
     # Note: `influx setup` also writes a CLI config with the admin token to
     # /root/.influxdbv2/configs (0600). That is the influx CLI's own state.
-    influx setup --force --host "${INFLUX_HOST}" \
-        --username admin --password "${admin_pw}" \
-        --org anolis --bucket anolis --retention "${OBSERVABILITY_RETENTION}" \
-        --token "${admin_token}" >/dev/null || { log_warn "observability: influx setup failed"; return 1; }
+    # influxd reports /health OK before its KV/onboarding store is ready to
+    # service `influx setup` on a cold data dir (first boot), so the setup call
+    # can transiently fail even though the health-gate above passed. Retry with a
+    # short backoff; capture output so a genuine failure is diagnosable rather
+    # than masked (the earlier `>/dev/null` hid the real error entirely).
+    local setup_out setup_ok=0
+    for i in $(seq 1 10); do
+        setup_out=$(influx setup --force --host "${INFLUX_HOST}" \
+            --username admin --password "${admin_pw}" \
+            --org anolis --bucket anolis --retention "${OBSERVABILITY_RETENTION}" \
+            --token "${admin_token}" 2>&1) && { setup_ok=1; break; }
+        # If a prior attempt already onboarded the instance (same admin_token),
+        # the endpoint flips allowed=false — treat that as success, not a retry.
+        curl -fsS "${INFLUX_HOST}/api/v2/setup" 2>/dev/null | grep -q '"allowed": *false' && { setup_ok=1; break; }
+        sleep 2
+    done
+    if [[ "${setup_ok}" != "1" ]]; then
+        # Scrub the generated admin secrets before logging, in case a future
+        # influx CLI echoes its --password/--token args back in an error.
+        local safe_err="${setup_out//${admin_pw}/***}"
+        safe_err="${safe_err//${admin_token}/***}"
+        log_warn "observability: influx setup failed after retries: ${safe_err}"
+        return 1
+    fi
 
     local bucket_id write_token read_token
     bucket_id=$(influx bucket list --host "${INFLUX_HOST}" --token "${admin_token}" --name anolis --hide-headers | awk '{print $1}')
