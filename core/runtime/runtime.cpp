@@ -147,8 +147,8 @@ bool Runtime::init_core_services(std::string & /*error*/) {
 
     // Create the e-stop safe-state controller and register its latch with the
     // call router so actuating calls are refused while an e-stop is latched.
-    safe_state_controller_ = std::make_unique<control::SafeStateController>(*registry_, *call_router_,
-                                                                           provider_registry_, config_.safety);
+    safe_state_controller_ =
+        std::make_unique<control::SafeStateController>(*registry_, *call_router_, provider_registry_, config_.safety);
     call_router_->set_actuation_latch(safe_state_controller_.get());
 
     // Create provider supervisor

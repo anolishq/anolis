@@ -15,6 +15,22 @@ commit messages only.
 
 ### Added
 
+- Software safe-state e-stop: `POST /v0/estop` engages a latching safe-state
+  that works regardless of `automation.enabled`, and `POST /v0/estop/clear`
+  releases it. The safe-state ladder runs the profile's declared safe-state
+  hooks; else drives per-actuator safe setpoints (only when they cover every
+  actuating output); else zeroes all actuating outputs, but only when the
+  profile asserts `safety.safe_state.zero_is_safe`; else honestly reports no
+  software safe-state rather than a false zero. While latched, actuating
+  `POST /v0/call` requests are refused with `409` (fail-closed on unclassified
+  functions); read-only calls are unaffected. On an automation machine an
+  e-stop also drives `FAULT`. `GET /v0/runtime/status` gains an `estop` block
+  (`latched`, `software_safe_state`, `latched_at_epoch_ms`,
+  `uncovered_actuating_functions`). A software stop is not a substitute for the
+  hardware backplane cut (#219).
+- New top-level `safety.safe_state` runtime-config section (`hooks`,
+  `setpoints`, `zero_is_safe`), parsed independently of `automation` so a
+  pure-manual machine can declare a software safe-state (#219).
 - `GET /v0/devices/{provider}/{device}/capabilities` now surfaces each
   function's actuation classification: a `category` field
   (`UNSPECIFIED`/`READ`/`CONFIG`/`ACTUATE`, read from the provider's

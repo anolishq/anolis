@@ -107,8 +107,8 @@ private:
     automation::ModeManager *mode_manager_ = nullptr;  // optional
 
     std::atomic<bool> latched_{false};
-    mutable std::mutex mutex_;               // serialize trigger()/clear(); guard metadata
-    std::optional<int64_t> latched_at_ms_;   // guarded by mutex_
+    mutable std::mutex mutex_;              // serialize trigger()/clear(); guard metadata
+    std::optional<int64_t> latched_at_ms_;  // guarded by mutex_
 };
 
 }  // namespace control

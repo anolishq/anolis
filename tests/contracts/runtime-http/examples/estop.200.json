@@ -1,0 +1,15 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "latched": true,
+  "software_safe_state": "hooks",
+  "actions": [
+    {
+      "device_handle": "sim0/motorctl0",
+      "function": "set_motor",
+      "success": true
+    }
+  ]
+}

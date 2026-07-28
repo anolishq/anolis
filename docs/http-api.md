@@ -70,6 +70,25 @@ Notes:
 1. Request currently requires `function_id`.
 2. Args use typed ADPP value encoding.
 
+### Safe-state (software e-stop)
+
+1. `POST /v0/estop` - engage the latching software safe-state.
+2. `POST /v0/estop/clear` - release the latch.
+
+Notes:
+
+1. `/v0/estop` runs the declared safe-state ladder (hooks -> per-actuator
+   setpoints, only when they cover every actuating output -> zero, only when
+   `safety.safe_state.zero_is_safe` is set -> otherwise an honest
+   `software_safe_state: "none"`) and works whether or not automation is
+   enabled. On an automation machine it also drives `FAULT`.
+2. While latched, actuating `POST /v0/call` requests are refused with `409`
+   (fail-closed: a function without an explicit read-only category counts as
+   actuating). Read-only calls are unaffected.
+3. Latch and planned safe-state are surfaced under `estop` in
+   `GET /v0/runtime/status`.
+4. This is a software stop, not a substitute for the hardware backplane cut.
+
 ### Automation and parameters
 
 1. `GET /v0/mode`
@@ -179,6 +198,15 @@ curl -s http://127.0.0.1:8080/v0/parameters | jq
 curl -s -X POST http://127.0.0.1:8080/v0/parameters \
   -H "Content-Type: application/json" \
   -d '{"name":"temp_setpoint","value":30.0}' | jq
+```
+
+### Software safe-state (e-stop)
+
+```bash
+# Engage: runs the safe-state ladder and latches actuation.
+curl -s -X POST http://127.0.0.1:8080/v0/estop | jq
+# While latched, actuating /v0/call returns 409. Release the latch:
+curl -s -X POST http://127.0.0.1:8080/v0/estop/clear | jq
 ```
 
 ### SSE stream

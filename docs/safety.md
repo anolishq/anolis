@@ -84,10 +84,18 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 
 ## Emergency Response
 
-1. Immediate software stop: transition to `MANUAL`.
+1. Immediate software stop: `POST /v0/estop` engages the latching software
+   safe-state (runs the declared safe-state ladder and refuses further
+   actuating calls until `POST /v0/estop/clear`). It works whether or not
+   automation is enabled; on an automation machine it also drives `FAULT`.
 2. If software path is insufficient: terminate runtime process.
 3. If physical hazard persists: use hardware E-stop / power isolation.
 4. After incident: inspect hardware, collect logs, and restart from full startup checklist.
+
+The software e-stop is a convenience within reach of an operator; per principle
+5 it does not replace the hardware E-stop / interlocks. A machine that declares
+no software safe-state (`safety.safe_state`) reports `software_safe_state:
+"none"` and still latches, but performs no safe-state actuation.
 
 ## Common Risks and Mitigations
 

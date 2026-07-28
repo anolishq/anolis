@@ -181,8 +181,9 @@ void HttpServer::handle_post_estop(const httplib::Request &req, httplib::Respons
             if (body.contains("reason") && body["reason"].is_string()) {
                 reason = body["reason"].get<std::string>();
             }
-        } catch (const std::exception &) {
-            // Ignore an unparseable body: e-stop must not be blocked by bad input.
+        } catch (const std::exception &e) {
+            // An unparseable body must not block an e-stop; proceed with the default reason.
+            LOG_WARN("[HTTP] /v0/estop: ignoring unparseable request body: " << e.what());
         }
     }
 

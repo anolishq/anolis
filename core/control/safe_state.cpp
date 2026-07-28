@@ -68,8 +68,8 @@ const char *safe_state_kind_to_string(SafeStateKind kind) {
 }
 
 SafeStateController::SafeStateController(const registry::DeviceRegistry &registry, CallRouter &call_router,
-                                        provider::ProviderRegistry &provider_registry,
-                                        const runtime::SafetyConfig &safety)
+                                         provider::ProviderRegistry &provider_registry,
+                                         const runtime::SafetyConfig &safety)
     : registry_(registry), call_router_(call_router), provider_registry_(provider_registry), safety_(safety) {}
 
 void SafeStateController::set_mode_manager(automation::ModeManager *mode_manager) { mode_manager_ = mode_manager; }

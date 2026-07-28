@@ -483,8 +483,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Unknown keys are warned about and ignored so config evolution can be
         // rolled out without breaking older runtimes immediately.
-        const std::vector<std::string> valid_keys = {"runtime",  "http",       "providers", "polling",
-                                                     "telemetry", "logging",   "automation", "safety"};
+        const std::vector<std::string> valid_keys = {"runtime",   "http",    "providers",  "polling",
+                                                     "telemetry", "logging", "automation", "safety"};
         for (const auto &key_node : yaml) {
             std::string key = key_node.first.as<std::string>();
             bool known = false;
@@ -836,9 +836,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 }
                 warn_unknown_keys(safe_state_node, "safety.safe_state", {"hooks", "setpoints", "zero_is_safe"});
 
-                if (safe_state_node["hooks"] &&
-                    !parse_call_list(safe_state_node["hooks"], "safety.safe_state.hooks",
-                                     config.safety.safe_state.hooks, error)) {
+                if (safe_state_node["hooks"] && !parse_call_list(safe_state_node["hooks"], "safety.safe_state.hooks",
+                                                                 config.safety.safe_state.hooks, error)) {
                     return false;
                 }
                 if (safe_state_node["setpoints"] &&
