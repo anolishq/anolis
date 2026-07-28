@@ -147,6 +147,58 @@ bool is_loopback_bind(const std::string &bind) {
     return bind == "127.0.0.1" || bind == "::1" || bind == "localhost" || bind.rfind("127.", 0) == 0;
 }
 
+// Parse a YAML sequence of device-call payloads, shared by mode-transition hooks
+// and the safety safe-state ladder. `base_path` names the sequence for
+// diagnostics; each element is reported as "<base_path>[i]".
+bool parse_call_list(const YAML::Node &calls_node, const std::string &base_path,
+                     std::vector<ModeTransitionCallConfig> &out, std::string &error) {
+    out.clear();
+    if (!ensure_sequence(calls_node, base_path, error)) {
+        return false;
+    }
+
+    size_t call_index = 0;
+    for (const auto &call_node : calls_node) {
+        const std::string call_path = base_path + "[" + std::to_string(call_index) + "]";
+        if (!call_node.IsMap()) {
+            error = std::format("'{}' must be a map", call_path);
+            return false;
+        }
+        warn_unknown_keys(call_node, call_path, {"device_handle", "function_id", "function_name", "args"});
+
+        ModeTransitionCallConfig call;
+        if (call_node["device_handle"]) {
+            call.device_handle = call_node["device_handle"].as<std::string>();
+        }
+        if (call_node["function_id"]) {
+            call.function_id = call_node["function_id"].as<uint32_t>();
+        }
+        if (call_node["function_name"]) {
+            call.function_name = call_node["function_name"].as<std::string>();
+        }
+
+        if (call_node["args"]) {
+            if (!ensure_mapping(call_node["args"], call_path + ".args", error)) {
+                return false;
+            }
+            for (const auto &arg_entry : call_node["args"]) {
+                const std::string arg_key = arg_entry.first.as<std::string>();
+                const std::string arg_path = std::format("{}.args.{}", call_path, arg_key);
+                automation::ParameterValue arg_value;
+                if (!parse_scalar_parameter_value(arg_entry.second, arg_value, error, arg_path)) {
+                    return false;
+                }
+                call.args[arg_key] = arg_value;
+            }
+        }
+
+        out.push_back(std::move(call));
+        ++call_index;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 bool validate_config(const RuntimeConfig &config, std::string &error) {
@@ -388,6 +440,32 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
         }
     }
 
+    // Safety safe-state calls are validated unconditionally: a pure-manual
+    // machine has no automation section but may still declare a software
+    // safe-state, and the estop ladder must be able to trust these calls.
+    const auto validate_safety_calls = [&](const std::vector<ModeTransitionCallConfig> &calls,
+                                           const std::string &list_name) -> bool {
+        for (size_t i = 0; i < calls.size(); ++i) {
+            const auto &call = calls[i];
+            const std::string call_path = "safety.safe_state." + list_name + "[" + std::to_string(i) + "]";
+            if (call.device_handle.empty()) {
+                error = call_path + ".device_handle is required";
+                return false;
+            }
+            if (call.function_id == 0 && call.function_name.empty()) {
+                error = call_path + " must provide function_id or function_name";
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!validate_safety_calls(config.safety.safe_state.hooks, "hooks")) {
+        return false;
+    }
+    if (!validate_safety_calls(config.safety.safe_state.setpoints, "setpoints")) {
+        return false;
+    }
+
     return true;
 }
 
@@ -405,8 +483,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Unknown keys are warned about and ignored so config evolution can be
         // rolled out without breaking older runtimes immediately.
-        const std::vector<std::string> valid_keys = {"runtime",   "http",    "providers", "polling",
-                                                     "telemetry", "logging", "automation"};
+        const std::vector<std::string> valid_keys = {"runtime",   "http",    "providers",  "polling",
+                                                     "telemetry", "logging", "automation", "safety"};
         for (const auto &key_node : yaml) {
             std::string key = key_node.first.as<std::string>();
             bool known = false;
@@ -743,6 +821,36 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
         }
 
+        // Load safety config. Parsed unconditionally (independent of automation)
+        // so a pure-manual machine can still declare a software safe-state.
+        if (yaml["safety"]) {
+            if (!ensure_mapping(yaml["safety"], "safety", error)) {
+                return false;
+            }
+            warn_unknown_keys(yaml["safety"], "safety", {"safe_state"});
+
+            if (yaml["safety"]["safe_state"]) {
+                const auto &safe_state_node = yaml["safety"]["safe_state"];
+                if (!ensure_mapping(safe_state_node, "safety.safe_state", error)) {
+                    return false;
+                }
+                warn_unknown_keys(safe_state_node, "safety.safe_state", {"hooks", "setpoints", "zero_is_safe"});
+
+                if (safe_state_node["hooks"] && !parse_call_list(safe_state_node["hooks"], "safety.safe_state.hooks",
+                                                                 config.safety.safe_state.hooks, error)) {
+                    return false;
+                }
+                if (safe_state_node["setpoints"] &&
+                    !parse_call_list(safe_state_node["setpoints"], "safety.safe_state.setpoints",
+                                     config.safety.safe_state.setpoints, error)) {
+                    return false;
+                }
+                if (safe_state_node["zero_is_safe"]) {
+                    config.safety.safe_state.zero_is_safe = safe_state_node["zero_is_safe"].as<bool>();
+                }
+            }
+        }
+
         // Load automation config
         if (yaml["automation"]) {
             if (!ensure_mapping(yaml["automation"], "automation", error)) {
@@ -920,48 +1028,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                             error = std::format("'{}.calls' is required", hook_path);
                             return false;
                         }
-                        if (!ensure_sequence(hook_node["calls"], hook_path + ".calls", error)) {
+                        if (!parse_call_list(hook_node["calls"], hook_path + ".calls", hook.calls, error)) {
                             return false;
-                        }
-
-                        size_t call_index = 0;
-                        for (const auto &call_node : hook_node["calls"]) {
-                            const std::string call_path = hook_path + ".calls[" + std::to_string(call_index) + "]";
-                            if (!call_node.IsMap()) {
-                                error = std::format("'{}' must be a map", call_path);
-                                return false;
-                            }
-                            warn_unknown_keys(call_node, call_path,
-                                              {"device_handle", "function_id", "function_name", "args"});
-
-                            ModeTransitionCallConfig call;
-                            if (call_node["device_handle"]) {
-                                call.device_handle = call_node["device_handle"].as<std::string>();
-                            }
-                            if (call_node["function_id"]) {
-                                call.function_id = call_node["function_id"].as<uint32_t>();
-                            }
-                            if (call_node["function_name"]) {
-                                call.function_name = call_node["function_name"].as<std::string>();
-                            }
-
-                            if (call_node["args"]) {
-                                if (!ensure_mapping(call_node["args"], call_path + ".args", error)) {
-                                    return false;
-                                }
-                                for (const auto &arg_entry : call_node["args"]) {
-                                    const std::string arg_key = arg_entry.first.as<std::string>();
-                                    const std::string arg_path = std::format("{}.args.{}", call_path, arg_key);
-                                    automation::ParameterValue arg_value;
-                                    if (!parse_scalar_parameter_value(arg_entry.second, arg_value, error, arg_path)) {
-                                        return false;
-                                    }
-                                    call.args[arg_key] = arg_value;
-                                }
-                            }
-
-                            hook.calls.push_back(std::move(call));
-                            ++call_index;
                         }
 
                         out.push_back(std::move(hook));

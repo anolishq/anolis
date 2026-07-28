@@ -211,6 +211,7 @@ anolis_apply_warnings(anolis_health)
 # Call router library
 add_library(anolis_control STATIC
     control/call_router.cpp
+    control/safe_state.cpp
 )
 
 target_include_directories(anolis_control PUBLIC

@@ -25,6 +25,8 @@ class ModeManager;
 
 namespace control {
 
+class IActuationLatch;
+
 /**
  * @brief High-level request for executing a device function.
  *
@@ -37,6 +39,10 @@ struct CallRequest {
     std::string function_name;  // Optional selector used by automation/internal callers
     std::map<std::string, anolis::deviceprovider::v1::Value> args;
     bool is_automated = false;  // true if called from BT automation, false if manual (HTTP/UI)
+    // true only for e-stop safe-state actions. Bypasses IDLE/AUTO gating and the
+    // actuation latch so the safe-state ladder can still drive actuators while
+    // the latch blocks every other actuating call. Never set from an HTTP call.
+    bool safe_state = false;
 };
 
 /**
@@ -84,6 +90,14 @@ public:
     void set_mode_manager(automation::ModeManager *mode_manager, const std::string &gating_policy);
 
     /**
+     * @brief Attach the e-stop actuation latch consulted before actuating calls.
+     *
+     * While the latch is engaged, actuating calls (fail-closed on unclassified
+     * functions) are refused unless the request carries `safe_state`.
+     */
+    void set_actuation_latch(const IActuationLatch *latch);
+
+    /**
      * @brief Execute a validated device function call.
      *
      * Error handling:
@@ -112,6 +126,7 @@ private:
     state::StateCache &state_cache_;
     automation::ModeManager *mode_manager_ = nullptr;  // optional
     std::string manual_gating_policy_ = "BLOCK";
+    const IActuationLatch *actuation_latch_ = nullptr;  // optional e-stop latch view
 
     // Per-provider lock table for serialized access (v0: prevent concurrent calls to same provider).
     // Callers hold a shared_ptr copy so lock lifetime is independent of lock-table mutation scope.

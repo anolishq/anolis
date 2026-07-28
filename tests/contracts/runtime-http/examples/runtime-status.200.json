@@ -14,5 +14,11 @@
       "device_count": 4
     }
   ],
-  "device_count": 4
+  "device_count": 4,
+  "estop": {
+    "latched": false,
+    "software_safe_state": "hooks",
+    "latched_at_epoch_ms": null,
+    "uncovered_actuating_functions": 0
+  }
 }

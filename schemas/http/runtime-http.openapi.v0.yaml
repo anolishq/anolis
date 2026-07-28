@@ -399,6 +399,45 @@ paths:
           $ref: '#/components/responses/FailedPrecondition'
         "503":
           $ref: '#/components/responses/Unavailable'
+  /v0/estop:
+    post:
+      tags: [system]
+      operationId: postEstop
+      summary: Engage the software safe-state (latching e-stop)
+      description: >-
+        Run the declared safe-state ladder and latch actuation. While latched,
+        actuating calls to POST /v0/call are refused until POST /v0/estop/clear.
+        A software stop, not a substitute for the hardware backplane cut.
+      responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "200":
+          description: Safe-state engaged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstopResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /v0/estop/clear:
+    post:
+      tags: [system]
+      operationId: postEstopClear
+      summary: Release the e-stop latch
+      description: >-
+        Clear the actuation latch. Does not change the runtime mode; on an
+        automation machine the operator still recovers FAULT separately.
+      responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "200":
+          description: Latch released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstopClearResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
   /v0/parameters:
     get:
       tags: [automation]
@@ -637,6 +676,9 @@ components:
     RuntimeStatusResponse:
       type: object
       additionalProperties: false
+      # estop is present whenever the safe-state controller is wired (always, in
+      # the shipped runtime), but kept optional so an embedding without it stays
+      # contract-valid.
       required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count]
       properties:
         status:
@@ -656,6 +698,73 @@ components:
             $ref: '#/components/schemas/RuntimeStatusProvider'
         device_count:
           type: integer
+        estop:
+          $ref: '#/components/schemas/EstopStatus'
+    SoftwareSafeState:
+      type: string
+      description: >-
+        Which rung of the safe-state ladder a POST /v0/estop would run now.
+        "none" means no software safe-state is declared (hardware cut only).
+      enum: [none, hooks, setpoints, zero]
+    EstopStatus:
+      type: object
+      additionalProperties: false
+      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions]
+      properties:
+        latched:
+          type: boolean
+          description: True while actuation is latched by a software e-stop.
+        software_safe_state:
+          $ref: '#/components/schemas/SoftwareSafeState'
+        latched_at_epoch_ms:
+          type: [integer, "null"]
+          description: Epoch milliseconds when the latch engaged, or null if not latched.
+        uncovered_actuating_functions:
+          type: integer
+          description: Count of actuating outputs with no declared safe setpoint.
+    EstopAction:
+      type: object
+      additionalProperties: false
+      required: [device_handle, function, success]
+      properties:
+        device_handle:
+          type: string
+        function:
+          type: string
+        success:
+          type: boolean
+        error:
+          type: string
+    EstopResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latched, software_safe_state, actions]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        latched:
+          type: boolean
+        software_safe_state:
+          $ref: '#/components/schemas/SoftwareSafeState'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EstopAction'
+        warning:
+          type: string
+          description: Present when software_safe_state is "none".
+        fault_engaged:
+          type: boolean
+          description: Present on automation machines; whether the FAULT transition succeeded.
+    EstopClearResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latched]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        latched:
+          type: boolean
     TelemetryBackend:
       type: object
       additionalProperties: false

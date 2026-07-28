@@ -12,6 +12,7 @@
 #include "anolis_build_config.hpp"
 #include "config.hpp"
 #include "control/call_router.hpp"
+#include "control/safe_state.hpp"
 #include "events/event_emitter.hpp"
 #include "http/server.hpp"
 #include "provider/i_provider_handle.hpp"  // Changed to interface
@@ -119,6 +120,7 @@ private:
     std::shared_ptr<events::EventEmitter> event_emitter_;  // Shared with StateCache + HTTP
     std::unique_ptr<state::StateCache> state_cache_;
     std::unique_ptr<control::CallRouter> call_router_;
+    std::unique_ptr<control::SafeStateController> safe_state_controller_;
     std::unique_ptr<http::HttpServer> http_server_;
     std::unique_ptr<telemetry::InfluxSink> telemetry_sink_;
     std::unique_ptr<telemetry::HealthSnapshotTask> health_snapshot_task_;

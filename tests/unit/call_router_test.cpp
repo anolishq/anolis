@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "automation/mode_manager.hpp"
+#include "control/i_actuation_latch.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
@@ -18,6 +20,13 @@
 using namespace anolis;
 using namespace testing;
 using namespace anolis::tests;
+
+// Test double for the e-stop latch so CallRouter's refusal logic can be
+// exercised without constructing a full SafeStateController.
+struct StubLatch : anolis::control::IActuationLatch {
+    std::atomic<bool> engaged{false};
+    bool is_engaged() const override { return engaged.load(); }
+};
 
 class CallRouterTest : public Test {
 protected:
@@ -63,6 +72,35 @@ protected:
                 auto* fn = caps->add_functions();
                 fn->set_name("reset");
                 fn->set_function_id(1);
+                return true;
+            }));
+
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    // Device with an untagged (fail-closed actuating) "reset" and an explicitly
+    // read-only "read_val" function, for exercising the actuation latch.
+    void RegisterMockDeviceWithReadAndActuate() {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("dev1");
+            devices.push_back(dev);
+            return true;
+        }));
+
+        EXPECT_CALL(*mock_provider, describe_device("dev1", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("dev1");
+                auto* caps = response.mutable_capabilities();
+
+                auto* actuate = caps->add_functions();  // untagged -> actuating (fail closed)
+                actuate->set_name("reset");
+                actuate->set_function_id(1);
+
+                auto* read = caps->add_functions();
+                read->set_name("read_val");
+                read->set_function_id(2);
+                read->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
                 return true;
             }));
 
@@ -999,4 +1037,77 @@ TEST_F(CallRouterRangeBugTest, MaxOnlyInt64_AboveMaxFails) {
     std::string error;
     EXPECT_FALSE(router->validate_call(req, error));
     EXPECT_THAT(error, HasSubstr("above maximum"));
+}
+
+//=============================================================================
+// Actuation latch (e-stop) tests
+//=============================================================================
+
+TEST_F(CallRouterTest, LatchBlocksActuatingCall) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubLatch latch;
+    latch.engaged = true;
+    router->set_actuation_latch(&latch);
+
+    // StrictMock: no call() expectation set, so a dispatched provider call fails the test.
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";  // untagged -> actuating (fail closed)
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+    EXPECT_THAT(result.error_message, HasSubstr("latched"));
+}
+
+TEST_F(CallRouterTest, LatchAllowsReadOnlyCall) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubLatch latch;
+    latch.engaged = true;
+    router->set_actuation_latch(&latch);
+
+    // A CATEGORY_READ function is not actuation, so it proceeds while latched.
+    EXPECT_CALL(*mock_provider, call("dev1", _, "read_val", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "read_val";
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success);
+}
+
+TEST_F(CallRouterTest, SafeStateBypassesLatch) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubLatch latch;
+    latch.engaged = true;
+    router->set_actuation_latch(&latch);
+
+    // safe_state requests are the e-stop ladder itself; they must still actuate.
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.safe_state = true;
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success);
+}
+
+TEST_F(CallRouterTest, SafeStateBypassesIdleGating) {
+    RegisterMockDeviceWithReadAndActuate();
+    std::string err;
+    mode_manager->set_mode(automation::RuntimeMode::IDLE, err);
+
+    // Normally IDLE blocks all control; safe_state must bypass it.
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.safe_state = true;
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success);
 }

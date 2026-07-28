@@ -19,6 +19,7 @@ Supported runtime YAML sections:
 5. `telemetry`
 6. `logging`
 7. `automation`
+8. `safety`
 
 Unknown keys are compatibility-warned and ignored.
 
@@ -152,6 +153,24 @@ Parameter entry fields:
 Compatibility alias:
 
 1. `behavior_tree_path` (accepted alias for `behavior_tree`).
+
+## `safety`
+
+Declares the software safe-state consumed by `POST /v0/estop`. Parsed
+independently of `automation`, so a pure-manual machine can declare one.
+
+`safety.safe_state` fields (all optional):
+
+1. `hooks` (array of call objects) - run first when present.
+2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
+   only when they cover every actuating output (fail closed).
+3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
+   outputs when neither hooks nor full-coverage setpoints apply.
+
+Call objects use the same shape as `mode_transition_hooks` calls
+(`device_handle`, `function_id` or `function_name`, `args`). Each call requires
+`device_handle` and a function selector. When none of the three apply, the
+runtime reports `software_safe_state: "none"` and latches without actuating.
 
 ## Validation Model
 

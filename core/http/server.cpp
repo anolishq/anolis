@@ -33,7 +33,8 @@ HttpServer::HttpServer(const runtime::HttpConfig &config, int polling_interval_m
       event_emitter_(std::move(dependencies.event_emitter)),
       mode_manager_(dependencies.mode_manager),
       telemetry_sink_(dependencies.telemetry_sink),
-      run_journal_(dependencies.run_journal)
+      run_journal_(dependencies.run_journal),
+      safe_state_(dependencies.safe_state)
 #if ANOLIS_ENABLE_AUTOMATION
       ,
       bt_runtime_(dependencies.bt_runtime)
@@ -287,6 +288,14 @@ void HttpServer::setup_routes() {
     server_->Post("/v0/mode",
                   [this](const httplib::Request &req, httplib::Response &res) { handle_post_mode(req, res); });
 
+    // POST /v0/estop - Engage the software safe-state (latching)
+    server_->Post("/v0/estop",
+                  [this](const httplib::Request &req, httplib::Response &res) { handle_post_estop(req, res); });
+
+    // POST /v0/estop/clear - Release the e-stop latch
+    server_->Post("/v0/estop/clear",
+                  [this](const httplib::Request &req, httplib::Response &res) { handle_post_estop_clear(req, res); });
+
     // GET /v0/parameters - Get all parameters
     server_->Get("/v0/parameters",
                  [this](const httplib::Request &req, httplib::Response &res) { handle_get_parameters(req, res); });
@@ -343,6 +352,8 @@ void HttpServer::setup_routes() {
     LOG_INFO("[HTTP]   GET  /v0/runtime/status");
     LOG_INFO("[HTTP]   GET  /v0/mode");
     LOG_INFO("[HTTP]   POST /v0/mode");
+    LOG_INFO("[HTTP]   POST /v0/estop");
+    LOG_INFO("[HTTP]   POST /v0/estop/clear");
     LOG_INFO("[HTTP]   GET  /v0/parameters");
     LOG_INFO("[HTTP]   POST /v0/parameters");
     LOG_INFO("[HTTP]   GET  /v0/automation/tree");

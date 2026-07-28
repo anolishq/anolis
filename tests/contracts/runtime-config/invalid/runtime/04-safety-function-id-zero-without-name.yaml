@@ -1,0 +1,9 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+safety:
+  safe_state:
+    hooks:
+      - device_handle: test0/device0
+        function_id: 0
