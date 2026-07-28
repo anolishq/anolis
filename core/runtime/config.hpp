@@ -144,6 +144,27 @@ struct ModeTransitionHooksConfig {
 };
 
 /**
+ * @brief Declared software safe-state actions for `POST /v0/estop`.
+ *
+ * Parsed independently of the `automation` section so it is available on a
+ * pure-manual machine. The estop ladder consumes these in order: run `hooks`;
+ * else drive `setpoints` (only if they cover every actuating output); else zero
+ * all actuating outputs, but only if `zero_is_safe` is explicitly asserted.
+ */
+struct SafeStateConfig {
+    std::vector<ModeTransitionCallConfig> hooks;
+    std::vector<ModeTransitionCallConfig> setpoints;
+    bool zero_is_safe = false;
+};
+
+/**
+ * @brief Settings from the top-level `safety` YAML section.
+ */
+struct SafetyConfig {
+    SafeStateConfig safe_state;
+};
+
+/**
  * @brief Automation subsystem settings from the `automation` YAML section.
  *
  * `behavior_tree` is the canonical config key. The loader may accept a small
@@ -170,6 +191,7 @@ struct RuntimeConfig {
     TelemetryConfig telemetry;
     LoggingConfig logging;
     AutomationConfig automation;
+    SafetyConfig safety;
 };
 
 /**

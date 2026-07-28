@@ -32,6 +32,9 @@
     },
     "automation": {
       "$ref": "#/$defs/automation"
+    },
+    "safety": {
+      "$ref": "#/$defs/safety"
     }
   },
   "additionalProperties": true,
@@ -735,6 +738,37 @@
           ]
         }
       ],
+      "additionalProperties": true
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "safe_state": {
+          "$ref": "#/$defs/safe_state"
+        }
+      },
+      "additionalProperties": true
+    },
+    "safe_state": {
+      "type": "object",
+      "description": "Declared software safe-state for POST /v0/estop. Ladder: run hooks; else drive setpoints (must cover every actuating output); else zero all actuating outputs only if zero_is_safe.",
+      "properties": {
+        "hooks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_call"
+          }
+        },
+        "setpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_call"
+          }
+        },
+        "zero_is_safe": {
+          "type": "boolean"
+        }
+      },
       "additionalProperties": true
     }
   }
