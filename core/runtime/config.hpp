@@ -32,6 +32,23 @@ struct LoggingConfig {
 };
 
 /**
+ * @brief Device-health liveness staleness thresholds (#220).
+ *
+ * Both default to 0 = "derive from the poll cadence and device count"
+ * (health::resolve_staleness_bounds). A positive value is an absolute ms
+ * override for buses the cadence heuristic does not fit.
+ */
+struct HealthStalenessConfig {
+    int warn_after_ms = 0;   // 0 => derive
+    int stale_after_ms = 0;  // 0 => derive
+};
+
+/** @brief Device/provider health surface policy. */
+struct HealthConfig {
+    HealthStalenessConfig staleness;
+};
+
+/**
  * @brief Core runtime lifecycle settings from the `runtime` YAML section.
  *
  * The current runtime mode is intentionally not configurable here. Startup
@@ -192,6 +209,7 @@ struct RuntimeConfig {
     LoggingConfig logging;
     AutomationConfig automation;
     SafetyConfig safety;
+    HealthConfig health;
 };
 
 /**

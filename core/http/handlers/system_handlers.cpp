@@ -533,7 +533,8 @@ nlohmann::json reported_device_health_json(const health::ReportedDeviceHealth &r
 void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::Response &res) {
     // Shared collector (#203): the same snapshot feeds the InfluxDB health
     // ingestion, so the HTTP and timeseries views cannot drift.
-    auto snapshot = health::collect_providers_health(provider_registry_, registry_, state_cache_, supervisor_);
+    auto snapshot =
+        health::collect_providers_health(provider_registry_, registry_, state_cache_, supervisor_, staleness_policy_);
 
     nlohmann::json providers_json = nlohmann::json::array();
 

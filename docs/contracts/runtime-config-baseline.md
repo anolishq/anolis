@@ -33,6 +33,8 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
 5. `telemetry`
 6. `logging`
 7. `automation`
+8. `safety`
+9. `health`
 
 ### Compatibility Commitments
 
@@ -61,6 +63,8 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
 5. Polling/logging validity:
    - `polling.interval_ms >= 100`
    - logging level in `debug|info|warn|error`
+   - `health.staleness.warn_after_ms`/`stale_after_ms` are `>= 0` (`0` = derive
+     from cadence); when both are positive, `stale_after_ms > warn_after_ms`
 6. Automation:
    - behavior tree path required when enabled
    - `tick_rate_hz` bounded

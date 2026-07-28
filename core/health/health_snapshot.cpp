@@ -1,5 +1,6 @@
 #include "health_snapshot.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <unordered_map>
 
@@ -49,10 +50,28 @@ ReportedDeviceHealth reported_device_health(const adpp::DeviceHealth &dh) {
 
 }  // namespace
 
+StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t device_count) {
+    const int64_t interval = policy.poll_interval_ms > 0 ? policy.poll_interval_ms : 500;
+    const int64_t cycle_budget = interval * static_cast<int64_t>(std::max<size_t>(1, device_count));
+
+    int64_t warn_ms = policy.warn_after_ms > 0 ? policy.warn_after_ms
+                                               : std::max(kStalenessWarnCycles * cycle_budget, kStalenessWarnFloorMs);
+    int64_t stale_ms = policy.stale_after_ms > 0
+                           ? policy.stale_after_ms
+                           : std::max(kStalenessStaleCycles * cycle_budget, kStalenessStaleFloorMs);
+
+    // Ordering clamp: WARNING must never sit past STALE (possible only when one
+    // side is an explicit override).
+    warn_ms = std::min(warn_ms, stale_ms);
+    return {warn_ms, stale_ms};
+}
+
 std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
                                                              registry::DeviceRegistry &device_registry,
                                                              state::StateCache &state_cache,
-                                                             provider::ProviderSupervisor *supervisor) {
+                                                             provider::ProviderSupervisor *supervisor,
+                                                             const StalenessPolicy &staleness_policy,
+                                                             std::chrono::system_clock::time_point now) {
     using namespace std::chrono;
     using SupervisionSnapshot = provider::ProviderSupervisor::ProviderSupervisionSnapshot;
 
@@ -73,6 +92,10 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
 
         auto devices = device_registry.get_devices_for_provider(provider_id);
         ps.device_count = devices.size();
+
+        // Cadence-derived liveness thresholds (#220): scale with the serialized
+        // cycle cost so a healthy multi-device bus stops false-flapping STALE.
+        const StalenessBounds bounds = resolve_staleness_bounds(staleness_policy, devices.size());
 
         // Provider-reported ADPP health (#185), fetched on demand: the
         // provider's own view — per-device metrics and last_seen, plus devices
@@ -101,7 +124,6 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
             if (device_state) {
                 ds.last_poll_ms = duration_cast<milliseconds>(device_state->last_poll_time.time_since_epoch()).count();
 
-                auto now = system_clock::now();
                 auto age_ms = duration_cast<milliseconds>(now - device_state->last_poll_time).count();
                 if (age_ms < 0) {
                     // Backward system-clock step (RTC-less Pi + NTP): a negative
@@ -111,13 +133,13 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
 
                 ds.staleness_ms = age_ms;
 
-                // Determine health based on staleness
-                // OK: < 2 seconds, WARNING: 2-5 seconds, STALE: > 5 seconds
+                // Liveness health from cadence-derived thresholds (#220):
+                // OK < warn <= WARNING < stale <= STALE.
                 if (!is_available) {
                     ds.health = "UNAVAILABLE";
-                } else if (age_ms < 2000) {
+                } else if (age_ms < bounds.warn_ms) {
                     ds.health = "OK";
-                } else if (age_ms < 5000) {
+                } else if (age_ms < bounds.stale_ms) {
                     ds.health = "WARNING";
                 } else {
                     ds.health = "STALE";

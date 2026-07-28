@@ -35,6 +35,9 @@
     },
     "safety": {
       "$ref": "#/$defs/safety"
+    },
+    "health": {
+      "$ref": "#/$defs/health"
     }
   },
   "additionalProperties": true,
@@ -355,6 +358,28 @@
         "interval_ms": {
           "type": "integer",
           "minimum": 100
+        }
+      },
+      "additionalProperties": true
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "staleness": {
+          "type": "object",
+          "properties": {
+            "warn_after_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Absolute age (ms) at which a device's liveness health becomes WARNING. 0 (default) derives the threshold from the poll cadence and device count (max(3 * poll_interval_ms * device_count, 2000)), so a serialized bus does not false-flap."
+            },
+            "stale_after_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Absolute age (ms) at which a device's liveness health becomes STALE. 0 (default) derives the threshold from the poll cadence and device count (max(8 * poll_interval_ms * device_count, 5000)). When both overrides are set, must be greater than warn_after_ms."
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

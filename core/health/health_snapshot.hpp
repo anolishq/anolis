@@ -12,6 +12,8 @@
  * cannot drift.
  */
 
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -34,6 +36,47 @@ class StateCache;
 }
 
 namespace health {
+
+/**
+ * @brief Cadence-derived device-liveness staleness policy (#220, D7 phase 1).
+ *
+ * The device `health` liveness tiers were historically a hardcoded 2s/5s wall
+ * clock on time-since-last-successful-poll. A healthy but *serialized* bus
+ * (e.g. EZO pH ~900ms + DO ~600-900ms => ~1.5-1.8s/cycle at N=2) structurally
+ * exceeds a 2s wall clock and flapped STALE (observed live). The bound is now
+ * derived from the poll cadence and the provider's device count so it scales
+ * with the real cycle cost, with absolute overrides for odd buses.
+ */
+struct StalenessPolicy {
+    int poll_interval_ms = 500;  // background poll period (runtime `polling.interval_ms`)
+    int warn_after_ms = 0;       // explicit override; 0 => derive from cadence
+    int stale_after_ms = 0;      // explicit override; 0 => derive from cadence
+};
+
+/** @brief Resolved WARNING/STALE liveness thresholds for one provider. */
+struct StalenessBounds {
+    int64_t warn_ms;
+    int64_t stale_ms;
+};
+
+// Derivation constants (see resolve_staleness_bounds). Chosen so that the
+// default policy at one device @ 500ms reproduces the historical 2000/5000
+// ladder exactly (zero regression for fast buses); bounds only loosen as the
+// serialized cycle grows.
+inline constexpr int kStalenessWarnCycles = 3;
+inline constexpr int kStalenessStaleCycles = 8;
+inline constexpr int64_t kStalenessWarnFloorMs = 2000;
+inline constexpr int64_t kStalenessStaleFloorMs = 5000;
+
+/**
+ * @brief Resolve the WARNING/STALE liveness thresholds for a provider.
+ *
+ * cycle_budget = poll_interval_ms * max(1, device_count)  (serialized worst case)
+ * warn  = override>0 ? override : max(kStalenessWarnCycles  * cycle_budget, kStalenessWarnFloorMs)
+ * stale = override>0 ? override : max(kStalenessStaleCycles * cycle_budget, kStalenessStaleFloorMs)
+ * warn  = min(warn, stale)  (ordering clamp)
+ */
+StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t device_count);
 
 /** @brief Provider-reported ADPP DeviceHealth entry (#185). */
 struct ReportedDeviceHealth {
@@ -90,11 +133,13 @@ struct ProviderHealthSnapshot {
  * choose the cadence deliberately.
  *
  * @param supervisor may be nullptr when supervision is disabled.
+ * @param staleness_policy cadence-derived liveness bounds (#220).
+ * @param now current time; defaulted, overridable for deterministic tests.
  */
-std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
-                                                             registry::DeviceRegistry &device_registry,
-                                                             state::StateCache &state_cache,
-                                                             provider::ProviderSupervisor *supervisor);
+std::vector<ProviderHealthSnapshot> collect_providers_health(
+    provider::ProviderRegistry &provider_registry, registry::DeviceRegistry &device_registry,
+    state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
 
 }  // namespace health
 }  // namespace anolis
