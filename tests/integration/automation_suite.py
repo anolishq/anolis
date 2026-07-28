@@ -22,6 +22,7 @@ class AutomationTester:
         timeout: float = 30.0,
         automation_enabled: bool = True,
         manual_gating_policy: str = "BLOCK",
+        with_safe_state_hooks: bool = True,
     ):
         self.port = port
         self.base_url = f"http://127.0.0.1:{port}"
@@ -29,7 +30,7 @@ class AutomationTester:
         self.repo_root = Path(__file__).resolve().parents[2]
 
         fixture_config = Path(__file__).parent / "fixtures" / "provider-sim-default.yaml"
-        config = {
+        config: Dict[str, Any] = {
             "runtime": {},
             "http": {"enabled": True, "bind": "127.0.0.1", "port": port},
             "providers": [
@@ -74,6 +75,26 @@ class AutomationTester:
             "logging": {"level": "info"},
         }
 
+        # Safe-state hook so AUTO is permitted by the refuse-hookless gate
+        # (automation with actuating outputs must declare one). Omitting it lets a
+        # test assert that AUTO is refused.
+        if with_safe_state_hooks:
+            config["automation"]["mode_transition_hooks"] = {
+                "before_transition": [
+                    {
+                        "to": "FAULT",
+                        "fail_on_error": False,
+                        "calls": [
+                            {
+                                "device_handle": "sim0/motorctl0",
+                                "function_name": "set_motor_duty",
+                                "args": {"motor_index": 1, "duty": 0.0},
+                            }
+                        ],
+                    }
+                ]
+            }
+
         self.fixture = RuntimeFixture(
             Path(runtime_path),
             Path(provider_path),
@@ -115,6 +136,25 @@ class AutomationTester:
         except requests.RequestException as err:
             raise AssertionError(f"POST /v0/mode failed for mode={mode}: {err}") from err
         return cast(Dict[str, Any], resp.json())
+
+    def manual_actuation_ok(self) -> bool:
+        """Issue a manual actuating /v0/call and report whether it succeeded."""
+        caps = requests.get(f"{self.base_url}/v0/devices/sim0/motorctl0/capabilities", timeout=2).json()
+        fid = next(f["function_id"] for f in caps["capabilities"]["functions"] if f["name"] == "set_motor_duty")
+        resp = requests.post(
+            f"{self.base_url}/v0/call",
+            json={
+                "provider_id": "sim0",
+                "device_id": "motorctl0",
+                "function_id": fid,
+                "args": {
+                    "motor_index": {"type": "int64", "int64": 1},
+                    "duty": {"type": "double", "double": 0.3},
+                },
+            },
+            timeout=2,
+        )
+        return resp.status_code == 200
 
     def _wait_for_mode(self, expected_mode: str, timeout: float = 3.0) -> None:
         ok = wait_for_condition(

@@ -114,6 +114,10 @@ automation:
       max: 50.0
 ```
 
+If your machine has actuating outputs, you must also declare safe-state
+`mode_transition_hooks` or the runtime will refuse `MANUAL -> AUTO` — see
+[automation.md](automation.md) and [safety.md](safety.md#manual---auto).
+
 Update a parameter at runtime:
 
 ```bash

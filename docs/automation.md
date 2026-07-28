@@ -83,6 +83,24 @@ automation:
       default: true
 ```
 
+**Safe-state hooks (required to enter AUTO with actuators).** Automation that
+drives actuating outputs must declare safe-state `mode_transition_hooks`; the
+runtime refuses `MANUAL -> AUTO` (HTTP 409) without them — see
+[safety.md](safety.md#manual---auto). Add a `*->FAULT` hook that drives actuators
+to a safe value:
+
+```yaml
+automation:
+  mode_transition_hooks:
+    before_transition:
+      - to: FAULT
+        fail_on_error: false
+        calls:
+          - device_handle: sim0/motorctl0
+            function_name: set_motor_duty
+            args: { motor_index: 1, duty: 0.0 }
+```
+
 Supported types:
 
 1. `double`
