@@ -216,6 +216,12 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
         spec.function_id = function.function_id();
         spec.function_name = function.name();
         spec.label = function.description();
+        // Retain the actuation classification. proto3 yields CATEGORY_UNSPECIFIED
+        // when policy is absent, which is the fail-closed default we want.
+        spec.category = function.policy().category();
+        if (spec.category == anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_UNSPECIFIED) {
+            LOG_WARN("[Registry] " << proto_device.device_id() << "/" << spec.function_name << " untagged; actuating");
+        }
 
         // Store full ArgSpec for validation (type, required, min/max constraints)
         for (const auto &arg : function.args()) {
@@ -226,6 +232,11 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
     }
 
     return true;
+}
+
+bool is_actuating(const FunctionSpec &spec) {
+    // Fail closed: only an explicit CATEGORY_READ is treated as non-actuating.
+    return spec.category != anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ;
 }
 
 }  // namespace registry

@@ -39,6 +39,7 @@ bool decode_call_request(const nlohmann::json& json, std::string& provider_id, s
 // Quality conversions
 std::string quality_to_string(anolis::deviceprovider::v1::SignalValue_Quality quality);
 std::string value_type_to_string(anolis::deviceprovider::v1::ValueType type);
+std::string function_category_to_string(anolis::deviceprovider::v1::FunctionPolicy_Category category);
 
 }  // namespace http
 }  // namespace anolis

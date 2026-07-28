@@ -189,6 +189,52 @@ protected:
         registry->discover_provider("test_provider", *mock_provider);
     }
 
+    void RegisterMockDeviceWithCategories(const std::string& device_id = "test_device") {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([device_id](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id(device_id);
+            devices.push_back(dev);
+            return true;
+        }));
+
+        EXPECT_CALL(*mock_provider, describe_device(device_id, _))
+            .WillOnce(Invoke([device_id](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id(device_id);
+                auto* caps = response.mutable_capabilities();
+
+                auto* actuate = caps->add_functions();
+                actuate->set_name("set_heater");
+                actuate->set_function_id(10);
+                actuate->mutable_policy()->set_category(
+                    anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+
+                auto* read = caps->add_functions();
+                read->set_name("read_temp");
+                read->set_function_id(11);
+                read->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+
+                auto* config = caps->add_functions();
+                config->set_name("calibrate");
+                config->set_function_id(12);
+                config->mutable_policy()->set_category(
+                    anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_CONFIG);
+
+                // An out-of-range category (e.g. a newer provider's future
+                // enum value) must fail closed, not silently become safe. The
+                // out-of-range cast is the scenario under test.
+                auto* unknown = caps->add_functions();
+                unknown->set_name("future_op");
+                unknown->set_function_id(13);
+                // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+                const auto future_category = static_cast<anolis::deviceprovider::v1::FunctionPolicy_Category>(99);
+                unknown->mutable_policy()->set_category(future_category);
+
+                return true;
+            }));
+
+        registry->discover_provider("test_provider", *mock_provider);
+    }
+
     /**
      * @brief Populate state cache with test data
      *
@@ -276,6 +322,42 @@ TEST_F(HttpHandlersTest, GetDeviceCapabilitiesSuccess) {
     ASSERT_EQ(1, caps["functions"].size());
     EXPECT_EQ("reset", caps["functions"][0]["name"]);
     EXPECT_EQ(100, caps["functions"][0]["function_id"]);
+    // A function with no declared FunctionPolicy fails closed to actuating.
+    EXPECT_EQ("UNSPECIFIED", caps["functions"][0]["category"]);
+    EXPECT_TRUE(caps["functions"][0]["actuating"].get<bool>());
+}
+
+TEST_F(HttpHandlersTest, GetDeviceCapabilitiesSurfacesActuationCategory) {
+    RegisterMockDeviceWithCategories();
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+
+    const auto json = nlohmann::json::parse(res->body);
+    const auto& functions = json["capabilities"]["functions"];
+    ASSERT_EQ(4, functions.size());  // sorted by function_id: 10, 11, 12, 13
+
+    EXPECT_EQ("set_heater", functions[0]["name"]);
+    EXPECT_EQ("ACTUATE", functions[0]["category"]);
+    EXPECT_TRUE(functions[0]["actuating"].get<bool>());
+
+    // Only an explicit READ is non-actuating.
+    EXPECT_EQ("read_temp", functions[1]["name"]);
+    EXPECT_EQ("READ", functions[1]["category"]);
+    EXPECT_FALSE(functions[1]["actuating"].get<bool>());
+
+    // CONFIG fails closed to actuating (persistent effect).
+    EXPECT_EQ("calibrate", functions[2]["name"]);
+    EXPECT_EQ("CONFIG", functions[2]["category"]);
+    EXPECT_TRUE(functions[2]["actuating"].get<bool>());
+
+    // An unrecognized category maps to UNSPECIFIED and fails closed to
+    // actuating, keeping the response schema-valid and safe.
+    EXPECT_EQ("future_op", functions[3]["name"]);
+    EXPECT_EQ("UNSPECIFIED", functions[3]["category"]);
+    EXPECT_TRUE(functions[3]["actuating"].get<bool>());
 }
 
 TEST_F(HttpHandlersTest, GetDeviceCapabilitiesNotFound) {
