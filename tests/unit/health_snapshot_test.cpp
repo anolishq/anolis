@@ -174,8 +174,8 @@ TEST_F(HealthSnapshotCollectorTest, LivenessTiersTrackDerivedBounds) {
 TEST_F(HealthSnapshotCollectorTest, ExplicitOverrideDrivesTiers) {
     RegisterDevices(1);
     auto poll_time = PollAndGetPollTime();
-    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 1000, 2000},
-                                                 poll_time + std::chrono::milliseconds(1500));
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr,
+                                                 {500, 1000, 2000}, poll_time + std::chrono::milliseconds(1500));
     EXPECT_EQ(HealthOf(snap, "dev0"), "WARNING");  // 1000 <= 1500 < 2000
 }
 
