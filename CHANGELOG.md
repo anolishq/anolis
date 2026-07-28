@@ -19,12 +19,13 @@ commit messages only.
   runtime config by a machine-profile `runtime_profiles` map **key** instead of
   the previous `.manual.` filename grep, so a mislabeled config can no longer be
   boot-selected as inert. install.sh now **verifies the selected variant is
-  actually inert** (`automation.enabled=false` and no `mode_transition_hooks`,
-  which fire regardless of `enabled`) and refuses a non-inert config on a fresh
+  actually inert** (`automation.enabled=false` and no `mode_transition_hooks` —
+  a variant declaring hooks is one flag-flip from actuation, so it is not a
+  clean inert baseline) and refuses a non-inert config on a fresh
   install; a deployment must declare a `runtime_profiles` map (fail-closed).
   An operator-activated config preserved across an upgrade is kept with a
   warning rather than blocking the upgrade. Automation is activated from Operate
-  after install, never at install time (#225).
+  after install, never at install time (anolishq/anolis-workbench#225).
 - Software safe-state e-stop: `POST /v0/estop` engages a latching safe-state
   that works regardless of `automation.enabled`, and `POST /v0/estop/clear`
   releases it. The safe-state ladder runs the profile's declared safe-state

@@ -1,8 +1,10 @@
 #!/usr/bin/env bats
-# Tests for --variant selection via runtime_profiles + verify-inert (#225).
+# Tests for --variant selection via runtime_profiles + verify-inert
+# (anolishq/anolis-workbench#225).
 #
 # install.sh selects the active runtime variant by a runtime_profiles map KEY
-# (never by filename — a name cannot be trusted, #254) and refuses to install a
+# (never by filename — a name cannot be trusted, anolishq/anolis-workbench#254)
+# and refuses to install a
 # non-inert config. Source install.sh (main() guarded) and exercise the pure
 # helpers + the selection phase with chown mocked. No root/network/systemd.
 
@@ -43,7 +45,7 @@ _write_profile() {  # <path> — machine-profile.yaml with a runtime_profiles ma
     [[ "${output}" == *"not inert"* ]]
 }
 
-@test "verify-inert: refuses enabled false WITH mode_transition_hooks (hooks fire regardless)" {
+@test "verify-inert: refuses enabled false WITH mode_transition_hooks (not a clean inert baseline)" {
     cfg="${TMP}/d.yaml"
     printf 'automation:\n  enabled: false\n  mode_transition_hooks:\n    before_transition: []\n' > "${cfg}"
     run verify_inert_runtime_config "${cfg}"
@@ -175,4 +177,72 @@ _make_bundle() {  # <profile-writer-fn>
     run show_help
     [ "$status" -eq 0 ]
     [[ "${output}" == *"--variant"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# verify-inert bypass regressions — valid YAML the runtime treats as enabled
+# must NOT pass as inert (default-deny).
+# ---------------------------------------------------------------------------
+
+@test "verify-inert: refuses non-canonical truthy enabled (True/yes/on/y)" {
+    for v in True TRUE yes on y; do
+        cfg="${TMP}/t-${v}.yaml"; printf 'automation:\n  enabled: %s\n' "${v}" > "${cfg}"
+        run verify_inert_runtime_config "${cfg}"
+        [ "$status" -ne 0 ] || { echo "accepted enabled: ${v}"; false; }
+    done
+}
+
+@test "verify-inert: refuses a quoted true" {
+    cfg="${TMP}/q.yaml"; printf 'automation:\n  enabled: "true"\n' > "${cfg}"
+    run verify_inert_runtime_config "${cfg}"
+    [ "$status" -ne 0 ]
+}
+
+@test "verify-inert: refuses a flow-style automation mapping" {
+    cfg="${TMP}/flow.yaml"; printf 'automation: {enabled: true}\n' > "${cfg}"
+    run verify_inert_runtime_config "${cfg}"
+    [ "$status" -ne 0 ]
+}
+
+@test "verify-inert: refuses a CRLF enabled true (Windows-edited config)" {
+    cfg="${TMP}/crlf.yaml"; printf 'automation:\r\n  enabled: true\r\n' > "${cfg}"
+    run verify_inert_runtime_config "${cfg}"
+    [ "$status" -ne 0 ]
+}
+
+@test "verify-inert: accepts a CRLF enabled false" {
+    cfg="${TMP}/crlf-ok.yaml"; printf 'automation:\r\n  enabled: false\r\n' > "${cfg}"
+    run verify_inert_runtime_config "${cfg}"
+    [ "$status" -eq 0 ]
+}
+
+@test "verify-inert: mode_transition_hooks under a different block does not trip it" {
+    cfg="${TMP}/other.yaml"
+    printf 'automation:\n  enabled: false\nother:\n  mode_transition_hooks: x\n' > "${cfg}"
+    run verify_inert_runtime_config "${cfg}"
+    [ "$status" -eq 0 ]
+}
+
+@test "phase_config_runtime: missing resolved variant file fails closed" {
+    _make_bundle _write_profile
+    rm -f "${BUNDLE_DIR}/projects/proj/config/anolis-runtime.telemetry.yaml"
+    RUNTIME_VARIANT="telemetry"
+    run phase_config_runtime
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"missing file"* ]]
+}
+
+@test "variant path: resolves a quoted map value" {
+    mp="${TMP}/mpq.yaml"
+    printf 'runtime_profiles:\n  manual: "config/anolis-runtime.manual.yaml"\ncomponents: {}\n' > "${mp}"
+    run _profile_variant_path "${mp}" manual
+    [ "${output}" = "config/anolis-runtime.manual.yaml" ]
+}
+
+@test "preflight_variant_selection: fails closed on a bad variant before any mutation" {
+    _make_bundle _write_profile
+    RUNTIME_VARIANT="bogus"
+    run preflight_variant_selection
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"bogus"* ]]
 }

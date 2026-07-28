@@ -119,7 +119,7 @@ Common:
                            (online; 30 d bucket retention; scoped tokens).
                            These services start immediately — the global
                            --no-start gates only the runtime.
-  --variant <key>        Runtime variant to activate, a runtime_profiles map key
+  --variant <key>        Runtime variant to install, a runtime_profiles map key
                          (default: manual). Must be inert (automation off, no
                          mode-transition hooks); a non-inert variant is refused.
                          Activate automation from Operate after install.
@@ -460,13 +460,17 @@ phase_config_project() {
 # Phase 13: Config (runtime) — skip if exists
 # =============================================================================
 
-phase_config_runtime() {
-    local dest="${PREFIX}/config/runtime.yaml"
+# Resolve the active variant (RUNTIME_VARIANT, default `manual`) to its bundled
+# config path within <profile_dir>, or die. Read-only; sets RESOLVED_VARIANT_SRC.
+# A deployment MUST declare a runtime_profiles map; the variant is resolved by
+# map key, never by filename (a name cannot be trusted — anolishq/anolis-workbench#254).
+# Called directly (not in $(...)) so die aborts the whole install.
+RESOLVED_VARIANT_SRC=""
+_resolve_variant_src() {
+    local profile_dir="$1"
+    local mp="${profile_dir}/machine-profile.yaml"
     local variant="${RUNTIME_VARIANT:-manual}"
-    local mp="${BUNDLE_DIR}/projects/${INSTALLED_PROFILE:-}/machine-profile.yaml"
 
-    # A deployment MUST declare a runtime_profiles map; the active variant is
-    # resolved by map key, never by filename (a name cannot be trusted — #254).
     local keys
     keys=$(_profile_variant_keys "${mp}")
     if [[ -z "${keys}" ]]; then
@@ -481,16 +485,40 @@ phase_config_runtime() {
         die "unknown runtime variant '${variant}'"
     fi
 
-    local src
-    src="${BUNDLE_DIR}/projects/${INSTALLED_PROFILE}/config/$(basename "${rel}")"
-    if [[ ! -f "${src}" ]]; then
-        die "config (runtime): variant '${variant}' resolves to a missing file: ${src}"
+    RESOLVED_VARIANT_SRC="${profile_dir}/config/$(basename "${rel}")"
+    if [[ ! -f "${RESOLVED_VARIANT_SRC}" ]]; then
+        die "config (runtime): variant '${variant}' resolves to a missing file: ${RESOLVED_VARIANT_SRC}"
     fi
+}
+
+# Read-only preflight: resolve + inert-verify the variant BEFORE any filesystem
+# mutation (binary replacement, config overwrite), so a bad selection aborts
+# cleanly instead of leaving new binaries against an un-updated config.
+preflight_variant_selection() {
+    local profile_dir
+    profile_dir=$(find "${BUNDLE_DIR}/projects" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+    [[ -n "${profile_dir}" ]] || die "config (runtime): no projects/ in bundle"
+    _resolve_variant_src "${profile_dir}"
+    # A fresh install must select an inert variant; an existing (operator-edited)
+    # config is preserved and only warned on in phase_config_runtime.
+    [[ -f "${PREFIX}/config/runtime.yaml" ]] || verify_inert_runtime_config "${RESOLVED_VARIANT_SRC}" die
+}
+
+phase_config_runtime() {
+    local dest="${PREFIX}/config/runtime.yaml"
+    local variant="${RUNTIME_VARIANT:-manual}"
+
+    _resolve_variant_src "${BUNDLE_DIR}/projects/${INSTALLED_PROFILE:-}"
+    local src="${RESOLVED_VARIANT_SRC}"
 
     if [[ -f "${dest}" ]]; then
         # Preserve an operator-edited/activated config across upgrades; only warn
         # if it is not inert (they may have activated automation from Operate).
         log_skip "config (runtime): ${dest} exists (preserved)"
+        if [[ -n "${RUNTIME_VARIANT}" ]]; then
+            log_warn "config (runtime): --variant '${RUNTIME_VARIANT}' NOT applied; ${dest} is preserved."
+            log_info "To switch variants, remove ${dest} and re-run, or edit it directly."
+        fi
         verify_inert_runtime_config "${dest}" warn
     else
         verify_inert_runtime_config "${src}" die
@@ -1207,48 +1235,68 @@ _profile_variant_keys() {
     local mp="$1"
     [[ -f "${mp}" ]] || return 0
     awk '
+        { sub(/\r$/, "") }
         /^[[:alpha:]]/ { in_blk = ($1 == "runtime_profiles:") }
-        in_blk && /^[[:space:]]+[A-Za-z0-9_-]+:/ { k = $1; sub(/:$/, "", k); printf "%s ", k }
+        in_blk && /^  [A-Za-z0-9_-]+:/ { k = $1; sub(/:$/, "", k); printf "%s ", k }
     ' "${mp}"
 }
 
-# Print "1" if a `mode_transition_hooks:` key appears under the top-level
-# `automation:` block. These hooks issue device calls on mode transitions
-# regardless of automation.enabled (core/runtime/runtime.cpp), so their mere
-# presence makes a config non-inert.
-_automation_hooks_present() {
+# Print a reason string if a runtime config is NOT inert, else print nothing.
+# Default-deny: inert requires automation.enabled to be positively false/absent
+# AND no mode_transition_hooks declared. The runtime parses enabled with
+# yaml-cpp (accepts true/yes/on/y in any case, quoted or not — core/runtime/
+# config.cpp), so anything not explicitly false-ish is treated as enabled here.
+# A flow-style `automation:` block cannot be verified offline and is refused.
+# Hooks are refused as conservative policy: a variant that declares them is one
+# flag-flip from actuation, so it is not a clean inert baseline (the canonical
+# manual/telemetry variants declare none). Tolerates CRLF and trailing comments.
+_automation_inert_violation() {
     local cfg="$1"
     [[ -f "${cfg}" ]] || return 0
     awk '
-        /^[[:alpha:]]/ { in_blk = ($1 == "automation:") }
-        in_blk && $1 == "mode_transition_hooks:" { print "1"; exit }
+        { sub(/\r$/, "") }
+        /^automation:/ {
+            in_blk = 1
+            rest = $0
+            sub(/^automation:[[:space:]]*/, "", rest)
+            sub(/[[:space:]]*#.*/, "", rest)
+            if (rest != "") { print "automation is not a plain block mapping (" rest ")"; exit }
+            next
+        }
+        /^[[:alpha:]]/ { in_blk = 0 }
+        in_blk && $1 == "enabled:" {
+            v = $2
+            gsub(/["\047]/, "", v)
+            lv = tolower(v)
+            if (lv != "" && lv != "false" && lv != "no" && lv != "off" && lv != "n") {
+                print "automation.enabled=" v
+                exit
+            }
+        }
+        in_blk && $1 == "mode_transition_hooks:" {
+            print "mode_transition_hooks present"
+            exit
+        }
     ' "${cfg}"
 }
 
-# Verify a runtime config is inert (safe to boot without an operator): automation
-# disabled AND no mode-transition hooks. install.sh only ever activates an inert
-# variant; automation is activated later from Operate. `mode` is `die` (refuse a
-# fresh install of a non-inert config) or `warn` (an operator-activated config
-# preserved across an upgrade must not brick the machine).
+# Verify a runtime config is inert (safe to boot without an operator). install.sh
+# only ever activates an inert variant; automation is activated later from
+# Operate. `mode` is `die` (refuse a fresh install of a non-inert config) or
+# `warn` (an operator-activated config preserved across an upgrade must not brick
+# the machine).
 verify_inert_runtime_config() {
     local cfg="$1" mode="${2:-die}"
-    local enabled hooks
-    enabled=$(_yaml_block_value "${cfg}" automation enabled)
-    hooks=$(_automation_hooks_present "${cfg}")
-
-    if [[ "${enabled}" != "true" && "${hooks}" != "1" ]]; then
-        return 0
-    fi
-
-    local reason="automation.enabled=${enabled:-false}"
-    [[ "${hooks}" == "1" ]] && reason="${reason}, mode_transition_hooks present"
+    local violation
+    violation=$(_automation_inert_violation "${cfg}")
+    [[ -z "${violation}" ]] && return 0
 
     if [[ "${mode}" == "warn" ]]; then
-        log_warn "config (runtime): active config is not inert (${reason}); preserved as-is"
+        log_warn "config (runtime): active config is not inert (${violation}); preserved as-is"
         return 0
     fi
 
-    log_err "config (runtime): selected variant is not inert (${reason})"
+    log_err "config (runtime): selected variant is not inert (${violation})"
     log_info "install.sh boots inert; activate automation from Operate after install."
     die "refusing to install a non-inert runtime config"
 }
@@ -1656,6 +1704,13 @@ if not default_rel:
 default_src = cfg / Path(default_rel).name
 if not default_src.exists():
     sys.exit(f"'manual' variant resolves to a missing file: {default_src}")
+# Verify the baked default is inert at stage time too. The bundle's own
+# install.sh is fetched from the pinned release and may predate the install-time
+# gate, so this pyyaml check (a real parser, robust to true/yes/on/quoting) is
+# the belt-and-suspenders that also protects the offline --local path.
+_auto = (yaml.safe_load(default_src.read_text()) or {}).get("automation") or {}
+if _auto.get("enabled") or "mode_transition_hooks" in _auto:
+    sys.exit(f"the 'manual' variant is not inert (automation enabled or hooks present): {default_src}")
 (out / "config" / "runtime.yaml").write_text(render(default_src.read_text()))
 for pc in sorted(cfg.glob("provider-*.yaml")):
     name = pc.stem.removeprefix("provider-").split(".")[0]
@@ -1837,6 +1892,7 @@ main() {
     phase_detect
     phase_prepare_bundle
     phase_verify
+    preflight_variant_selection
     phase_system_user
     phase_i2c
     phase_deps
