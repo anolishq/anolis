@@ -38,7 +38,23 @@ struct FunctionSpec {
     std::string function_name;
     std::string label;
     std::vector<anolis::deviceprovider::v1::ArgSpec> args;  // Full ArgSpec retained for validation
+    // Actuation classification from the provider's FunctionPolicy. Retained so
+    // safety gates (software safe-state, refuse-hookless) can tell which outputs
+    // actuate. Defaults to UNSPECIFIED so an untagged function fails closed.
+    anolis::deviceprovider::v1::FunctionPolicy_Category category =
+        anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_UNSPECIFIED;
 };
+
+/**
+ * @brief Fail-closed actuation predicate for a function.
+ *
+ * A function is treated as actuating unless it *explicitly* declares itself
+ * read-only (`CATEGORY_READ`). `CATEGORY_UNSPECIFIED` (an untagged, e.g.
+ * third-party, provider), `CATEGORY_CONFIG` (persistent effect), and any
+ * unknown future category all fail closed to actuating. Safety gates must use
+ * this rather than checking `== CATEGORY_ACTUATE`.
+ */
+bool is_actuating(const FunctionSpec &spec);
 
 /**
  * @brief Immutable capability snapshot for a discovered device.

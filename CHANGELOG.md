@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v0/devices/{provider}/{device}/capabilities` now surfaces each
+  function's actuation classification: a `category` field
+  (`UNSPECIFIED`/`READ`/`CONFIG`/`ACTUATE`, read from the provider's
+  `FunctionPolicy`) and a fail-closed `actuating` flag — true unless the
+  function explicitly declares `READ`, so an untagged (`UNSPECIFIED`) or
+  `CONFIG` function counts as actuating. Both fields are required in the v0
+  capabilities schema. This lets clients enumerate a device's actuating
+  outputs and is the shared dependency for the runtime software safe-state
+  command and the refuse-hookless install gate (#218).
+
 ## [0.1.38] - 2026-07-22
 
 ### Fixed

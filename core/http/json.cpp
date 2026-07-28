@@ -94,6 +94,21 @@ std::string value_type_to_string(anolis::deviceprovider::v1::ValueType type) {
     }
 }
 
+std::string function_category_to_string(anolis::deviceprovider::v1::FunctionPolicy_Category category) {
+    using C = anolis::deviceprovider::v1::FunctionPolicy_Category;
+    switch (category) {
+        case C::FunctionPolicy_Category_CATEGORY_READ:
+            return "READ";
+        case C::FunctionPolicy_Category_CATEGORY_CONFIG:
+            return "CONFIG";
+        case C::FunctionPolicy_Category_CATEGORY_ACTUATE:
+            return "ACTUATE";
+        case C::FunctionPolicy_Category_CATEGORY_UNSPECIFIED:
+        default:
+            return "UNSPECIFIED";
+    }
+}
+
 nlohmann::json encode_value(const anolis::deviceprovider::v1::Value &value) {
     nlohmann::json result;
 
@@ -218,7 +233,12 @@ nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
         args[arg.name()] = arg_info;
     }
 
-    return {{"function_id", spec.function_id}, {"name", spec.function_name}, {"label", spec.label}, {"args", args}};
+    return {{"function_id", spec.function_id},
+            {"name", spec.function_name},
+            {"label", spec.label},
+            {"args", args},
+            {"category", function_category_to_string(spec.category)},
+            {"actuating", registry::is_actuating(spec)}};
 }
 
 nlohmann::json encode_capabilities(const registry::DeviceCapabilitySet &caps) {

@@ -747,7 +747,7 @@ components:
     FunctionSpec:
       type: object
       additionalProperties: false
-      required: [function_id, name, label, args]
+      required: [function_id, name, label, args, category, actuating]
       properties:
         function_id:
           type: integer
@@ -759,6 +759,20 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/ArgSpec'
+        category:
+          type: string
+          description: >-
+            Actuation classification from the provider's FunctionPolicy.
+            UNSPECIFIED means the provider did not tag the function (or tagged
+            it with a category this runtime does not recognize); either way it
+            fails closed to actuating.
+          enum: [UNSPECIFIED, READ, CONFIG, ACTUATE]
+        actuating:
+          type: boolean
+          description: >-
+            Fail-closed actuation flag: true unless the function explicitly
+            declares category READ. UNSPECIFIED and CONFIG both fail closed to
+            true. Safety gates use this to enumerate actuating outputs.
     SignalSpec:
       type: object
       additionalProperties: false

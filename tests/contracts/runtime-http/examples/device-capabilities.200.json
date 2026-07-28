@@ -18,6 +18,8 @@
         "function_id": 10,
         "name": "set_motor",
         "label": "Set motor duty",
+        "category": "ACTUATE",
+        "actuating": true,
         "args": {
           "motor_index": {
             "type": "int64",
