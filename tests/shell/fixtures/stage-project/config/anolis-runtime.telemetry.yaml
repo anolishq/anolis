@@ -1,0 +1,11 @@
+server:
+  bind: 127.0.0.1
+providers:
+  - name: foo
+    command: ../anolis-provider-foo/build/dev-release/anolis-provider-foo
+    args: ["--config", "../anolis-projects/projects/stage-project/config/provider-foo.yaml"]
+  - name: bar
+    command: ../anolis-provider-bar/build/dev-release/anolis-provider-bar
+    args: ["--config", "../anolis-projects/projects/stage-project/config/provider-bar.yaml"]
+telemetry:
+  enabled: true

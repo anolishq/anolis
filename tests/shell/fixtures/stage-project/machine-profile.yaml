@@ -1,4 +1,9 @@
-# Minimal fixture — do_stage only reads the components: block.
+# Minimal fixture. do_stage reads the components: block; variant selection reads
+# runtime_profiles. Both variants are inert (no automation block).
+runtime_profiles:
+  manual: config/anolis-runtime.manual.yaml
+  telemetry: config/anolis-runtime.telemetry.yaml
+
 components:
   runtime:
     repo: anolishq/anolis
