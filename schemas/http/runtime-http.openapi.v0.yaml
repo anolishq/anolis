@@ -676,7 +676,10 @@ components:
     RuntimeStatusResponse:
       type: object
       additionalProperties: false
-      required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count, estop]
+      # estop is present whenever the safe-state controller is wired (always, in
+      # the shipped runtime), but kept optional so an embedding without it stays
+      # contract-valid.
+      required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count]
       properties:
         status:
           $ref: '#/components/schemas/Status'

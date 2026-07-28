@@ -42,13 +42,23 @@ std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovid
 }
 
 // True if `setpoint` targets the same function as an actuating `spec` on `handle`.
+// When both selectors are present they must agree (mirroring CallRouter, which
+// requires id and name to resolve to the same function), so a contradictory
+// setpoint does not count toward coverage.
 bool setpoint_matches(const runtime::ModeTransitionCallConfig &setpoint, const std::string &handle,
                       const registry::FunctionSpec &spec) {
     if (setpoint.device_handle != handle) {
         return false;
     }
-    return (setpoint.function_id != 0 && setpoint.function_id == spec.function_id) ||
-           (!setpoint.function_name.empty() && setpoint.function_name == spec.function_name);
+    const bool has_id = setpoint.function_id != 0;
+    const bool has_name = !setpoint.function_name.empty();
+    if (has_id && setpoint.function_id != spec.function_id) {
+        return false;
+    }
+    if (has_name && setpoint.function_name != spec.function_name) {
+        return false;
+    }
+    return has_id || has_name;
 }
 
 }  // namespace
@@ -77,11 +87,18 @@ void SafeStateController::set_mode_manager(automation::ModeManager *mode_manager
 bool SafeStateController::is_engaged() const { return latched_.load(std::memory_order_acquire); }
 
 std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController::actuating_functions() const {
+    // The ladder EXECUTES against explicitly-declared actuators only. This is
+    // deliberately narrower than the CallRouter latch's fail-closed
+    // `is_actuating` (any not-READ function): the latch refuses unknown calls
+    // (conservative about ALLOWING), while the ladder must not blindly invoke a
+    // CONFIG change or an untagged command to "make it safe" (conservative about
+    // ACTING). Untagged actuators are still latched; declare a hook/setpoint to
+    // drive them.
     std::vector<std::pair<std::string, registry::FunctionSpec>> out;
     for (const auto &device : registry_.get_all_devices()) {
         for (const auto &[name, spec] : device.capabilities.functions_by_id) {
             (void)name;
-            if (registry::is_actuating(spec)) {
+            if (spec.category == anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE) {
                 out.emplace_back(device.get_handle(), spec);
             }
         }
@@ -168,6 +185,16 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
         request.args[arg.name()] = *zero;
     }
 
+    // Refuse to bare-invoke a function with nothing to zero: "zero the outputs"
+    // means driving a numeric setpoint to 0, not calling a no-argument command
+    // (which could energize hardware). Still latches; the operator should
+    // declare a hook for such a function.
+    if (request.args.empty()) {
+        outcome.success = false;
+        outcome.error = "cannot zero: no numeric required argument to drive to zero";
+        return outcome;
+    }
+
     const auto res = call_router_.execute_call(request, provider_registry_);
     outcome.success = res.success;
     if (!res.success) {
@@ -202,6 +229,12 @@ EstopResult SafeStateController::run_ladder() {
 }
 
 EstopResult SafeStateController::trigger(const std::string &reason) {
+    // The mutex is held across the whole ladder so a trigger is atomic with
+    // respect to clear() and concurrent triggers. Consequence: capability()
+    // (the status surface) and clear() block for the ladder's duration, which
+    // is bounded by provider call timeouts. This is acceptable for a rare
+    // safety stop; is_engaged() stays lock-free so the CallRouter latch check is
+    // never blocked.
     std::lock_guard<std::mutex> lock(mutex_);
     latched_.store(true, std::memory_order_release);
     latched_at_ms_ = now_epoch_ms();
@@ -236,12 +269,14 @@ void SafeStateController::clear() {
 
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
-    cap.latched = latched_.load(std::memory_order_acquire);
     size_t uncovered = 0;
     cap.software_safe_state = planned_kind(&uncovered);
     cap.uncovered_actuating_functions = uncovered;
     {
+        // Read latch flag and timestamp together so the pair is consistent
+        // against a concurrent clear() (no {latched:true, latched_at:null}).
         std::lock_guard<std::mutex> lock(mutex_);
+        cap.latched = latched_.load(std::memory_order_acquire);
         cap.latched_at_epoch_ms = latched_at_ms_;
     }
     return cap;

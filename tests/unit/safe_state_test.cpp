@@ -48,8 +48,8 @@ protected:
 
     // Register an actuating "set_output" (CATEGORY_ACTUATE) with a required double
     // "pwm" arg. `arg_type` lets a test force a non-numeric required arg.
-    void RegisterActuator(anolis::deviceprovider::v1::ValueType arg_type =
-                              anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE) {
+    void RegisterActuator(
+        anolis::deviceprovider::v1::ValueType arg_type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE) {
         EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
             Device dev;
             dev.set_device_id("heater");
@@ -178,4 +178,79 @@ TEST_F(SafeStateTest, ClearReleasesLatch) {
     controller->clear();
     EXPECT_FALSE(controller->is_engaged());
     EXPECT_FALSE(controller->capability().latched);
+}
+
+TEST_F(SafeStateTest, ZeroRungSkipsNonActuateFunctions) {
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("mixed");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device("mixed", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("mixed");
+            auto* caps = response.mutable_capabilities();
+
+            auto* actuate = caps->add_functions();
+            actuate->set_name("set_output");
+            actuate->set_function_id(1);
+            actuate->mutable_policy()->set_category(
+                anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+            auto* pwm = actuate->add_args();
+            pwm->set_name("pwm");
+            pwm->set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            pwm->set_required(true);
+
+            auto* config = caps->add_functions();  // must NOT be zeroed
+            config->set_name("calibrate");
+            config->set_function_id(2);
+            config->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_CONFIG);
+            auto* offset = config->add_args();
+            offset->set_name("offset");
+            offset->set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            offset->set_required(true);
+            return true;
+        }));
+    registry->discover_provider("sim0", *mock_provider);
+
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // Only the ACTUATE function is driven; StrictMock fails if CONFIG is called.
+    EXPECT_CALL(*mock_provider, call("mixed", 1, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_EQ(result.actions[0].function, "set_output");
+}
+
+TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("btn");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device("btn", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("btn");
+            auto* fn = response.mutable_capabilities()->add_functions();
+            fn->set_name("pulse");  // ACTUATE but no args -> nothing to zero
+            fn->set_function_id(1);
+            fn->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+            return true;
+        }));
+    registry->discover_provider("sim0", *mock_provider);
+
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // StrictMock: no call() — a no-arg actuator must not be bare-invoked.
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_FALSE(result.actions[0].success);
+    EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
 }

@@ -128,6 +128,18 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     ProviderLock provider_lock_handle = get_or_create_provider_lock(provider_id);
     std::lock_guard<std::mutex> provider_lock(*provider_lock_handle);
 
+    // Re-check the latch after acquiring the provider lock. An e-stop could have
+    // engaged (and its ladder run to completion for this provider) while this
+    // call waited for the lock; without this check an in-flight actuating call
+    // would land after the safe state was applied. Safe-state calls are exempt.
+    if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
+        registry::is_actuating(*func_spec)) {
+        result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+        LOG_WARN("[CallRouter] " << result.error_message);
+        return result;
+    }
+
     // Forward call to provider
     anolis::deviceprovider::v1::CallResponse call_response;
     if (!provider->call(device_id, func_spec->function_id, resolved_function_name, request.args, call_response)) {
