@@ -450,11 +450,12 @@ bool Runtime::init_http(std::string &error) {
         dependencies.mode_manager = mode_manager_.get();            // optional: automation mode
         dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters
         dependencies.bt_runtime = bt_runtime_.get();                // optional: automation runtime
-#endif
-        // The e-stop controller drives FAULT on automation machines; hand it the
-        // mode manager (nullptr when automation is disabled) and expose it to the
-        // HTTP surface for POST /v0/estop and the status snapshot.
+        // The e-stop controller drives FAULT on automation machines. Without
+        // automation there is no mode manager, so it stays latch + ladder only.
         safe_state_controller_->set_mode_manager(mode_manager_.get());
+#endif
+        // Expose the e-stop controller to the HTTP surface (POST /v0/estop and
+        // the status snapshot) regardless of automation.
         dependencies.safe_state = safe_state_controller_.get();
         http_server_ =
             std::make_unique<http::HttpServer>(config_.http, config_.polling.interval_ms, std::move(dependencies));
