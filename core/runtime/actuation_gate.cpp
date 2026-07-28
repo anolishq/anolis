@@ -2,8 +2,8 @@
 
 #include <sstream>
 
-#include "runtime/config.hpp"
 #include "registry/device_registry.hpp"
+#include "runtime/config.hpp"
 
 namespace anolis {
 namespace runtime {

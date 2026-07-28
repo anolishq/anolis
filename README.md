@@ -281,6 +281,11 @@ Enable automation and parameters in your runtime config:
 automation:
   enabled: true
   behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
+```
+
+Machines with actuating outputs must also declare safe-state
+`mode_transition_hooks` or the runtime refuses `MANUAL -> AUTO` (see
+[docs/safety.md](docs/safety.md#manual---auto)).
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v0/parameters \

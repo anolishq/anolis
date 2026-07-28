@@ -137,6 +137,25 @@ class AutomationTester:
             raise AssertionError(f"POST /v0/mode failed for mode={mode}: {err}") from err
         return cast(Dict[str, Any], resp.json())
 
+    def manual_actuation_ok(self) -> bool:
+        """Issue a manual actuating /v0/call and report whether it succeeded."""
+        caps = requests.get(f"{self.base_url}/v0/devices/sim0/motorctl0/capabilities", timeout=2).json()
+        fid = next(f["function_id"] for f in caps["capabilities"]["functions"] if f["name"] == "set_motor_duty")
+        resp = requests.post(
+            f"{self.base_url}/v0/call",
+            json={
+                "provider_id": "sim0",
+                "device_id": "motorctl0",
+                "function_id": fid,
+                "args": {
+                    "motor_index": {"type": "int64", "int64": 1},
+                    "duty": {"type": "double", "double": 0.3},
+                },
+            },
+            timeout=2,
+        )
+        return resp.status_code == 200
+
     def _wait_for_mode(self, expected_mode: str, timeout: float = 3.0) -> None:
         ok = wait_for_condition(
             lambda: self.get_mode().get("mode") == expected_mode,

@@ -18,14 +18,15 @@ commit messages only.
 - Refuse-hookless safety gate: the runtime now refuses the transition into
   `AUTO` when automation is enabled with actuating outputs but no safe-state
   `mode_transition_hooks` declared. Enforced at `set_mode` (the single choke
-  point into AUTO), so it holds for the process lifetime and re-evaluates
-  against the live device inventory across provider restarts. Manual control and
-  `POST /v0/estop` stay available, and `FAULT` is never blocked. Actuating
-  outputs are enumerated fail-closed (any function not explicitly tagged
-  read-only counts), and a startup ERROR log names them. Automation configs with
-  actuating outputs must now declare `mode_transition_hooks` (e.g. a `*->FAULT`
-  hook that drives actuators to a safe state) to run autonomously; a config
-  whose functions are all read-only is unaffected (anolishq/anolis-workbench#237).
+  point into AUTO) and re-evaluated against the live device inventory on each
+  `MANUAL -> AUTO` attempt. Manual control and `POST /v0/estop` stay available,
+  and `FAULT` is never blocked. Actuating outputs are enumerated fail-closed
+  (any function not explicitly tagged read-only counts), and a startup ERROR log
+  names them. Automation configs with actuating outputs must now declare
+  `mode_transition_hooks` (e.g. a `*->FAULT` hook that drives actuators to a safe
+  state) to run autonomously; a config whose functions are all read-only is
+  unaffected. Interim: the gate checks that hooks are *declared*, not yet that a
+  hook targets `FAULT` specifically (anolishq/anolis-workbench#237).
 
 - `install.sh --variant <key>` (alias `--runtime-profile`) selects the active
   runtime config by a machine-profile `runtime_profiles` map **key** instead of

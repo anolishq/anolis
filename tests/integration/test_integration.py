@@ -161,8 +161,9 @@ def test_auto_refused_without_safe_state_hooks(
         assert result.get("status", {}).get("code") == "FAILED_PRECONDITION", result
         assert "mode_transition_hooks" in str(result), result
 
-        # The runtime stays in MANUAL; manual control is unaffected.
+        # The runtime stays in MANUAL and manual actuation still works.
         assert tester.get_mode().get("mode") == "MANUAL"
+        assert tester.manual_actuation_ok()
     finally:
         tester.cleanup()
 

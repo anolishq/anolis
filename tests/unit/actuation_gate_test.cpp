@@ -44,6 +44,17 @@ protected:
         registry->discover_provider("sim0", *mock_provider);
     }
 
+    // A realistic *->FAULT hook with one call (matches what the loader accepts).
+    static runtime::ModeTransitionHookConfig make_fault_hook() {
+        runtime::ModeTransitionHookConfig hook;
+        hook.to = "FAULT";
+        runtime::ModeTransitionCallConfig call;
+        call.device_handle = "sim0/dev0";
+        call.function_name = "set_output";
+        hook.calls.push_back(call);
+        return hook;
+    }
+
     runtime::AutomationConfig automation;  // enabled=false, no hooks by default
     std::unique_ptr<registry::DeviceRegistry> registry;
     std::shared_ptr<MockProviderHandle> mock_provider;
@@ -84,19 +95,25 @@ TEST_F(ActuationGateTest, AllowsReadOnlyFunctions) {
 TEST_F(ActuationGateTest, AllowsWhenBeforeTransitionHookDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
-    automation.mode_transition_hooks.before_transition.push_back(runtime::ModeTransitionHookConfig{});
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
     EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWhenAfterTransitionHookDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
-    automation.mode_transition_hooks.after_transition.push_back(runtime::ModeTransitionHookConfig{});
+    automation.mode_transition_hooks.after_transition.push_back(make_fault_hook());
     EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWhenAutomationDisabled) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = false;
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, AllowsWhenRegistryEmpty) {
+    // No devices discovered: nothing can actuate, so hookless AUTO is allowed.
+    automation.enabled = true;
     EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
 }
