@@ -33,6 +33,7 @@ class StateCache;
 }
 namespace control {
 class CallRouter;
+class SafeStateController;
 }
 namespace events {
 class EventEmitter;
@@ -77,6 +78,7 @@ struct HttpServerDependencies {
     automation::ParameterManager *parameter_manager = nullptr;
     telemetry::InfluxSink *telemetry_sink = nullptr;  // optional: telemetry health surface
     runs::RunJournal *run_journal = nullptr;          // optional: run registry
+    control::SafeStateController *safe_state = nullptr;  // optional: e-stop safe-state + latch
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -160,6 +162,7 @@ private:
     automation::ModeManager *mode_manager_;  // optional
     telemetry::InfluxSink *telemetry_sink_;  // optional: nullptr when telemetry disabled
     runs::RunJournal *run_journal_;          // optional: nullptr when run registry unavailable
+    control::SafeStateController *safe_state_;  // optional: e-stop safe-state + latch
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif
@@ -186,6 +189,8 @@ private:
     void handle_get_runtime_status(const httplib::Request &req, httplib::Response &res);
     void handle_get_mode(const httplib::Request &req, httplib::Response &res);
     void handle_post_mode(const httplib::Request &req, httplib::Response &res);
+    void handle_post_estop(const httplib::Request &req, httplib::Response &res);
+    void handle_post_estop_clear(const httplib::Request &req, httplib::Response &res);
     void handle_get_parameters(const httplib::Request &req, httplib::Response &res);
     void handle_post_parameters(const httplib::Request &req, httplib::Response &res);
     void handle_get_automation_tree(const httplib::Request &req, httplib::Response &res);

@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "automation/mode_manager.hpp"
+#include "control/i_actuation_latch.hpp"
 #include "logging/logger.hpp"
 
 namespace anolis {
@@ -26,6 +27,8 @@ void CallRouter::set_mode_manager(automation::ModeManager* mode_manager, const s
     manual_gating_policy_ = gating_policy;
 }
 
+void CallRouter::set_actuation_latch(const IActuationLatch* latch) { actuation_latch_ = latch; }
+
 CallRouter::ProviderLock CallRouter::get_or_create_provider_lock(const std::string& provider_id) {
     std::lock_guard<std::mutex> map_lock(provider_locks_mutex_);
     return provider_locks_.try_emplace(provider_id, std::make_shared<std::mutex>()).first->second;
@@ -38,8 +41,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // Dynamic gating lives here, not in validate_call(). That keeps the
     // validation-only path useful for static checks while reserving runtime
     // mode/provider availability enforcement for real execution.
-    // Block control operations in IDLE mode
-    if (mode_manager_ != nullptr && mode_manager_->is_idle()) {
+    // Block control operations in IDLE mode. E-stop safe-state actions bypass
+    // gating so the ladder can still drive actuators to a safe state.
+    if (!request.safe_state && mode_manager_ != nullptr && mode_manager_->is_idle()) {
         result.error_message = "Control operations blocked in IDLE mode";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
@@ -47,7 +51,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     }
 
     // Check manual/auto contention (only for manual calls)
-    if (!request.is_automated && mode_manager_ != nullptr &&
+    if (!request.is_automated && !request.safe_state && mode_manager_ != nullptr &&
         mode_manager_->current_mode() == automation::RuntimeMode::AUTO) {
         if (manual_gating_policy_ == "BLOCK") {
             result.error_message = "Manual call blocked in AUTO mode (policy: BLOCK)";
@@ -99,6 +103,17 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         } else {
             result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT;
         }
+        return result;
+    }
+
+    // Refuse actuating calls while the e-stop latch is engaged. Fail closed:
+    // an unclassified function is treated as actuating. Safe-state actions and
+    // read-only/config functions are unaffected.
+    if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
+        registry::is_actuating(*func_spec)) {
+        result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+        LOG_WARN("[CallRouter] " << result.error_message);
         return result;
     }
 

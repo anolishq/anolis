@@ -8,6 +8,7 @@
 #endif
 #include "../../automation/mode_manager.hpp"
 #include "../../automation/parameter_manager.hpp"
+#include "../../control/safe_state.hpp"
 #include "../../health/health_snapshot.hpp"
 #include "../../logging/logger.hpp"
 #include "../../provider/i_provider_handle.hpp"    // Need provider definition for handle_get_runtime_status
@@ -57,6 +58,21 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
                                {"polling_interval_ms", polling_interval_ms_},
                                {"providers", providers_json},
                                {"device_count", total_device_count}};
+
+    // Software safe-state / e-stop surface: what a POST /v0/estop would do now,
+    // and whether actuation is currently latched.
+    if (safe_state_ != nullptr) {
+        const auto cap = safe_state_->capability();
+        nlohmann::json estop = {{"latched", cap.latched},
+                                {"software_safe_state", control::safe_state_kind_to_string(cap.software_safe_state)},
+                                {"uncovered_actuating_functions", cap.uncovered_actuating_functions}};
+        if (cap.latched_at_epoch_ms.has_value()) {
+            estop["latched_at_epoch_ms"] = *cap.latched_at_epoch_ms;
+        } else {
+            estop["latched_at_epoch_ms"] = nullptr;
+        }
+        response["estop"] = estop;
+    }
 
     send_json(res, StatusCode::OK, response);
 }
@@ -144,6 +160,70 @@ void HttpServer::handle_post_mode(const httplib::Request &req, httplib::Response
 
     nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"mode", current_str}};
 
+    send_json(res, StatusCode::OK, response);
+}
+
+//=============================================================================
+// POST /v0/estop - Engage the software safe-state (latching)
+//=============================================================================
+void HttpServer::handle_post_estop(const httplib::Request &req, httplib::Response &res) {
+    if (safe_state_ == nullptr) {
+        send_json(res, StatusCode::UNAVAILABLE,
+                  make_error_response(StatusCode::UNAVAILABLE, "Safe-state controller not available"));
+        return;
+    }
+
+    // An optional {"reason": "..."} body is recorded for logging only.
+    std::string reason = "operator";
+    if (!req.body.empty()) {
+        try {
+            const auto body = nlohmann::json::parse(req.body);
+            if (body.contains("reason") && body["reason"].is_string()) {
+                reason = body["reason"].get<std::string>();
+            }
+        } catch (const std::exception &) {
+            // Ignore an unparseable body: e-stop must not be blocked by bad input.
+        }
+    }
+
+    const auto result = safe_state_->trigger(reason);
+
+    nlohmann::json actions = nlohmann::json::array();
+    for (const auto &action : result.actions) {
+        nlohmann::json entry = {
+            {"device_handle", action.device_handle}, {"function", action.function}, {"success", action.success}};
+        if (!action.error.empty()) {
+            entry["error"] = action.error;
+        }
+        actions.push_back(entry);
+    }
+
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)},
+                               {"latched", true},
+                               {"software_safe_state", control::safe_state_kind_to_string(result.kind)},
+                               {"actions", actions}};
+    if (result.kind == control::SafeStateKind::None) {
+        response["warning"] = "No software safe-state declared; the hardware e-stop is the only safe-state path";
+    }
+    if (result.fault_requested) {
+        response["fault_engaged"] = result.fault_ok;
+    }
+
+    send_json(res, StatusCode::OK, response);
+}
+
+//=============================================================================
+// POST /v0/estop/clear - Release the e-stop latch
+//=============================================================================
+void HttpServer::handle_post_estop_clear(const httplib::Request &, httplib::Response &res) {
+    if (safe_state_ == nullptr) {
+        send_json(res, StatusCode::UNAVAILABLE,
+                  make_error_response(StatusCode::UNAVAILABLE, "Safe-state controller not available"));
+        return;
+    }
+
+    safe_state_->clear();
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"latched", false}};
     send_json(res, StatusCode::OK, response);
 }
 

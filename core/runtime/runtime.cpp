@@ -20,6 +20,7 @@
 #include "automation/parameter_manager.hpp"
 #include "automation/parameter_types.hpp"
 #endif
+#include "control/provider_value_bridge.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
 #include "provider/provider_handle.hpp"  // Required for instantiation
@@ -144,6 +145,12 @@ bool Runtime::init_core_services(std::string & /*error*/) {
     // Create call router
     call_router_ = std::make_unique<control::CallRouter>(*registry_, *state_cache_);
 
+    // Create the e-stop safe-state controller and register its latch with the
+    // call router so actuating calls are refused while an e-stop is latched.
+    safe_state_controller_ = std::make_unique<control::SafeStateController>(*registry_, *call_router_,
+                                                                           provider_registry_, config_.safety);
+    call_router_->set_actuation_latch(safe_state_controller_.get());
+
     // Create provider supervisor
     supervisor_ = std::make_unique<provider::ProviderSupervisor>();
     LOG_INFO("[Runtime] Provider supervisor created");
@@ -195,21 +202,7 @@ bool Runtime::init_providers(std::string &error) {
 bool Runtime::init_automation(std::string &error) {
 #if ANOLIS_ENABLE_AUTOMATION
     auto parameter_value_to_provider_value = [](const automation::ParameterValue &input) {
-        anolis::deviceprovider::v1::Value value;
-        if (std::holds_alternative<double>(input)) {
-            value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
-            value.set_double_value(std::get<double>(input));
-        } else if (std::holds_alternative<int64_t>(input)) {
-            value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
-            value.set_int64_value(std::get<int64_t>(input));
-        } else if (std::holds_alternative<bool>(input)) {
-            value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_BOOL);
-            value.set_bool_value(std::get<bool>(input));
-        } else if (std::holds_alternative<std::string>(input)) {
-            value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
-            value.set_string_value(std::get<std::string>(input));
-        }
-        return value;
+        return control::to_provider_value(input);
     };
 
     auto hook_mode_matches = [](const std::string &filter, automation::RuntimeMode actual) {
@@ -458,6 +451,11 @@ bool Runtime::init_http(std::string &error) {
         dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters
         dependencies.bt_runtime = bt_runtime_.get();                // optional: automation runtime
 #endif
+        // The e-stop controller drives FAULT on automation machines; hand it the
+        // mode manager (nullptr when automation is disabled) and expose it to the
+        // HTTP surface for POST /v0/estop and the status snapshot.
+        safe_state_controller_->set_mode_manager(mode_manager_.get());
+        dependencies.safe_state = safe_state_controller_.get();
         http_server_ =
             std::make_unique<http::HttpServer>(config_.http, config_.polling.interval_ms, std::move(dependencies));
 
