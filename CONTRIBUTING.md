@@ -857,8 +857,7 @@ Tests should verify runtime behavior through the HTTP API, not by parsing log ou
 from tests.support.api_helpers import assert_provider_available, assert_device_count
 
 runtime = RuntimeFixture(
-    runtime_path="build/dev-release/core/anolis-runtime",
-    provider_path="/path/to/anolis-provider-sim"
+    runtime_path="build/dev-release/core/anolis-runtime", provider_path="/path/to/anolis-provider-sim"
 )
 runtime.start()
 
@@ -894,6 +893,7 @@ finally:
 
 # ❌ BAD: Global process killing
 import subprocess
+
 subprocess.run(["pkill", "-x", "anolis-runtime"])  # Kills ALL anolis-runtime processes!
 ```
 
@@ -914,11 +914,11 @@ subprocess.run(["pkill", "-x", "anolis-runtime"])  # Kills ALL anolis-runtime pr
 from tests.support.runtime_fixture import RuntimeFixture
 from tests.support.api_helpers import assert_http_available, assert_provider_available
 
+
 def test_my_feature():
     """Test description here."""
     runtime = RuntimeFixture(
-        runtime_path="build/dev-release/core/anolis-runtime",
-        provider_path="/path/to/anolis-provider-sim"
+        runtime_path="build/dev-release/core/anolis-runtime", provider_path="/path/to/anolis-provider-sim"
     )
 
     try:
@@ -934,6 +934,7 @@ def test_my_feature():
 
     finally:
         runtime.cleanup()  # Always cleanup, even on exception
+
 
 if __name__ == "__main__":
     test_my_feature()
