@@ -60,6 +60,9 @@ UNINSTALL=0
 ROLLBACK=0
 DRY_RUN=0
 PREFIX="${DEFAULT_PREFIX}"
+# Active runtime variant (a runtime_profiles map key). Empty = the reserved
+# inert default `manual`. install.sh only ever installs an inert variant.
+RUNTIME_VARIANT=""
 REBOOT_NEEDED=0
 HEALTH_FAILED=0
 
@@ -116,6 +119,10 @@ Common:
                            (online; 30 d bucket retention; scoped tokens).
                            These services start immediately — the global
                            --no-start gates only the runtime.
+  --variant <key>        Runtime variant to activate, a runtime_profiles map key
+                         (default: manual). Must be inert (automation off, no
+                         mode-transition hooks); a non-inert variant is refused.
+                         Activate automation from Operate after install.
   --no-start             Install but don't start services
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
@@ -155,6 +162,7 @@ parse_args() {
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
             --prefix)    PREFIX="${2:-}"; shift 2 ;;
+            --variant|--runtime-profile) RUNTIME_VARIANT="${2:-}"; shift 2 ;;
             --stage)     STAGE_DIR="${2:-}"; shift 2 ;;
             --project)   PROJECT_DIR="${2:-}"; shift 2 ;;
             --arch)      TARGET_ARCH="${2:-}"; shift 2 ;;
@@ -453,20 +461,42 @@ phase_config_project() {
 # =============================================================================
 
 phase_config_runtime() {
-    local src="${BUNDLE_DIR}/config/runtime.yaml"
     local dest="${PREFIX}/config/runtime.yaml"
+    local variant="${RUNTIME_VARIANT:-manual}"
+    local mp="${BUNDLE_DIR}/projects/${INSTALLED_PROFILE:-}/machine-profile.yaml"
 
+    # A deployment MUST declare a runtime_profiles map; the active variant is
+    # resolved by map key, never by filename (a name cannot be trusted — #254).
+    local keys
+    keys=$(_profile_variant_keys "${mp}")
+    if [[ -z "${keys}" ]]; then
+        log_err "config (runtime): machine profile has no runtime_profiles map (${mp})"
+        die "refusing to install without a runtime_profiles map"
+    fi
+
+    local rel
+    rel=$(_profile_variant_path "${mp}" "${variant}")
+    if [[ -z "${rel}" ]]; then
+        log_err "config (runtime): variant '${variant}' is not in runtime_profiles (available: ${keys% })"
+        die "unknown runtime variant '${variant}'"
+    fi
+
+    local src
+    src="${BUNDLE_DIR}/projects/${INSTALLED_PROFILE}/config/$(basename "${rel}")"
     if [[ ! -f "${src}" ]]; then
-        log_warn "config (runtime): no config/runtime.yaml in bundle"
-        return
+        die "config (runtime): variant '${variant}' resolves to a missing file: ${src}"
     fi
 
     if [[ -f "${dest}" ]]; then
+        # Preserve an operator-edited/activated config across upgrades; only warn
+        # if it is not inert (they may have activated automation from Operate).
         log_skip "config (runtime): ${dest} exists (preserved)"
+        verify_inert_runtime_config "${dest}" warn
     else
+        verify_inert_runtime_config "${src}" die
         cp "${src}" "${dest}"
         chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-        log_ok "config (runtime): written"
+        log_ok "config (runtime): installed variant '${variant}'"
     fi
 
     preflight_runtime_config "${dest}"
@@ -1143,16 +1173,84 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
-# Read a scalar key from the top-level `http:` block of a runtime config. Prints
-# the empty string when absent. Dependency-free (awk, no python) so it works on an
-# offline --local host that has no pyyaml.
-_http_value() {
-    local cfg="$1" key="$2"
+# Read a 2-space-indented scalar `key` from a named top-level `block` of a YAML
+# file. Prints the empty string when absent. Dependency-free (awk, no python) so
+# it works on an offline --local host that has no pyyaml. Assumes canonical
+# top-level blocks with 2-space scalars (as install.sh already renders them).
+_yaml_block_value() {
+    local cfg="$1" block="$2" key="$3"
     [[ -f "${cfg}" ]] || return 0
-    awk -v key="${key}:" '
-        /^[[:alpha:]]/ { in_http = ($1 == "http:") }
-        in_http && $1 == key { print $2; exit }
+    awk -v blk="${block}:" -v key="${key}:" '
+        /^[[:alpha:]]/ { in_blk = ($1 == blk) }
+        in_blk && $1 == key { print $2; exit }
     ' "${cfg}"
+}
+
+# Read a scalar key from the top-level `http:` block of a runtime config.
+_http_value() {
+    _yaml_block_value "$1" http "$2"
+}
+
+# Resolve a runtime_profiles map key to its (project-relative) config path.
+# Prints the empty string when the map or key is absent.
+_profile_variant_path() {
+    local mp="$1" key="$2"
+    [[ -f "${mp}" ]] || return 0
+    awk -v key="${key}:" '
+        /^[[:alpha:]]/ { in_blk = ($1 == "runtime_profiles:") }
+        in_blk && $1 == key { gsub(/["\x27]/, "", $2); print $2; exit }
+    ' "${mp}"
+}
+
+# Print the space-separated runtime_profiles keys (empty if the map is absent).
+_profile_variant_keys() {
+    local mp="$1"
+    [[ -f "${mp}" ]] || return 0
+    awk '
+        /^[[:alpha:]]/ { in_blk = ($1 == "runtime_profiles:") }
+        in_blk && /^[[:space:]]+[A-Za-z0-9_-]+:/ { k = $1; sub(/:$/, "", k); printf "%s ", k }
+    ' "${mp}"
+}
+
+# Print "1" if a `mode_transition_hooks:` key appears under the top-level
+# `automation:` block. These hooks issue device calls on mode transitions
+# regardless of automation.enabled (core/runtime/runtime.cpp), so their mere
+# presence makes a config non-inert.
+_automation_hooks_present() {
+    local cfg="$1"
+    [[ -f "${cfg}" ]] || return 0
+    awk '
+        /^[[:alpha:]]/ { in_blk = ($1 == "automation:") }
+        in_blk && $1 == "mode_transition_hooks:" { print "1"; exit }
+    ' "${cfg}"
+}
+
+# Verify a runtime config is inert (safe to boot without an operator): automation
+# disabled AND no mode-transition hooks. install.sh only ever activates an inert
+# variant; automation is activated later from Operate. `mode` is `die` (refuse a
+# fresh install of a non-inert config) or `warn` (an operator-activated config
+# preserved across an upgrade must not brick the machine).
+verify_inert_runtime_config() {
+    local cfg="$1" mode="${2:-die}"
+    local enabled hooks
+    enabled=$(_yaml_block_value "${cfg}" automation enabled)
+    hooks=$(_automation_hooks_present "${cfg}")
+
+    if [[ "${enabled}" != "true" && "${hooks}" != "1" ]]; then
+        return 0
+    fi
+
+    local reason="automation.enabled=${enabled:-false}"
+    [[ "${hooks}" == "1" ]] && reason="${reason}, mode_transition_hooks present"
+
+    if [[ "${mode}" == "warn" ]]; then
+        log_warn "config (runtime): active config is not inert (${reason}); preserved as-is"
+        return 0
+    fi
+
+    log_err "config (runtime): selected variant is not inert (${reason})"
+    log_info "install.sh boots inert; activate automation from Operate after install."
+    die "refusing to install a non-inert runtime config"
 }
 
 # Read the runtime HTTP port from the installed runtime config, falling back to
@@ -1500,6 +1598,7 @@ PY
     # Render production configs (dev-relative → ${PREFIX} absolute; bind 0.0.0.0).
     if ! python3 - "${PROJECT_DIR}" "${dest}" "${profile}" "${PREFIX}" <<'PY'
 import re, shutil, sys
+import yaml
 from pathlib import Path
 project, out, profile, prefix = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 pd = Path(project)
@@ -1542,8 +1641,22 @@ if not rts:
     sys.exit(f"no runtime configs in {cfg}")
 for rc in rts:
     (pcfg / rc.name).write_text(render(rc.read_text()))
-manual = [rc for rc in rts if ".manual." in rc.name] or rts
-(out / "config" / "runtime.yaml").write_text(render(manual[0].read_text()))
+# Bake the inert default (the reserved `manual` runtime_profiles key) as the
+# bundle's config/runtime.yaml. The map is required (no filename guessing); the
+# install step re-resolves --variant against this same map and verifies inert.
+mp_src = pd / "machine-profile.yaml"
+if not mp_src.exists():
+    sys.exit(f"machine profile not found: {mp_src}")
+profile_map = (yaml.safe_load(mp_src.read_text()) or {}).get("runtime_profiles") or {}
+if not profile_map:
+    sys.exit(f"machine profile has no runtime_profiles map: {mp_src}")
+default_rel = profile_map.get("manual")
+if not default_rel:
+    sys.exit(f"runtime_profiles has no inert 'manual' variant: {mp_src}")
+default_src = cfg / Path(default_rel).name
+if not default_src.exists():
+    sys.exit(f"'manual' variant resolves to a missing file: {default_src}")
+(out / "config" / "runtime.yaml").write_text(render(default_src.read_text()))
 for pc in sorted(cfg.glob("provider-*.yaml")):
     name = pc.stem.removeprefix("provider-").split(".")[0]
     (out / "config" / "providers" / f"{name}.yaml").write_text(render(pc.read_text()))
@@ -1706,7 +1819,7 @@ main() {
         dry_run_phase "backup existing binaries"
         dry_run_phase "install binaries to ${PREFIX}/bin/"
         dry_run_phase "install project config"
-        dry_run_phase "install runtime config (skip if exists)"
+        dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
         dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
         dry_run_phase "install provider configs (skip each if exists)"
         dry_run_phase "write manifest.json"

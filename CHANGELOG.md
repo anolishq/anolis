@@ -15,6 +15,16 @@ commit messages only.
 
 ### Added
 
+- `install.sh --variant <key>` (alias `--runtime-profile`) selects the active
+  runtime config by a machine-profile `runtime_profiles` map **key** instead of
+  the previous `.manual.` filename grep, so a mislabeled config can no longer be
+  boot-selected as inert. install.sh now **verifies the selected variant is
+  actually inert** (`automation.enabled=false` and no `mode_transition_hooks`,
+  which fire regardless of `enabled`) and refuses a non-inert config on a fresh
+  install; a deployment must declare a `runtime_profiles` map (fail-closed).
+  An operator-activated config preserved across an upgrade is kept with a
+  warning rather than blocking the upgrade. Automation is activated from Operate
+  after install, never at install time (#225).
 - Software safe-state e-stop: `POST /v0/estop` engages a latching safe-state
   that works regardless of `automation.enabled`, and `POST /v0/estop/clear`
   releases it. The safe-state ladder runs the profile's declared safe-state
