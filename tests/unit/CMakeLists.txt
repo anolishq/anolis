@@ -8,6 +8,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     state_cache_test.cpp
     call_router_test.cpp
     safe_state_test.cpp
+    actuation_gate_test.cpp
     config_test.cpp
     runtime_ownership_validation_test.cpp
     http_handlers_test.cpp

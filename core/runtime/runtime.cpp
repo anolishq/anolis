@@ -25,6 +25,7 @@
 #include "ownership_validation.hpp"
 #include "provider/provider_handle.hpp"  // Required for instantiation
 #include "provider/provider_supervisor.hpp"
+#include "runtime/actuation_gate.hpp"
 #include "signal_handler.hpp"
 
 namespace anolis {
@@ -219,6 +220,33 @@ bool Runtime::init_automation(std::string &error) {
         std::string policy_str =
             (config_.automation.manual_gating_policy == GatingPolicy::BLOCK) ? "BLOCK" : "OVERRIDE";
         call_router_->set_mode_manager(mode_manager_.get(), policy_str);
+
+        // Refuse-hookless (D6): if automation is enabled with actuating outputs
+        // but no safe-state mode_transition_hooks, veto any transition INTO AUTO
+        // so autonomous actuation cannot start without a declared safe-state
+        // path. Enforced at set_mode (the single choke point into AUTO) and
+        // re-evaluated against the live registry, so it holds for the process
+        // lifetime and across provider restarts. Manual control and /v0/estop
+        // stay available; the veto never blocks FAULT (mode_manager honors that).
+        const auto startup_gate = evaluate_hookless_auto_gate(*registry_, config_.automation);
+        if (startup_gate.refused) {
+            LOG_ERROR("[Runtime] " << startup_gate.message);
+            LOG_ERROR(
+                "[Runtime] AUTO is refused until safe-state hooks are declared; "
+                "manual control and /v0/estop remain available.");
+        }
+        mode_manager_->on_before_mode_change(
+            [this](automation::RuntimeMode /*prev*/, automation::RuntimeMode next, std::string &veto_reason) {
+                if (next != automation::RuntimeMode::AUTO) {
+                    return true;
+                }
+                const auto gate = evaluate_hookless_auto_gate(*registry_, config_.automation);
+                if (gate.refused) {
+                    veto_reason = gate.message;
+                    return false;
+                }
+                return true;
+            });
     }
 
     // Create and initialize ParameterManager BEFORE HTTP server

@@ -40,6 +40,22 @@ def _scenario_config(provider_exe: Path, port: int, policy: str) -> dict:
             "behavior_tree": str(bt_path),
             "tick_rate_hz": 10,
             "manual_gating_policy": policy,
+            # Safe-state hook so AUTO is permitted by the refuse-hookless gate.
+            "mode_transition_hooks": {
+                "before_transition": [
+                    {
+                        "to": "FAULT",
+                        "fail_on_error": False,
+                        "calls": [
+                            {
+                                "device_handle": "sim0/motorctl0",
+                                "function_name": "set_motor_duty",
+                                "args": {"motor_index": 1, "duty": 0.0},
+                            }
+                        ],
+                    }
+                ]
+            },
         },
     }
 

@@ -64,6 +64,13 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 3. Transition to `AUTO`.
 4. Monitor `/v0/automation/status` and `/v0/providers/health`.
 
+> The runtime refuses `MANUAL -> AUTO` (returns `FAILED_PRECONDITION`) when the
+> config has actuating outputs but no safe-state `mode_transition_hooks`
+> declared — autonomous actuation must have a declared `*->FAULT` safe-state
+> path. Declare `automation.mode_transition_hooks` (e.g. driving actuators to a
+> safe value on FAULT entry). Manual control and the software e-stop remain
+> available in the refused state.
+
 ### AUTO -> MANUAL
 
 1. Transition to `MANUAL` for planned operator takeover.

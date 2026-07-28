@@ -136,6 +136,39 @@ def test_automation_disabled_mode_api(
 
 @pytest.mark.integration
 @pytest.mark.timeout(360)
+def test_auto_refused_without_safe_state_hooks(
+    runtime_exe: Path,
+    provider_exe: Path,
+    integration_timeout: float,
+    unique_port: int,
+) -> None:
+    # Refuse-hookless gate: automation with actuating outputs but no
+    # mode_transition_hooks must not be able to enter AUTO, while manual control
+    # stays available.
+    tester = AutomationTester(
+        runtime_exe,
+        provider_exe,
+        port=unique_port,
+        timeout=integration_timeout,
+        with_safe_state_hooks=False,
+    )
+    try:
+        tester.start_runtime()
+        tester.set_mode("MANUAL")
+        tester._wait_for_mode("MANUAL")
+
+        result = tester.set_mode("AUTO")
+        assert result.get("status", {}).get("code") == "FAILED_PRECONDITION", result
+        assert "mode_transition_hooks" in str(result), result
+
+        # The runtime stays in MANUAL; manual control is unaffected.
+        assert tester.get_mode().get("mode") == "MANUAL"
+    finally:
+        tester.cleanup()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(360)
 @pytest.mark.parametrize(
     ("_check_name", "check_fn"),
     SUPERVISION_CHECKS,

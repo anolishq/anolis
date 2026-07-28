@@ -22,6 +22,7 @@ class AutomationTester:
         timeout: float = 30.0,
         automation_enabled: bool = True,
         manual_gating_policy: str = "BLOCK",
+        with_safe_state_hooks: bool = True,
     ):
         self.port = port
         self.base_url = f"http://127.0.0.1:{port}"
@@ -29,7 +30,7 @@ class AutomationTester:
         self.repo_root = Path(__file__).resolve().parents[2]
 
         fixture_config = Path(__file__).parent / "fixtures" / "provider-sim-default.yaml"
-        config = {
+        config: Dict[str, Any] = {
             "runtime": {},
             "http": {"enabled": True, "bind": "127.0.0.1", "port": port},
             "providers": [
@@ -73,6 +74,26 @@ class AutomationTester:
             },
             "logging": {"level": "info"},
         }
+
+        # Safe-state hook so AUTO is permitted by the refuse-hookless gate
+        # (automation with actuating outputs must declare one). Omitting it lets a
+        # test assert that AUTO is refused.
+        if with_safe_state_hooks:
+            config["automation"]["mode_transition_hooks"] = {
+                "before_transition": [
+                    {
+                        "to": "FAULT",
+                        "fail_on_error": False,
+                        "calls": [
+                            {
+                                "device_handle": "sim0/motorctl0",
+                                "function_name": "set_motor_duty",
+                                "args": {"motor_index": 1, "duty": 0.0},
+                            }
+                        ],
+                    }
+                ]
+            }
 
         self.fixture = RuntimeFixture(
             Path(runtime_path),
