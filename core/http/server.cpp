@@ -34,7 +34,8 @@ HttpServer::HttpServer(const runtime::HttpConfig &config, int polling_interval_m
       mode_manager_(dependencies.mode_manager),
       telemetry_sink_(dependencies.telemetry_sink),
       run_journal_(dependencies.run_journal),
-      safe_state_(dependencies.safe_state)
+      safe_state_(dependencies.safe_state),
+      staleness_policy_(dependencies.staleness_policy)
 #if ANOLIS_ENABLE_AUTOMATION
       ,
       bt_runtime_(dependencies.bt_runtime)

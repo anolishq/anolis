@@ -15,6 +15,19 @@ commit messages only.
 
 ### Added
 
+- Device-health liveness staleness is now **cadence-derived** instead of a fixed
+  2s/5s wall clock (D7 phase 1). The `WARNING`/`STALE` thresholds scale with the
+  poll interval and the provider's device count
+  (`warn = max(3 x poll_interval_ms x device_count, 2000)`,
+  `stale = max(8 x ..., 5000)`), so a healthy but *serialized* bus (e.g. an EZO
+  chain whose per-cycle dwell exceeds 2s) no longer false-flaps `STALE`. At the
+  default 500ms interval with a single device the bounds are exactly the historic
+  2000/5000 — no change for fast buses. A new optional `health.staleness`
+  config section (`warn_after_ms` / `stale_after_ms`, `0` = derive) provides
+  absolute overrides for buses the heuristic does not fit. Pure liveness change:
+  the `/v0/providers/health` and `anolis_device_health` health strings and
+  fields are unchanged (anolishq/anolis#220).
+
 - Refuse-hookless safety gate: the runtime now refuses the transition into
   `AUTO` when automation is enabled with actuating outputs but no safe-state
   `mode_transition_hooks` declared. Enforced at `set_mode` (the single choke

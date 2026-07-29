@@ -15,14 +15,16 @@ namespace telemetry {
 HealthSnapshotTask::HealthSnapshotTask(int interval_ms, std::string runtime_name,
                                        provider::ProviderRegistry &provider_registry,
                                        registry::DeviceRegistry &device_registry, state::StateCache &state_cache,
-                                       provider::ProviderSupervisor *supervisor, InfluxSink &sink)
+                                       provider::ProviderSupervisor *supervisor, InfluxSink &sink,
+                                       health::StalenessPolicy staleness_policy)
     : interval_ms_(interval_ms),
       runtime_name_(std::move(runtime_name)),
       provider_registry_(provider_registry),
       device_registry_(device_registry),
       state_cache_(state_cache),
       supervisor_(supervisor),
-      sink_(sink) {}
+      sink_(sink),
+      staleness_policy_(staleness_policy) {}
 
 HealthSnapshotTask::~HealthSnapshotTask() { stop(); }
 
@@ -60,8 +62,8 @@ void HealthSnapshotTask::loop() {
             }
         }
 
-        auto snapshot =
-            health::collect_providers_health(provider_registry_, device_registry_, state_cache_, supervisor_);
+        auto snapshot = health::collect_providers_health(provider_registry_, device_registry_, state_cache_,
+                                                         supervisor_, staleness_policy_);
 
         const int64_t timestamp_ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 

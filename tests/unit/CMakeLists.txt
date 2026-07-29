@@ -22,6 +22,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     event_emitter_test.cpp
     influx_sink_test.cpp
     health_line_protocol_test.cpp
+    health_snapshot_test.cpp
     run_journal_test.cpp
     signal_handler_test.cpp
 )

@@ -1,0 +1,14 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+logging:
+  level: info
+
+health:
+  staleness:
+    warn_after_ms: 5000
+    stale_after_ms: 5000

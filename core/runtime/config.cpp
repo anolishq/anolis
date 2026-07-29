@@ -350,6 +350,19 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
         return false;
     }
 
+    // Validate Health staleness overrides (#220). 0 means "derive from cadence";
+    // a negative value is nonsense. When both are explicit, WARNING must precede
+    // STALE.
+    if (config.health.staleness.warn_after_ms < 0 || config.health.staleness.stale_after_ms < 0) {
+        error = "health.staleness.warn_after_ms/stale_after_ms must be >= 0";
+        return false;
+    }
+    if (config.health.staleness.warn_after_ms > 0 && config.health.staleness.stale_after_ms > 0 &&
+        config.health.staleness.stale_after_ms <= config.health.staleness.warn_after_ms) {
+        error = "health.staleness.stale_after_ms must be > warn_after_ms when both are set";
+        return false;
+    }
+
     // Validate Logging settings
     if (config.logging.level != "debug" && config.logging.level != "info" && config.logging.level != "warn" &&
         config.logging.level != "error") {
@@ -483,8 +496,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // Unknown keys are warned about and ignored so config evolution can be
         // rolled out without breaking older runtimes immediately.
-        const std::vector<std::string> valid_keys = {"runtime",   "http",    "providers",  "polling",
-                                                     "telemetry", "logging", "automation", "safety"};
+        const std::vector<std::string> valid_keys = {"runtime", "http",       "providers", "polling", "telemetry",
+                                                     "logging", "automation", "safety",    "health"};
         for (const auto &key_node : yaml) {
             std::string key = key_node.first.as<std::string>();
             bool known = false;
@@ -715,6 +728,26 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (yaml["polling"]["interval_ms"]) {
                 config.polling.interval_ms = yaml["polling"]["interval_ms"].as<int>();
+            }
+        }
+
+        // Load health config (#220): device-liveness staleness thresholds.
+        if (yaml["health"]) {
+            if (!ensure_mapping(yaml["health"], "health", error)) {
+                return false;
+            }
+            warn_unknown_keys(yaml["health"], "health", {"staleness"});
+            if (yaml["health"]["staleness"]) {
+                if (!ensure_mapping(yaml["health"]["staleness"], "health.staleness", error)) {
+                    return false;
+                }
+                warn_unknown_keys(yaml["health"]["staleness"], "health.staleness", {"warn_after_ms", "stale_after_ms"});
+                if (yaml["health"]["staleness"]["warn_after_ms"]) {
+                    config.health.staleness.warn_after_ms = yaml["health"]["staleness"]["warn_after_ms"].as<int>();
+                }
+                if (yaml["health"]["staleness"]["stale_after_ms"]) {
+                    config.health.staleness.stale_after_ms = yaml["health"]["staleness"]["stale_after_ms"].as<int>();
+                }
             }
         }
 

@@ -21,6 +21,7 @@
 #include "automation/parameter_types.hpp"
 #endif
 #include "control/provider_value_bridge.hpp"
+#include "health/health_snapshot.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
 #include "provider/provider_handle.hpp"  // Required for instantiation
@@ -485,6 +486,10 @@ bool Runtime::init_http(std::string &error) {
         // Expose the e-stop controller to the HTTP surface (POST /v0/estop and
         // the status snapshot) regardless of automation.
         dependencies.safe_state = safe_state_controller_.get();
+        // Device-liveness staleness thresholds (#220): derived from the poll
+        // cadence + device count unless explicitly overridden.
+        dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
+                                         config_.health.staleness.stale_after_ms};
         http_server_ =
             std::make_unique<http::HttpServer>(config_.http, config_.polling.interval_ms, std::move(dependencies));
 
@@ -529,7 +534,9 @@ bool Runtime::init_telemetry(std::string & /*error*/) {
             if (config_.telemetry.health_interval_ms > 0) {
                 health_snapshot_task_ = std::make_unique<telemetry::HealthSnapshotTask>(
                     config_.telemetry.health_interval_ms, influx_config.runtime_name, provider_registry_, *registry_,
-                    *state_cache_, supervisor_.get(), *telemetry_sink_);
+                    *state_cache_, supervisor_.get(), *telemetry_sink_,
+                    health::StalenessPolicy{config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
+                                            config_.health.staleness.stale_after_ms});
                 health_snapshot_task_->start();
             }
         }

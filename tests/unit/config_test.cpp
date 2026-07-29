@@ -1367,3 +1367,79 @@ telemetry:
     EXPECT_TRUE(config.telemetry.enabled);
     EXPECT_EQ(config.telemetry.queue_size, 10000);  // Default value
 }
+
+// --- Health staleness overrides (#220) ---------------------------------------
+
+TEST_F(ConfigTest, HealthStalenessDefaultsToDerive) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+)";
+    std::string config_path = create_config_file("health_default.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.health.staleness.warn_after_ms, 0);   // 0 => derive
+    EXPECT_EQ(config.health.staleness.stale_after_ms, 0);  // 0 => derive
+}
+
+TEST_F(ConfigTest, HealthStalenessExplicitOverrides) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+
+health:
+  staleness:
+    warn_after_ms: 4000
+    stale_after_ms: 12000
+)";
+    std::string config_path = create_config_file("health_override.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.health.staleness.warn_after_ms, 4000);
+    EXPECT_EQ(config.health.staleness.stale_after_ms, 12000);
+}
+
+TEST_F(ConfigTest, HealthStalenessNegativeRejected) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+
+health:
+  staleness:
+    stale_after_ms: -1
+)";
+    std::string config_path = create_config_file("health_negative.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+}
+
+TEST_F(ConfigTest, HealthStalenessStaleNotGreaterThanWarnRejected) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+
+health:
+  staleness:
+    warn_after_ms: 5000
+    stale_after_ms: 5000
+)";
+    std::string config_path = create_config_file("health_order.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    EXPECT_FALSE(load_config(config_path, config, error));
+}

@@ -20,6 +20,7 @@ Supported runtime YAML sections:
 6. `logging`
 7. `automation`
 8. `safety`
+9. `health`
 
 Unknown keys are compatibility-warned and ignored.
 
@@ -115,6 +116,22 @@ Compatibility aliases (deprecated but accepted):
 1. Flat keys under `telemetry.*`:
    - `influx_url`, `influx_org`, `influx_bucket`, `influx_token`
    - `batch_size`, `flush_interval_ms`
+
+## `health`
+
+Purpose: device-health liveness staleness policy.
+
+Fields:
+
+1. `staleness` object (all `0` = derive from cadence):
+   - `warn_after_ms` (int, `>= 0`, default `0`): absolute age at which liveness
+     health becomes `WARNING`. `0` derives `max(3 x polling.interval_ms x device_count, 2000)`.
+   - `stale_after_ms` (int, `>= 0`, default `0`): absolute age at which liveness
+     health becomes `STALE`. `0` derives `max(8 x polling.interval_ms x device_count, 5000)`.
+
+When both overrides are positive, `stale_after_ms` must be `> warn_after_ms`. The
+derivation keeps the historic `2000`/`5000` behavior at one device @ 500ms while
+letting a serialized multi-device bus loosen proportionally instead of false-flapping.
 
 ## `logging`
 

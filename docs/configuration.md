@@ -90,6 +90,28 @@ automation:
 4. When telemetry is enabled, provider/device health is also ingested every
    `telemetry.health_interval_ms` (default 15000; `0` disables).
 
+### Health staleness
+
+Device-health liveness (`OK`/`WARNING`/`STALE` in `/v0/providers/health` and the
+`anolis_device_health` timeseries) is derived from *time since the last successful
+poll*. The `WARNING`/`STALE` thresholds are **cadence-derived** by default so a
+healthy but serialized bus does not false-flap:
+
+- `warn_after_ms  = max(3 x polling.interval_ms x device_count, 2000)`
+- `stale_after_ms = max(8 x polling.interval_ms x device_count, 5000)`
+
+At the default `interval_ms: 500` with a single device this is exactly `2000` /
+`5000` (unchanged from prior releases). A multi-device serialized bus (e.g. an EZO
+chain where a full poll cycle exceeds 2s) gets proportionally looser bounds and
+stops flapping. Supply absolute overrides only when the heuristic does not fit:
+
+```yaml
+health:
+  staleness:
+    warn_after_ms: 0    # 0 (default) => derive from cadence; a positive value overrides
+    stale_after_ms: 0   # 0 (default) => derive; when both set, must be > warn_after_ms
+```
+
 ### Compatibility behavior
 
 1. Unknown keys are warn-and-ignore for forward compatibility.

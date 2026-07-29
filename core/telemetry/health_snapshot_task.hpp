@@ -18,6 +18,8 @@
 #include <string>
 #include <thread>
 
+#include "../health/health_snapshot.hpp"
+
 namespace anolis {
 
 namespace provider {
@@ -41,7 +43,8 @@ class HealthSnapshotTask {
 public:
     HealthSnapshotTask(int interval_ms, std::string runtime_name, provider::ProviderRegistry &provider_registry,
                        registry::DeviceRegistry &device_registry, state::StateCache &state_cache,
-                       provider::ProviderSupervisor *supervisor, InfluxSink &sink);
+                       provider::ProviderSupervisor *supervisor, InfluxSink &sink,
+                       health::StalenessPolicy staleness_policy);
 
     ~HealthSnapshotTask();
 
@@ -69,6 +72,7 @@ private:
     state::StateCache &state_cache_;
     provider::ProviderSupervisor *supervisor_;
     InfluxSink &sink_;
+    health::StalenessPolicy staleness_policy_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

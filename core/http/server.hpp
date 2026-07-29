@@ -16,6 +16,7 @@
 
 #include "anolis_build_config.hpp"
 #include "events/event_types.hpp"
+#include "health/health_snapshot.hpp"
 #include "provider/i_provider_handle.hpp"  // Updated include
 #include "provider/provider_registry.hpp"
 #include "runtime/config.hpp"
@@ -79,6 +80,7 @@ struct HttpServerDependencies {
     telemetry::InfluxSink *telemetry_sink = nullptr;     // optional: telemetry health surface
     runs::RunJournal *run_journal = nullptr;             // optional: run registry
     control::SafeStateController *safe_state = nullptr;  // optional: e-stop safe-state + latch
+    health::StalenessPolicy staleness_policy;            // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -163,6 +165,7 @@ private:
     telemetry::InfluxSink *telemetry_sink_;     // optional: nullptr when telemetry disabled
     runs::RunJournal *run_journal_;             // optional: nullptr when run registry unavailable
     control::SafeStateController *safe_state_;  // optional: e-stop safe-state + latch
+    health::StalenessPolicy staleness_policy_;  // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif
