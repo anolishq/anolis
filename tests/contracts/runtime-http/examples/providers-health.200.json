@@ -26,6 +26,8 @@
           "last_poll_ms": 1710000000123,
           "staleness_ms": 150,
           "registered": true,
+          "stale_signal_count": 0,
+          "fault_signal_count": 0,
           "reported": {
             "state": "STATE_OK",
             "message": "ok",
@@ -38,11 +40,23 @@
           }
         },
         {
+          "device_id": "phctl1",
+          "health": "FAULT",
+          "last_poll_ms": 1710000000110,
+          "staleness_ms": 160,
+          "registered": true,
+          "stale_signal_count": 0,
+          "fault_signal_count": 1,
+          "reported": null
+        },
+        {
           "device_id": "tempctl9",
           "health": "UNKNOWN",
           "last_poll_ms": 0,
           "staleness_ms": 0,
           "registered": false,
+          "stale_signal_count": 0,
+          "fault_signal_count": 0,
           "reported": {
             "state": "STATE_UNREACHABLE",
             "message": "probe failed (version_read_failed): unexpected opcode in version reply: 0x80",

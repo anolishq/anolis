@@ -541,9 +541,14 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
     for (const auto &ps : snapshot) {
         nlohmann::json devices_json = nlohmann::json::array();
         for (const auto &ds : ps.devices) {
-            nlohmann::json device_json = {{"device_id", ds.device_id},       {"health", ds.health},
-                                          {"last_poll_ms", ds.last_poll_ms}, {"staleness_ms", ds.staleness_ms},
-                                          {"registered", ds.registered},     {"reported", nullptr}};
+            nlohmann::json device_json = {{"device_id", ds.device_id},
+                                          {"health", ds.health},
+                                          {"last_poll_ms", ds.last_poll_ms},
+                                          {"staleness_ms", ds.staleness_ms},
+                                          {"registered", ds.registered},
+                                          {"stale_signal_count", ds.stale_signal_count},
+                                          {"fault_signal_count", ds.fault_signal_count},
+                                          {"reported", nullptr}};
             if (ds.reported) {
                 device_json["reported"] = reported_device_health_json(*ds.reported);
             }

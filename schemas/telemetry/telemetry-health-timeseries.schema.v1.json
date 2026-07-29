@@ -172,6 +172,7 @@
                 "OK",
                 "WARNING",
                 "STALE",
+                "FAULT",
                 "UNAVAILABLE",
                 "UNKNOWN"
               ]
@@ -180,6 +181,14 @@
               "type": "boolean"
             },
             "staleness_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stale_signal_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fault_signal_count": {
               "type": "integer",
               "minimum": 0
             },

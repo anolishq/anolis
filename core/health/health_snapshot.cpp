@@ -66,6 +66,10 @@ StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t d
     return {warn_ms, stale_ms};
 }
 
+int64_t effective_signal_stale_after_ms(uint32_t declared_ms, int64_t liveness_stale_ms) {
+    return std::max(static_cast<int64_t>(declared_ms), liveness_stale_ms);
+}
+
 std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
                                                              registry::DeviceRegistry &device_registry,
                                                              state::StateCache &state_cache,
@@ -143,6 +147,33 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                     ds.health = "WARNING";
                 } else {
                     ds.health = "STALE";
+                }
+
+                // Per-signal freshness/quality rollup (#220 phase 2): a device
+                // whose poll is fresh can still be serving a cached FAULT/stale
+                // sample. Count the degraded signals (truthful even when the
+                // provider is unavailable) and, when available, escalate the
+                // device health: FAULT beats liveness STALE/WARNING/OK; a
+                // freshness-stale signal escalates OK/WARNING to STALE.
+                for (const auto &[signal_id, cached] : device_state->signals) {
+                    const auto spec_it = device.capabilities.signals_by_id.find(signal_id);
+                    const uint32_t declared =
+                        spec_it != device.capabilities.signals_by_id.end() ? spec_it->second.stale_after_ms : 0;
+                    const int64_t effective = effective_signal_stale_after_ms(declared, bounds.stale_ms);
+                    if (cached.quality == adpp::SignalValue_Quality_QUALITY_FAULT) {
+                        ++ds.fault_signal_count;
+                    } else if (cached.quality == adpp::SignalValue_Quality_QUALITY_STALE ||
+                               cached.quality == adpp::SignalValue_Quality_QUALITY_UNKNOWN ||
+                               cached.age(now).count() > effective) {
+                        ++ds.stale_signal_count;
+                    }
+                }
+                if (is_available) {
+                    if (ds.fault_signal_count > 0) {
+                        ds.health = "FAULT";
+                    } else if (ds.stale_signal_count > 0) {
+                        ds.health = "STALE";
+                    }
                 }
             } else {
                 ds.health = "UNKNOWN";

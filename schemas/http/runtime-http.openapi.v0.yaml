@@ -1401,13 +1401,13 @@ components:
     ProviderDeviceHealth:
       type: object
       additionalProperties: false
-      required: [device_id, health, last_poll_ms, staleness_ms, registered, reported]
+      required: [device_id, health, last_poll_ms, staleness_ms, registered, stale_signal_count, fault_signal_count, reported]
       properties:
         device_id:
           type: string
         health:
           type: string
-          enum: [OK, WARNING, STALE, UNAVAILABLE, UNKNOWN]
+          enum: [OK, WARNING, STALE, FAULT, UNAVAILABLE, UNKNOWN]
         last_poll_ms:
           type: integer
         staleness_ms:
@@ -1417,6 +1417,19 @@ components:
             False for devices the provider reports (e.g. expected devices that
             failed their startup probe) but the runtime registry does not carry.
           type: boolean
+        stale_signal_count:
+          description: >-
+            Cached signals of degraded quality (STALE/UNKNOWN) or older than
+            their effective stale_after_ms bound. A non-zero count with a fresh
+            poll is why a device reads STALE (#220).
+          type: integer
+          minimum: 0
+        fault_signal_count:
+          description: >-
+            Cached signals reporting QUALITY_FAULT. A non-zero count drives the
+            device health to FAULT (#220).
+          type: integer
+          minimum: 0
         reported:
           oneOf:
             - $ref: '#/components/schemas/ReportedDeviceHealth'

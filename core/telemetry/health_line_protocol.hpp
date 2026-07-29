@@ -15,8 +15,9 @@
  *
  * - anolis_device_health
  *   Tags: runtime_name, provider_id, device_id
- *   Fields: health, registered, staleness_ms (only once the device has been
- *           polled), plus allowlisted provider-reported metrics.
+ *   Fields: health, registered, staleness_ms + stale_signal_count +
+ *           fault_signal_count (only once the device has been polled), plus
+ *           allowlisted provider-reported metrics.
  *
  * Provider-reported metrics arrive as an untyped string->string map. Only
  * keys in the allowlists below are written, parsed strictly to their declared
@@ -173,10 +174,13 @@ inline std::vector<std::string> format_health_lines(const health::ProviderHealth
 
         line << " health=\"" << escape_field_string(ds.health) << "\"";
         line << ",registered=" << (ds.registered ? "true" : "false");
-        // staleness_ms only once the device has actually been polled: a
-        // missing/never-polled device must not read as 0 ms fresh.
+        // staleness_ms + per-signal counts only once the device has actually
+        // been polled: a missing/never-polled device must not read as 0 ms
+        // fresh with zero degraded signals.
         if (ds.last_poll_ms > 0) {
             line << ",staleness_ms=" << ds.staleness_ms << "i";
+            line << ",stale_signal_count=" << ds.stale_signal_count << "i";
+            line << ",fault_signal_count=" << ds.fault_signal_count << "i";
         }
 
         if (ds.reported) {

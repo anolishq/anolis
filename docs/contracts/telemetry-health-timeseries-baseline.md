@@ -39,10 +39,15 @@ so they cannot drift.
 
 1. Tags (exactly): `runtime_name`, `provider_id`, `device_id` — non-empty
    strings.
-2. Required fields: `health` (`OK|WARNING|STALE|UNAVAILABLE|UNKNOWN`),
+2. Required fields: `health` (`OK|WARNING|STALE|FAULT|UNAVAILABLE|UNKNOWN`),
    `registered` (bool).
-3. `staleness_ms` is present only once the device has actually been polled: a
-   missing/never-polled device must not read as 0 ms fresh.
+3. `staleness_ms`, `stale_signal_count`, and `fault_signal_count` are present
+   only once the device has actually been polled: a missing/never-polled device
+   must not read as 0 ms fresh with zero degraded signals. The two counts
+   (integers, ≥ 0) tally cached signals that are freshness-stale (degraded
+   quality or older than their effective `stale_after_ms`) vs `QUALITY_FAULT`;
+   a non-zero `fault_signal_count` is why a freshly-polled device reads `FAULT`
+   (#220).
 4. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,

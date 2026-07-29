@@ -206,6 +206,7 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
         spec.readable = true;                           // All signals readable in v0
         spec.writable = false;                          // No writable signals in v0
         spec.is_default = (signal.poll_hint_hz() > 0);  // Default if poll hint set
+        spec.stale_after_ms = signal.stale_after_ms();  // Provider-declared freshness bound (#220)
 
         caps.signals_by_id[spec.signal_id] = spec;
     }
