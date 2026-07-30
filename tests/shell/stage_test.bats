@@ -94,3 +94,141 @@ teardown() {
 
     rm -rf "${x}"
 }
+
+# Copy the fixture project into a writable temp dir so a test can mutate it.
+# Keeps the "stage-project" basename so the produced bundle name is stable
+# (the profile is derived from the project dir's basename).
+_copy_fixture() {
+    local d; d="$(mktemp -d)/stage-project"
+    cp -r "${PROJECT}" "${d}"
+    printf '%s' "${d}"
+}
+
+# --- #223: consume components.optional.telemetry_export pin -------------------
+
+@test "#223 stage bakes the profile telemetry_export pin into manifest.json" {
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    local x; x="$(mktemp -d)"
+    tar -xzf "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" -C "${x}" --strip-components=1
+    grep -q '"telemetry_export"' "${x}/manifest.json"
+    grep -q '"0.9.9"' "${x}/manifest.json"
+    ( cd "${x}" && sha256sum -c checksums.sha256 >/dev/null )
+    rm -rf "${x}"
+}
+
+@test "#223 profile pin beats an explicit env override at assemble time" {
+    export TELEMETRY_EXPORT_VERSION=8.8.8
+    TELEMETRY_EXPORT_VERSION_ENV=8.8.8
+    # Call assemble_bundle directly (not via run) so the global is observable.
+    assemble_bundle "${OUT}/b" x86_64
+    [ "${ASSEMBLED_TELEMETRY_EXPORT_PIN}" = "0.9.9" ]
+    grep -q '"0.9.9"' "${OUT}/b/manifest.json"
+    ! grep -q '"8.8.8"' "${OUT}/b/manifest.json"
+}
+
+@test "#223 no optional pin → no telemetry_export block in manifest" {
+    PROJECT_DIR="$(_copy_fixture)"
+    # Drop the whole optional: block.
+    sed -i '/^  optional:/,/version: "0.9.9"/d' "${PROJECT_DIR}/machine-profile.yaml"
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    local x; x="$(mktemp -d)"
+    tar -xzf "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" -C "${x}" --strip-components=1
+    ! grep -q '"telemetry_export"' "${x}/manifest.json"
+    rm -rf "${x}" "${PROJECT_DIR}"
+}
+
+# --- #222: record the staged prefix in the manifest --------------------------
+
+@test "#222 manifest records the staged prefix (default)" {
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    local x; x="$(mktemp -d)"
+    tar -xzf "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" -C "${x}" --strip-components=1
+    grep -q '"prefix": "/opt/anolis"' "${x}/manifest.json"
+    rm -rf "${x}"
+}
+
+@test "#222 manifest + render reflect a custom staged prefix" {
+    PREFIX="/usr/local/anolis"
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    local x; x="$(mktemp -d)"
+    tar -xzf "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" -C "${x}" --strip-components=1
+    grep -q '"prefix": "/usr/local/anolis"' "${x}/manifest.json"
+    grep -q "/usr/local/anolis/bin/anolis-provider-foo" "${x}/config/runtime.yaml"
+    rm -rf "${x}"
+}
+
+# --- #226: cross-validate configured providers against pinned ----------------
+
+@test "#226 a config referencing an unpinned provider fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    # Point bar's command at an unpinned provider 'baz'.
+    sed -i 's#anolis-provider-bar#anolis-provider-baz#g' \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"baz"* ]]
+    [[ "$output" == *"components.providers"* ]]
+    [ ! -f "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" ]
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#226 an unpinned reference in a non-manual variant also fails" {
+    PROJECT_DIR="$(_copy_fixture)"
+    sed -i 's#anolis-provider-bar#anolis-provider-baz#g' \
+        "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"baz"* ]]
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#226 a non-provider-shaped command fails closed" {
+    PROJECT_DIR="$(_copy_fixture)"
+    # Replace bar's command with something the rewrite never maps to a bundled bin.
+    sed -i 's#command: .*anolis-provider-bar#command: /usr/bin/env#' \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -ne 0 ]
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#226 a pinned-but-unreferenced provider warns, not fails" {
+    PROJECT_DIR="$(_copy_fixture)"
+    # Add a third pinned provider 'qux' under components.providers that no config
+    # references (write a fresh profile so indentation is unambiguous).
+    cat > "${PROJECT_DIR}/machine-profile.yaml" <<'YAML'
+runtime_profiles:
+  manual: config/anolis-runtime.manual.yaml
+  telemetry: config/anolis-runtime.telemetry.yaml
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: "9.9.9"
+  providers:
+    foo:
+      repo: anolishq/anolis-provider-foo
+      version: "1.0.0"
+    bar:
+      repo: anolishq/anolis-provider-bar
+      version: "2.0.0"
+    qux:
+      repo: anolishq/anolis-provider-qux
+      version: "3.0.0"
+YAML
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"qux"* ]]
+    rm -rf "${PROJECT_DIR}"
+}
