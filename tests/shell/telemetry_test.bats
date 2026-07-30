@@ -70,3 +70,102 @@ setup() {
     run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --project ./cfg
     [ "$status" -eq 0 ] && [[ "${output}" != *"telemetry-export service"* ]]
 }
+
+# ===========================================================================
+# #223: resolve telemetry-export version (profile pin > env > fallback)
+# ===========================================================================
+
+_mk_tex_manifest() {
+    # $2 = telemetry_export version to embed; empty => omit the optional block.
+    local dir="$1" ver="$2"
+    mkdir -p "${dir}"
+    if [[ -n "${ver}" ]]; then
+        cat > "${dir}/manifest.json" <<JSON
+{
+  "schema_version": 1,
+  "components": {
+    "runtime": {"version": "9.9.9"},
+    "providers": {"foo": {"version": "1.0.0"}},
+    "optional": {"telemetry_export": {"version": "${ver}"}}
+  }
+}
+JSON
+    else
+        cat > "${dir}/manifest.json" <<JSON
+{
+  "schema_version": 1,
+  "components": {
+    "runtime": {"version": "9.9.9"},
+    "providers": {"foo": {"version": "1.0.0"}}
+  }
+}
+JSON
+    fi
+}
+
+@test "#223 resolver: assembled pin (online --project) wins over env" {
+    ASSEMBLED_TELEMETRY_EXPORT_PIN="0.9.9"
+    TELEMETRY_EXPORT_VERSION_ENV="8.8.8"; TELEMETRY_EXPORT_VERSION="8.8.8"
+    BUNDLE_DIR=""  # online path has no bundle
+    resolve_telemetry_export_version > "${BATS_TEST_TMPDIR}/out" 2>&1
+    [ "${TELEMETRY_EXPORT_VERSION}" = "0.9.9" ]
+    grep -q "8.8.8" "${BATS_TEST_TMPDIR}/out"
+}
+
+@test "#223 resolver: manifest pin (offline --local) wins over env" {
+    ASSEMBLED_TELEMETRY_EXPORT_PIN=""
+    _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" "0.9.9"
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/b"
+    TELEMETRY_EXPORT_VERSION_ENV="8.8.8"; TELEMETRY_EXPORT_VERSION="8.8.8"
+    resolve_telemetry_export_version > "${BATS_TEST_TMPDIR}/out" 2>&1
+    [ "${TELEMETRY_EXPORT_VERSION}" = "0.9.9" ]
+    grep -q "8.8.8" "${BATS_TEST_TMPDIR}/out"
+}
+
+@test "#223 resolver: env wins when there is no pin" {
+    ASSEMBLED_TELEMETRY_EXPORT_PIN=""
+    _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" ""
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/b"
+    TELEMETRY_EXPORT_VERSION_ENV="8.8.8"; TELEMETRY_EXPORT_VERSION="8.8.8"
+    resolve_telemetry_export_version >/dev/null 2>&1
+    [ "${TELEMETRY_EXPORT_VERSION}" = "8.8.8" ]
+}
+
+@test "#223 resolver: fallback when neither pin nor env" {
+    ASSEMBLED_TELEMETRY_EXPORT_PIN=""
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/none"  # no manifest
+    TELEMETRY_EXPORT_VERSION_ENV=""; TELEMETRY_EXPORT_VERSION="0.1.1"
+    resolve_telemetry_export_version >/dev/null 2>&1
+    [ "${TELEMETRY_EXPORT_VERSION}" = "0.1.1" ]
+}
+
+@test "#223 resolver: a non-version manifest value is ignored (and warns)" {
+    ASSEMBLED_TELEMETRY_EXPORT_PIN=""
+    _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" "1.2.3; rm -rf /"
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/b"
+    TELEMETRY_EXPORT_VERSION_ENV=""; TELEMETRY_EXPORT_VERSION="0.1.1"
+    resolve_telemetry_export_version > "${BATS_TEST_TMPDIR}/out" 2>&1
+    [ "${TELEMETRY_EXPORT_VERSION}" = "0.1.1" ]
+    grep -q "malformed" "${BATS_TEST_TMPDIR}/out"
+}
+
+@test "#223 _manifest_telemetry_export_pin: a provider named telemetry_export cannot spoof the pin" {
+    mkdir -p "${BATS_TEST_TMPDIR}/b"
+    cat > "${BATS_TEST_TMPDIR}/b/manifest.json" <<'JSON'
+{
+  "schema_version": 1,
+  "components": {
+    "providers": {"telemetry_export": {"version": "6.6.6"}},
+    "optional": {"telemetry_export": {"version": "0.9.9"}}
+  }
+}
+JSON
+    run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
+    [ "${output}" = "0.9.9" ]
+}
+
+@test "#223 _manifest_telemetry_export_pin does not misread provider versions" {
+    _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" ""  # providers present, no optional
+    run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
+    [ -z "${output}" ]
+}

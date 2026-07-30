@@ -36,6 +36,10 @@ readonly TELEMETRY_ENV_FILE="/etc/anolis/telemetry-export.env"
 # copied around. Generated per-device at install time, never baked into a bundle.
 readonly RUNTIME_ENV_FILE="/etc/anolis/runtime.env"
 # Pinned for reproducible installs; override via the environment if needed.
+# Capture whether the env was explicitly set BEFORE the fallback default, so a
+# profile pin (components.optional.telemetry_export, #223/D12) can beat an env
+# override and still warn the operator.
+TELEMETRY_EXPORT_VERSION_ENV="${TELEMETRY_EXPORT_VERSION:-}"
 TELEMETRY_EXPORT_VERSION="${TELEMETRY_EXPORT_VERSION:-0.1.1}"
 # Observability provisioning (#162): secrets/config outside ${PREFIX}, same
 # rationale as the two env files above.
@@ -60,6 +64,10 @@ UNINSTALL=0
 ROLLBACK=0
 DRY_RUN=0
 PREFIX="${DEFAULT_PREFIX}"
+# Whether --prefix was explicitly passed. A staged bundle bakes its prefix; on
+# --local a differing EXPLICIT --prefix is refused, while no --prefix adopts the
+# baked one (#222/D11). Default == baked must not trip the refusal.
+PREFIX_EXPLICIT=0
 # Active runtime variant (a runtime_profiles map key). Empty = the reserved
 # inert default `manual`. install.sh only ever installs an inert variant.
 RUNTIME_VARIANT=""
@@ -73,6 +81,9 @@ TARGET_ARCH=""
 STAGE_TMP=""
 ASSEMBLED_PROFILE=""
 ASSEMBLED_RUNTIME_VERSION=""
+# Resolved telemetry-export version pin from components.optional (#223); empty
+# when the profile does not pin it.
+ASSEMBLED_TELEMETRY_EXPORT_PIN=""
 
 # =============================================================================
 # Output helpers
@@ -127,7 +138,9 @@ Common:
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
-  --prefix <path>        Override install prefix (default: /opt/anolis)
+  --prefix <path>        Override install prefix (default: /opt/anolis).
+                         Stage-time decision: a staged bundle bakes its prefix,
+                         so --local refuses a differing --prefix (re-stage instead).
   --help, -h             Show this help
 
 Environment:
@@ -161,7 +174,7 @@ parse_args() {
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
-            --prefix)    PREFIX="${2:-}"; shift 2 ;;
+            --prefix)    PREFIX="${2:-}"; PREFIX_EXPLICIT=1; shift 2 ;;
             --variant|--runtime-profile) RUNTIME_VARIANT="${2:-}"; shift 2 ;;
             --stage)     STAGE_DIR="${2:-}"; shift 2 ;;
             --project)   PROJECT_DIR="${2:-}"; shift 2 ;;
@@ -226,6 +239,28 @@ phase_prepare_bundle() {
         else
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
+
+        # #222/D11: a staged bundle bakes ${PREFIX} into the systemd unit and the
+        # rendered config paths. Installing at a different prefix would leave the
+        # unit/config pointing at the staged one — a silent broken install. Refuse
+        # a differing EXPLICIT --prefix; with no --prefix, adopt the baked one.
+        local baked_prefix
+        baked_prefix=$(_manifest_prefix "${BUNDLE_DIR}/manifest.json")
+        if [[ -z "${baked_prefix}" ]]; then
+            if [[ "${PREFIX_EXPLICIT}" -eq 1 ]]; then
+                log_warn "prepare: bundle predates prefix recording (no 'prefix' in manifest); cannot verify --prefix ${PREFIX}"
+            fi
+        elif [[ "${PREFIX_EXPLICIT}" -eq 1 && "${PREFIX}" != "${baked_prefix}" ]]; then
+            log_err "prepare: this bundle was staged for prefix ${baked_prefix}, but --prefix ${PREFIX} was requested"
+            log_info "The bundle's systemd unit and rendered configs bake the stage-time prefix."
+            log_info "Re-stage for this prefix: ./install.sh --stage <out> --project <config> --prefix ${PREFIX}"
+            log_info "Or install without --prefix to use the staged prefix."
+            die "refusing to install a prefix-mismatched bundle"
+        else
+            # Adopt the baked prefix (no-op when it already matches).
+            PREFIX="${baked_prefix}"
+        fi
+
         log_ok "prepare: using local bundle"
         return
     fi
@@ -646,6 +681,33 @@ phase_manifest() {
     log_ok "manifest: written"
 }
 
+# Read fields from install.sh's OWN manifest.json (the writer uses
+# json.dump(indent=2), so keys are on their own two-space-indented lines) — these
+# are NOT general JSON parsers. Empty output on a missing field or legacy bundle.
+_manifest_prefix() {
+    # Top-level "prefix": "..." (indent 2). [^"]* keeps it robust to trailing
+    # commas and portable across sed implementations.
+    sed -n 's/^  "prefix": *"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n1
+}
+
+_manifest_telemetry_export_pin() {
+    # components.optional.telemetry_export.version — the first "version" line after
+    # the "telemetry_export" key WITHIN the "optional" block (so a provider that
+    # happens to be named telemetry_export cannot spoof the pin). Portable awk
+    # (no gawk 3-arg match); relies on the writer's key order (optional last).
+    awk '
+        /"optional"/ { in_opt = 1 }
+        in_opt && /"telemetry_export"/ { seen = 1 }
+        seen && /"version":/ {
+            line = $0
+            sub(/^.*"version": *"/, "", line)
+            sub(/".*$/, "", line)
+            print line
+            exit
+        }
+    ' "$1" 2>/dev/null
+}
+
 # =============================================================================
 # Phase 16: systemd units
 # =============================================================================
@@ -750,8 +812,35 @@ limits:
 YAML
 }
 
+# Resolve the telemetry-export version (#223/D12). Precedence: profile pin
+# (source of truth) > env override > hardcoded fallback. The pin comes from the
+# assembled profile online (--project) or from manifest.json offline (--local),
+# where the profile is not present.
+resolve_telemetry_export_version() {
+    local pin=""
+    if [[ -n "${ASSEMBLED_TELEMETRY_EXPORT_PIN}" ]]; then
+        pin="${ASSEMBLED_TELEMETRY_EXPORT_PIN}"
+    elif [[ -f "${BUNDLE_DIR}/manifest.json" ]]; then
+        pin=$(_manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json")
+    fi
+    # Trust the pin only if it is fully a version string (fully anchored so a
+    # tampered manifest like "1.2.3; rm -rf /" is rejected, not passed to pip).
+    if [[ -n "${pin}" ]]; then
+        if [[ "${pin}" =~ ^[0-9]+\.[0-9]+\.[0-9][A-Za-z0-9.]*$ ]]; then
+            if [[ -n "${TELEMETRY_EXPORT_VERSION_ENV}" && "${TELEMETRY_EXPORT_VERSION_ENV}" != "${pin}" ]]; then
+                log_warn "telemetry-export: profile pin ${pin} overrides TELEMETRY_EXPORT_VERSION=${TELEMETRY_EXPORT_VERSION_ENV} (D12: profile is source of truth)"
+            fi
+            TELEMETRY_EXPORT_VERSION="${pin}"
+        else
+            log_warn "telemetry-export: ignoring malformed telemetry_export pin '${pin}' from manifest; using ${TELEMETRY_EXPORT_VERSION}"
+        fi
+    fi
+}
+
 phase_telemetry_export() {
     [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] || return 0
+
+    resolve_telemetry_export_version
 
     local venv="${PREFIX}/telemetry-export/venv"
 
@@ -1602,6 +1691,10 @@ r = c["runtime"]
 print(f"runtime\t{r['repo']}\t{r['version']}")
 for name, cfg in (c.get("providers") or {}).items():
     print(f"provider\t{name}\t{cfg['repo']}\t{cfg['version']}")
+# Optional components (#223): telemetry-export version pin, if declared.
+opt = ((c.get("optional") or {}).get("telemetry_export") or {})
+if opt.get("version"):
+    print(f"optional_telemetry_export\t{opt['version']}")
 PY
 ) || die "could not parse ${mp}"
 
@@ -1612,6 +1705,7 @@ PY
         case "${kind}" in
             runtime)  runtime_repo="${f1}"; runtime_version="${f2}" ;;
             provider) p_names+=("${f1}"); p_repos+=("${f2}"); p_vers+=("${f3}") ;;
+            optional_telemetry_export) ASSEMBLED_TELEMETRY_EXPORT_PIN="${f1}" ;;
         esac
     done <<< "${parsed}"
     [[ -n "${runtime_version}" ]] || die "no runtime component in ${mp}"
@@ -1687,15 +1781,39 @@ if beh.is_dir():
 rts = sorted(cfg.glob("anolis-runtime.*.yaml"))
 if not rts:
     sys.exit(f"no runtime configs in {cfg}")
-for rc in rts:
-    (pcfg / rc.name).write_text(render(rc.read_text()))
-# Bake the inert default (the reserved `manual` runtime_profiles key) as the
-# bundle's config/runtime.yaml. The map is required (no filename guessing); the
-# install step re-resolves --variant against this same map and verifies inert.
+# Load the machine-profile once: pinned providers (#226 cross-validation) and
+# the runtime_profiles map (inert-default baking below).
 mp_src = pd / "machine-profile.yaml"
 if not mp_src.exists():
     sys.exit(f"machine profile not found: {mp_src}")
-profile_map = (yaml.safe_load(mp_src.read_text()) or {}).get("runtime_profiles") or {}
+mp_data = yaml.safe_load(mp_src.read_text()) or {}
+pinned = set((mp_data.get("components") or {}).get("providers") or {})
+prov_cmd = re.compile(re.escape(prefix) + r"/bin/anolis-provider-([a-z0-9-]+)$")
+referenced = set()
+for rc in rts:
+    text = render(rc.read_text())
+    # #226: every provider command in the rendered config must resolve to a
+    # pinned/bundled provider binary. A config naming an unpinned provider would
+    # produce a bundle whose checksums pass but whose runtime crash-loops.
+    doc = yaml.safe_load(text) or {}
+    for prov in (doc.get("providers") or []):
+        name = prov.get("id") or prov.get("name") or "?"
+        cmd = str(prov.get("command") or "")
+        m = prov_cmd.match(cmd)
+        if not m or m.group(1) not in pinned:
+            sys.exit(
+                f"{rc.name}: provider '{name}' command '{cmd}' does not resolve to a pinned "
+                f"provider binary (pinned: {', '.join(sorted(pinned)) or 'none'}) — add it to "
+                f"components.providers in machine-profile.yaml or fix the config"
+            )
+        referenced.add(m.group(1))
+    (pcfg / rc.name).write_text(text)
+for extra in sorted(pinned - referenced):
+    print(f"warning: pinned provider '{extra}' is referenced by no runtime config", file=sys.stderr)
+# Bake the inert default (the reserved `manual` runtime_profiles key) as the
+# bundle's config/runtime.yaml. The map is required (no filename guessing); the
+# install step re-resolves --variant against this same map and verifies inert.
+profile_map = (mp_data.get("runtime_profiles")) or {}
 if not profile_map:
     sys.exit(f"machine profile has no runtime_profiles map: {mp_src}")
 default_rel = profile_map.get("manual")
@@ -1726,21 +1844,27 @@ PY
 
     emit_systemd_unit > "${dest}/systemd/anolis-runtime.service"
 
-    # Manifest — generic over providers.
-    if ! python3 - "${dest}/manifest.json" "${profile}" "${runtime_version}" "${arch}" "${p_names[*]-}" "${p_vers[*]-}" <<'PY'
+    # Manifest — generic over providers. Also records the stage-time prefix
+    # (#222: --local refuses a differing --prefix) and the resolved
+    # telemetry-export pin (#223: the offline --local path has no profile).
+    if ! python3 - "${dest}/manifest.json" "${profile}" "${runtime_version}" "${arch}" "${p_names[*]-}" "${p_vers[*]-}" "${PREFIX}" "${ASSEMBLED_TELEMETRY_EXPORT_PIN}" <<'PY'
 import json, sys
-out, profile, version, arch, names, vers = sys.argv[1:7]
+out, profile, version, arch, names, vers, prefix, tex_pin = sys.argv[1:9]
 names, vers = names.split(), vers.split()
+components = {
+    "runtime": {"version": version},
+    "providers": {n: {"version": v} for n, v in zip(names, vers)},
+}
+if tex_pin:
+    components["optional"] = {"telemetry_export": {"version": tex_pin}}
 json.dump(
     {
         "schema_version": 1,
         "profile": profile,
         "version": version,
         "arch": arch,
-        "components": {
-            "runtime": {"version": version},
-            "providers": {n: {"version": v} for n, v in zip(names, vers)},
-        },
+        "prefix": prefix,
+        "components": components,
     },
     open(out, "w"),
     indent=2,

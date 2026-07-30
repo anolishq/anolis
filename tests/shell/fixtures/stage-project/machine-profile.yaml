@@ -15,3 +15,6 @@ components:
     bar:
       repo: anolishq/anolis-provider-bar
       version: "2.0.0"
+  optional:
+    telemetry_export:
+      version: "0.9.9"

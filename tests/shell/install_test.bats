@@ -208,3 +208,102 @@ _teardown_running_binary() {
     [[ "${output}" == *"GITHUB_TOKEN"* ]]
     [[ "${output}" == *"--local"* ]]
 }
+
+# ===========================================================================
+# #222: --local refuses a --prefix that differs from the staged bundle
+# ===========================================================================
+
+# Write a bundle dir with a manifest.json in the writer's indent-2 shape.
+# $2 empty => omit the "prefix" field (legacy pre-#222 bundle).
+_mk_bundle() {
+    local dir="$1" prefix="$2"
+    mkdir -p "${dir}"
+    if [[ -n "${prefix}" ]]; then
+        cat > "${dir}/manifest.json" <<JSON
+{
+  "schema_version": 1,
+  "profile": "p",
+  "version": "9.9.9",
+  "arch": "x86_64",
+  "prefix": "${prefix}",
+  "components": {
+    "runtime": {"version": "9.9.9"}
+  }
+}
+JSON
+    else
+        cat > "${dir}/manifest.json" <<JSON
+{
+  "schema_version": 1,
+  "profile": "p",
+  "version": "9.9.9",
+  "arch": "x86_64",
+  "components": {
+    "runtime": {"version": "9.9.9"}
+  }
+}
+JSON
+    fi
+}
+
+@test "#222 parse_args --prefix sets PREFIX_EXPLICIT" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u
+    PREFIX_EXPLICIT=0
+    parse_args --prefix /x
+    [ "${PREFIX_EXPLICIT}" -eq 1 ]
+    [ "${PREFIX}" = "/x" ]
+    # A parse with no --prefix leaves it unset.
+    PREFIX_EXPLICIT=0
+    parse_args --no-start
+    [ "${PREFIX_EXPLICIT}" -eq 0 ]
+}
+
+@test "#222 --local refuses an explicit --prefix that differs from the staged prefix" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u
+    _mk_bundle "${BATS_TEST_TMPDIR}/b" "/opt/anolis"
+    PROJECT_DIR=""; LOCAL_PATH="${BATS_TEST_TMPDIR}/b"
+    PREFIX="/usr/local/anolis"; PREFIX_EXPLICIT=1
+    run phase_prepare_bundle
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"staged for prefix /opt/anolis"* ]]
+    [[ "${output}" == *"Re-stage"* ]]
+}
+
+@test "#222 --local with a matching explicit --prefix proceeds" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u
+    _mk_bundle "${BATS_TEST_TMPDIR}/b" "/opt/anolis"
+    PROJECT_DIR=""; LOCAL_PATH="${BATS_TEST_TMPDIR}/b"
+    PREFIX="/opt/anolis"; PREFIX_EXPLICIT=1
+    run phase_prepare_bundle
+    [ "$status" -eq 0 ]
+}
+
+@test "#222 --local with no --prefix adopts the staged prefix" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u
+    _mk_bundle "${BATS_TEST_TMPDIR}/b" "/usr/local/anolis"
+    PROJECT_DIR=""; LOCAL_PATH="${BATS_TEST_TMPDIR}/b"
+    PREFIX="/opt/anolis"; PREFIX_EXPLICIT=0
+    # Call directly so the PREFIX adoption is observable in this shell.
+    phase_prepare_bundle
+    [ "${PREFIX}" = "/usr/local/anolis" ]
+}
+
+@test "#222 --local legacy bundle without a prefix field proceeds (warns if explicit)" {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u
+    _mk_bundle "${BATS_TEST_TMPDIR}/b" ""
+    PROJECT_DIR=""; LOCAL_PATH="${BATS_TEST_TMPDIR}/b"
+    PREFIX="/usr/local/anolis"; PREFIX_EXPLICIT=1
+    run phase_prepare_bundle
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"predates prefix recording"* ]]
+}
