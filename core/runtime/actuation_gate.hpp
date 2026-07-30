@@ -5,9 +5,12 @@
  * @brief Refuse-hookless safety gate (decision D6).
  *
  * Guarantees that autonomous actuation (AUTO) cannot start when the config
- * declares actuating outputs but no safe-state `mode_transition_hooks`. The
- * predicate is evaluated post-provider-discovery (it needs the live capability
- * inventory) and enforced as a veto at the single choke point into AUTO.
+ * declares actuating outputs but no declared `mode_transition_hooks` entry
+ * drives a safe state on the autonomous `AUTO -> FAULT` transition (a hook whose
+ * `from` matches AUTO and `to` matches FAULT, each `AUTO`/`FAULT` / `*` /
+ * omitted). The predicate is evaluated post-provider-discovery (it needs the
+ * live capability inventory) and enforced as a veto at the single choke point
+ * into AUTO.
  */
 
 #include <string>
@@ -35,9 +38,13 @@ struct HooklessAutoGate {
  *
  * Refuses iff automation is enabled AND at least one discovered function is
  * actuating (fail-closed via `registry::is_actuating` — any function not
- * explicitly read-only) AND no `mode_transition_hooks` are declared. The manual
- * e-stop path (`safety.safe_state`) deliberately does NOT satisfy this gate: it
- * fires only on operator `POST /v0/estop`, never on autonomous transitions.
+ * explicitly read-only) AND no declared hook covers the `AUTO -> FAULT`
+ * transition (in either list: `from` = AUTO/`*`/omitted AND `to` =
+ * FAULT/`*`/omitted). A hook covering only another transition (e.g.
+ * `AUTO->MANUAL`, or an `IDLE->FAULT` hook that never fires from AUTO) does not
+ * satisfy the gate. The manual e-stop path (`safety.safe_state`) deliberately
+ * does NOT satisfy this gate either: it fires only on operator `POST /v0/estop`,
+ * never on autonomous transitions.
  *
  * Read-only; safe to call on every AUTO transition attempt.
  */

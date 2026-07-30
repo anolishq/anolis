@@ -65,11 +65,14 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 4. Monitor `/v0/automation/status` and `/v0/providers/health`.
 
 > The runtime refuses `MANUAL -> AUTO` (returns `FAILED_PRECONDITION`) when the
-> config has actuating outputs but no safe-state `mode_transition_hooks`
-> declared — autonomous actuation must have a declared `*->FAULT` safe-state
-> path. Declare `automation.mode_transition_hooks` (e.g. driving actuators to a
-> safe value on FAULT entry). Manual control and the software e-stop remain
-> available in the refused state.
+> config has actuating outputs but no declared `mode_transition_hooks` entry
+> covers the `AUTO -> FAULT` transition — autonomous actuation (which only runs
+> in AUTO) must have a declared safe-state path that actually fires when a fault
+> trips from AUTO. Declare a hook matching `AUTO -> FAULT` (`from: AUTO`/`"*"`/
+> omitted **and** `to: FAULT`/`"*"`/omitted) that drives actuators to a safe
+> value; a hook covering only another transition (e.g. `AUTO -> MANUAL`, or an
+> `IDLE -> FAULT` hook that never fires from AUTO) does not satisfy the gate.
+> Manual control and the software e-stop remain available in the refused state.
 
 ### AUTO -> MANUAL
 
