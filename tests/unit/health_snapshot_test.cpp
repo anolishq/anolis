@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -82,8 +83,9 @@ protected:
         provider_registry->add_provider("sim0", mock_provider);
     }
 
-    // Register `count` devices, each with a single default double signal.
-    void RegisterDevices(int count) {
+    // Register `count` devices, each with a single default double signal "temp"
+    // carrying the given provider-declared stale_after_ms (0 = unset).
+    void RegisterDevices(int count, uint32_t stale_after_ms = 0) {
         ON_CALL(*mock_provider, list_devices(_)).WillByDefault(Invoke([count](std::vector<Device> &devices) {
             for (int i = 0; i < count; ++i) {
                 Device dev;
@@ -94,7 +96,7 @@ protected:
             return true;
         }));
         ON_CALL(*mock_provider, describe_device(_, _))
-            .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+            .WillByDefault(Invoke([stale_after_ms](const std::string &id, DescribeDeviceResponse &response) {
                 auto *device = response.mutable_device();
                 device->set_device_id(id);
                 device->set_label(id);
@@ -103,9 +105,37 @@ protected:
                 sig->set_signal_id("temp");
                 sig->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
                 sig->set_poll_hint_hz(1.0);  // default => polled
+                sig->set_stale_after_ms(stale_after_ms);
                 return true;
             }));
         registry->discover_provider("sim0", *mock_provider);
+    }
+
+    // Poll once with the "temp" signal set to `quality`. When `sample_epoch_ms`
+    // is set, the provider stamps that explicit timestamp so the signal age can
+    // differ from the poll age (the cached-sample false-green case). Returns the
+    // stamped poll time of dev0.
+    std::chrono::system_clock::time_point PollWithQuality(anolis::deviceprovider::v1::SignalValue_Quality quality,
+                                                          std::optional<int64_t> sample_epoch_ms = std::nullopt) {
+        ON_CALL(*mock_provider, read_signals(_, _, _))
+            .WillByDefault(Invoke([quality, sample_epoch_ms](const std::string &, const std::vector<std::string> &,
+                                                             ReadSignalsResponse &response) {
+                auto *v = response.add_values();
+                v->set_signal_id("temp");
+                v->set_quality(quality);
+                v->mutable_value()->set_double_value(21.0);
+                if (sample_epoch_ms) {
+                    v->mutable_timestamp()->set_seconds(*sample_epoch_ms / 1000);
+                    v->mutable_timestamp()->set_nanos(static_cast<int32_t>((*sample_epoch_ms % 1000) * 1000000));
+                }
+                return true;
+            }));
+        state_cache = std::make_unique<state::StateCache>(*registry, 500);
+        EXPECT_TRUE(state_cache->initialize());
+        state_cache->poll_once(*provider_registry);
+        auto st = state_cache->get_device_state("sim0/dev0");
+        EXPECT_TRUE(st != nullptr);
+        return st->last_poll_time;
     }
 
     // Poll once so every device has a fresh last_poll_time, and return the
@@ -186,4 +216,129 @@ TEST_F(HealthSnapshotCollectorTest, ProviderUnavailableReportsUnavailable) {
     auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
                                                  poll_time + std::chrono::milliseconds(100));
     EXPECT_EQ(HealthOf(snap, "dev0"), "UNAVAILABLE");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (#220): per-signal freshness/quality folded into device health.
+// ---------------------------------------------------------------------------
+
+namespace {
+namespace adpp = anolis::deviceprovider::v1;
+
+const health::DeviceHealthSnapshot *find_dev(const std::vector<health::ProviderHealthSnapshot> &snap,
+                                             const std::string &device_id) {
+    for (const auto &ps : snap) {
+        for (const auto &ds : ps.devices) {
+            if (ds.device_id == device_id) {
+                return &ds;
+            }
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+
+TEST(SignalFreshness, EffectiveStaleAfterMs) {
+    // The liveness stale bound is the floor; declared only extends trust beyond
+    // it. This is what keeps the per-signal age check from re-introducing the
+    // false-STALE storm (a serialized bus never age-flags before liveness).
+    EXPECT_EQ(health::effective_signal_stale_after_ms(0, 5000), 5000);       // unset => liveness bound
+    EXPECT_EQ(health::effective_signal_stale_after_ms(900, 8000), 8000);     // declared tighter is subsumed
+    EXPECT_EQ(health::effective_signal_stale_after_ms(30000, 5000), 30000);  // declared looser extends trust
+}
+
+TEST_F(HealthSnapshotCollectorTest, RegistryIngestsSignalStaleAfterMs) {
+    RegisterDevices(1, /*stale_after_ms=*/900);
+    const auto devices = registry->get_devices_for_provider("sim0");
+    ASSERT_EQ(devices.size(), 1u);
+    EXPECT_EQ(devices[0].capabilities.signals_by_id.at("temp").stale_after_ms, 900u);
+}
+
+TEST_F(HealthSnapshotCollectorTest, FreshFaultSignalDrivesFault) {
+    // Poll is fresh, but the cached sample is QUALITY_FAULT: the false-green case.
+    RegisterDevices(1);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_FAULT);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    const auto *d = find_dev(snap, "dev0");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->health, "FAULT");
+    EXPECT_EQ(d->fault_signal_count, 1u);
+    EXPECT_EQ(d->stale_signal_count, 0u);
+}
+
+TEST_F(HealthSnapshotCollectorTest, DegradedQualityDrivesStale) {
+    RegisterDevices(1);
+    for (auto q : {adpp::SignalValue_Quality_QUALITY_STALE, adpp::SignalValue_Quality_QUALITY_UNKNOWN}) {
+        auto poll_time = PollWithQuality(q);
+        auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                     poll_time + std::chrono::milliseconds(100));
+        const auto *d = find_dev(snap, "dev0");
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->health, "STALE");
+        EXPECT_EQ(d->stale_signal_count, 1u);
+        EXPECT_EQ(d->fault_signal_count, 0u);
+    }
+}
+
+TEST_F(HealthSnapshotCollectorTest, UnspecifiedQualityIsNeutral) {
+    // A fresh sample with unset quality (legacy provider) stays OK.
+    RegisterDevices(1);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_UNSPECIFIED);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    const auto *d = find_dev(snap, "dev0");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->health, "OK");
+    EXPECT_EQ(d->stale_signal_count, 0u);
+    EXPECT_EQ(d->fault_signal_count, 0u);
+}
+
+TEST_F(HealthSnapshotCollectorTest, NormalAgeDoesNotAgeFlagBeforeLiveness) {
+    // A signal aged like its poll (no stuck sample) must NOT be age-flagged
+    // STALE before the liveness bound, even with a tight declared stale_after_ms
+    // (ezo-like 900ms) — this is the anti-storm guarantee. QUALITY stays OK.
+    RegisterDevices(2, /*stale_after_ms=*/900);  // N=2 => liveness warn=3000
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_OK);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(1600));
+    const auto *d = find_dev(snap, "dev0");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->health, "OK");  // 1600 > declared 900 but < liveness warn 3000
+    EXPECT_EQ(d->stale_signal_count, 0u);
+}
+
+TEST_F(HealthSnapshotCollectorTest, FreshPollServingOldSampleIsStale) {
+    // Poll age ~0 (fresh) but the provider stamped a decade-old sample timestamp:
+    // signal age >> any threshold => STALE even though liveness is OK.
+    RegisterDevices(1, /*stale_after_ms=*/60000);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_OK, /*sample_epoch_ms=*/1600000000000);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(50));
+    const auto *d = find_dev(snap, "dev0");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->health, "STALE");
+    EXPECT_EQ(d->stale_signal_count, 1u);
+}
+
+TEST_F(HealthSnapshotCollectorTest, FaultBeatsLivenessStale) {
+    // Liveness would be STALE (age past stale=5000 at N=1) AND the signal is
+    // FAULT: FAULT wins.
+    RegisterDevices(1);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_FAULT);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(9000));
+    EXPECT_EQ(HealthOf(snap, "dev0"), "FAULT");
+}
+
+TEST_F(HealthSnapshotCollectorTest, UnavailableBeatsFaultButCountsPopulated) {
+    RegisterDevices(1);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_FAULT);
+    ON_CALL(*mock_provider, is_available()).WillByDefault(Return(false));
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    const auto *d = find_dev(snap, "dev0");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->health, "UNAVAILABLE");   // availability wins the string
+    EXPECT_EQ(d->fault_signal_count, 1u);  // ...but the count is still truthful
 }

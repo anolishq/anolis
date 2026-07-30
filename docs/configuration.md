@@ -112,6 +112,20 @@ health:
     stale_after_ms: 0   # 0 (default) => derive; when both set, must be > warn_after_ms
 ```
 
+Beyond liveness, device health also folds in **per-signal quality and freshness**:
+a device serving a cached `QUALITY_FAULT` sample reads `FAULT`, and a signal of
+degraded quality (`QUALITY_STALE`/`QUALITY_UNKNOWN`) reads `STALE` — even when the
+poll itself is fresh (this is the false-green the hardcoded liveness check missed).
+The per-signal *age* check is deliberately conservative: it uses
+`max(stale_after_ms, <liveness stale bound>)`, so it never flags `STALE` before the
+cadence-derived liveness bound and therefore cannot re-introduce the false-STALE
+storm — a provider's declared `stale_after_ms` (from its capability descriptor) only
+*extends* trust, and an unset value simply inherits the liveness bound. The age path
+adds `STALE` only for a genuinely stuck/old cached sample (signal age far exceeding
+poll age). Per-device precedence is `UNAVAILABLE > FAULT > STALE > WARNING > OK`, and
+the `stale_signal_count` / `fault_signal_count` fields on `/v0/providers/health`
+explain the result.
+
 ### Compatibility behavior
 
 1. Unknown keys are warn-and-ignore for forward compatibility.

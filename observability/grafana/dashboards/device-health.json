@@ -70,6 +70,10 @@
                 "UNKNOWN": {
                   "color": "blue",
                   "index": 3
+                },
+                "FAULT": {
+                  "color": "red",
+                  "index": 4
                 }
               },
               "type": "value"
@@ -171,6 +175,11 @@
                   "color": "blue",
                   "index": 3,
                   "text": "UNKNOWN"
+                },
+                "FAULT": {
+                  "color": "red",
+                  "index": 4,
+                  "text": "FAULT"
                 }
               },
               "type": "value"
@@ -434,6 +443,21 @@
             "matcher": {
               "id": "byName",
               "options": "ERROR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FAULT"
             },
             "properties": [
               {

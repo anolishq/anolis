@@ -153,7 +153,8 @@ TEST(HealthLineProtocolTest, DeviceLineWithTypedAllowlist) {
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_EQ(lines[1],
               "anolis_device_health,runtime_name=bioreactor,provider_id=bread0,device_id=dcmt0 "
-              "health=\"OK\",registered=true,staleness_ms=120i,io_ok=142i,io_failed=3i,io_retried_attempts=7i,"
+              "health=\"OK\",registered=true,staleness_ms=120i,stale_signal_count=0i,fault_signal_count=0i,"
+              "io_ok=142i,io_failed=3i,io_retried_attempts=7i,"
               "watchdog_timeout_ms=5000i,watchdog_trip_count=2i,watchdog_armed=true,watchdog_tripped=false "
               "1700000000000");
 }
@@ -178,10 +179,13 @@ TEST(HealthLineProtocolTest, DeviceLineSkipsMalformedValues) {
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_EQ(lines[1],
               "anolis_device_health,runtime_name=r,provider_id=bread0,device_id=ph0 "
-              "health=\"OK\",registered=true,staleness_ms=50i,sample_success_count=9i 5");
+              "health=\"OK\",registered=true,staleness_ms=50i,stale_signal_count=0i,fault_signal_count=0i,"
+              "sample_success_count=9i 5");
 }
 
 TEST(HealthLineProtocolTest, NeverPolledDeviceOmitsStaleness) {
+    // A never-polled device (last_poll_ms == 0) omits staleness_ms AND the two
+    // per-signal counts: they must not read as 0-fresh / zero-degraded (#220).
     auto ps = base_provider();
     DeviceHealthSnapshot ds;
     ds.device_id = "dcmt9";
@@ -198,6 +202,25 @@ TEST(HealthLineProtocolTest, NeverPolledDeviceOmitsStaleness) {
     EXPECT_EQ(lines[1],
               "anolis_device_health,runtime_name=r,provider_id=bread0,device_id=dcmt9 "
               "health=\"UNKNOWN\",registered=false,missing=true 5");
+}
+
+TEST(HealthLineProtocolTest, DeviceLineEmitsFaultHealthAndCounts) {
+    auto ps = base_provider();
+    ps.provider_id = "ezo0";
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "FAULT";
+    ds.last_poll_ms = 1;
+    ds.staleness_ms = 160;
+    ds.stale_signal_count = 2;
+    ds.fault_signal_count = 1;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "r", 7);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[1],
+              "anolis_device_health,runtime_name=r,provider_id=ezo0,device_id=ph0 "
+              "health=\"FAULT\",registered=true,staleness_ms=160i,stale_signal_count=2i,fault_signal_count=1i 7");
 }
 
 TEST(HealthLineProtocolTest, ExcludedDeviceCarriesIoCountersAndFlag) {

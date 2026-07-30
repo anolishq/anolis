@@ -63,6 +63,10 @@
                   "color": "orange",
                   "index": 2
                 },
+                "FAULT": {
+                  "color": "dark-red",
+                  "index": 7
+                },
                 "UNAVAILABLE": {
                   "color": "red",
                   "index": 3

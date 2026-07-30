@@ -78,6 +78,21 @@ inline constexpr int64_t kStalenessStaleFloorMs = 5000;
  */
 StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t device_count);
 
+/**
+ * @brief Effective per-signal age bound in ms (#220, D7 phase 2).
+ *
+ * `max(declared_ms, liveness_stale_ms)`. The per-signal *age* freshness check
+ * must never fire before the cadence-derived liveness STALE bound, or it would
+ * re-introduce the false-STALE storm phase 1 fixed (a serialized bus whose
+ * signals are legitimately ~one cycle old). So the liveness stale bound is the
+ * floor; a provider's declared `stale_after_ms` only *extends* trust beyond it.
+ * The age path therefore adds STALE only for a genuinely stuck/old cached
+ * sample (signal age >> poll age); a proto3-unset (0) declared value simply
+ * inherits the liveness bound (never instant-stale). Degraded *quality*
+ * (STALE/UNKNOWN/FAULT) is provider-authoritative and handled separately.
+ */
+int64_t effective_signal_stale_after_ms(uint32_t declared_ms, int64_t liveness_stale_ms);
+
 /** @brief Provider-reported ADPP DeviceHealth entry (#185). */
 struct ReportedDeviceHealth {
     std::string state;  // adpp DeviceHealth::State name, e.g. "STATE_OK"
@@ -88,10 +103,16 @@ struct ReportedDeviceHealth {
 
 struct DeviceHealthSnapshot {
     std::string device_id;
-    std::string health = "UNKNOWN";  // OK | WARNING | STALE | UNAVAILABLE | UNKNOWN
+    std::string health = "UNKNOWN";  // OK | WARNING | STALE | FAULT | UNAVAILABLE | UNKNOWN
     uint64_t last_poll_ms = 0;
     uint64_t staleness_ms = 0;
     bool registered = true;
+    // Per-signal freshness/quality rollup (#220 phase 2): how many cached
+    // signals are FAULT-quality vs freshness-stale (degraded quality or older
+    // than their effective stale_after_ms). Populated whenever a DeviceState
+    // exists; they explain the FAULT/STALE health string.
+    uint32_t stale_signal_count = 0;
+    uint32_t fault_signal_count = 0;
     std::optional<ReportedDeviceHealth> reported;
 };
 

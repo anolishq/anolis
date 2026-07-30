@@ -16,6 +16,9 @@ examples:
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/05-extra-field-forward-compatible.json
     expect: valid
     note: additive metadata in fields should stay forward-compatible
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/06-device-fault-quality.json
+    expect: valid
+    note: device FAULT from a cached fault-quality signal, with per-signal counts (#220)
 
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
     expect: invalid
