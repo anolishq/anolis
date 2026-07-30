@@ -22,6 +22,10 @@ namespace registry {
 class DeviceRegistry;
 }
 
+namespace automation {
+class ModeManager;
+}
+
 namespace runtime {
 
 struct AutomationConfig;
@@ -50,6 +54,22 @@ struct HooklessAutoGate {
  */
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
                                              const AutomationConfig &automation);
+
+/**
+ * @brief Re-enforce the refuse-hookless gate while already in AUTO (#233).
+ *
+ * The entry-time gate runs only on `MANUAL -> AUTO`. A provider restart can
+ * publish a replacement inventory that exposes a new actuating function with no
+ * `AUTO -> FAULT` safe-state hook, bypassing it. This re-check closes that
+ * fail-open: it is a no-op unless `mode_manager.current_mode() == AUTO`; when the
+ * gate refuses against the live registry it logs ERROR (with `context`, e.g.
+ * "provider 'x' restart") and forces `FAULT` (which cannot be vetoed), halting
+ * autonomous actuation. Manual control and `POST /v0/estop` remain available.
+ *
+ * @return true iff the gate refused and FAULT was requested.
+ */
+bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
+                                   automation::ModeManager &mode_manager, const std::string &context);
 
 }  // namespace runtime
 }  // namespace anolis
