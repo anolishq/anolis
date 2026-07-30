@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-07-30
+
 ### Added
 
 - Device-health liveness staleness is now **cadence-derived** instead of a fixed
@@ -27,6 +29,21 @@ commit messages only.
   absolute overrides for buses the heuristic does not fit. Pure liveness change:
   the `/v0/providers/health` and `anolis_device_health` health strings and
   fields are unchanged (anolishq/anolis#220).
+
+- Device health now folds in **per-signal quality and freshness** (D7 phase 2,
+  closes anolishq/anolis#220). A device serving a cached `QUALITY_FAULT` sample
+  reads the new health state **`FAULT`**, and a signal of degraded quality
+  (`QUALITY_STALE`/`QUALITY_UNKNOWN`) reads `STALE`, even when the poll is fresh
+  (the false-green the old liveness-only check missed). The per-signal *age*
+  check uses `max(declared stale_after_ms, <liveness stale bound>)`, so it never
+  fires before the cadence-derived liveness bound (cannot re-introduce the
+  false-STALE storm) and only flags a genuinely stuck/old cached sample. New
+  per-device fields `stale_signal_count` / `fault_signal_count` on
+  `/v0/providers/health` and `anolis_device_health` explain the result;
+  per-device precedence is `UNAVAILABLE > FAULT > STALE > WARNING > OK`.
+  Provider-declared `stale_after_ms` is now carried through registry ingestion.
+  Additive wire change: the device `health` enum gains `FAULT` and the two count
+  fields (required on the HTTP surface).
 
 - Refuse-hookless safety gate: the runtime now refuses the transition into
   `AUTO` when automation is enabled with actuating outputs but no safe-state
@@ -710,7 +727,8 @@ summarizes the meaningful work that landed prior to `v0.1.0`.
 - Composer runtime ownership: logs scoped to project; detached runtime
   status/stop reconciliation; restart conflict and project-switch safety guards.
 
-[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.32...HEAD
+[Unreleased]: https://github.com/anolishq/anolis/compare/v0.1.39...HEAD
+[0.1.39]: https://github.com/anolishq/anolis/compare/v0.1.38...v0.1.39
 [0.1.32]: https://github.com/anolishq/anolis/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/anolishq/anolis/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/anolishq/anolis/compare/v0.1.29...v0.1.30
