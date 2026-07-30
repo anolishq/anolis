@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 
+#include "automation/mode_manager.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
@@ -188,4 +189,59 @@ TEST_F(ActuationGateTest, AllowsWhenRegistryEmpty) {
     // No devices discovered: nothing can actuate, so hookless AUTO is allowed.
     automation.enabled = true;
     EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+// --- enforce_hookless_gate_in_auto (#233: in-AUTO restart re-check) ----------
+
+TEST_F(ActuationGateTest, EnforceInAuto_RefusalForcesFault) {
+    // In AUTO, a restart that exposes a hookless actuator must force FAULT.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation::ModeManager mode(automation::RuntimeMode::AUTO);
+
+    EXPECT_TRUE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+}
+
+TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenGatePasses) {
+    // A declared AUTO->FAULT hook keeps AUTO after the restart re-check.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
+    automation::ModeManager mode(automation::RuntimeMode::AUTO);
+
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
+}
+
+TEST_F(ActuationGateTest, EnforceInAuto_NoOpForReadOnlyInventory) {
+    // The motivating case: read-only rig restarts with the same read-only
+    // inventory while in AUTO -> nothing to refuse, stays AUTO.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+    automation.enabled = true;
+    automation::ModeManager mode(automation::RuntimeMode::AUTO);
+
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
+}
+
+TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenNotInAuto) {
+    // Not in AUTO: the entry-time gate guards the next MANUAL->AUTO, so the
+    // restart re-check must not touch the mode.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    for (auto m : {automation::RuntimeMode::MANUAL, automation::RuntimeMode::IDLE}) {
+        SCOPED_TRACE(automation::mode_to_string(m));
+        automation::ModeManager mode(m);
+        EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+        EXPECT_EQ(mode.current_mode(), m);
+    }
+}
+
+TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenAutomationDisabled) {
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = false;
+    automation::ModeManager mode(automation::RuntimeMode::AUTO);
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
 }
