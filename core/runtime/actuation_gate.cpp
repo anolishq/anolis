@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <sstream>
+#include <string>
 
+#include "automation/mode_manager.hpp"
+#include "logging/logger.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
 
@@ -77,6 +80,35 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     }
     result.message = msg.str();
     return result;
+}
+
+bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
+                                   automation::ModeManager &mode_manager, const std::string &context) {
+    // Only autonomous actuation (AUTO) is at risk; cheapest check first, and it
+    // skips the O(inventory) scan on the common non-AUTO restart.
+    if (mode_manager.current_mode() != automation::RuntimeMode::AUTO) {
+        return false;
+    }
+
+    // evaluate_hookless_auto_gate already returns non-refused when automation is
+    // disabled or nothing actuates, so a same-inventory restart is a no-op here.
+    const auto gate = evaluate_hookless_auto_gate(registry, automation);
+    if (!gate.refused) {
+        return false;
+    }
+
+    LOG_ERROR("[Runtime] " << context << " changed the device inventory while in AUTO: " << gate.message);
+    std::string err;
+    if (!mode_manager.set_mode(automation::RuntimeMode::FAULT, err)) {
+        // Any->FAULT is fail-safe in ModeManager, so this is near-impossible
+        // (only a concurrent transition that already left AUTO / entered FAULT).
+        LOG_ERROR("[Runtime] Failed to force FAULT after in-AUTO gate refusal: " << err);
+    } else {
+        LOG_ERROR(
+            "[Runtime] Forcing FAULT: autonomous actuation halted; manual control and "
+            "/v0/estop remain available.");
+    }
+    return true;
 }
 
 }  // namespace runtime
