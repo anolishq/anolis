@@ -44,16 +44,21 @@ protected:
         registry->discover_provider("sim0", *mock_provider);
     }
 
-    // A realistic *->FAULT hook with one call (matches what the loader accepts).
-    static runtime::ModeTransitionHookConfig make_fault_hook() {
+    // A realistic hook for the `from`->`to` transition with one call (matches what
+    // the loader accepts). Empty `from` is a wildcard.
+    static runtime::ModeTransitionHookConfig make_hook(const std::string& to, const std::string& from = "") {
         runtime::ModeTransitionHookConfig hook;
-        hook.to = "FAULT";
+        hook.from = from;
+        hook.to = to;
         runtime::ModeTransitionCallConfig call;
         call.device_handle = "sim0/dev0";
         call.function_name = "set_output";
         hook.calls.push_back(call);
         return hook;
     }
+
+    // A realistic *->FAULT safe-state hook (wildcard from, covers AUTO->FAULT).
+    static runtime::ModeTransitionHookConfig make_fault_hook() { return make_hook("FAULT"); }
 
     runtime::AutomationConfig automation;  // enabled=false, no hooks by default
     std::unique_ptr<registry::DeviceRegistry> registry;
@@ -103,6 +108,73 @@ TEST_F(ActuationGateTest, AllowsWhenAfterTransitionHookDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.after_transition.push_back(make_fault_hook());
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, RefusesWhenOnlyNonFaultHookDeclared) {
+    // A hook that targets only MANUAL is not an autonomous safe-state path on a
+    // -> FAULT transition; the gate must still refuse (#232).
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
+
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation);
+    EXPECT_TRUE(gate.refused);
+    ASSERT_EQ(gate.actuating_functions.size(), 1u);
+    EXPECT_EQ(gate.actuating_functions[0], "sim0/dev0/set_output");
+    EXPECT_THAT(gate.message, HasSubstr("FAULT"));
+    EXPECT_THAT(gate.message, HasSubstr("mode_transition_hooks"));
+    EXPECT_THAT(gate.message, HasSubstr("sim0/dev0/set_output"));
+}
+
+TEST_F(ActuationGateTest, RefusesWhenNonFaultHooksInBothLists) {
+    // Proves both lists are scanned for a FAULT target, not mere presence.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
+    automation.mode_transition_hooks.after_transition.push_back(make_hook("IDLE"));
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, AllowsWildcardToHook) {
+    // to: "*" fires on every transition including -> FAULT, so it satisfies the gate.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("*"));
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, AllowsEmptyToHook) {
+    // An omitted (empty) `to` is a wildcard and covers -> FAULT.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook(""));
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, RefusesWhenFaultHookRestrictedToNonAutoFrom) {
+    // A {from: IDLE, to: FAULT} hook never fires on AUTO->FAULT (autonomous
+    // actuation only runs in AUTO), so it does not satisfy the gate (#232).
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("FAULT", "IDLE"));
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, AllowsFaultHookFromAuto) {
+    // An explicit {from: AUTO, to: FAULT} hook fires on the transition we gate on.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("FAULT", "AUTO"));
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+}
+
+TEST_F(ActuationGateTest, AllowsFaultHookAmongNonFaultHooks) {
+    // any-of, not all-of: a FAULT hook alongside a non-FAULT hook satisfies the gate.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
     EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
 }
 
