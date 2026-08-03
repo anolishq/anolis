@@ -13,6 +13,47 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-08-02
+
+### Changed
+
+- The refuse-hookless `AUTO` gate now requires a safe-state hook that actually
+  covers the `AUTO -> FAULT` transition, not merely any declared hook. A config
+  declaring only a non-FAULT hook (e.g. `AUTO -> MANUAL`) previously satisfied
+  the gate while having no autonomous safe-state path on a fault, so a
+  behavior-tree fault could leave actuators at their last-commanded values. The
+  predicate now mirrors the runtime's own two-filter hook dispatch: `from` must
+  match `AUTO` (`AUTO`/`"*"`/omitted) **and** `to` must match `FAULT`
+  (`FAULT`/`"*"`/omitted), in either the before- or after-transition list. No
+  behavior change for a config whose hook already covers `AUTO -> FAULT`,
+  including the canonical `bioreactor-v1` automation and full variants (#232).
+
+### Fixed
+
+- The refuse-hookless gate is re-checked when a provider restarts while the
+  runtime is already in `AUTO`. A restart publishes a replacement inventory, so
+  a provider returning with a **new** actuating function and no `AUTO -> FAULT`
+  safe-state hook could be driven by the behavior tree with no autonomous
+  safe-state path until the next mode change — a narrow but real fail-open. The
+  gate now runs after `restart_provider`; when it refuses against the live
+  registry it logs an error and forces `FAULT`, halting autonomous actuation.
+  The restart itself still succeeds (#233).
+- `install.sh --local` refuses a differing explicit `--prefix`. A staged bundle
+  bakes the prefix into its systemd unit and rendered config paths, so
+  installing it under another prefix silently produced a broken unit. The
+  staged prefix is now recorded in `manifest.json`, adopted when `--prefix` is
+  omitted, and a conflicting explicit value fails with re-stage guidance (#222).
+- Staging cross-validates configured providers against pinned ones. A config
+  referencing an unpinned provider previously produced a bundle that passed its
+  checksums and then crash-looped on the target. Config rendering now fails
+  staging if any provider command in any runtime-config variant does not
+  resolve to a pinned, bundled provider binary; a pinned but unreferenced
+  provider warns (#226).
+- `components.optional.telemetry_export` is consumed instead of ignored. The
+  pin is baked into `manifest.json` so the offline `--local` path (which has no
+  profile) still receives it, with precedence profile pin > environment >
+  fallback, warning when a pin overrides an explicit environment value (#223).
+
 ## [0.1.39] - 2026-07-30
 
 ### Added
