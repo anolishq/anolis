@@ -198,7 +198,121 @@ bool Runtime::init_providers(std::string &error) {
 
     LOG_INFO("[Runtime] Ownership validation passed for discovered I2C devices");
     LOG_INFO("[Runtime] All providers started");
+    preflight_declared_calls();
     return true;
+}
+
+void Runtime::preflight_declared_calls() const {
+    // Every call the config declares is dispatched at a moment when nobody is
+    // watching a terminal: a mode transition, or an operator pulling the e-stop.
+    // A call that cannot resolve or type-check stays invisible until then. This
+    // dry-runs each one against the live registry, now that providers have
+    // reported their capabilities.
+    //
+    // `--check-config` deliberately cannot do this: it exits before any provider
+    // starts, so no ArgSpec exists to validate against.
+    //
+    // WHAT THIS DOES NOT CHECK. `validate_call` resolves the device and function
+    // and validates argument types and ranges. It performs NO runtime gating --
+    // IDLE/AUTO mode gating and the e-stop actuation latch all live in
+    // `execute_call`. So a call can pass here and still be refused when it fires:
+    // notably an `after_transition` hook into IDLE (blocked by the IDLE gate) or
+    // a `*->FAULT` hook during an e-stop (refused by the latch, deliberately --
+    // see safe_state.cpp). Passing preflight means "dispatchable", not "will run".
+    //
+    // Reports, never refuses. A machine whose safe state is partly undispatchable
+    // is still far better up than down, and the operator needs the runtime alive
+    // to fix it. The loud ERROR is the point.
+    if (call_router_ == nullptr) {
+        return;
+    }
+
+    size_t checked = 0;
+    size_t failed = 0;
+
+    // Which rung `POST /v0/estop` would actually run. The ladder runs exactly one
+    // (safe_state.cpp), so a broken call in an unselected rung is worth a warning
+    // but is not the emergency an ERROR implies.
+    const std::string active_rung =
+        safe_state_controller_ != nullptr
+            ? control::safe_state_kind_to_string(safe_state_controller_->capability().software_safe_state)
+            : "none";
+
+    const auto check = [&](const std::string &where, bool active, const ModeTransitionCallConfig &call) {
+        control::CallRequest request;
+        request.device_handle = call.device_handle;
+        request.function_id = call.function_id;
+        request.function_name = call.function_name;
+        // `validate_call` reads neither flag; left at their defaults rather than
+        // set to values that would imply this dry run models real gating.
+
+        for (const auto &[name, value] : call.args) {
+            request.args[name] = control::to_provider_value(value);
+        }
+
+        ++checked;
+        std::string err;
+        if (call_router_->validate_call(request, err)) {
+            return;
+        }
+
+        const std::string target =
+            call.function_name.empty() ? ("#" + std::to_string(call.function_id)) : call.function_name;
+        if (active) {
+            ++failed;
+            LOG_ERROR("[Runtime] " << where << " cannot be dispatched: " << call.device_handle << "/" << target << " - "
+                                   << err);
+        } else {
+            LOG_WARN("[Runtime] " << where << " cannot be dispatched: " << call.device_handle << "/" << target << " - "
+                                  << err << " (not the active e-stop rung; declared but unused)");
+        }
+    };
+
+    for (const auto &call : config_.safety.safe_state.hooks) {
+        check("safety.safe_state.hooks", active_rung == "hooks", call);
+    }
+    for (const auto &call : config_.safety.safe_state.setpoints) {
+        check("safety.safe_state.setpoints", active_rung == "setpoints", call);
+    }
+
+    // Mode-transition hooks only ever fire on an automation machine.
+    if (config_.automation.enabled) {
+        const auto check_group = [&](const std::vector<ModeTransitionHookConfig> &hooks, const char *group) {
+            for (const auto &hook : hooks) {
+                const std::string where = std::string("automation.mode_transition_hooks.") + group + " (" +
+                                          (hook.from.empty() ? "*" : hook.from) + "->" +
+                                          (hook.to.empty() ? "*" : hook.to) + ")";
+                for (const auto &call : hook.calls) {
+                    check(where, true, call);
+                }
+            }
+        };
+        check_group(config_.automation.mode_transition_hooks.before_transition, "before_transition");
+        check_group(config_.automation.mode_transition_hooks.after_transition, "after_transition");
+    }
+
+    // Stated unconditionally: "no software safe state" and "preflight did not run"
+    // are otherwise indistinguishable, and the first is the one worth knowing.
+    // The `zero` rung is derived from the live registry rather than declared, so
+    // it has no calls to dry-run here.
+    LOG_INFO("[Runtime] preflight: e-stop ladder would run rung '" << active_rung << "'");
+    if (active_rung == "none") {
+        LOG_WARN(
+            "[Runtime] preflight: no software safe-state is declared; POST /v0/estop will latch without driving "
+            "outputs");
+    }
+
+    if (failed > 0) {
+        LOG_ERROR("[Runtime] " << failed << " of " << checked
+                               << " declared call(s) could not be dispatched against the device inventory as it "
+                                  "stands now. They will fail at the moment they are needed.");
+    } else if (checked > 0) {
+        // Deliberately a snapshot, not a guarantee: a provider restart can
+        // republish a different inventory (see restart_provider) and invalidate
+        // every statement made here.
+        LOG_INFO("[Runtime] preflight: all " << checked
+                                             << " declared call(s) dispatchable against the current inventory");
+    }
 }
 
 bool Runtime::init_automation(std::string &error) {
@@ -775,6 +889,12 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     provider_registry_.add_provider(provider_id, provider);
 
     LOG_INFO("[Runtime] Provider " << provider_id << " restarted and devices rediscovered");
+
+    // A restarted provider can republish a different inventory — renamed devices,
+    // renamed functions, changed argument types — any of which silently
+    // invalidates the boot-time preflight. Re-run it against what is actually
+    // registered now, for the same reason the hookless gate is re-checked below.
+    preflight_declared_calls();
 
 #if ANOLIS_ENABLE_AUTOMATION
     // #233: a restarted provider can publish an inventory with new actuating

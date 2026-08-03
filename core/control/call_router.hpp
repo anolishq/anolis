@@ -143,6 +143,20 @@ private:
     bool validate_arguments(const registry::FunctionSpec &spec,
                             const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
                             std::string &error) const;
+    /**
+     * @brief Reconcile integer signedness of `args` against the resolved spec.
+     *
+     * Config-authored call arguments (mode-transition hooks, `safety.safe_state`)
+     * carry no declared type: `parse_scalar_parameter_value` maps every YAML
+     * integer to int64, and `ParameterValue` has no unsigned alternative. Without
+     * this, a `uint64` parameter is uncallable from any hook — which left the
+     * heater on the reference machine with no expressible safe state (#252).
+     *
+     * Widening only, and never silent: a negative for a uint64 parameter, or a
+     * value above `INT64_MAX` for an int64 one, is refused rather than wrapped.
+     */
+    bool coerce_arguments(const registry::FunctionSpec &spec,
+                          std::map<std::string, anolis::deviceprovider::v1::Value> &args, std::string &error) const;
     bool validate_argument_type(const anolis::deviceprovider::v1::ArgSpec &spec,
                                 const anolis::deviceprovider::v1::Value &value, std::string &error) const;
     bool validate_argument_range(const anolis::deviceprovider::v1::ArgSpec &spec,
