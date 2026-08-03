@@ -9,6 +9,7 @@
 
 #include "call_router.hpp"
 
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 
@@ -117,8 +118,19 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         return result;
     }
 
+    // Reconcile integer signedness against the resolved spec BEFORE validating.
+    // A config-authored argument carries no declared type (YAML integers all
+    // arrive as int64), so a uint64 parameter would otherwise be uncallable from
+    // a hook. Widening only; out-of-range is an error, never a wrap.
+    std::map<std::string, anolis::deviceprovider::v1::Value> args = request.args;
+    if (!coerce_arguments(*func_spec, args, result.error_message)) {
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT;
+        LOG_WARN("[CallRouter] Coercion failed: " << result.error_message);
+        return result;
+    }
+
     // Validate function arguments after selector resolution.
-    if (!validate_arguments(*func_spec, request.args, result.error_message)) {
+    if (!validate_arguments(*func_spec, args, result.error_message)) {
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT;
         LOG_WARN("[CallRouter] Validation failed: " << result.error_message);
         return result;
@@ -142,7 +154,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
 
     // Forward call to provider
     anolis::deviceprovider::v1::CallResponse call_response;
-    if (!provider->call(device_id, func_spec->function_id, resolved_function_name, request.args, call_response)) {
+    if (!provider->call(device_id, func_spec->function_id, resolved_function_name, args, call_response)) {
         result.error_message = "Provider call failed: " + provider->last_error();
         result.status_code = provider->last_status_code();
         LOG_ERROR("[CallRouter] Call failed: " << result.error_message << " (Code: " << result.status_code << ")");
@@ -188,9 +200,107 @@ bool CallRouter::validate_call(const CallRequest& request, std::string& error) c
         return false;
     }
 
-    // Validate arguments
-    if (!validate_arguments(*func_spec, request.args, error)) {
+    // Mirror execute_call: coerce integer signedness against the spec first, so a
+    // dry-run validation accepts exactly what a real dispatch would.
+    std::map<std::string, anolis::deviceprovider::v1::Value> args = request.args;
+    if (!coerce_arguments(*func_spec, args, error)) {
         return false;
+    }
+
+    // Validate arguments
+    if (!validate_arguments(*func_spec, args, error)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool CallRouter::coerce_arguments(const registry::FunctionSpec& spec,
+                                  std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                                  std::string& error) const {
+    using ValueType = anolis::deviceprovider::v1::ValueType;
+
+    // Integers exactly representable as a double. Past this, int64 -> double
+    // silently rounds, and a setpoint arriving at the hardware as a different
+    // number than the operator wrote is the failure this change exists to stop.
+    static constexpr int64_t kMaxExactDouble = 1LL << 53;
+
+    // Driven off the spec's own arg list rather than a name->spec index: these
+    // lists are single digits long, and it avoids duplicating the map that
+    // validate_arguments already builds a few lines later.
+    for (const auto& arg_spec : spec.args) {
+        auto it = args.find(arg_spec.name());
+        if (it == args.end()) {
+            // Absent: validate_arguments reports it as missing-if-required, which
+            // names the real problem better than anything this pass could say.
+            continue;
+        }
+        auto& arg_value = it->second;
+        const auto& arg_name = arg_spec.name();
+
+        switch (arg_spec.type()) {
+            // int64 -> uint64. The only unrepresentable case is a negative, which
+            // is a genuine authoring error: refuse rather than wrap to a huge duty.
+            case ValueType::VALUE_TYPE_UINT64:
+                if (arg_value.has_int64_value()) {
+                    const int64_t raw = arg_value.int64_value();
+                    if (raw < 0) {
+                        error = "Argument '" + arg_name + "': " + std::to_string(raw) +
+                                " is negative but the parameter is uint64";
+                        return false;
+                    }
+                    arg_value.set_type(ValueType::VALUE_TYPE_UINT64);
+                    arg_value.set_uint64_value(static_cast<uint64_t>(raw));
+                }
+                break;
+
+            // uint64 -> int64, for callers sending an unsigned value to a signed
+            // parameter. Refuse above INT64_MAX rather than wrapping negative.
+            case ValueType::VALUE_TYPE_INT64:
+                if (arg_value.has_uint64_value()) {
+                    const uint64_t raw = arg_value.uint64_value();
+                    if (raw > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+                        error = "Argument '" + arg_name + "': " + std::to_string(raw) +
+                                " exceeds the maximum of an int64 parameter";
+                        return false;
+                    }
+                    arg_value.set_type(ValueType::VALUE_TYPE_INT64);
+                    arg_value.set_int64_value(static_cast<int64_t>(raw));
+                }
+                break;
+
+            // Integer -> double. Without this the fix is asymmetric on a single
+            // physical device: bread RLHT takes a uint64 duty and double
+            // setpoints, so `duty1_pct: 0` would work while `setpoint1_c: 0` did
+            // not. Writing a plain 0 is the obvious way to express a safe value.
+            case ValueType::VALUE_TYPE_DOUBLE:
+                if (arg_value.has_int64_value()) {
+                    const int64_t raw = arg_value.int64_value();
+                    if (raw > kMaxExactDouble || raw < -kMaxExactDouble) {
+                        error = "Argument '" + arg_name + "': " + std::to_string(raw) +
+                                " cannot be represented exactly as a double";
+                        return false;
+                    }
+                    arg_value.set_type(ValueType::VALUE_TYPE_DOUBLE);
+                    arg_value.set_double_value(static_cast<double>(raw));
+                } else if (arg_value.has_uint64_value()) {
+                    const uint64_t raw = arg_value.uint64_value();
+                    if (raw > static_cast<uint64_t>(kMaxExactDouble)) {
+                        error = "Argument '" + arg_name + "': " + std::to_string(raw) +
+                                " cannot be represented exactly as a double";
+                        return false;
+                    }
+                    arg_value.set_type(ValueType::VALUE_TYPE_DOUBLE);
+                    arg_value.set_double_value(static_cast<double>(raw));
+                }
+                break;
+
+            // Deliberately no narrowing: double -> integer would discard a
+            // fractional part the author wrote on purpose. Left to
+            // validate_arguments to reject as a type mismatch.
+            default:
+                break;
+        }
     }
 
     return true;

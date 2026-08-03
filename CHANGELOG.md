@@ -13,6 +13,40 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `uint64` provider parameter could not be driven from any config-declared
+  hook** (#252). Call arguments in `safety.safe_state` and
+  `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
+  no unsigned alternative — every YAML integer became `int64` and `CallRouter`
+  rejected it as a type mismatch. On the reference bioreactor this left the
+  heater (`set_open_duty_pct`, uint64 args) with **no expressible software safe
+  state**: the e-stop ladder ran and that call failed. `CallRouter` now
+  reconciles argument types against the target's declared `ArgSpec` before
+  validating — `int64 <-> uint64`, and integer to `double` (so `setpoint_c: 0`
+  works alongside `duty_pct: 0` on the same device). Widening only, and never
+  silent: a negative into a `uint64`, a value above `INT64_MAX` into an `int64`,
+  or an integer past 2^53 into a `double` is **refused, not wrapped or rounded**.
+  Declared min/max bounds still apply to the converted value, and `double` is
+  never narrowed to an integer. Applies to every caller, so `POST /v0/call` also
+  now accepts an in-range `int64` for an unsigned parameter where it previously
+  returned 400.
+
+### Added
+
+- **Startup preflight for declared hook and safe-state calls** (#252). Once
+  providers have reported their capabilities, every call declared in
+  `safety.safe_state` and `automation.mode_transition_hooks` is dry-run against
+  the live registry, and the ones that cannot resolve or type-check are logged.
+  These calls otherwise only execute during a mode transition or an e-stop, so a
+  broken one stayed invisible until the moment it was needed. `--check-config`
+  cannot cover this: it exits before any provider starts, so no `ArgSpec` exists.
+  The log names which ladder rung `POST /v0/estop` would actually run, warns when
+  a machine declares no software safe state at all, and re-runs after a provider
+  restart republishes its inventory. It reports; it never refuses to start.
+  Passing means *dispatchable*, not *will run* — runtime gating (IDLE/AUTO mode,
+  the actuation latch) lives in `execute_call` and is deliberately not simulated.
+
 ## [0.1.40] - 2026-08-02
 
 ### Changed

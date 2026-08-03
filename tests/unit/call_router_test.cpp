@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -107,6 +108,69 @@ protected:
         registry->discover_provider("sim0", *mock_provider);
     }
 
+    // Device carrying a uint64 argument with a 0..100 bound, mirroring the real
+    // bread RLHT `set_open_duty_pct` that exposed #252 on hardware, plus an int64
+    // argument for the reverse direction.
+    void RegisterMockDeviceWithUnsignedArg() {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("dev1");
+            devices.push_back(dev);
+            return true;
+        }));
+
+        EXPECT_CALL(*mock_provider, describe_device("dev1", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("dev1");
+                auto* caps = response.mutable_capabilities();
+
+                auto* duty = caps->add_functions();
+                duty->set_name("set_duty");
+                duty->set_function_id(1);
+                auto* duty_arg = duty->add_args();
+                duty_arg->set_name("pct");
+                duty_arg->set_type(anolis::deviceprovider::v1::VALUE_TYPE_UINT64);
+                duty_arg->set_required(true);
+                duty_arg->set_min_uint64(0);
+                duty_arg->set_max_uint64(100);
+
+                auto* offset = caps->add_functions();
+                offset->set_name("set_offset");
+                offset->set_function_id(2);
+                auto* offset_arg = offset->add_args();
+                offset_arg->set_name("delta");
+                offset_arg->set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
+                offset_arg->set_required(true);
+
+                // Mirrors bread RLHT's double setpoints, which sit on the SAME
+                // device as its uint64 duty: the asymmetry review S1/S5 flagged.
+                auto* temp = caps->add_functions();
+                temp->set_name("set_temp");
+                temp->set_function_id(3);
+                auto* temp_arg = temp->add_args();
+                temp_arg->set_name("celsius");
+                temp_arg->set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+                temp_arg->set_required(true);
+                return true;
+            }));
+
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    static anolis::deviceprovider::v1::Value Int64Value(int64_t v) {
+        anolis::deviceprovider::v1::Value value;
+        value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
+        value.set_int64_value(v);
+        return value;
+    }
+
+    static anolis::deviceprovider::v1::Value Uint64Value(uint64_t v) {
+        anolis::deviceprovider::v1::Value value;
+        value.set_type(anolis::deviceprovider::v1::VALUE_TYPE_UINT64);
+        value.set_uint64_value(v);
+        return value;
+    }
+
     std::unique_ptr<registry::DeviceRegistry> registry;
     std::unique_ptr<state::StateCache> state_cache;
     std::unique_ptr<control::CallRouter> router;
@@ -114,6 +178,120 @@ protected:
     std::unique_ptr<provider::ProviderRegistry> provider_registry;
     std::shared_ptr<MockProviderHandle> mock_provider;
 };
+
+// --- #252: a config-authored argument carries no declared type -------------
+// Every YAML integer reaches CallRouter as int64, so without coercion a uint64
+// parameter is uncallable from any hook. On the reference machine that left the
+// heater with no expressible safe state.
+
+TEST_F(CallRouterTest, CoercesInRangeInt64IntoUnsignedParameter) {
+    RegisterMockDeviceWithUnsignedArg();
+
+    // The provider must receive a genuinely unsigned value, not merely be reached.
+    EXPECT_CALL(*mock_provider, call("dev1", 1, _, _, _))
+        .WillOnce(Invoke([](const std::string&, uint32_t, const std::string&,
+                            const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                            anolis::deviceprovider::v1::CallResponse&) {
+            EXPECT_TRUE(args.at("pct").has_uint64_value());
+            EXPECT_EQ(args.at("pct").uint64_value(), 42u);
+            return true;
+        }));
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 1;
+    request.args["pct"] = Int64Value(42);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, RefusesNegativeIntoUnsignedParameterRatherThanWrapping) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 1;
+    request.args["pct"] = Int64Value(-5);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    ASSERT_FALSE(result.success);
+    // A wrap would have produced a colossal duty cycle that still satisfies the
+    // type check; the message must name the real problem.
+    EXPECT_THAT(result.error_message, HasSubstr("negative"));
+    EXPECT_THAT(result.error_message, HasSubstr("uint64"));
+}
+
+TEST_F(CallRouterTest, RangeBoundsStillApplyAfterCoercion) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 1;
+    request.args["pct"] = Int64Value(200);  // within uint64, outside the declared 0..100
+
+    const auto result = router->execute_call(request, *provider_registry);
+    ASSERT_FALSE(result.success);
+    EXPECT_THAT(result.error_message, HasSubstr("above maximum"));
+}
+
+TEST_F(CallRouterTest, CoercesUnsignedIntoSignedParameter) {
+    RegisterMockDeviceWithUnsignedArg();
+
+    EXPECT_CALL(*mock_provider, call("dev1", 2, _, _, _))
+        .WillOnce(Invoke([](const std::string&, uint32_t, const std::string&,
+                            const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                            anolis::deviceprovider::v1::CallResponse&) {
+            EXPECT_TRUE(args.at("delta").has_int64_value());
+            EXPECT_EQ(args.at("delta").int64_value(), 7);
+            return true;
+        }));
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 2;
+    request.args["delta"] = Uint64Value(7);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, RefusesUnsignedAboveInt64MaxRatherThanWrapping) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 2;
+    request.args["delta"] = Uint64Value(static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    ASSERT_FALSE(result.success);
+    EXPECT_THAT(result.error_message, HasSubstr("exceeds the maximum"));
+}
+
+TEST_F(CallRouterTest, ValidateCallAcceptsWhatExecuteCallWouldDispatch) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    // The startup preflight validates via validate_call, so a divergence here
+    // would let an undispatchable hook pass preflight, or flag a good one.
+    control::CallRequest ok;
+    ok.device_handle = "sim0/dev1";
+    ok.function_id = 1;
+    ok.args["pct"] = Int64Value(42);
+    std::string error;
+    EXPECT_TRUE(router->validate_call(ok, error)) << error;
+
+    control::CallRequest bad;
+    bad.device_handle = "sim0/dev1";
+    bad.function_id = 1;
+    bad.args["pct"] = Int64Value(-5);
+    EXPECT_FALSE(router->validate_call(bad, error));
+    EXPECT_THAT(error, HasSubstr("negative"));
+}
 
 TEST_F(CallRouterTest, ExecuteCallSuccess) {
     RegisterMockDevice();
@@ -1110,4 +1288,84 @@ TEST_F(CallRouterTest, SafeStateBypassesIdleGating) {
 
     auto result = router->execute_call(req, *provider_registry);
     EXPECT_TRUE(result.success);
+}
+
+TEST_F(CallRouterTest, CoercesInt64IntoDoubleParameter) {
+    RegisterMockDeviceWithUnsignedArg();
+
+    // `setpoint1_c: 0` is how an author naturally writes a safe temperature.
+    EXPECT_CALL(*mock_provider, call("dev1", 3, _, _, _))
+        .WillOnce(Invoke([](const std::string&, uint32_t, const std::string&,
+                            const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                            anolis::deviceprovider::v1::CallResponse&) {
+            EXPECT_TRUE(args.at("celsius").has_double_value());
+            EXPECT_DOUBLE_EQ(args.at("celsius").double_value(), 0.0);
+            return true;
+        }));
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 3;
+    request.args["celsius"] = Int64Value(0);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, RefusesInt64ThatCannotBeRepresentedExactlyAsDouble) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 3;
+    // 2^53 + 1: the first integer a double cannot hold. Silently rounding it
+    // would send the hardware a different number than the operator wrote.
+    request.args["celsius"] = Int64Value((1LL << 53) + 1);
+
+    const auto result = router->execute_call(request, *provider_registry);
+    ASSERT_FALSE(result.success);
+    EXPECT_THAT(result.error_message, HasSubstr("cannot be represented exactly as a double"));
+}
+
+TEST_F(CallRouterTest, AcceptsUnsignedExactlyAtInt64Max) {
+    RegisterMockDeviceWithUnsignedArg();
+
+    // The boundary the guard is written around: INT64_MAX must round-trip, only
+    // INT64_MAX+1 may be refused.
+    EXPECT_CALL(*mock_provider, call("dev1", 2, _, _, _))
+        .WillOnce(Invoke([](const std::string&, uint32_t, const std::string&,
+                            const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                            anolis::deviceprovider::v1::CallResponse&) {
+            EXPECT_TRUE(args.at("delta").has_int64_value());
+            EXPECT_EQ(args.at("delta").int64_value(), std::numeric_limits<int64_t>::max());
+            return true;
+        }));
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 2;
+    request.args["delta"] = Uint64Value(static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+
+    const auto result = router->execute_call(request, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, DoesNotNarrowDoubleIntoIntegerParameter) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    // Narrowing would discard a fractional part the author wrote deliberately.
+    anolis::deviceprovider::v1::Value fractional;
+    fractional.set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+    fractional.set_double_value(2.5);
+
+    control::CallRequest request;
+    request.device_handle = "sim0/dev1";
+    request.function_id = 2;
+    request.args["delta"] = fractional;
+
+    const auto result = router->execute_call(request, *provider_registry);
+    ASSERT_FALSE(result.success);
+    EXPECT_THAT(result.error_message, HasSubstr("Type mismatch"));
 }

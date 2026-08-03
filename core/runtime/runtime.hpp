@@ -98,6 +98,18 @@ public:
 private:
     // Staged initialization helpers
     bool init_providers(std::string &error);
+    /**
+     * @brief Dry-run every config-declared hook / safe-state call against the
+     *        live registry, once providers have reported their capabilities.
+     *
+     * These calls only ever run at a mode transition or an e-stop, so an
+     * unresolvable device, unknown function, or mismatched argument type stays
+     * invisible until the worst possible moment (#252). `--check-config` cannot
+     * catch them: it exits before any provider starts, so no ArgSpec exists.
+     *
+     * Reports loudly; never refuses to start.
+     */
+    void preflight_declared_calls() const;
     bool init_core_services(std::string &error);
     bool init_automation(std::string &error);
     bool init_http(std::string &error);
