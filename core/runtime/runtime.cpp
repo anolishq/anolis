@@ -404,6 +404,17 @@ bool Runtime::init_automation(std::string &error) {
                             request.function_id = call.function_id;
                             request.function_name = call.function_name;
                             request.is_automated = true;
+                            // #251: a `-> FAULT` hook is a safe-state action. Normally the
+                            // e-stop ladder is the single safe-state authority and the latch
+                            // rightly refuses these (safe_state.cpp) so the two cannot
+                            // double-drive. But when the ladder would drive NOTHING, these
+                            // hooks are the only safe-state path the machine has, and
+                            // refusing them makes pressing e-stop strictly worse than not
+                            // pressing it: FAULT is entered with the actuators untouched,
+                            // while any other route into FAULT would have run them.
+                            request.safe_state = next == automation::RuntimeMode::FAULT &&
+                                                 safe_state_controller_ != nullptr &&
+                                                 safe_state_controller_->ladder_drives_nothing();
 
                             for (const auto &[arg_name, arg_value] : call.args) {
                                 request.args[arg_name] = parameter_value_to_provider_value(arg_value);
@@ -453,6 +464,10 @@ bool Runtime::init_automation(std::string &error) {
                         request.function_id = call.function_id;
                         request.function_name = call.function_name;
                         request.is_automated = true;
+                        // Same rule as the before_transition hooks above (#251).
+                        request.safe_state = next == automation::RuntimeMode::FAULT &&
+                                             safe_state_controller_ != nullptr &&
+                                             safe_state_controller_->ladder_drives_nothing();
 
                         for (const auto &[arg_name, arg_value] : call.args) {
                             request.args[arg_name] = parameter_value_to_provider_value(arg_value);

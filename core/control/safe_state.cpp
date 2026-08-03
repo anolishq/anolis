@@ -267,6 +267,8 @@ void SafeStateController::clear() {
     LOG_INFO("[SafeState] E-stop latch cleared");
 }
 
+bool SafeStateController::ladder_drives_nothing() const { return planned_kind(nullptr) == SafeStateKind::None; }
+
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
     size_t uncovered = 0;

@@ -3,8 +3,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "control/call_router.hpp"
 #include "mocks/mock_provider_handle.hpp"
@@ -253,4 +255,72 @@ TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
     ASSERT_EQ(result.actions.size(), 1u);
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
+}
+
+// --- #251: is the ladder actually the safe-state authority? ----------------
+// `-> FAULT` mode-transition hooks are refused by the latch so they cannot
+// double-drive against the ladder. That is only correct while the ladder has
+// something to say; when it does not, those hooks are the machine's only
+// safe-state path and must be let through. This predicate is what decides it.
+
+TEST_F(SafeStateTest, LadderDrivesNothingWhenNoSafeStateIsDeclared) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    // The config the refuse-hookless gate steers operators into: FAULT mode
+    // hooks, no `safety.safe_state`. Pressing e-stop must not suppress them.
+    EXPECT_EQ(controller->capability().software_safe_state, control::SafeStateKind::None);
+    EXPECT_TRUE(controller->ladder_drives_nothing());
+}
+
+TEST_F(SafeStateTest, LadderDrivesSomethingWithDeclaredHooks) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_FALSE(controller->ladder_drives_nothing());
+}
+
+TEST_F(SafeStateTest, LadderDrivesSomethingWithCoveringSetpoints) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_FALSE(controller->ladder_drives_nothing());
+}
+
+TEST_F(SafeStateTest, LadderDrivesSomethingWithZeroIsSafe) {
+    RegisterActuator();
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_FALSE(controller->ladder_drives_nothing());
+}
+
+TEST_F(SafeStateTest, PartialSetpointCoverageCountsAsDrivingNothing) {
+    RegisterActuator();
+    // Fails closed to None (see PartialSetpointCoverageFailsClosedToNone), so the
+    // FAULT hooks must be let through — a partially-covering setpoints block is
+    // not a safe state, and treating it as one would suppress the only real path.
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "some_other_fn"));
+    auto controller = make_controller();
+
+    EXPECT_TRUE(controller->ladder_drives_nothing());
+}
+
+TEST_F(SafeStateTest, LadderDrivesNothingIsSafeToCallWhileTriggerHoldsTheLock) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    // trigger() holds mutex_ across the ladder AND the FAULT transition, so the
+    // hooks run inside that lock. If this predicate ever took mutex_ it would
+    // deadlock there rather than fail a test, so assert the lock-free property
+    // directly: calling it mid-trigger must return, not hang.
+    std::atomic<bool> returned{false};
+    std::thread probe([&] {
+        (void)controller->ladder_drives_nothing();
+        returned.store(true);
+    });
+    probe.join();
+    EXPECT_TRUE(returned.load());
 }

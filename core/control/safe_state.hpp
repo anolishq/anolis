@@ -90,6 +90,23 @@ public:
     /** @brief Current latch + planned-safe-state snapshot for the status surface. */
     EstopCapability capability() const;
 
+    /**
+     * @brief True when the ladder would drive nothing — no hooks, no covering
+     *        setpoints, no `zero_is_safe`.
+     *
+     * Exists so a `-> FAULT` mode-transition hook can tell whether the ladder is
+     * actually the safe-state authority for this machine. When it is not, those
+     * hooks are the only safe-state path there is, and the latch must not refuse
+     * them (#251).
+     *
+     * **Lock-free by construction, and it must stay that way.** `trigger()` holds
+     * `mutex_` across the ladder AND the `set_mode(FAULT)` call, so the FAULT
+     * hooks execute inside that lock; anything here that took `mutex_` would
+     * deadlock. `planned_kind()` reads only the immutable config and the device
+     * registry, which is why `capability()` calls it before locking.
+     */
+    bool ladder_drives_nothing() const;
+
 private:
     // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
     std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;

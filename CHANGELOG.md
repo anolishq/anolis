@@ -15,6 +15,22 @@ commit messages only.
 
 ### Fixed
 
+- **`POST /v0/estop` suppressed the `* -> FAULT` hooks when it had no safe-state
+  of its own to run** (#251). The e-stop engages the actuation latch, then drives
+  FAULT; the latch then refused the `* -> FAULT` mode-transition hooks. That is
+  correct when the ladder already drove the actuators — two mechanisms writing to
+  the same outputs would be worse — but when the ladder is `None` it drove
+  nothing, and the hooks it suppressed were the machine's only declared safe-state
+  path. Reaching FAULT by any other route ran them; reaching it via the e-stop
+  guaranteed it did not, making a press strictly worse than no press.
+
+  `-> FAULT` hooks are now dispatched as safe-state actions **only when the
+  ladder would drive nothing**, so the "ladder is the single safe-state
+  authority" rule still holds wherever there is an authority. Note this is the
+  configuration the refuse-hookless gate steers operators toward: it requires a
+  `AUTO -> FAULT` mode hook before permitting AUTO and never mentions
+  `safety.safe_state`.
+
 - **A `uint64` provider parameter could not be driven from any config-declared
   hook** (#252). Call arguments in `safety.safe_state` and
   `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
