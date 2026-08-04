@@ -27,6 +27,8 @@ bool hook_covers_auto_to_fault(const ModeTransitionHookConfig &hook) {
     return from_ok && to_ok;
 }
 
+}  // namespace
+
 // The gate is satisfied only by a declared hook that fires on `AUTO -> FAULT` and
 // drives a safe state there (#232).
 bool has_fault_safe_state_hook(const AutomationConfig &automation) {
@@ -34,8 +36,6 @@ bool has_fault_safe_state_hook(const AutomationConfig &automation) {
     return std::any_of(hooks.before_transition.begin(), hooks.before_transition.end(), hook_covers_auto_to_fault) ||
            std::any_of(hooks.after_transition.begin(), hooks.after_transition.end(), hook_covers_auto_to_fault);
 }
-
-}  // namespace
 
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
                                              const AutomationConfig &automation) {
