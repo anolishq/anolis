@@ -297,9 +297,24 @@ void Runtime::preflight_declared_calls() const {
     // it has no calls to dry-run here.
     LOG_INFO("[Runtime] preflight: e-stop ladder would run rung '" << active_rung << "'");
     if (active_rung == "none") {
-        LOG_WARN(
-            "[Runtime] preflight: no software safe-state is declared; POST /v0/estop will latch without driving "
-            "outputs");
+        // The sharp case (#251): the machine DOES declare a fault safe-state --
+        // it had to, or the refuse-hookless gate would not have permitted AUTO --
+        // but declared it in the section the e-stop does not read. Pressing e-stop
+        // is then worse than not pressing it: the latch engages before FAULT is
+        // entered, so it suppresses the very hooks that reaching FAULT by any
+        // other route would have run. Say that, not just "nothing is declared".
+        if (config_.automation.enabled && has_fault_safe_state_hook(config_.automation)) {
+            LOG_WARN(
+                "[Runtime] preflight: this machine declares '-> FAULT' mode-transition hooks but no "
+                "safety.safe_state. POST /v0/estop reads only safety.safe_state, so it will drive NOTHING -- and "
+                "because it latches actuation before entering FAULT, it also SUPPRESSES those hooks. Reaching FAULT "
+                "any other way (a fault condition, POST /v0/mode {\"mode\":\"FAULT\"}) runs them; the e-stop does "
+                "not. Declare safety.safe_state to give the e-stop a safe state of its own.");
+        } else {
+            LOG_WARN(
+                "[Runtime] preflight: no software safe-state is declared; POST /v0/estop will latch without driving "
+                "outputs");
+        }
     }
 
     if (failed > 0) {

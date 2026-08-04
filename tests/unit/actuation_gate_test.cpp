@@ -245,3 +245,45 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenAutomationDisabled) {
     EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
 }
+
+// --- #251: the predicate is now shared, so it must stay one predicate --------
+// The gate admits AUTO on the strength of a fault safe-state hook; the startup
+// preflight uses the SAME question to warn that such a machine's e-stop will
+// drive nothing and suppress those very hooks. Two copies of this drifting apart
+// is how a machine gets gated as safe while its e-stop does nothing, so pin the
+// shapes the gate accepts.
+
+TEST_F(ActuationGateTest, FaultHookPredicateMatchesWhatTheGateAdmits) {
+    // Every shape the gate's own refusal message tells operators to write:
+    // "from: AUTO/\"*\"/omitted and to: FAULT/\"*\"/omitted".
+    for (const std::string& from : {std::string(""), std::string("*"), std::string("AUTO")}) {
+        for (const std::string& to : {std::string(""), std::string("*"), std::string("FAULT")}) {
+            runtime::AutomationConfig cfg;
+            cfg.mode_transition_hooks.before_transition.push_back(make_hook(to, from));
+            EXPECT_TRUE(runtime::has_fault_safe_state_hook(cfg))
+                << "from='" << from << "' to='" << to << "' is endorsed by the gate message but not recognised";
+        }
+    }
+}
+
+TEST_F(ActuationGateTest, FaultHookPredicateRejectsNonFaultTransitions) {
+    runtime::AutomationConfig cfg;
+    // Fires when LEAVING AUTO for MANUAL — never on the fault path.
+    cfg.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL", "AUTO"));
+    EXPECT_FALSE(runtime::has_fault_safe_state_hook(cfg));
+
+    // Reaches FAULT, but only from IDLE, so it cannot cover AUTO -> FAULT.
+    cfg.mode_transition_hooks.before_transition.push_back(make_hook("FAULT", "IDLE"));
+    EXPECT_FALSE(runtime::has_fault_safe_state_hook(cfg));
+}
+
+TEST_F(ActuationGateTest, FaultHookPredicateFindsAfterTransitionHooks) {
+    runtime::AutomationConfig cfg;
+    cfg.mode_transition_hooks.after_transition.push_back(make_fault_hook());
+    EXPECT_TRUE(runtime::has_fault_safe_state_hook(cfg));
+}
+
+TEST_F(ActuationGateTest, FaultHookPredicateIsFalseWithNoHooks) {
+    runtime::AutomationConfig cfg;
+    EXPECT_FALSE(runtime::has_fault_safe_state_hook(cfg));
+}

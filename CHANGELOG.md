@@ -13,6 +13,29 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **The startup preflight now names the specific hazard behind #251.** A machine
+  can declare its safe state twice over, for two different triggers:
+  `safety.safe_state` is what `POST /v0/estop` runs, while a `-> FAULT` entry in
+  `automation.mode_transition_hooks` is what an autonomous fault runs. The
+  refuse-hookless gate only ever asks for the second, so following its refusal
+  message produces a machine whose e-stop reads nothing.
+
+  Pressing the e-stop there is worse than not pressing it: the latch engages
+  before FAULT is entered, so it also **suppresses** the `-> FAULT` hooks that
+  reaching FAULT by any other route would have run. The preflight previously said
+  only "no software safe-state is declared"; on this shape it now says that the
+  hooks exist, that the e-stop will not run them, and that it will prevent them
+  from running. `has_fault_safe_state_hook` is shared with the gate rather than
+  reimplemented, so the two cannot disagree about what a fault safe-state hook is.
+
+  Diagnostic only — no behaviour change. Two attempts to fix this in the runtime
+  were closed after review (#259, #260): the runtime cannot know whether a
+  machine's FAULT hooks constitute a safe state for that machine in its current
+  state, and on DCMT hardware sending them can clear a watchdog trip and release
+  a brake (#261).
+
 ### Fixed
 
 - **A `uint64` provider parameter could not be driven from any config-declared

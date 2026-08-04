@@ -30,6 +30,16 @@ namespace runtime {
 
 struct AutomationConfig;
 
+/**
+ * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.
+ *
+ * Exposed so callers that need to reason about "does this machine have a
+ * declared fault safe-state path" use the SAME predicate the gate admits AUTO
+ * on. Two implementations of this question drifting apart is exactly how a
+ * machine ends up gated as safe while its e-stop drives nothing (#251).
+ */
+bool has_fault_safe_state_hook(const AutomationConfig &automation);
+
 /** @brief Outcome of the refuse-hookless evaluation. */
 struct HooklessAutoGate {
     bool refused = false;
