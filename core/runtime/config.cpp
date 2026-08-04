@@ -482,6 +482,75 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
     return true;
 }
 
+// A machine can declare its safe state twice over, for two different triggers:
+// `safety.safe_state` is what `POST /v0/estop` runs, while a `-> FAULT` entry in
+// `automation.mode_transition_hooks` is what an autonomous fault runs. They are
+// unconnected, and the refuse-hookless gate only ever asks for the second.
+//
+// So an operator who follows that gate's refusal message to the letter ends up
+// with FAULT hooks and no `safety.safe_state`. Pressing the e-stop then ran
+// nothing AND — because the latch engages before FAULT is entered — suppressed
+// the FAULT hooks that any other route into FAULT would have executed. The
+// safety-labelled route was the worse one (#251).
+//
+// When the operator has said nothing at all about `safety`, adopt their explicit
+// `-> FAULT` hooks as the e-stop's ladder. Everything downstream then behaves
+// normally: the ladder runs them as ordinary safe-state calls, their outcomes
+// land in the e-stop response, and the FAULT-transition dispatch is untouched
+// (still refused by the latch, so the two cannot double-drive).
+//
+// Two deliberate limits:
+//   - `to` must be exactly FAULT. A wildcard hook fires on EVERY transition and
+//     is not a safe-state declaration; its author never claimed it was one.
+//   - `from` must be a wildcard. The ladder has no notion of which mode it is
+//     leaving, so a hook that only claims to be correct when leaving AUTO cannot
+//     be run unconditionally.
+// A machine whose hooks do not qualify is left exactly as it was, and the
+// startup preflight already warns that it has no software safe state.
+void adopt_fault_hooks_as_safe_state(RuntimeConfig &config, bool safety_section_declared) {
+    // An operator who wrote a `safety:` block considered the question. Even if it
+    // declares nothing, that is an answer -- respect it rather than overriding a
+    // deliberate latch-only choice.
+    if (safety_section_declared) {
+        return;
+    }
+    if (!config.automation.enabled) {
+        return;
+    }
+    const auto &safe_state = config.safety.safe_state;
+    if (!safe_state.hooks.empty() || !safe_state.setpoints.empty() || safe_state.zero_is_safe) {
+        return;
+    }
+
+    const auto qualifies = [](const ModeTransitionHookConfig &hook) {
+        const bool targets_fault = hook.to == "FAULT";
+        const bool from_any = hook.from.empty() || hook.from == "*";
+        return targets_fault && from_any;
+    };
+
+    std::vector<ModeTransitionCallConfig> adopted;
+    for (const auto *group : {&config.automation.mode_transition_hooks.before_transition,
+                              &config.automation.mode_transition_hooks.after_transition}) {
+        for (const auto &hook : *group) {
+            if (!qualifies(hook)) {
+                continue;
+            }
+            adopted.insert(adopted.end(), hook.calls.begin(), hook.calls.end());
+        }
+    }
+
+    if (adopted.empty()) {
+        return;
+    }
+
+    config.safety.safe_state.hooks = std::move(adopted);
+    LOG_INFO("[Config] No safety.safe_state declared; adopting "
+             << config.safety.safe_state.hooks.size()
+             << " call(s) from the '* -> FAULT' mode-transition hooks as the software safe state. "
+                "POST /v0/estop will run them. Declare a safety.safe_state block to override, "
+                "or an empty one to keep the e-stop latch-only.");
+}
+
 bool load_config(const std::string &config_path, RuntimeConfig &config, std::string &error) {
     try {
         YAML::Node yaml = YAML::LoadFile(config_path);
@@ -854,6 +923,11 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
         }
 
+        // Whether the operator said ANYTHING about safety. Distinguishing
+        // "declared nothing" from "declared none" is what makes the adoption
+        // below safe to do automatically — see adopt_fault_hooks_as_safe_state.
+        const bool safety_section_declared = static_cast<bool>(yaml["safety"]);
+
         // Load safety config. Parsed unconditionally (independent of automation)
         // so a pure-manual machine can still declare a software safe-state.
         if (yaml["safety"]) {
@@ -1115,6 +1189,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         LOG_INFO(telemetry_msg.str());
 
         LOG_INFO("[Config] Log level: " << config.logging.level);
+
+        adopt_fault_hooks_as_safe_state(config, safety_section_declared);
 
         std::stringstream automation_msg;
         automation_msg << "[Config] Automation: " << (config.automation.enabled ? "enabled" : "disabled");

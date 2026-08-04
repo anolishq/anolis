@@ -15,6 +15,32 @@ commit messages only.
 
 ### Fixed
 
+- **`POST /v0/estop` ran nothing, and suppressed the hooks that would otherwise
+  have run** (#251). A machine can declare its safe state twice over, for two
+  different triggers: `safety.safe_state` is what the e-stop runs, while a
+  `-> FAULT` entry in `automation.mode_transition_hooks` is what an autonomous
+  fault runs. They are unconnected, and the refuse-hookless gate only ever asks
+  for the second. So an operator who follows that gate's refusal message to the
+  letter ends up with FAULT hooks and no `safety.safe_state` — and pressing the
+  e-stop then drove nothing *and*, because the latch engages before FAULT is
+  entered, refused the FAULT hooks that `POST /v0/mode {"mode":"FAULT"}` would
+  have executed. The safety-labelled route was the worse one. This is the state
+  the reference bioreactor shipped in until anolis-projects#58.
+
+  When a config declares no `safety:` section at all, its explicit `-> FAULT`
+  mode hooks are now adopted as the e-stop's ladder at config load. Everything
+  downstream is unchanged: the ladder runs them as ordinary safe-state calls,
+  their outcomes appear in the `POST /v0/estop` response, `software_safe_state`
+  reports `hooks`, and the FAULT-transition dispatch path is untouched — those
+  hooks are still refused by the latch, so the two cannot double-drive.
+
+  Adoption is deliberately narrow. A hook qualifies only if its `to` is exactly
+  `FAULT` (a wildcard hook fires on every transition and was never a safe-state
+  declaration) and its `from` is a wildcard (the ladder has no notion of which
+  mode it is leaving). Declaring a `safety:` block — **even an empty one** —
+  opts out entirely, so a machine that deliberately wants a latch-only e-stop
+  keeps it. The adoption is logged at load.
+
 - **A `uint64` provider parameter could not be driven from any config-declared
   hook** (#252). Call arguments in `safety.safe_state` and
   `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has

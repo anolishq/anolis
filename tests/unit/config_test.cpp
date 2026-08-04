@@ -1443,3 +1443,131 @@ health:
 
     EXPECT_FALSE(load_config(config_path, config, error));
 }
+
+// --- #251: adopting `-> FAULT` mode hooks as the e-stop's safe state -------
+// `safety.safe_state` (what POST /v0/estop runs) and `automation
+// .mode_transition_hooks` `-> FAULT` (what an autonomous fault runs) are two
+// unconnected declarations, and the refuse-hookless gate only ever asks for the
+// second. An operator who follows that gate ends up with no e-stop safe state,
+// and the latch then suppresses the FAULT hooks that any other route into FAULT
+// would have run. When they have said nothing about `safety`, adopt.
+
+namespace {
+// Automation with one `* -> FAULT` hook. `safety_block` is spliced in verbatim so
+// a test can supply none, an empty one, or a populated one.
+std::string automation_with_fault_hook(const std::string& to = "FAULT", const std::string& from = "*",
+                                       const std::string& safety_block = "") {
+    return R"(
+runtime:
+http:
+  enabled: false
+providers:
+  - id: test0
+    command: ./provider-test
+)" + safety_block +
+           R"(
+automation:
+  enabled: true
+  behavior_tree: /tmp/does-not-need-to-exist.xml
+  mode_transition_hooks:
+    before_transition:
+      - from: ")" +
+           from + R"("
+        to: ")" +
+           to + R"("
+        calls:
+          - device_handle: test0/dev0
+            function_name: set_output
+            args:
+              pwm: 0
+logging:
+  level: info
+)";
+}
+}  // namespace
+
+TEST_F(ConfigTest, AdoptsFaultHooksWhenNoSafetySectionIsDeclared) {
+    const std::string path = create_config_file("adopt.yaml", automation_with_fault_hook());
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    ASSERT_EQ(config.safety.safe_state.hooks.size(), 1u);
+    EXPECT_EQ(config.safety.safe_state.hooks[0].device_handle, "test0/dev0");
+    EXPECT_EQ(config.safety.safe_state.hooks[0].function_name, "set_output");
+    // The mode hooks themselves must be left intact — they still run on a
+    // non-e-stop route into FAULT.
+    EXPECT_EQ(config.automation.mode_transition_hooks.before_transition.size(), 1u);
+}
+
+TEST_F(ConfigTest, DoesNotAdoptWhenAnEmptySafetySectionIsDeclared) {
+    // Declaring `safety:` at all is an answer, even when it declares nothing:
+    // the operator considered the question and chose latch-only. Overriding that
+    // would silently actuate a machine whose owner asked us not to.
+    const std::string path =
+        create_config_file("optout.yaml", automation_with_fault_hook("FAULT", "*", "\nsafety:\n  safe_state:\n"));
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_TRUE(config.safety.safe_state.hooks.empty());
+}
+
+TEST_F(ConfigTest, DoesNotAdoptAWildcardTargetHook) {
+    // `to: "*"` fires on EVERY transition — a marker, a valve cycle, anything.
+    // Its author never claimed it was a safe state, so it does not get to become
+    // one. (The refuse-hookless gate accepts `*`, so this config is reachable.)
+    const std::string path = create_config_file("wildcard.yaml", automation_with_fault_hook("*"));
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_TRUE(config.safety.safe_state.hooks.empty());
+}
+
+TEST_F(ConfigTest, DoesNotAdoptAHookScopedToOneOriginMode) {
+    // `from: AUTO` claims to be correct when LEAVING AUTO. The ladder has no
+    // notion of which mode it is leaving, so running it unconditionally would
+    // assume something the author did not say.
+    const std::string path = create_config_file("from_auto.yaml", automation_with_fault_hook("FAULT", "AUTO"));
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_TRUE(config.safety.safe_state.hooks.empty());
+}
+
+TEST_F(ConfigTest, DoesNotAdoptWhenAutomationIsDisabled) {
+    std::string content = automation_with_fault_hook();
+    const auto pos = content.find("enabled: true");
+    ASSERT_NE(pos, std::string::npos);
+    content.replace(pos, std::string("enabled: true").size(), "enabled: false");
+
+    const std::string path = create_config_file("no_automation.yaml", content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    // Mode hooks never fire on a machine with no automation layer, so there is
+    // nothing meaningful to adopt.
+    EXPECT_TRUE(config.safety.safe_state.hooks.empty());
+}
+
+TEST_F(ConfigTest, DeclaredSafeStateIsNeverOverwrittenByAdoption) {
+    const std::string safety = R"(
+safety:
+  safe_state:
+    hooks:
+      - device_handle: test0/dev0
+        function_name: operator_chose_this
+        args:
+          pwm: 0
+)";
+    const std::string path = create_config_file("declared.yaml", automation_with_fault_hook("FAULT", "*", safety));
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    ASSERT_EQ(config.safety.safe_state.hooks.size(), 1u);
+    EXPECT_EQ(config.safety.safe_state.hooks[0].function_name, "operator_chose_this");
+}
