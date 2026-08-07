@@ -1499,6 +1499,24 @@ phase_summary() {
 # Uninstall
 # =============================================================================
 
+# Observability data directories present on THIS host, one per line.
+#
+# The Debian influxdb2 package stores under /var/lib/influxdb; the uninstall text
+# used to name /var/lib/influxdb2, which does not exist. Following the printed
+# purge verbatim therefore left every byte of recorded telemetry on disk while
+# reporting success (#247). Both spellings are probed so the guidance stays right
+# if the package layout ever changes, and only what exists is reported.
+#
+# ANOLIS_DATA_ROOT_PREFIX exists so this is testable without touching real paths.
+_observability_data_dirs() {
+    local prefix="${ANOLIS_DATA_ROOT_PREFIX:-}"
+    local candidate
+    for candidate in /var/lib/influxdb /var/lib/influxdb2 /var/lib/grafana /root/.influxdbv2; do
+        [[ -e "${prefix}${candidate}" ]] && printf '%s\n' "${prefix}${candidate}"
+    done
+    return 0
+}
+
 do_uninstall() {
     log_info "Uninstalling anolis from ${PREFIX}..."
 
@@ -1540,12 +1558,33 @@ do_uninstall() {
         rm -rf /var/lib/grafana/dashboards
         systemctl daemon-reload 2>/dev/null || true
         log_ok "observability: services disabled, provisioning removed"
-        log_info "Kept: influxdb2/grafana packages, /var/lib/influxdb2 and /var/lib/grafana (data)."
-        log_info "Full purge (DESTROYS recorded data):"
-        log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
-        log_info "  rm -rf /var/lib/influxdb2 /var/lib/grafana /root/.influxdbv2"
-        log_info "  rm -f /etc/apt/sources.list.d/influxdata.list /etc/apt/sources.list.d/grafana.list"
+
+        # Report the data directories that are actually on THIS host rather than a
+        # hardcoded guess. The previous text named /var/lib/influxdb2, which the
+        # Debian influxdb2 package does not use -- it stores under
+        # /var/lib/influxdb. An operator following the purge verbatim believed
+        # they had destroyed the recorded telemetry and in fact left all of it on
+        # disk (#247). Deriving it means the instruction cannot go stale again if
+        # the package layout changes.
+        local kept_data=()
+        mapfile -t kept_data < <(_observability_data_dirs)
+
+        if [[ ${#kept_data[@]} -gt 0 ]]; then
+            log_info "Kept: influxdb2/grafana packages, and the recorded data in ${kept_data[*]}"
+            log_info "Full purge (DESTROYS recorded data):"
+            log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
+            log_info "  rm -rf ${kept_data[*]}"
+        else
+            log_info "Kept: influxdb2/grafana packages. No data directories found on this host."
+            log_info "Full purge:"
+            log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
+        fi
+        # .ucf-dist is left behind by dpkg when the vendor list file was modified;
+        # without it a later reinstall can resurrect the vendor repo.
+        log_info "  rm -f /etc/apt/sources.list.d/influxdata.list /etc/apt/sources.list.d/influxdata.list.ucf-dist"
+        log_info "  rm -f /etc/apt/sources.list.d/grafana.list"
         log_info "  rm -f /etc/apt/keyrings/influxdata-archive.gpg /etc/apt/keyrings/grafana.gpg"
+        log_info "  rm -rf /etc/influxdb /etc/grafana   # dpkg leaves these when non-empty"
     fi
 
     log_ok "uninstall complete"
