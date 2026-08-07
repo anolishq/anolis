@@ -13,6 +13,46 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`install.sh` never enabled I2C on a Pi with a display** (#249). `phase_i2c`
+  decided the bus was already up by globbing `/dev/i2c-*`, which matches the
+  HDMI DDC adapters (`i2c-20`, `i2c-21` — `fef04500.i2c`) that the VC4 driver
+  publishes regardless of `dtparam=i2c_arm=on`. The guard was therefore
+  effectively always true and the enablement below it unreachable on exactly the
+  hardware it was written for: the install reported `i2c: already enabled`, never
+  appended the dtparam, never set `REBOOT_NEEDED`, and then failed 30 s later
+  with `health: runtime not responding` while the real cause —
+  `failed to open I2C bus '/dev/i2c-1': No such file or directory` — appeared
+  only in the journal.
+
+  Detection now looks for the GPIO-header bus specifically: `/dev/i2c-1`, or an
+  adapter whose name identifies the ARM/BSC controller if the number differs.
+  The "configured but not live" warning now says a reboot is required *before
+  providers can open /dev/i2c-1*, rather than referring to a glob.
+
+  The bug survived because nothing could exercise it without real hardware, so
+  the two filesystem roots are overridable and four bats cases pin the
+  behaviour — including a DDC-only adapter set, which is what a desktop Pi with
+  no dtparam actually looks like.
+
+- **A `uint64` provider parameter could not be driven from any config-declared
+  hook** (#252). Call arguments in `safety.safe_state` and
+  `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
+  no unsigned alternative — every YAML integer became `int64` and `CallRouter`
+  rejected it as a type mismatch. On the reference bioreactor this left the
+  heater (`set_open_duty_pct`, uint64 args) with **no expressible software safe
+  state**: the e-stop ladder ran and that call failed. `CallRouter` now
+  reconciles argument types against the target's declared `ArgSpec` before
+  validating — `int64 <-> uint64`, and integer to `double` (so `setpoint_c: 0`
+  works alongside `duty_pct: 0` on the same device). Widening only, and never
+  silent: a negative into a `uint64`, a value above `INT64_MAX` into an `int64`,
+  or an integer past 2^53 into a `double` is **refused, not wrapped or rounded**.
+  Declared min/max bounds still apply to the converted value, and `double` is
+  never narrowed to an integer. Applies to every caller, so `POST /v0/call` also
+  now accepts an in-range `int64` for an unsigned parameter where it previously
+  returned 400.
+
 ### Added
 
 - **The startup preflight now names the specific hazard behind #251.** A machine
@@ -35,27 +75,6 @@ commit messages only.
   machine's FAULT hooks constitute a safe state for that machine in its current
   state, and on DCMT hardware sending them can clear a watchdog trip and release
   a brake (#261).
-
-### Fixed
-
-- **A `uint64` provider parameter could not be driven from any config-declared
-  hook** (#252). Call arguments in `safety.safe_state` and
-  `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
-  no unsigned alternative — every YAML integer became `int64` and `CallRouter`
-  rejected it as a type mismatch. On the reference bioreactor this left the
-  heater (`set_open_duty_pct`, uint64 args) with **no expressible software safe
-  state**: the e-stop ladder ran and that call failed. `CallRouter` now
-  reconciles argument types against the target's declared `ArgSpec` before
-  validating — `int64 <-> uint64`, and integer to `double` (so `setpoint_c: 0`
-  works alongside `duty_pct: 0` on the same device). Widening only, and never
-  silent: a negative into a `uint64`, a value above `INT64_MAX` into an `int64`,
-  or an integer past 2^53 into a `double` is **refused, not wrapped or rounded**.
-  Declared min/max bounds still apply to the converted value, and `double` is
-  never narrowed to an integer. Applies to every caller, so `POST /v0/call` also
-  now accepts an in-range `int64` for an unsigned parameter where it previously
-  returned 400.
-
-### Added
 
 - **Startup preflight for declared hook and safe-state calls** (#252). Once
   providers have reported their capabilities, every call declared in
