@@ -53,6 +53,21 @@ commit messages only.
   now accepts an in-range `int64` for an unsigned parameter where it previously
   returned 400.
 
+- **The uninstall's data-purge instruction named a directory that does not
+  exist** (#247). It told the operator their recorded telemetry lived in
+  `/var/lib/influxdb2`; the Debian `influxdb2` package stores under
+  `/var/lib/influxdb`. Following the printed "Full purge (DESTROYS recorded
+  data)" block verbatim therefore left **every byte on disk** while reporting
+  success — a data-handling instruction failing in the direction that
+  under-deletes, so the mistake stays invisible until someone goes looking for
+  data they believed was gone, or hands on a device assuming it was wiped.
+
+  The guidance is now derived from what is actually present on the host rather
+  than hardcoded, so it cannot drift from the package layout again. The purge
+  block also now covers `influxdata.list.ucf-dist` (left by dpkg when the vendor
+  list was modified, and enough to resurrect the repo on a later reinstall) and
+  the non-empty `/etc/influxdb` and `/etc/grafana` that dpkg declines to remove.
+
 ### Added
 
 - **The startup preflight now names the specific hazard behind #251.** A machine
