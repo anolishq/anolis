@@ -1,6 +1,5 @@
 #include "control/safe_state.hpp"
 
-#include <algorithm>
 #include <chrono>
 
 #include "automation/mode_manager.hpp"
@@ -122,10 +121,21 @@ size_t uncovered_for_kind(SafeStateKind kind, const runtime::SafeStateConfig &sa
     }
 
     size_t uncovered = 0;
-    for (const auto &[handle, spec] : actuators) {
-        const bool covered = std::any_of(
-            declared->begin(), declared->end(),
-            [&](const runtime::ModeTransitionCallConfig &call) { return call_targets(call, handle, spec); });
+    for (const auto &actuator : actuators) {
+        // A plain nested loop rather than any_of with a lambda: capturing a
+        // structured binding trips clang-analyzer-core.CallAndMessage ("2nd
+        // function call argument is an uninitialized value"), and this reads no
+        // worse than the algorithm did.
+        const std::string &handle = actuator.first;
+        const registry::FunctionSpec &spec = actuator.second;
+
+        bool covered = false;
+        for (const auto &call : *declared) {
+            if (call_targets(call, handle, spec)) {
+                covered = true;
+                break;
+            }
+        }
         if (!covered) {
             ++uncovered;
         }
