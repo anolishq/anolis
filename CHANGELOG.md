@@ -15,6 +15,32 @@ commit messages only.
 
 ### Fixed
 
+- **`uncovered_actuating_functions` measured a mechanism that was not running**
+  (#253). It always counted `setpoints` coverage, whatever rung the ladder had
+  actually planned. So a machine whose safe state is expressed as **hooks**
+  reported every actuator as uncovered no matter how complete those hooks were —
+  on pi-g1, `{"software_safe_state": "hooks", "uncovered_actuating_functions": 7}`
+  from a config whose e-stop had just been observed physically stopping the
+  impeller.
+
+  The workbench renders that number as a red *"N actuating function(s) have no
+  declared safe setpoint and will not be driven"*, and that branch is unreachable
+  on a `"none"` machine — so the first operator-visible statement about a working
+  safe state was a false one. A safety surface that cries wolf when the safe state
+  works trains operators to discount it, and the same widget has to be believed
+  when the gap is real.
+
+  The count now measures the rung `software_safe_state` names: for `hooks` and
+  `setpoints`, outputs no declared call targets; for `zero`, outputs with no
+  zeroable required argument; for `none`, all of them. `run_zero_call` and the
+  `zero` count share one predicate so the rung and its reported coverage cannot
+  drift, and one matcher now serves both call-based rungs for the same reason.
+
+  Note the limit, now stated in the OpenAPI description: this means "the ladder
+  will not touch this output", not "the ladder leaves it unsafe". Whether an
+  arbitrary hook call drives an output to a *safe* value is not decidable from
+  config — that distinction is #246.
+
 - **`install.sh` never enabled I2C on a Pi with a display** (#249). `phase_i2c`
   decided the bus was already up by globbing `/dev/i2c-*`, which matches the
   HDMI DDC adapters (`i2c-20`, `i2c-21` — `fef04500.i2c`) that the VC4 driver

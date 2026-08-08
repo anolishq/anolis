@@ -721,7 +721,14 @@ components:
           description: Epoch milliseconds when the latch engaged, or null if not latched.
         uncovered_actuating_functions:
           type: integer
-          description: Count of actuating outputs with no declared safe setpoint.
+          description: >-
+            Count of actuating outputs the PLANNED ladder rung would not drive,
+            measured against whichever rung software_safe_state names. For
+            "hooks" and "setpoints" that is the outputs no declared call
+            targets; for "zero", those with no zeroable required argument; for
+            "none", all of them. Note it means "the ladder will not touch this",
+            not "the ladder leaves this unsafe" -- whether an arbitrary hook call
+            drives an output to a SAFE value is not decidable from the config.
     EstopAction:
       type: object
       additionalProperties: false

@@ -254,3 +254,65 @@ TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
 }
+
+// --- #253: the count must measure the rung that will actually run -----------
+// It used to measure SETPOINT coverage regardless of the planned rung, so a
+// machine driven entirely by hooks reported every actuator uncovered while its
+// e-stop demonstrably stopped the impeller — and the workbench rendered that as
+// a red "will not be driven" error for outputs that were being driven.
+
+TEST_F(SafeStateTest, HooksRungCountsOutputsNoHookTargets) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Hooks);
+    // The single actuator IS targeted by the hook, so nothing is uncovered.
+    // Under the old setpoint-only counting this reported 1.
+    EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+}
+
+TEST_F(SafeStateTest, HooksRungStillReportsOutputsItDoesNotTarget) {
+    RegisterActuator();
+    // A hook that targets a different function leaves the real actuator untouched.
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "some_other_fn"));
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Hooks);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, NoneRungCountsEveryActuator) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::None);
+    // Nothing runs, so nothing is covered — previously this also reported 1,
+    // but by coincidence of the setpoint list being empty rather than by meaning.
+    EXPECT_EQ(cap.uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, ZeroRungCountsWhatItCannotZero) {
+    // A string-argument actuator: run_zero_call refuses to invent a "zero" for
+    // it, so the count must agree that the rung will not drive it.
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Zero);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, SetpointsRungKeepsItsOriginalMeaning) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Setpoints);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+}

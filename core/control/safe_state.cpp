@@ -1,5 +1,6 @@
 #include "control/safe_state.hpp"
 
+#include <algorithm>
 #include <chrono>
 
 #include "automation/mode_manager.hpp"
@@ -41,24 +42,95 @@ std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovid
     }
 }
 
-// True if `setpoint` targets the same function as an actuating `spec` on `handle`.
+// True if `call` targets the same function as an actuating `spec` on `handle`.
 // When both selectors are present they must agree (mirroring CallRouter, which
 // requires id and name to resolve to the same function), so a contradictory
-// setpoint does not count toward coverage.
-bool setpoint_matches(const runtime::ModeTransitionCallConfig &setpoint, const std::string &handle,
-                      const registry::FunctionSpec &spec) {
-    if (setpoint.device_handle != handle) {
+// declaration does not count toward coverage.
+//
+// Used for BOTH rungs that consume declared calls -- setpoints and hooks -- so
+// the two cannot disagree about what "this call targets that output" means.
+bool call_targets(const runtime::ModeTransitionCallConfig &call, const std::string &handle,
+                  const registry::FunctionSpec &spec) {
+    if (call.device_handle != handle) {
         return false;
     }
-    const bool has_id = setpoint.function_id != 0;
-    const bool has_name = !setpoint.function_name.empty();
-    if (has_id && setpoint.function_id != spec.function_id) {
+    const bool has_id = call.function_id != 0;
+    const bool has_name = !call.function_name.empty();
+    if (has_id && call.function_id != spec.function_id) {
         return false;
     }
-    if (has_name && setpoint.function_name != spec.function_name) {
+    if (has_name && call.function_name != spec.function_name) {
         return false;
     }
     return has_id || has_name;
+}
+
+// True if the zero rung could actually drive `spec` to a neutral value: it needs
+// at least one required argument, and every required argument must have a
+// zero. Mirrors run_zero_call's refusals exactly -- they call this, rather than
+// re-deriving the rule, so the reported coverage cannot drift from what the rung
+// really does.
+bool can_zero(const registry::FunctionSpec &spec) {
+    bool has_required = false;
+    for (const auto &arg : spec.args) {
+        if (!arg.required()) {
+            continue;
+        }
+        has_required = true;
+        if (!zero_value(arg.type()).has_value()) {
+            return false;
+        }
+    }
+    return has_required;
+}
+
+// How many actuating outputs the given rung would NOT drive.
+//
+// Previously this always measured SETPOINT coverage, whatever rung was actually
+// planned -- so a machine driven entirely by hooks reported every actuator as
+// uncovered while the e-stop demonstrably stopped it, and the workbench rendered
+// that as a red "will not be driven" error (#253).
+//
+// Note the limit of what this can mean for `hooks`: a hook is an arbitrary call,
+// so whether it drives an output to a SAFE value is not decidable here. It
+// counts outputs no declared call targets at all -- "the ladder will not touch
+// this", not "the ladder leaves this unsafe". That distinction is #246.
+size_t uncovered_for_kind(SafeStateKind kind, const runtime::SafeStateConfig &safe_state,
+                          const std::vector<std::pair<std::string, registry::FunctionSpec>> &actuators) {
+    const std::vector<runtime::ModeTransitionCallConfig> *declared = nullptr;
+    switch (kind) {
+        case SafeStateKind::Hooks:
+            declared = &safe_state.hooks;
+            break;
+        case SafeStateKind::Setpoints:
+            declared = &safe_state.setpoints;
+            break;
+        case SafeStateKind::Zero: {
+            size_t uncovered = 0;
+            for (const auto &[handle, spec] : actuators) {
+                (void)handle;
+                if (!can_zero(spec)) {
+                    ++uncovered;
+                }
+            }
+            return uncovered;
+        }
+        case SafeStateKind::None:
+        default:
+            // Nothing runs, so nothing is covered.
+            return actuators.size();
+    }
+
+    size_t uncovered = 0;
+    for (const auto &[handle, spec] : actuators) {
+        const bool covered = std::any_of(
+            declared->begin(), declared->end(),
+            [&](const runtime::ModeTransitionCallConfig &call) { return call_targets(call, handle, spec); });
+        if (!covered) {
+            ++uncovered;
+        }
+    }
+    return uncovered;
 }
 
 }  // namespace
@@ -108,34 +180,25 @@ std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController:
 
 SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
     const auto actuators = actuating_functions();
-    size_t uncovered = 0;
-    for (const auto &[handle, spec] : actuators) {
-        bool covered = false;
-        for (const auto &setpoint : safety_.safe_state.setpoints) {
-            if (setpoint_matches(setpoint, handle, spec)) {
-                covered = true;
-                break;
-            }
-        }
-        if (!covered) {
-            ++uncovered;
-        }
-    }
-    if (uncovered_out != nullptr) {
-        *uncovered_out = uncovered;
+
+    // Setpoint coverage is needed to DECIDE the rung (setpoints apply only if
+    // they cover everything, fail closed), independently of what we then report.
+    const size_t setpoint_uncovered = uncovered_for_kind(SafeStateKind::Setpoints, safety_.safe_state, actuators);
+
+    SafeStateKind kind = SafeStateKind::None;
+    if (!safety_.safe_state.hooks.empty()) {
+        kind = SafeStateKind::Hooks;
+    } else if (!safety_.safe_state.setpoints.empty() && setpoint_uncovered == 0) {
+        kind = SafeStateKind::Setpoints;
+    } else if (safety_.safe_state.zero_is_safe) {
+        kind = SafeStateKind::Zero;
     }
 
-    if (!safety_.safe_state.hooks.empty()) {
-        return SafeStateKind::Hooks;
+    // Report against the rung that will actually run, not always setpoints.
+    if (uncovered_out != nullptr) {
+        *uncovered_out = uncovered_for_kind(kind, safety_.safe_state, actuators);
     }
-    // Setpoints apply only if they cover every actuating output (fail closed).
-    if (!safety_.safe_state.setpoints.empty() && uncovered == 0) {
-        return SafeStateKind::Setpoints;
-    }
-    if (safety_.safe_state.zero_is_safe) {
-        return SafeStateKind::Zero;
-    }
-    return SafeStateKind::None;
+    return kind;
 }
 
 CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfig &call) {
@@ -172,6 +235,8 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     request.function_name = spec.function_name;
     request.is_automated = false;
     request.safe_state = true;
+    // can_zero() decides the same question for the coverage count; the loop below
+    // still reports WHICH argument blocked it, which the count cannot.
     for (const auto &arg : spec.args) {
         if (!arg.required()) {
             continue;
