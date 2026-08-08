@@ -318,6 +318,39 @@ phase_system_user() {
 # Phase 7: I2C
 # =============================================================================
 
+# True when the GPIO-header I2C bus is live -- the one `dtparam=i2c_arm=on`
+# creates and the one every provider config in this project opens
+# (`bus_path: /dev/i2c-1`).
+#
+# Deliberately NOT a glob over /dev/i2c-*. On any Pi with HDMI attached the VC4
+# driver publishes DDC buses (i2c-20 / i2c-21, named "fef04500.i2c") which exist
+# regardless of dtparam, so a glob always matched and the enablement below was
+# unreachable on exactly the hardware it was written for: the install reported
+# "i2c: already enabled", then failed 30s later with the providers unable to open
+# /dev/i2c-1 and nothing naming the cause (#249).
+#
+# The two roots are overridable so this is testable without real hardware --
+# the original bug shipped undetected because nothing could exercise it.
+_arm_i2c_bus_present() {
+    local dev_root="${ANOLIS_I2C_DEV_ROOT:-/dev}"
+    local sys_root="${ANOLIS_I2C_SYS_ROOT:-/sys/class/i2c-dev}"
+
+    # Conventional GPIO bus on Pi 3/4/5.
+    [[ -e "${dev_root}/i2c-1" ]] && return 0
+
+    # Fallback for a nonstandard adapter number: match the ARM/BSC controller by
+    # name so a renumbered header bus still counts, while the DDC adapters
+    # (fef0*.i2c) never do.
+    local name_file
+    for name_file in "${sys_root}"/*/name; do
+        [[ -e "${name_file}" ]] || continue
+        if grep -qiE 'bcm2835|bcm2708|bsc' "${name_file}" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 phase_i2c() {
     # Skip on non-Pi (x86_64 dev machines)
     if [[ "${ARCH}" == "x86_64" ]]; then
@@ -325,7 +358,7 @@ phase_i2c() {
         return
     fi
 
-    if ls /dev/i2c-* &>/dev/null; then
+    if _arm_i2c_bus_present; then
         log_ok "i2c: already enabled"
         return
     fi
@@ -342,7 +375,7 @@ phase_i2c() {
     fi
 
     if grep -q "^dtparam=i2c_arm=on" "${config_file}"; then
-        log_warn "i2c: configured in ${config_file} but /dev/i2c-* not present — reboot required"
+        log_warn "i2c: enabled in ${config_file} but the GPIO bus is not live yet — REBOOT REQUIRED before providers can open /dev/i2c-1"
         REBOOT_NEEDED=1
         return
     fi
