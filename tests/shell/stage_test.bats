@@ -256,9 +256,10 @@ YAML
 
     local bundle="anolis-stage-project-9.9.9-x86_64.tar.gz"
     # An absolute staging path would not exist on the target machine, so
-    # sha256sum -c would look for the wrong file after the USB handoff.
+    # sha256sum -c would look for the wrong file after the USB handoff. The
+    # two-space separator is what rules a path out: `<digest>  /abs/…/x.tar.gz`
+    # does not end in two spaces followed by the bare name.
     [[ "$(cat "${OUT}/${bundle}.sha256")" == *"  ${bundle}" ]]
-    [[ "$(cat "${OUT}/${bundle}.sha256")" != *"/"* ]]
 }
 
 @test "#268 --stage tells the operator how to verify" {

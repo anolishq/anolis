@@ -2008,7 +2008,7 @@ do_stage() {
     ( cd "${abs_out}" && sha256sum "${bundle}.tar.gz" > "${bundle}.tar.gz.sha256" )
 
     log_ok "stage: ${abs_out}/${bundle}.tar.gz"
-    log_info "Verify with:          cd ${abs_out} && sha256sum -c ${bundle}.tar.gz.sha256"
+    log_info "Verify with:          cd '${abs_out}' && sha256sum -c ${bundle}.tar.gz.sha256"
     log_info "Install offline with: sudo ./install.sh --local ${abs_out}/${bundle}.tar.gz"
 }
 

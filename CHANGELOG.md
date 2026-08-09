@@ -15,6 +15,25 @@ commit messages only.
 
 ### Fixed
 
+- **The staged bundle's `.sha256` sidecar could not be checked with
+  `sha256sum -c`** (#268). `--stage` piped the digest through `awk '{print $1}'`,
+  so the sidecar held a bare 64-character hash with no filename. The air-gap
+  operator's obvious command — the single most important thing they do after
+  carrying a tarball across a trust boundary on removable media — failed with
+  `no properly formatted checksum lines found`, which reads like a corrupt
+  download rather than a misformatted checksum file. The digest itself was
+  always correct.
+
+  The sidecar is now standard `sha256sum` output, generated from within the
+  staging directory so the recorded filename is bare; an absolute path would
+  name a file that does not exist on the target machine after the handoff. This
+  also aligns `--stage` with the release workflow's `SHA256SUMS`, which already
+  used the two-field convention. The bundle-internal `checksums.sha256` was
+  already correct and is unchanged.
+
+  `--stage` now also prints the verify command above the install hint, so the
+  order shown is the order the operator should follow.
+
 - **`install.sh` never enabled I2C on a Pi with a display** (#249). `phase_i2c`
   decided the bus was already up by globbing `/dev/i2c-*`, which matches the
   HDMI DDC adapters (`i2c-20`, `i2c-21` — `fef04500.i2c`) that the VC4 driver
