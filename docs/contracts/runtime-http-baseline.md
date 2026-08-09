@@ -44,7 +44,16 @@ Freeze implemented `/v0` HTTP behavior so OpenAPI, examples, and conformance tes
 2. `/v0/state` returns only devices with cached state entries.
 3. `/v0/state/{provider_id}/{device_id}` supports repeated `signal_id` filter params.
 4. `/v0/providers/health` always returns a `supervision` object.
-5. `/v0/events` currently emits:
+5. `/v0/providers/health` device entries always carry `type_version` and
+   `descriptor_tags`, passed through verbatim from the provider's inventory
+   descriptor — the runtime interprets no key in them. Both are present but
+   empty (`""` / `{}`) when the provider declared no identity, and for devices
+   the provider reports but the registry does not carry, since no descriptor
+   exists for those. Bounded on ingest: at most 32 tags, keys longer than 128
+   bytes dropped, and values truncated to 128 **bytes** on a UTF-8 character
+   boundary — cutting mid-codepoint would emit invalid UTF-8 and fail the whole
+   response.
+6. `/v0/events` currently emits:
    - `state_update`, `quality_change`, `device_availability`, `mode_change`, `parameter_change`, `bt_error`, `provider_health_change`.
 
 ## Validation Gates

@@ -342,3 +342,50 @@ TEST_F(HealthSnapshotCollectorTest, UnavailableBeatsFaultButCountsPopulated) {
     EXPECT_EQ(d->health, "UNAVAILABLE");   // availability wins the string
     EXPECT_EQ(d->fault_signal_count, 1u);  // ...but the count is still truthful
 }
+
+// --- bread#126: the runtime stops discarding the device descriptor ---
+
+TEST_F(HealthSnapshotCollectorTest, DescriptorIdentitySurvivesIntoTheSnapshot) {
+    // The runtime used to read exactly two tags (hw.bus_path, hw.i2c_address,
+    // for ownership validation) and drop everything else, so a provider that
+    // published its device's firmware revision had it discarded on arrival —
+    // and a bench result could not be attributed to a firmware build.
+    ON_CALL(*mock_provider, list_devices(_)).WillByDefault(Invoke([](std::vector<Device> &devices) {
+        Device dev;
+        dev.set_device_id("dev0");
+        devices.push_back(dev);
+        return true;
+    }));
+    ON_CALL(*mock_provider, describe_device(_, _))
+        .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+            auto *device = response.mutable_device();
+            device->set_device_id(id);
+            device->set_label(id);
+            device->set_type_version("1");
+            device->mutable_tags()->insert({"module_version", "1.0.0"});
+            device->mutable_tags()->insert({"crumbs_version", "1205"});
+            auto *sig = response.mutable_capabilities()->add_signals();
+            sig->set_signal_id("temp");
+            sig->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            sig->set_poll_hint_hz(1.0);
+            return true;
+        }));
+    registry->discover_provider("sim0", *mock_provider);
+    PollAndGetPollTime();  // also builds the state cache the collector needs
+
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0});
+
+    const health::DeviceHealthSnapshot *found = nullptr;
+    for (const auto &ps : snap) {
+        for (const auto &ds : ps.devices) {
+            if (ds.device_id == "dev0") {
+                found = &ds;
+            }
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->type_version, "1");
+    ASSERT_TRUE(found->descriptor_tags.contains("module_version"));
+    EXPECT_EQ(found->descriptor_tags.at("module_version"), "1.0.0");
+    EXPECT_EQ(found->descriptor_tags.at("crumbs_version"), "1205");
+}

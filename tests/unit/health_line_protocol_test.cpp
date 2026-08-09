@@ -259,3 +259,178 @@ TEST(HealthLineProtocolTest, OneLinePerDevicePlusProvider) {
         EXPECT_EQ(lines[i].rfind("anolis_device_health,", 0), 0u);
     }
 }
+
+// --- bread#126: device identity reaches the timeseries ---
+
+TEST(HealthLineProtocolTest, DeviceLineCarriesTypeVersion) {
+    // A stored result has to be attributable to what was actually installed.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dcmt0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.staleness_ms = 120;
+    ds.type_version = "1";
+    // Descriptor tags are deliberately NOT forwarded to line protocol: the keys
+    // are provider-chosen and unbounded.
+    ds.descriptor_tags["module_version"] = "1.0.0";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find("type_version=\"1\""), std::string::npos);
+    EXPECT_EQ(lines[1].find("module_version"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, DeviceLineOmitsEmptyTypeVersion) {
+    // A provider that declares no version must not add an empty field.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[1].find("type_version"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, TypeVersionFieldIsEscaped) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version = R"(1.0 "beta"\x)";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    // A raw quote would terminate the field and corrupt the line.
+    EXPECT_NE(lines[1].find(R"(type_version="1.0 \"beta\"\\x")"), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, ProviderFieldStringCannotSplitARow) {
+    // Line protocol is newline-delimited, so a raw newline in a
+    // provider-supplied value does not corrupt one row — it ends it and starts
+    // another. A value crafted to close this row and open a well-formed second
+    // one would inject a whole measurement with attacker-chosen tags.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version =
+        "1.0\nanolis_device_health,runtime_name=prod,provider_id=x,device_id=forged registered=true 1700000000000\nz";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    // One row in, one row out: nothing the provider wrote may split the line.
+    EXPECT_EQ(lines[1].find('\n'), std::string::npos) << lines[1];
+    EXPECT_EQ(lines[1].find('\r'), std::string::npos) << lines[1];
+    // ...and the forged measurement name survives only as inert escaped text.
+    EXPECT_NE(lines[1].find("device_id=dev0"), std::string::npos);
+    EXPECT_NE(lines[1].find("\\n"), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, ControlCharactersAreStrippedFromFields) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version = std::string("1.0") + '\x01' + '\x7f' + "b";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(type_version="1.0b")"), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, DeviceLineCarriesAllowlistedIdentityStrings) {
+    // Without a string category the runtime dropped every descriptive metric,
+    // so a provider reporting its firmware the way the SDK vocabulary suggests
+    // reached the HTTP surface and never the timeseries.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ReportedDeviceHealth rd;
+    rd.metrics["startup_firmware"] = "2.14";   // what ezo emits today
+    rd.metrics["firmware_version"] = "0.4.5";  // what bread#126 proposes
+    rd.metrics["last_error"] = "not allowlisted";
+    rd.metrics["startup_product_code"] = "";  // empty -> omitted, not written blank
+    // bread publishes module_version as a descriptor TAG, not a metric, and
+    // descriptor tags are by design never written to line protocol. Allowlisting
+    // it here would be dead code that reads as coverage.
+    rd.metrics["module_version"] = "1.0.0";
+    ds.reported = rd;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(startup_firmware="2.14")"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find(R"(firmware_version="0.4.5")"), std::string::npos) << lines[1];
+    EXPECT_EQ(lines[1].find("last_error"), std::string::npos);
+    EXPECT_EQ(lines[1].find("startup_product_code"), std::string::npos);
+    EXPECT_EQ(lines[1].find("module_version"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, OverlongIdentityStringIsTruncated) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ReportedDeviceHealth rd;
+    rd.metrics["startup_firmware"] = std::string(4096, 'v');
+    ds.reported = rd;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_LT(lines[1].size(), 512u) << "one bad device must not bloat the batch";
+    // ...and the field is still written, truncated — not silently dropped, which
+    // a size-only assertion would also accept.
+    const std::string expected = "startup_firmware=\"" + std::string(128, 'v') + "\"";
+    EXPECT_NE(lines[1].find(expected), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, ProviderTagValueCannotSplitARow) {
+    // device_id/provider_id are provider-supplied and reach escape_tag with no
+    // charset validation anywhere upstream. A newline there splits one row into
+    // two malformed ones, and the whole batch is rejected — silent, repeated
+    // telemetry loss, which is worse than a single corrupt row.
+    auto ps = base_provider();
+    ps.provider_id = "bread0\nanolis_device_health,runtime_name=prod";
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0\r\nforged";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    for (const auto &line : lines) {
+        EXPECT_EQ(line.find('\n'), std::string::npos) << line;
+        EXPECT_EQ(line.find('\r'), std::string::npos) << line;
+    }
+}
+
+TEST(HealthLineProtocolTest, TrailingBackslashInATagCannotEatTheSeparator) {
+    // An unescaped trailing backslash escapes the space that ends the tag set,
+    // folding the first field into the tag key and corrupting the row.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0\\";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(device_id=dev0\\ health=)"), std::string::npos) << lines[1];
+}

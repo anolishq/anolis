@@ -34,6 +34,32 @@ std::string derive_lifecycle_state(bool is_available,
     return "DOWN";
 }
 
+// Bounds on provider-declared descriptor identity. Generous next to what any
+// real provider emits (bread declares 13 short tags) and small enough that a
+// misbehaving one cannot inflate a health response or a telemetry batch.
+constexpr size_t kMaxIdentityLen = 128;
+constexpr size_t kMaxDescriptorTags = 32;
+
+// Truncate to kMaxIdentityLen *bytes*, never mid-codepoint.
+//
+// Cutting a UTF-8 sequence in half produces invalid UTF-8, and
+// nlohmann::json::dump() throws type_error.316 on that — which the HTTP layer
+// turns into a 500 for the whole /v0/providers/health response, every provider
+// and every device, not just the offending one. So a bound added to protect the
+// endpoint from a misbehaving provider would instead let a *well-behaved* one
+// take it down with an ordinary non-ASCII label longer than 128 bytes.
+std::string clamp_identity(const std::string &value) {
+    if (value.size() <= kMaxIdentityLen) {
+        return value;
+    }
+    size_t cut = kMaxIdentityLen;
+    // Walk back off any continuation bytes (0b10xxxxxx) to a boundary.
+    while (cut > 0 && (static_cast<unsigned char>(value[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    return value.substr(0, cut);
+}
+
 ReportedDeviceHealth reported_device_health(const adpp::DeviceHealth &dh) {
     ReportedDeviceHealth out;
     out.state = adpp::DeviceHealth::State_Name(dh.state());
@@ -177,6 +203,30 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                 }
             } else {
                 ds.health = "UNKNOWN";
+            }
+
+            // Descriptor identity (bread#126). Registry-derived, so it is
+            // present even when the provider is unavailable and its live health
+            // cannot be fetched — which is exactly when knowing what was
+            // installed matters most.
+            //
+            // Bounded on the way in. This is provider-supplied data crossing
+            // into a JSON response and a timeseries write, and the only limit
+            // upstream is the 1 MiB provider frame — a buggy provider could put
+            // a megabyte of identity on every device, re-serialized on every
+            // health request and every telemetry tick.
+            ds.type_version = clamp_identity(device.capabilities.proto.type_version());
+            for (const auto &[key, value] : device.capabilities.proto.tags()) {
+                if (ds.descriptor_tags.size() >= kMaxDescriptorTags) {
+                    break;
+                }
+                // Over-long keys are dropped rather than truncated: truncating
+                // would silently collide two distinct keys into one entry,
+                // last-write-wins, and the survivor would be unidentifiable.
+                if (key.size() > kMaxIdentityLen) {
+                    continue;
+                }
+                ds.descriptor_tags[key] = clamp_identity(value);
             }
 
             const auto reported_it = reported_by_id.find(device.device_id);

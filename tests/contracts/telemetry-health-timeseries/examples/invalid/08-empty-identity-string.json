@@ -1,0 +1,14 @@
+{
+  "measurement": "anolis_device_health",
+  "timestamp_ms": 1700000000000,
+  "tags": {
+    "runtime_name": "bioreactor",
+    "provider_id": "ezo0",
+    "device_id": "ph0"
+  },
+  "fields": {
+    "health": "OK",
+    "registered": true,
+    "startup_firmware": ""
+  }
+}

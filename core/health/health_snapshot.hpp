@@ -113,6 +113,16 @@ struct DeviceHealthSnapshot {
     // exists; they explain the FAULT/STALE health string.
     uint32_t stale_signal_count = 0;
     uint32_t fault_signal_count = 0;
+    // Device identity as the provider declared it in its inventory descriptor
+    // (bread#126). The runtime used to read exactly two tags — hw.bus_path and
+    // hw.i2c_address, for ownership validation — and drop the rest, so a
+    // provider that published its device's firmware revision had it discarded
+    // on arrival. A bench result then could not be attributed to a firmware
+    // build at all. Carried through verbatim: no key here means anything
+    // particular to the runtime, which must hold no provider-specific
+    // knowledge.
+    std::string type_version;
+    std::map<std::string, std::string> descriptor_tags;
     std::optional<ReportedDeviceHealth> reported;
 };
 

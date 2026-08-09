@@ -541,6 +541,13 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
     for (const auto &ps : snapshot) {
         nlohmann::json devices_json = nlohmann::json::array();
         for (const auto &ds : ps.devices) {
+            // Descriptor identity as the provider declared it (bread#126),
+            // passed through verbatim — the runtime interprets no key here.
+            nlohmann::json descriptor_tags = nlohmann::json::object();
+            for (const auto &[key, value] : ds.descriptor_tags) {
+                descriptor_tags[key] = value;
+            }
+
             nlohmann::json device_json = {{"device_id", ds.device_id},
                                           {"health", ds.health},
                                           {"last_poll_ms", ds.last_poll_ms},
@@ -548,6 +555,8 @@ void HttpServer::handle_get_providers_health(const httplib::Request &, httplib::
                                           {"registered", ds.registered},
                                           {"stale_signal_count", ds.stale_signal_count},
                                           {"fault_signal_count", ds.fault_signal_count},
+                                          {"type_version", ds.type_version},
+                                          {"descriptor_tags", descriptor_tags},
                                           {"reported", nullptr}};
             if (ds.reported) {
                 device_json["reported"] = reported_device_health_json(*ds.reported);

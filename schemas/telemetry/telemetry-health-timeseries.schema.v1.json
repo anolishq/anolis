@@ -192,6 +192,26 @@
               "type": "integer",
               "minimum": 0
             },
+            "type_version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Device type schema version as the provider declared it in its inventory descriptor (Device.type_version). Per the device-provider protocol this identifies the device TYPE CONTRACT, not necessarily the firmware build; a provider that wants its firmware attributable reports it through the allowlisted identity strings below. Omitted when the provider declares none."
+            },
+            "startup_firmware": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Firmware revision the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
+            },
+            "startup_product_code": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Product/model code the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
+            },
+            "firmware_version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Firmware revision the provider reports for the device. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
+            },
             "io_ok": {
               "type": "integer",
               "minimum": 0

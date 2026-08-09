@@ -48,12 +48,39 @@ so they cannot drift.
    quality or older than their effective `stale_after_ms`) vs `QUALITY_FAULT`;
    a non-zero `fault_signal_count` is why a freshly-polled device reads `FAULT`
    (#220).
-4. Optional typed metric fields, parsed from the provider's `metrics` map
+4. `type_version` (string, non-empty) is present when the provider declared one
+   in its inventory descriptor, and omitted entirely otherwise — never written
+   empty. Per the device-provider protocol this is the device **type schema**
+   version, which identifies the type contract and is *not* required to track
+   the firmware build; do not read it as a firmware revision. A provider that
+   wants its firmware attributable reports it as an allowlisted identity string
+   (below).
+5. Identity is carried as **fields, not tags**. As tags they would fork the
+   series on every firmware change, orphaning exactly the history they exist to
+   connect. The provider's wider descriptor tag map is deliberately *not*
+   written here — those keys are provider-chosen and unbounded, and line
+   protocol keys must not be. It is available in full on
+   `GET /v0/providers/health`.
+6. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,
      `watchdog_timeout_ms`, `watchdog_trip_count`, `sample_success_count`,
      `sample_failure_count`, `call_success_count`, `call_failure_count`
    - booleans: `watchdog_armed`, `watchdog_tripped`, `missing`, `excluded`
+   - identity strings: `startup_firmware`, `startup_product_code`,
+     `firmware_version` — non-empty, truncated to 128 bytes, omitted when
+     absent or empty. Note these three are not in the SDK's reserved-key
+     vocabulary yet, unlike the counters above; the first two are what
+     `anolis-provider-ezo` emits today and the third is the key
+     `anolis-provider-bread#126` proposes.
+7. Every provider-supplied string is escaped for line protocol — **tag values
+   as well as string fields**, since `provider_id`, `device_id` and `signal_id`
+   are provider-chosen and unvalidated. In field values `"` and `\` are
+   backslash-escaped; in tag values `,`, `=`, space and `\` are. In both, `\n`,
+   `\r` and `\t` are rewritten to their two-character forms and other C0/DEL
+   bytes are dropped: line protocol is newline-delimited, so a raw newline
+   would split one row into two malformed ones and cost the whole batch, and a
+   trailing backslash would consume the delimiter that follows it.
 
 ### Allowlist rule
 

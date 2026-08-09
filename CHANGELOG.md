@@ -13,7 +13,71 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **Device identity is no longer discarded on arrival** (anolishq/anolis-provider-bread#126).
+  The runtime read exactly two descriptor tags — `hw.bus_path` and
+  `hw.i2c_address`, for I2C ownership validation — and dropped the rest of
+  `Device.tags` along with `Device.type_version`. A provider that published its
+  device's firmware revision therefore had it thrown away at the registry
+  boundary, and a bench result could not be attributed to a firmware build at
+  all: on the reference machine the DCMT/RLHT revision existed only in a
+  provider log line, lost on journal rotation.
+
+  `GET /v0/providers/health` now carries `type_version` and the full
+  `descriptor_tags` map per device, and `anolis_device_health` carries
+  `type_version` as a field. Both are passed through verbatim — the runtime
+  interprets no key, so this holds no provider-specific knowledge and works for
+  any provider that declares identity. Registry-derived, so it is present even
+  when the provider is unavailable and its live health cannot be fetched, which
+  is when knowing what is installed matters most. Bounded on ingest at 32 tags
+  and 128 **bytes** per string — truncated on a UTF-8 character boundary, since
+  cutting mid-codepoint emits invalid UTF-8 and would fail the whole response —
+  because the only limit upstream is the 1 MiB provider frame.
+
+  Note what `type_version` is: the device **type schema** version the protocol
+  defines, which identifies the type contract and is not required to track the
+  firmware build. It is not a firmware revision, and should not be read as one.
+
+- **Allowlisted device identity strings reach the timeseries** (anolishq/anolis-provider-bread#126).
+  The health line-protocol writer had integer and boolean allowlists and **no
+  string category at all**, so a provider reporting its firmware through health
+  metrics had it reach the HTTP surface and never the timeseries.
+  `startup_firmware`, `startup_product_code` and `firmware_version` are now
+  written as fields (truncated to 128 bytes, omitted when empty). Note these
+  keys are not in the SDK's reserved vocabulary yet — the first two are what
+  ezo already emits, the third is what bread#126 proposes for itself.
+
+  Fields rather than tags throughout: as tags they would fork the series on
+  every firmware change, orphaning the history they exist to connect. The
+  descriptor tag map is still not written to line protocol, whose keys must
+  stay bounded.
+
+  **What this does and does not buy today.** ezo's firmware now lands in the
+  timeseries with no provider change. bread's does not: it publishes
+  `module_version` and `crumbs_version` as descriptor *tags*, so they reach
+  `GET /v0/providers/health` but not InfluxDB, and its `type_version` is the
+  module major alone — a constant `"1"`. Making a bread device attributable in
+  the timeseries needs a change in bread. And a device whose reported version
+  never moves when its behaviour does (feastorg/Slice_DCMT#13) stays
+  unattributable regardless.
+
 ### Fixed
+
+- **A provider-supplied string could forge an InfluxDB row.** `escape_field_string`
+  escaped only `"` and `\`, but line protocol is newline-delimited and a field
+  string has no encoding for a literal newline. A raw `\n` in a provider value
+  therefore did not corrupt one row — it ended it and started another, so a
+  value crafted to close the row and open a well-formed second one injected a
+  whole measurement with attacker-chosen `runtime_name` / `provider_id` /
+  `device_id` tags. The likely outcome was worse than the forgery: the
+  surrounding malformed lines get the entire batch rejected, silently and
+  repeatedly, losing all telemetry.
+
+  Newline, carriage return and tab are now rewritten to their two-character
+  escapes and any other C0/DEL byte is dropped. This affected every
+  provider-controlled string field, `anolis_signal`'s `value_string` included,
+  so it predates the health-identity fields that prompted the audit.
 
 - **The staged bundle's `.sha256` sidecar could not be checked with
   `sha256sum -c`** (#268). `--stage` piped the digest through `awk '{print $1}'`,

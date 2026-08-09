@@ -1,0 +1,17 @@
+{
+  "measurement": "anolis_device_health",
+  "timestamp_ms": 1700000000000,
+  "tags": {
+    "runtime_name": "bioreactor",
+    "provider_id": "bread0",
+    "device_id": "dcmt0"
+  },
+  "fields": {
+    "health": "OK",
+    "registered": true,
+    "staleness_ms": 120,
+    "stale_signal_count": 0,
+    "fault_signal_count": 0,
+    "type_version": "1"
+  }
+}

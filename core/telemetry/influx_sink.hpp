@@ -72,25 +72,86 @@ struct InfluxConfig {
  *
  * Tag keys/values and field keys need escaping of: comma, equals, space
  * Field string values need escaping of: double quote, backslash
+ *
+ * Tag values are provider-supplied too — `device_id`, `provider_id` and
+ * `signal_id` reach here verbatim, with no charset validation anywhere upstream.
+ * Line protocol is newline-delimited, so a `\n` in a device id splits one row
+ * into two malformed ones and the whole batch is rejected: silent, repeated
+ * telemetry loss. A trailing backslash is as bad, escaping the separator that
+ * ends the tag set. Control bytes are therefore neutralised the same way as in
+ * field strings, and a literal backslash is escaped so it cannot consume the
+ * delimiter that follows it.
  */
 inline std::string escape_tag(const std::string &s) {
     std::string result;
     result.reserve(s.size() + 10);  // Reserve extra for escapes
     for (char c : s) {
-        if (c == ',' || c == '=' || c == ' ') {
-            result += '\\';
+        switch (c) {
+            case ',':
+            case '=':
+            case ' ':
+            case '\\':
+                result += '\\';
+                result += c;
+                continue;
+            case '\n':
+                result += "\\n";
+                continue;
+            case '\r':
+                result += "\\r";
+                continue;
+            case '\t':
+                result += "\\t";
+                continue;
+            default:
+                break;
+        }
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F) {
+            continue;  // remaining C0/DEL bytes carry no meaning in an identifier
         }
         result += c;
     }
     return result;
 }
 
+/**
+ * @brief Escape a string for use as a line-protocol field value.
+ *
+ * Line protocol is newline-delimited, and a field string has no encoding for a
+ * literal newline. A raw `\n` in a provider-supplied value therefore does not
+ * corrupt one row — it splits the payload, and a value crafted to close the row
+ * and open another forges a complete second measurement with attacker-chosen
+ * tags. Control characters are neutralised rather than passed through: `\n`,
+ * `\r` and `\t` become their two-character escapes (backslash-n and friends are
+ * kept verbatim by line protocol, which only unescapes `"` and `\`), and any
+ * other C0/DEL byte is dropped.
+ */
 inline std::string escape_field_string(const std::string &s) {
     std::string result;
     result.reserve(s.size() + 10);
     for (char c : s) {
-        if (c == '"' || c == '\\') {
-            result += '\\';
+        switch (c) {
+            case '"':
+            case '\\':
+                result += '\\';
+                result += c;
+                continue;
+            case '\n':
+                result += "\\n";
+                continue;
+            case '\r':
+                result += "\\r";
+                continue;
+            case '\t':
+                result += "\\t";
+                continue;
+            default:
+                break;
+        }
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F) {
+            continue;  // remaining C0/DEL bytes carry no meaning here
         }
         result += c;
     }
