@@ -997,9 +997,12 @@ TEST_F(HttpHandlersProvidersHealthTest, MultibyteIdentityDoesNotBreakTheResponse
     // protect this endpoint from a misbehaving provider would then let a
     // well-behaved one with a long non-ASCII label take it down. 60 x U+3042 is
     // 180 bytes of perfectly valid UTF-8 that straddles byte 128.
+    // Written as explicit UTF-8 bytes, not \u3042: MSVC cannot represent a
+    // universal-character-name in a narrow literal under code page 1252 and
+    // warns C4566, which the strict Windows preset treats as an error.
     const std::string multibyte = [] {
         std::string out;
-        for (int i = 0; i < 60; ++i) out += "\u3042";
+        for (int i = 0; i < 60; ++i) out += "\xE3\x81\x82";  // U+3042, 3 bytes
         return out;
     }();
     EXPECT_CALL(*mock_provider, list_devices(_)).WillRepeatedly(Invoke([](std::vector<Device>& devices) {
@@ -1044,7 +1047,10 @@ TEST_F(HttpHandlersProvidersHealthTest, InvalidUtf8FromAProviderStillReturns200)
         .WillRepeatedly(Invoke([](const std::string& id, DescribeDeviceResponse& response) {
             auto* device = response.mutable_device();
             device->set_device_id(id);
-            device->set_type_version(std::string("\x81\xff"));
+            // Lone continuation byte + an invalid lead byte: not valid UTF-8 in
+            // any encoding, and not something a boundary-safe truncation can fix.
+            const char invalid[] = {static_cast<char>(0x81), static_cast<char>(0xFF)};
+            device->set_type_version(std::string(invalid, sizeof(invalid)));
             return true;
         }));
     registry->discover_provider("test_provider", *mock_provider);
