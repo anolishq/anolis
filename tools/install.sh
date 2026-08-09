@@ -2001,9 +2001,14 @@ do_stage() {
         && cp -r "$(basename "${staging}")" "${bundle}" \
         && tar -czf "${abs_out}/${bundle}.tar.gz" "${bundle}" \
         && rm -rf "${bundle}" )
-    sha256sum "${abs_out}/${bundle}.tar.gz" | awk '{print $1}' > "${abs_out}/${bundle}.tar.gz.sha256"
+    # Standard `sha256sum` output — digest plus a *bare* filename — so the
+    # air-gap operator's `sha256sum -c` works from whatever directory they
+    # carried both files into (#268). Staging an absolute path here would name a
+    # file that does not exist on the target machine.
+    ( cd "${abs_out}" && sha256sum "${bundle}.tar.gz" > "${bundle}.tar.gz.sha256" )
 
     log_ok "stage: ${abs_out}/${bundle}.tar.gz"
+    log_info "Verify with:          cd ${abs_out} && sha256sum -c ${bundle}.tar.gz.sha256"
     log_info "Install offline with: sudo ./install.sh --local ${abs_out}/${bundle}.tar.gz"
 }
 
