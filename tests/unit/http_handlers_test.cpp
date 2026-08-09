@@ -990,6 +990,70 @@ TEST_F(HttpHandlersProvidersHealthTest, DescriptorIdentityIsBounded) {
     }
 }
 
+TEST_F(HttpHandlersProvidersHealthTest, MultibyteIdentityDoesNotBreakTheResponse) {
+    // The 128-byte bound must not cut a UTF-8 sequence in half. Invalid UTF-8
+    // makes nlohmann::json::dump() throw, which the server turns into a 500 for
+    // the WHOLE response — every provider, every device. A bound added to
+    // protect this endpoint from a misbehaving provider would then let a
+    // well-behaved one with a long non-ASCII label take it down. 60 x U+3042 is
+    // 180 bytes of perfectly valid UTF-8 that straddles byte 128.
+    const std::string multibyte = [] {
+        std::string out;
+        for (int i = 0; i < 60; ++i) out += "\u3042";
+        return out;
+    }();
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillRepeatedly(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("utf8dev");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device(_, _))
+        .WillRepeatedly(Invoke([&multibyte](const std::string& id, DescribeDeviceResponse& response) {
+            auto* device = response.mutable_device();
+            device->set_device_id(id);
+            device->set_type_version(multibyte);
+            device->mutable_tags()->insert({"label", multibyte});
+            return true;
+        }));
+    registry->discover_provider("test_provider", *mock_provider);
+
+    auto res = client->Get("/v0/providers/health");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status) << res->body;
+    auto json = nlohmann::json::parse(res->body);
+    const auto& device = json["providers"][0]["devices"][0];
+    // Truncated on a character boundary: a whole number of 3-byte codepoints.
+    const auto tv = device["type_version"].get<std::string>();
+    EXPECT_LE(tv.size(), 128u);
+    EXPECT_EQ(tv.size() % 3, 0u) << "cut mid-codepoint";
+    EXPECT_EQ(device["descriptor_tags"]["label"].get<std::string>().size() % 3, 0u);
+}
+
+TEST_F(HttpHandlersProvidersHealthTest, InvalidUtf8FromAProviderStillReturns200) {
+    // Belt and braces for everything else a provider can put in this response:
+    // a lone continuation byte is not something clamp_identity can fix, and it
+    // must still not blank the operator's whole health view.
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillRepeatedly(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("baddev");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device(_, _))
+        .WillRepeatedly(Invoke([](const std::string& id, DescribeDeviceResponse& response) {
+            auto* device = response.mutable_device();
+            device->set_device_id(id);
+            device->set_type_version(std::string("\x81\xff"));
+            return true;
+        }));
+    registry->discover_provider("test_provider", *mock_provider);
+
+    auto res = client->Get("/v0/providers/health");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status) << res->body;
+}
+
 TEST_F(HttpHandlersProvidersHealthTest, ReportedHealthSurfacesUnregisteredFailedDevice) {
     // The provider reports a device the registry does not carry (an expected
     // device that failed its startup probe): it must appear in the devices

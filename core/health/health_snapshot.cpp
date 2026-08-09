@@ -40,8 +40,24 @@ std::string derive_lifecycle_state(bool is_available,
 constexpr size_t kMaxIdentityLen = 128;
 constexpr size_t kMaxDescriptorTags = 32;
 
+// Truncate to kMaxIdentityLen *bytes*, never mid-codepoint.
+//
+// Cutting a UTF-8 sequence in half produces invalid UTF-8, and
+// nlohmann::json::dump() throws type_error.316 on that — which the HTTP layer
+// turns into a 500 for the whole /v0/providers/health response, every provider
+// and every device, not just the offending one. So a bound added to protect the
+// endpoint from a misbehaving provider would instead let a *well-behaved* one
+// take it down with an ordinary non-ASCII label longer than 128 bytes.
 std::string clamp_identity(const std::string &value) {
-    return value.size() <= kMaxIdentityLen ? value : value.substr(0, kMaxIdentityLen);
+    if (value.size() <= kMaxIdentityLen) {
+        return value;
+    }
+    size_t cut = kMaxIdentityLen;
+    // Walk back off any continuation bytes (0b10xxxxxx) to a boundary.
+    while (cut > 0 && (static_cast<unsigned char>(value[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    return value.substr(0, cut);
 }
 
 ReportedDeviceHealth reported_device_health(const adpp::DeviceHealth &dh) {
@@ -204,7 +220,13 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                 if (ds.descriptor_tags.size() >= kMaxDescriptorTags) {
                     break;
                 }
-                ds.descriptor_tags[clamp_identity(key)] = clamp_identity(value);
+                // Over-long keys are dropped rather than truncated: truncating
+                // would silently collide two distinct keys into one entry,
+                // last-write-wins, and the survivor would be unidentifiable.
+                if (key.size() > kMaxIdentityLen) {
+                    continue;
+                }
+                ds.descriptor_tags[key] = clamp_identity(value);
             }
 
             const auto reported_it = reported_by_id.find(device.device_id);

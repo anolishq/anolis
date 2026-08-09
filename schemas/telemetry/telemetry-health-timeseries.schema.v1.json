@@ -200,22 +200,22 @@
             "startup_firmware": {
               "type": "string",
               "minLength": 1,
-              "description": "Firmware revision the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 characters."
+              "description": "Firmware revision the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
             },
             "startup_product_code": {
               "type": "string",
               "minLength": 1,
-              "description": "Product/model code the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 characters."
+              "description": "Product/model code the provider read from the device at startup. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
             },
             "module_version": {
               "type": "string",
               "minLength": 1,
-              "description": "Device module contract version as the provider reports it. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 characters."
+              "description": "Device module contract version as the provider reports it. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
             },
             "crumbs_version": {
               "type": "string",
               "minLength": 1,
-              "description": "Bus/session protocol version as the provider reports it. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 characters."
+              "description": "Bus/session protocol version as the provider reports it. Allowlisted identity string parsed from the provider metrics map; omitted when absent or empty. Truncated to 128 bytes."
             },
             "io_ok": {
               "type": "integer",

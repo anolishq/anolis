@@ -1439,18 +1439,24 @@ components:
             through its health metrics or a descriptor tag. Empty string when
             the provider declared none, and for devices the provider reports but
             the registry does not carry (no descriptor exists for those).
-            Truncated to 128 characters.
+            Truncated to 128 bytes, on a UTF-8 character boundary.
           type: string
         descriptor_tags:
           description: >-
             Provider-declared descriptor tags, passed through verbatim — the
             runtime interprets no key here. Carries whatever identity the
             provider chose to publish (e.g. bread emits module_version and
-            crumbs_version). Empty for devices the registry does not carry. At
-            most 32 entries; keys and values truncated to 128 characters.
+            crumbs_version). Empty for devices the registry does not carry.
+            Bounded on ingest: at most 32 entries, keys longer than 128 bytes
+            dropped, values truncated to 128 bytes on a UTF-8 character
+            boundary.
           type: object
+          maxProperties: 32
+          propertyNames:
+            maxLength: 128
           additionalProperties:
             type: string
+            maxLength: 128
         reported:
           oneOf:
             - $ref: '#/components/schemas/ReportedDeviceHealth'

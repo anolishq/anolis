@@ -311,7 +311,7 @@ TEST(HealthLineProtocolTest, TypeVersionFieldIsEscaped) {
     EXPECT_NE(lines[1].find(R"(type_version="1.0 \"beta\"\\x")"), std::string::npos) << lines[1];
 }
 
-TEST(HealthLineProtocolTest, ProviderStringCannotForgeARow) {
+TEST(HealthLineProtocolTest, ProviderFieldStringCannotSplitARow) {
     // Line protocol is newline-delimited, so a raw newline in a
     // provider-supplied value does not corrupt one row — it ends it and starts
     // another. A value crafted to close this row and open a well-formed second
@@ -359,19 +359,24 @@ TEST(HealthLineProtocolTest, DeviceLineCarriesAllowlistedIdentityStrings) {
     ds.health = "OK";
     ds.last_poll_ms = 1699999999000;
     ReportedDeviceHealth rd;
-    rd.metrics["startup_firmware"] = "2.14";
-    rd.metrics["module_version"] = "1.0.0";
+    rd.metrics["startup_firmware"] = "2.14";   // what ezo emits today
+    rd.metrics["firmware_version"] = "0.4.5";  // what bread#126 proposes
     rd.metrics["last_error"] = "not allowlisted";
     rd.metrics["startup_product_code"] = "";  // empty -> omitted, not written blank
+    // bread publishes module_version as a descriptor TAG, not a metric, and
+    // descriptor tags are by design never written to line protocol. Allowlisting
+    // it here would be dead code that reads as coverage.
+    rd.metrics["module_version"] = "1.0.0";
     ds.reported = rd;
     ps.devices.push_back(ds);
 
     auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_NE(lines[1].find(R"(startup_firmware="2.14")"), std::string::npos) << lines[1];
-    EXPECT_NE(lines[1].find(R"(module_version="1.0.0")"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find(R"(firmware_version="0.4.5")"), std::string::npos) << lines[1];
     EXPECT_EQ(lines[1].find("last_error"), std::string::npos);
     EXPECT_EQ(lines[1].find("startup_product_code"), std::string::npos);
+    EXPECT_EQ(lines[1].find("module_version"), std::string::npos);
 }
 
 TEST(HealthLineProtocolTest, OverlongIdentityStringIsTruncated) {
@@ -388,4 +393,44 @@ TEST(HealthLineProtocolTest, OverlongIdentityStringIsTruncated) {
     auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_LT(lines[1].size(), 512u) << "one bad device must not bloat the batch";
+    // ...and the field is still written, truncated — not silently dropped, which
+    // a size-only assertion would also accept.
+    const std::string expected = "startup_firmware=\"" + std::string(128, 'v') + "\"";
+    EXPECT_NE(lines[1].find(expected), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, ProviderTagValueCannotSplitARow) {
+    // device_id/provider_id are provider-supplied and reach escape_tag with no
+    // charset validation anywhere upstream. A newline there splits one row into
+    // two malformed ones, and the whole batch is rejected — silent, repeated
+    // telemetry loss, which is worse than a single corrupt row.
+    auto ps = base_provider();
+    ps.provider_id = "bread0\nanolis_device_health,runtime_name=prod";
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0\r\nforged";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    for (const auto &line : lines) {
+        EXPECT_EQ(line.find('\n'), std::string::npos) << line;
+        EXPECT_EQ(line.find('\r'), std::string::npos) << line;
+    }
+}
+
+TEST(HealthLineProtocolTest, TrailingBackslashInATagCannotEatTheSeparator) {
+    // An unescaped trailing backslash escapes the space that ends the tag set,
+    // folding the first field into the tag key and corrupting the row.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0\\";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(device_id=dev0\\ health=)"), std::string::npos) << lines[1];
 }
