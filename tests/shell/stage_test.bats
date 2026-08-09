@@ -232,3 +232,39 @@ YAML
     [[ "$output" == *"qux"* ]]
     rm -rf "${PROJECT_DIR}"
 }
+
+# --- #268: the sidecar must be consumable by sha256sum -c ---------------------
+
+@test "#268 the .sha256 sidecar verifies with sha256sum -c" {
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+
+    local bundle="anolis-stage-project-9.9.9-x86_64.tar.gz"
+    [ -f "${OUT}/${bundle}.sha256" ]
+
+    # The air-gap operator's first command, run from the directory they carried
+    # both files into. A bare digest fails here with "no properly formatted
+    # checksum lines found".
+    ( cd "${OUT}" && sha256sum -c "${bundle}.sha256" >/dev/null )
+}
+
+@test "#268 the sidecar names the bundle relatively, not by staging path" {
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+
+    local bundle="anolis-stage-project-9.9.9-x86_64.tar.gz"
+    # An absolute staging path would not exist on the target machine, so
+    # sha256sum -c would look for the wrong file after the USB handoff. The
+    # two-space separator is what rules a path out: `<digest>  /abs/…/x.tar.gz`
+    # does not end in two spaces followed by the bare name.
+    [[ "$(cat "${OUT}/${bundle}.sha256")" == *"  ${bundle}" ]]
+}
+
+@test "#268 --stage tells the operator how to verify" {
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sha256sum -c"* ]]
+}
