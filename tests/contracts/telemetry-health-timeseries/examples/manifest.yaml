@@ -19,6 +19,9 @@ examples:
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/06-device-fault-quality.json
     expect: valid
     note: device FAULT from a cached fault-quality signal, with per-signal counts (#220)
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/07-device-carries-type-version.json
+    expect: valid
+    note: device row carries the provider-declared type_version so a stored result is attributable to a firmware revision
 
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
     expect: invalid
@@ -38,3 +41,6 @@ examples:
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/06-empty-runtime-name.json
     expect: invalid
     note: required tag values must be non-empty
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/07-empty-type-version.json
+    expect: invalid
+    note: type_version is omitted rather than written empty, so an empty string is a producer bug

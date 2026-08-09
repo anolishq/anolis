@@ -179,6 +179,15 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                 ds.health = "UNKNOWN";
             }
 
+            // Descriptor identity (bread#126). Registry-derived, so it is
+            // present even when the provider is unavailable and its live health
+            // cannot be fetched — which is exactly when knowing what was
+            // installed matters most.
+            ds.type_version = device.capabilities.proto.type_version();
+            for (const auto &[key, value] : device.capabilities.proto.tags()) {
+                ds.descriptor_tags[key] = value;
+            }
+
             const auto reported_it = reported_by_id.find(device.device_id);
             if (reported_it != reported_by_id.end()) {
                 ds.reported = reported_device_health(*reported_it->second);

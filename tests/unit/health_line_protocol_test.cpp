@@ -259,3 +259,54 @@ TEST(HealthLineProtocolTest, OneLinePerDevicePlusProvider) {
         EXPECT_EQ(lines[i].rfind("anolis_device_health,", 0), 0u);
     }
 }
+
+// --- bread#126: device identity reaches the timeseries ---
+
+TEST(HealthLineProtocolTest, DeviceLineCarriesTypeVersion) {
+    // A stored result has to be attributable to what was actually installed.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dcmt0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.staleness_ms = 120;
+    ds.type_version = "1";
+    // Descriptor tags are deliberately NOT forwarded to line protocol: the keys
+    // are provider-chosen and unbounded.
+    ds.descriptor_tags["module_version"] = "1.0.0";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find("type_version=\"1\""), std::string::npos);
+    EXPECT_EQ(lines[1].find("module_version"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, DeviceLineOmitsEmptyTypeVersion) {
+    // A provider that declares no version must not add an empty field.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[1].find("type_version"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, TypeVersionFieldIsEscaped) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version = R"(1.0 "beta"\x)";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    // A raw quote would terminate the field and corrupt the line.
+    EXPECT_NE(lines[1].find(R"(type_version="1.0 \"beta\"\\x")"), std::string::npos) << lines[1];
+}

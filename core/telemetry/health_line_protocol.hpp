@@ -183,6 +183,17 @@ inline std::vector<std::string> format_health_lines(const health::ProviderHealth
             line << ",fault_signal_count=" << ds.fault_signal_count << "i";
         }
 
+        // Device identity, so a stored result can be attributed to what was
+        // actually installed (bread#126). A field rather than a tag: it is
+        // per-device metadata, and making it a tag would fork the series on
+        // every firmware change, orphaning the history it exists to connect.
+        // Only the first-class protocol field is emitted — forwarding the
+        // provider's whole descriptor tag map here would put unbounded,
+        // provider-chosen keys into line protocol.
+        if (!ds.type_version.empty()) {
+            line << ",type_version=\"" << escape_field_string(ds.type_version) << "\"";
+        }
+
         if (ds.reported) {
             detail::append_allowlisted_metrics(
                 line, ds.reported->metrics, health_keys::device_int_keys.data(), health_keys::device_int_keys.size(),

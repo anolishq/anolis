@@ -13,6 +13,35 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **Device identity is no longer discarded on arrival** (anolishq/anolis-provider-bread#126).
+  The runtime read exactly two descriptor tags — `hw.bus_path` and
+  `hw.i2c_address`, for I2C ownership validation — and dropped the rest of
+  `Device.tags` along with `Device.type_version`. A provider that published its
+  device's firmware revision therefore had it thrown away at the registry
+  boundary, and a bench result could not be attributed to a firmware build at
+  all: on the reference machine the DCMT/RLHT revision existed only in a
+  provider log line, lost on journal rotation.
+
+  `GET /v0/providers/health` now carries `type_version` and the full
+  `descriptor_tags` map per device, and `anolis_device_health` carries
+  `type_version` as a field. Both are passed through verbatim — the runtime
+  interprets no key, so this holds no provider-specific knowledge and works for
+  any provider that declares identity. Registry-derived, so it is present even
+  when the provider is unavailable and its live health cannot be fetched, which
+  is when knowing what is installed matters most.
+
+  `type_version` is a field rather than a tag deliberately: as a tag it would
+  fork the timeseries on every firmware change, orphaning the history it exists
+  to connect. The wider tag map is not written to line protocol, whose keys must
+  stay bounded.
+
+  This is the runtime half only. A provider still has to declare something
+  meaningful — and note that a device reporting a version that never changes
+  when its behaviour does (feastorg/Slice_DCMT#13) stays unattributable no
+  matter what this surfaces.
+
 ### Fixed
 
 - **The staged bundle's `.sha256` sidecar could not be checked with

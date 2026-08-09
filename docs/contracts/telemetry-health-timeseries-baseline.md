@@ -48,7 +48,16 @@ so they cannot drift.
    quality or older than their effective `stale_after_ms`) vs `QUALITY_FAULT`;
    a non-zero `fault_signal_count` is why a freshly-polled device reads `FAULT`
    (#220).
-4. Optional typed metric fields, parsed from the provider's `metrics` map
+4. `type_version` (string, non-empty) is present when the provider declared one
+   in its inventory descriptor, and omitted entirely otherwise — never written
+   empty. It carries the device's type/firmware revision so a stored result can
+   be attributed to the build that produced it (bread#126). It is a **field,
+   not a tag**: as a tag it would fork the series on every firmware change,
+   orphaning exactly the history it exists to connect. Only this first-class
+   protocol field is written; the provider's wider descriptor tag map is not,
+   because those keys are provider-chosen and unbounded (it is available in
+   full on `GET /v0/providers/health`).
+5. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,
      `watchdog_timeout_ms`, `watchdog_trip_count`, `sample_success_count`,

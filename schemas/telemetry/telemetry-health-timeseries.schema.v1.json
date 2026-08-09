@@ -192,6 +192,11 @@
               "type": "integer",
               "minimum": 0
             },
+            "type_version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Device type/firmware version as the provider declared it in its inventory descriptor (Device.type_version). Omitted when the provider declares none. Carried so a stored result can be attributed to the revision that produced it."
+            },
             "io_ok": {
               "type": "integer",
               "minimum": 0
