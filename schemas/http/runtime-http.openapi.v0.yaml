@@ -1401,7 +1401,7 @@ components:
     ProviderDeviceHealth:
       type: object
       additionalProperties: false
-      required: [device_id, health, last_poll_ms, staleness_ms, registered, stale_signal_count, fault_signal_count, reported]
+      required: [device_id, health, last_poll_ms, staleness_ms, registered, stale_signal_count, fault_signal_count, type_version, descriptor_tags, reported]
       properties:
         device_id:
           type: string
@@ -1430,6 +1430,27 @@ components:
             device health to FAULT (#220).
           type: integer
           minimum: 0
+        type_version:
+          description: >-
+            Device type schema version as the provider declared it in its
+            inventory descriptor. Per the device-provider protocol this
+            identifies the device *type contract*, not necessarily the firmware
+            build — a provider that wants its firmware attributable reports that
+            through its health metrics or a descriptor tag. Empty string when
+            the provider declared none, and for devices the provider reports but
+            the registry does not carry (no descriptor exists for those).
+            Truncated to 128 characters.
+          type: string
+        descriptor_tags:
+          description: >-
+            Provider-declared descriptor tags, passed through verbatim — the
+            runtime interprets no key here. Carries whatever identity the
+            provider chose to publish (e.g. bread emits module_version and
+            crumbs_version). Empty for devices the registry does not carry. At
+            most 32 entries; keys and values truncated to 128 characters.
+          type: object
+          additionalProperties:
+            type: string
         reported:
           oneOf:
             - $ref: '#/components/schemas/ReportedDeviceHealth'

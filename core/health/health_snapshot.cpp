@@ -34,6 +34,16 @@ std::string derive_lifecycle_state(bool is_available,
     return "DOWN";
 }
 
+// Bounds on provider-declared descriptor identity. Generous next to what any
+// real provider emits (bread declares 13 short tags) and small enough that a
+// misbehaving one cannot inflate a health response or a telemetry batch.
+constexpr size_t kMaxIdentityLen = 128;
+constexpr size_t kMaxDescriptorTags = 32;
+
+std::string clamp_identity(const std::string &value) {
+    return value.size() <= kMaxIdentityLen ? value : value.substr(0, kMaxIdentityLen);
+}
+
 ReportedDeviceHealth reported_device_health(const adpp::DeviceHealth &dh) {
     ReportedDeviceHealth out;
     out.state = adpp::DeviceHealth::State_Name(dh.state());
@@ -183,9 +193,18 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
             // present even when the provider is unavailable and its live health
             // cannot be fetched — which is exactly when knowing what was
             // installed matters most.
-            ds.type_version = device.capabilities.proto.type_version();
+            //
+            // Bounded on the way in. This is provider-supplied data crossing
+            // into a JSON response and a timeseries write, and the only limit
+            // upstream is the 1 MiB provider frame — a buggy provider could put
+            // a megabyte of identity on every device, re-serialized on every
+            // health request and every telemetry tick.
+            ds.type_version = clamp_identity(device.capabilities.proto.type_version());
             for (const auto &[key, value] : device.capabilities.proto.tags()) {
-                ds.descriptor_tags[key] = value;
+                if (ds.descriptor_tags.size() >= kMaxDescriptorTags) {
+                    break;
+                }
+                ds.descriptor_tags[clamp_identity(key)] = clamp_identity(value);
             }
 
             const auto reported_it = reported_by_id.find(device.device_id);

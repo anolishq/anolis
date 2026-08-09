@@ -30,19 +30,47 @@ commit messages only.
   interprets no key, so this holds no provider-specific knowledge and works for
   any provider that declares identity. Registry-derived, so it is present even
   when the provider is unavailable and its live health cannot be fetched, which
-  is when knowing what is installed matters most.
+  is when knowing what is installed matters most. Bounded on ingest at 32 tags
+  and 128 characters per string, since the only limit upstream is the 1 MiB
+  provider frame.
 
-  `type_version` is a field rather than a tag deliberately: as a tag it would
-  fork the timeseries on every firmware change, orphaning the history it exists
-  to connect. The wider tag map is not written to line protocol, whose keys must
+  Note what `type_version` is: the device **type schema** version the protocol
+  defines, which identifies the type contract and is not required to track the
+  firmware build. It is not a firmware revision, and should not be read as one.
+
+- **Allowlisted device identity strings reach the timeseries** (anolishq/anolis-provider-bread#126).
+  The health line-protocol writer had integer and boolean allowlists and **no
+  string category at all**, so a provider reporting its firmware through health
+  metrics — the way the SDK vocabulary suggests, and the way ezo already
+  reports `startup_firmware` — had it reach the HTTP surface and never the
+  timeseries. `startup_firmware`, `startup_product_code`, `module_version` and
+  `crumbs_version` are now written as fields (truncated to 128 characters,
+  omitted when empty).
+
+  Fields rather than tags throughout: as tags they would fork the series on
+  every firmware change, orphaning the history they exist to connect. The
+  descriptor tag map is still not written to line protocol, whose keys must
   stay bounded.
 
-  This is the runtime half only. A provider still has to declare something
-  meaningful — and note that a device reporting a version that never changes
-  when its behaviour does (feastorg/Slice_DCMT#13) stays unattributable no
-  matter what this surfaces.
+  A device whose reported version never moves when its behaviour does
+  (feastorg/Slice_DCMT#13) stays unattributable regardless of any of this.
 
 ### Fixed
+
+- **A provider-supplied string could forge an InfluxDB row.** `escape_field_string`
+  escaped only `"` and `\`, but line protocol is newline-delimited and a field
+  string has no encoding for a literal newline. A raw `\n` in a provider value
+  therefore did not corrupt one row — it ended it and started another, so a
+  value crafted to close the row and open a well-formed second one injected a
+  whole measurement with attacker-chosen `runtime_name` / `provider_id` /
+  `device_id` tags. The likely outcome was worse than the forgery: the
+  surrounding malformed lines get the entire batch rejected, silently and
+  repeatedly, losing all telemetry.
+
+  Newline, carriage return and tab are now rewritten to their two-character
+  escapes and any other C0/DEL byte is dropped. This affected every
+  provider-controlled string field, `anolis_signal`'s `value_string` included,
+  so it predates the health-identity fields that prompted the audit.
 
 - **The staged bundle's `.sha256` sidecar could not be checked with
   `sha256sum -c`** (#268). `--stage` piped the digest through `awk '{print $1}'`,

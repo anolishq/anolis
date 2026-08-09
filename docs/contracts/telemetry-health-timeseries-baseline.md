@@ -50,19 +50,31 @@ so they cannot drift.
    (#220).
 4. `type_version` (string, non-empty) is present when the provider declared one
    in its inventory descriptor, and omitted entirely otherwise — never written
-   empty. It carries the device's type/firmware revision so a stored result can
-   be attributed to the build that produced it (bread#126). It is a **field,
-   not a tag**: as a tag it would fork the series on every firmware change,
-   orphaning exactly the history it exists to connect. Only this first-class
-   protocol field is written; the provider's wider descriptor tag map is not,
-   because those keys are provider-chosen and unbounded (it is available in
-   full on `GET /v0/providers/health`).
-5. Optional typed metric fields, parsed from the provider's `metrics` map
+   empty. Per the device-provider protocol this is the device **type schema**
+   version, which identifies the type contract and is *not* required to track
+   the firmware build; do not read it as a firmware revision. A provider that
+   wants its firmware attributable reports it as an allowlisted identity string
+   (below).
+5. Identity is carried as **fields, not tags**. As tags they would fork the
+   series on every firmware change, orphaning exactly the history they exist to
+   connect. The provider's wider descriptor tag map is deliberately *not*
+   written here — those keys are provider-chosen and unbounded, and line
+   protocol keys must not be. It is available in full on
+   `GET /v0/providers/health`.
+6. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,
      `watchdog_timeout_ms`, `watchdog_trip_count`, `sample_success_count`,
      `sample_failure_count`, `call_success_count`, `call_failure_count`
    - booleans: `watchdog_armed`, `watchdog_tripped`, `missing`, `excluded`
+   - identity strings: `startup_firmware`, `startup_product_code`,
+     `module_version`, `crumbs_version` — non-empty, truncated to 128
+     characters, omitted when absent or empty
+7. Every string field value is escaped for line protocol. `"` and `\` are
+   backslash-escaped; `\n`, `\r` and `\t` are rewritten to their two-character
+   forms and other C0/DEL bytes dropped, because line protocol is
+   newline-delimited and a raw newline in a provider-supplied value would forge
+   an additional row rather than corrupt one.
 
 ### Allowlist rule
 

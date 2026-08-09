@@ -95,6 +95,24 @@ inline constexpr std::array<const char *, 4> device_bool_keys = {
     "excluded",
 };
 
+// Device-level identity strings. Distinct from the counters above: these are
+// low-churn descriptive values, and without them a provider reporting its
+// firmware revision the way the SDK vocabulary suggests has it dropped on the
+// floor — the runtime had no string category at all, so ezo's startup_firmware
+// reached the HTTP surface and never the timeseries it needs to be attributable
+// from (anolishq/anolis-provider-bread#126).
+inline constexpr std::array<const char *, 4> device_string_keys = {
+    "startup_firmware",
+    "startup_product_code",
+    "module_version",
+    "crumbs_version",
+};
+
+// Cap on any provider-supplied string written to line protocol. Values this
+// long are a provider bug; truncating keeps one bad device from bloating every
+// batch.
+inline constexpr size_t kMaxStringFieldLen = 128;
+
 // Provider-level integer counters (SDK startup diagnostics).
 inline constexpr std::array<const char *, 3> provider_int_keys = {
     "startup_configured_devices",
@@ -124,6 +142,18 @@ inline void append_allowlisted_metrics(std::ostringstream &line, const std::map<
         if (parse_metric_bool(it->second, value)) {
             line << "," << bool_keys[i] << "=" << (value ? "true" : "false");
         }
+    }
+}
+
+inline void append_allowlisted_strings(std::ostringstream &line, const std::map<std::string, std::string> &metrics,
+                                       const char *const *string_keys, size_t string_key_count) {
+    for (size_t i = 0; i < string_key_count; ++i) {
+        auto it = metrics.find(string_keys[i]);
+        if (it == metrics.end() || it->second.empty()) continue;
+        const std::string value = it->second.size() <= health_keys::kMaxStringFieldLen
+                                      ? it->second
+                                      : it->second.substr(0, health_keys::kMaxStringFieldLen);
+        line << "," << string_keys[i] << "=\"" << escape_field_string(value) << "\"";
     }
 }
 
@@ -184,12 +214,16 @@ inline std::vector<std::string> format_health_lines(const health::ProviderHealth
         }
 
         // Device identity, so a stored result can be attributed to what was
-        // actually installed (bread#126). A field rather than a tag: it is
-        // per-device metadata, and making it a tag would fork the series on
-        // every firmware change, orphaning the history it exists to connect.
-        // Only the first-class protocol field is emitted — forwarding the
-        // provider's whole descriptor tag map here would put unbounded,
-        // provider-chosen keys into line protocol.
+        // actually installed (bread#126). Fields rather than tags: making
+        // identity a tag would fork the series on every firmware change,
+        // orphaning the history it exists to connect.
+        //
+        // type_version is the device *type schema* version the provider
+        // declares (protocol types.proto), not necessarily its firmware
+        // revision — a provider that wants its firmware attributable reports it
+        // through the allowlisted identity metrics below. The descriptor tag map
+        // is deliberately not written here: those keys are provider-chosen and
+        // unbounded, and line protocol keys must not be.
         if (!ds.type_version.empty()) {
             line << ",type_version=\"" << escape_field_string(ds.type_version) << "\"";
         }
@@ -198,6 +232,8 @@ inline std::vector<std::string> format_health_lines(const health::ProviderHealth
             detail::append_allowlisted_metrics(
                 line, ds.reported->metrics, health_keys::device_int_keys.data(), health_keys::device_int_keys.size(),
                 health_keys::device_bool_keys.data(), health_keys::device_bool_keys.size());
+            detail::append_allowlisted_strings(line, ds.reported->metrics, health_keys::device_string_keys.data(),
+                                               health_keys::device_string_keys.size());
         }
 
         line << " " << timestamp_ms;

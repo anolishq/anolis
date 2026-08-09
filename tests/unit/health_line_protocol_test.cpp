@@ -310,3 +310,82 @@ TEST(HealthLineProtocolTest, TypeVersionFieldIsEscaped) {
     // A raw quote would terminate the field and corrupt the line.
     EXPECT_NE(lines[1].find(R"(type_version="1.0 \"beta\"\\x")"), std::string::npos) << lines[1];
 }
+
+TEST(HealthLineProtocolTest, ProviderStringCannotForgeARow) {
+    // Line protocol is newline-delimited, so a raw newline in a
+    // provider-supplied value does not corrupt one row — it ends it and starts
+    // another. A value crafted to close this row and open a well-formed second
+    // one would inject a whole measurement with attacker-chosen tags.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version =
+        "1.0\nanolis_device_health,runtime_name=prod,provider_id=x,device_id=forged registered=true 1700000000000\nz";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    // One row in, one row out: nothing the provider wrote may split the line.
+    EXPECT_EQ(lines[1].find('\n'), std::string::npos) << lines[1];
+    EXPECT_EQ(lines[1].find('\r'), std::string::npos) << lines[1];
+    // ...and the forged measurement name survives only as inert escaped text.
+    EXPECT_NE(lines[1].find("device_id=dev0"), std::string::npos);
+    EXPECT_NE(lines[1].find("\\n"), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, ControlCharactersAreStrippedFromFields) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "dev0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ds.type_version = std::string("1.0") + '\x01' + '\x7f' + "b";
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(type_version="1.0b")"), std::string::npos) << lines[1];
+}
+
+TEST(HealthLineProtocolTest, DeviceLineCarriesAllowlistedIdentityStrings) {
+    // Without a string category the runtime dropped every descriptive metric,
+    // so a provider reporting its firmware the way the SDK vocabulary suggests
+    // reached the HTTP surface and never the timeseries.
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ReportedDeviceHealth rd;
+    rd.metrics["startup_firmware"] = "2.14";
+    rd.metrics["module_version"] = "1.0.0";
+    rd.metrics["last_error"] = "not allowlisted";
+    rd.metrics["startup_product_code"] = "";  // empty -> omitted, not written blank
+    ds.reported = rd;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[1].find(R"(startup_firmware="2.14")"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find(R"(module_version="1.0.0")"), std::string::npos) << lines[1];
+    EXPECT_EQ(lines[1].find("last_error"), std::string::npos);
+    EXPECT_EQ(lines[1].find("startup_product_code"), std::string::npos);
+}
+
+TEST(HealthLineProtocolTest, OverlongIdentityStringIsTruncated) {
+    auto ps = base_provider();
+    DeviceHealthSnapshot ds;
+    ds.device_id = "ph0";
+    ds.health = "OK";
+    ds.last_poll_ms = 1699999999000;
+    ReportedDeviceHealth rd;
+    rd.metrics["startup_firmware"] = std::string(4096, 'v');
+    ds.reported = rd;
+    ps.devices.push_back(ds);
+
+    auto lines = format_health_lines(ps, "bioreactor", 1700000000000);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_LT(lines[1].size(), 512u) << "one bad device must not bloat the batch";
+}

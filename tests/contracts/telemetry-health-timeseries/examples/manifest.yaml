@@ -21,7 +21,10 @@ examples:
     note: device FAULT from a cached fault-quality signal, with per-signal counts (#220)
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/07-device-carries-type-version.json
     expect: valid
-    note: device row carries the provider-declared type_version so a stored result is attributable to a firmware revision
+    note: device row carries the provider-declared type_version (device type schema version, not necessarily firmware)
+  - file: tests/contracts/telemetry-health-timeseries/examples/valid/08-device-identity-strings.json
+    expect: valid
+    note: allowlisted identity strings (ezo reports firmware this way) reach the timeseries alongside counters
 
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
     expect: invalid
