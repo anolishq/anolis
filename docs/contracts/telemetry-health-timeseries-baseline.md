@@ -68,13 +68,19 @@ so they cannot drift.
      `sample_failure_count`, `call_success_count`, `call_failure_count`
    - booleans: `watchdog_armed`, `watchdog_tripped`, `missing`, `excluded`
    - identity strings: `startup_firmware`, `startup_product_code`,
-     `module_version`, `crumbs_version` — non-empty, truncated to 128
-     characters, omitted when absent or empty
-7. Every string field value is escaped for line protocol. `"` and `\` are
-   backslash-escaped; `\n`, `\r` and `\t` are rewritten to their two-character
-   forms and other C0/DEL bytes dropped, because line protocol is
-   newline-delimited and a raw newline in a provider-supplied value would forge
-   an additional row rather than corrupt one.
+     `firmware_version` — non-empty, truncated to 128 bytes, omitted when
+     absent or empty. Note these three are not in the SDK's reserved-key
+     vocabulary yet, unlike the counters above; the first two are what
+     `anolis-provider-ezo` emits today and the third is the key
+     `anolis-provider-bread#126` proposes.
+7. Every provider-supplied string is escaped for line protocol — **tag values
+   as well as string fields**, since `provider_id`, `device_id` and `signal_id`
+   are provider-chosen and unvalidated. In field values `"` and `\` are
+   backslash-escaped; in tag values `,`, `=`, space and `\` are. In both, `\n`,
+   `\r` and `\t` are rewritten to their two-character forms and other C0/DEL
+   bytes are dropped: line protocol is newline-delimited, so a raw newline
+   would split one row into two malformed ones and cost the whole batch, and a
+   trailing backslash would consume the delimiter that follows it.
 
 ### Allowlist rule
 

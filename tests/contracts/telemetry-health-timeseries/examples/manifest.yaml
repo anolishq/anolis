@@ -24,7 +24,7 @@ examples:
     note: device row carries the provider-declared type_version (device type schema version, not necessarily firmware)
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/08-device-identity-strings.json
     expect: valid
-    note: allowlisted identity strings (ezo reports firmware this way) reach the timeseries alongside counters
+    note: allowlisted identity strings (startup_firmware as ezo emits it, firmware_version as bread#126 proposes) reach the timeseries alongside counters
 
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
     expect: invalid
@@ -47,3 +47,6 @@ examples:
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/07-empty-type-version.json
     expect: invalid
     note: type_version is omitted rather than written empty, so an empty string is a producer bug
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/08-empty-identity-string.json
+    expect: invalid
+    note: identity strings are omitted rather than written empty, same rule as type_version

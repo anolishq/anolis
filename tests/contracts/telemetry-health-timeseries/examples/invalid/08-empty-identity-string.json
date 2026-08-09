@@ -9,12 +9,6 @@
   "fields": {
     "health": "OK",
     "registered": true,
-    "staleness_ms": 240,
-    "stale_signal_count": 0,
-    "fault_signal_count": 0,
-    "startup_firmware": "2.14",
-    "startup_product_code": "EZO-PH",
-    "sample_success_count": 67,
-    "firmware_version": "0.4.5"
+    "startup_firmware": ""
   }
 }
