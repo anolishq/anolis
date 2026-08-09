@@ -5,6 +5,7 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/safe_state.hpp"
 #include "logging/logger.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
@@ -38,7 +39,7 @@ bool has_fault_safe_state_hook(const AutomationConfig &automation) {
 }
 
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
-                                             const AutomationConfig &automation) {
+                                             const AutomationConfig &automation, const SafetyConfig &safety) {
     HooklessAutoGate result;
 
     // Only AUTO-capable configs are gated.
@@ -78,12 +79,29 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     for (size_t i = 0; i < result.actuating_functions.size(); ++i) {
         msg << (i != 0 ? ", " : "") << result.actuating_functions[i];
     }
+
+    // A machine declares its safe state twice over, for two different triggers,
+    // and this gate only ever asks for one of them. An operator who follows the
+    // sentence above to the letter satisfies the gate and still has a machine
+    // whose e-stop drives nothing — and worse, whose latch then SUPPRESSES the
+    // very hooks they just added (#251). Say so here, where they are reading,
+    // rather than leaving it to a startup warning they have already scrolled
+    // past. Text only: the verdict does not depend on safety.safe_state,
+    // because the ladder fires on operator request, never autonomously.
+    if (control::planned_safe_state_kind(registry, safety) == control::SafeStateKind::None) {
+        msg << ". Note: that hook satisfies this gate but is NOT what POST /v0/estop runs — the e-stop runs "
+               "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would "
+               "latch without stopping anything. Declare safety.safe_state (setpoints count only if they cover "
+               "every actuating output)";
+    }
+
     result.message = msg.str();
     return result;
 }
 
 bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
-                                   automation::ModeManager &mode_manager, const std::string &context) {
+                                   const SafetyConfig &safety, automation::ModeManager &mode_manager,
+                                   const std::string &context) {
     // Only autonomous actuation (AUTO) is at risk; cheapest check first, and it
     // skips the O(inventory) scan on the common non-AUTO restart.
     if (mode_manager.current_mode() != automation::RuntimeMode::AUTO) {
@@ -92,7 +110,7 @@ bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, con
 
     // evaluate_hookless_auto_gate already returns non-refused when automation is
     // disabled or nothing actuates, so a same-inventory restart is a no-op here.
-    const auto gate = evaluate_hookless_auto_gate(registry, automation);
+    const auto gate = evaluate_hookless_auto_gate(registry, automation, safety);
     if (!gate.refused) {
         return false;
     }

@@ -73,6 +73,13 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 > value; a hook covering only another transition (e.g. `AUTO -> MANUAL`, or an
 > `IDLE -> FAULT` hook that never fires from AUTO) does not satisfy the gate.
 > Manual control and the software e-stop remain available in the refused state.
+>
+> **Satisfying this gate does not give you a software e-stop.** The gate asks
+> only for the autonomous path; `POST /v0/estop` runs `safety.safe_state`, which
+> is a separate declaration the gate never checks. Declaring only the hook
+> leaves the e-stop driving nothing *and* — because the latch engages before
+> FAULT is entered — suppresses the hook that any other route into FAULT would
+> have run. The refusal message says so when the ladder would drive nothing.
 
 ### AUTO -> MANUAL
 

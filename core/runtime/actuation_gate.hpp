@@ -29,6 +29,7 @@ class ModeManager;
 namespace runtime {
 
 struct AutomationConfig;
+struct SafetyConfig;
 
 /**
  * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.
@@ -60,10 +61,22 @@ struct HooklessAutoGate {
  * does NOT satisfy this gate either: it fires only on operator `POST /v0/estop`,
  * never on autonomous transitions.
  *
+ * `safety` does not change the verdict — only the refusal text. Following this
+ * message names one declaration and produces a machine with no manual e-stop
+ * path, which is the configuration #251 makes dangerous; when the ladder would
+ * drive nothing the message says so rather than leaving the operator to
+ * discover it (#258).
+ *
+ * "Would drive nothing" is `control::planned_safe_state_kind`, not a local
+ * inspection of the config: the setpoints rung counts only when it covers every
+ * actuating output, so a config with setpoints covering nothing declares a safe
+ * state that plans `None`. Answering this question twice is how a machine gets
+ * reported as safe while its e-stop does nothing.
+ *
  * Read-only; safe to call on every AUTO transition attempt.
  */
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
-                                             const AutomationConfig &automation);
+                                             const AutomationConfig &automation, const SafetyConfig &safety);
 
 /**
  * @brief Re-enforce the refuse-hookless gate while already in AUTO (#233).
@@ -79,7 +92,8 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
  * @return true iff the gate refused and FAULT was requested.
  */
 bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
-                                   automation::ModeManager &mode_manager, const std::string &context);
+                                   const SafetyConfig &safety, automation::ModeManager &mode_manager,
+                                   const std::string &context);
 
 }  // namespace runtime
 }  // namespace anolis

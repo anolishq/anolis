@@ -358,7 +358,7 @@ bool Runtime::init_automation(std::string &error) {
         // re-evaluated against the live registry, so it holds for the process
         // lifetime and across provider restarts. Manual control and /v0/estop
         // stay available; the veto never blocks FAULT (mode_manager honors that).
-        const auto startup_gate = evaluate_hookless_auto_gate(*registry_, config_.automation);
+        const auto startup_gate = evaluate_hookless_auto_gate(*registry_, config_.automation, config_.safety);
         if (startup_gate.refused) {
             LOG_ERROR("[Runtime] " << startup_gate.message);
             LOG_ERROR(
@@ -370,7 +370,7 @@ bool Runtime::init_automation(std::string &error) {
                 if (next != automation::RuntimeMode::AUTO) {
                     return true;
                 }
-                const auto gate = evaluate_hookless_auto_gate(*registry_, config_.automation);
+                const auto gate = evaluate_hookless_auto_gate(*registry_, config_.automation, config_.safety);
                 if (gate.refused) {
                     veto_reason = gate.message;
                     return false;
@@ -924,7 +924,7 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // registry); tracked in #239. This still closes the permanent in-AUTO
     // fail-open.
     if (mode_manager_ && config_.automation.enabled) {
-        enforce_hookless_gate_in_auto(*registry_, config_.automation, *mode_manager_,
+        enforce_hookless_gate_in_auto(*registry_, config_.automation, config_.safety, *mode_manager_,
                                       "provider '" + provider_id + "' restart");
     }
 #endif
