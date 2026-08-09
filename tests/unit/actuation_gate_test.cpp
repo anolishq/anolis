@@ -7,6 +7,7 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/safe_state.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
@@ -299,7 +300,6 @@ TEST_F(ActuationGateTest, RefusalNamesSafeStateWhenNoneIsDeclared) {
     // very hooks the operator just added (#251). The message has to say so.
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
-    ASSERT_FALSE(runtime::declares_software_safe_state(safety));
 
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     ASSERT_TRUE(gate.refused);
@@ -312,32 +312,12 @@ TEST_F(ActuationGateTest, RefusalStaysQuietWhenSafeStateIsDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     safety.safe_state.hooks.push_back({});
-    ASSERT_TRUE(runtime::declares_software_safe_state(safety));
 
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     ASSERT_TRUE(gate.refused) << "safety.safe_state must not satisfy the gate — it is not an autonomous path";
     EXPECT_THAT(gate.message, Not(HasSubstr("safety.safe_state")));
     // The actual fix is still named.
     EXPECT_THAT(gate.message, HasSubstr("mode_transition_hooks"));
-}
-
-TEST_F(ActuationGateTest, SafeStateIsDeclaredByAnyRung) {
-    // Config-level and permissive: it asks "did the operator declare a manual
-    // e-stop path", not "is it adequate" — that needs the live inventory.
-    runtime::SafetyConfig none;
-    EXPECT_FALSE(runtime::declares_software_safe_state(none));
-
-    runtime::SafetyConfig by_hooks;
-    by_hooks.safe_state.hooks.push_back({});
-    EXPECT_TRUE(runtime::declares_software_safe_state(by_hooks));
-
-    runtime::SafetyConfig by_setpoints;
-    by_setpoints.safe_state.setpoints.push_back({});
-    EXPECT_TRUE(runtime::declares_software_safe_state(by_setpoints));
-
-    runtime::SafetyConfig by_zero;
-    by_zero.safe_state.zero_is_safe = true;
-    EXPECT_TRUE(runtime::declares_software_safe_state(by_zero));
 }
 
 TEST_F(ActuationGateTest, SafeStateDoesNotChangeTheVerdict) {
@@ -348,4 +328,41 @@ TEST_F(ActuationGateTest, SafeStateDoesNotChangeTheVerdict) {
     safety.safe_state.zero_is_safe = true;
 
     EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
+}
+
+TEST_F(ActuationGateTest, SetpointsCoveringNothingStillGetTheNote) {
+    // The hole a config-level "is safe_state non-empty?" check would leave.
+    // SafeStateController honours the setpoints rung only when it covers EVERY
+    // actuating output; partial coverage plans None and the ladder drives
+    // nothing (see safe_state_test PartialSetpointCoverageFailsClosedToNone).
+    // A gate that inspected the config itself would see a non-empty setpoints
+    // list, stay quiet, and hand back exactly the #251 machine.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    runtime::ModeTransitionCallConfig setpoint;
+    setpoint.device_handle = "sim0/some-other-device";  // covers nothing here
+    setpoint.function_name = "set_output";
+    safety.safe_state.setpoints.push_back(setpoint);
+
+    ASSERT_EQ(control::planned_safe_state_kind(*registry, safety), control::SafeStateKind::None);
+
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
+    ASSERT_TRUE(gate.refused);
+    EXPECT_THAT(gate.message, HasSubstr("safety.safe_state"));
+}
+
+TEST_F(ActuationGateTest, SetpointsCoveringEverythingSuppressTheNote) {
+    // ...and when the ladder really would drive, the note stays off.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    runtime::ModeTransitionCallConfig setpoint;
+    setpoint.device_handle = "sim0/dev0";
+    setpoint.function_name = "set_output";
+    safety.safe_state.setpoints.push_back(setpoint);
+
+    ASSERT_EQ(control::planned_safe_state_kind(*registry, safety), control::SafeStateKind::Setpoints);
+
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
+    ASSERT_TRUE(gate.refused);
+    EXPECT_THAT(gate.message, Not(HasSubstr("safety.safe_state")));
 }

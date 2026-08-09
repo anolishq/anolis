@@ -13,30 +13,6 @@ commit messages only.
 
 ## [Unreleased]
 
-### Changed
-
-- **The refuse-hookless gate no longer steers operators into a machine with no
-  e-stop** (#258). A machine declares its safe state twice over, for two
-  different triggers: `safety.safe_state` is what `POST /v0/estop` runs, and a
-  `-> FAULT` entry in `automation.mode_transition_hooks` is what an autonomous
-  fault runs. The gate only ever asked for the second, so an operator who
-  followed its refusal message to the letter got AUTO permitted *and* a machine
-  whose e-stop drove nothing — and whose latch then suppressed the very hooks
-  they had just added (#251). That is not hypothetical: it is the state
-  `bioreactor-v1` shipped in until anolishq/anolis-projects#58, and why its
-  E-stop was latch-only on the reference machine for weeks.
-
-  When no `safety.safe_state` is declared, the refusal now says that the hook it
-  is asking for is not what the e-stop runs, and names `safety.safe_state`. When
-  one *is* declared the message is unchanged — an operator who already did this
-  does not need telling.
-
-  **No behaviour change.** `safety.safe_state` still does not satisfy the gate,
-  and correctly so: it fires only on operator request, never on an autonomous
-  transition, so it is not a fault-safe path. Requiring it would refuse configs
-  that are legal today, which on a running culture is its own incident. This is
-  the companion to #262, which named the same hazard at startup.
-
 ### Added
 
 - **Device identity is no longer discarded on arrival** (anolishq/anolis-provider-bread#126).
@@ -85,6 +61,42 @@ commit messages only.
   the timeseries needs a change in bread. And a device whose reported version
   never moves when its behaviour does (feastorg/Slice_DCMT#13) stays
   unattributable regardless.
+
+### Changed
+
+- **The refuse-hookless gate no longer steers operators into a machine with no
+  e-stop** (#258). A machine declares its safe state twice over, for two
+  different triggers: `safety.safe_state` is what `POST /v0/estop` runs, and a
+  `-> FAULT` entry in `automation.mode_transition_hooks` is what an autonomous
+  fault runs. The gate only ever asked for the second, so an operator who
+  followed its refusal message to the letter got AUTO permitted *and* a machine
+  whose e-stop drove nothing — and whose latch then suppressed the very hooks
+  they had just added (#251). That is not hypothetical: it is the state
+  `bioreactor-v1` shipped in until anolishq/anolis-projects#58, and why its
+  E-stop was latch-only on the reference machine for weeks.
+
+  When the e-stop ladder would drive nothing, the refusal now says that the hook
+  it is asking for is not what the e-stop runs, and names `safety.safe_state`.
+  When a working ladder exists the message is unchanged — an operator who
+  already did this does not need telling.
+
+  "Would drive nothing" is `control::planned_safe_state_kind`, extracted from
+  `SafeStateController` so the gate and the controller cannot disagree. Asking
+  the config directly would have been wrong: the setpoints rung counts only when
+  it covers *every* actuating output, so setpoints that cover nothing declare a
+  safe state that plans `None` — and the gate would have stayed quiet for
+  exactly the machine it exists to warn about.
+
+  `docs/getting-started.md`, `docs/automation.md` and `docs/safety.md` also
+  described the gate without mentioning `safety.safe_state`. An operator who
+  follows those adds the hook proactively and never sees the refusal at all, so
+  the runtime message alone would not have reached them.
+
+  **No behaviour change.** `safety.safe_state` still does not satisfy the gate,
+  and correctly so: it fires only on operator request, never on an autonomous
+  transition, so it is not a fault-safe path. Requiring it would refuse configs
+  that are legal today, which on a running culture is its own incident. This is
+  the companion to #262, which named the same hazard at startup.
 
 ### Fixed
 

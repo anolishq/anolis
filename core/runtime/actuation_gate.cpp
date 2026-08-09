@@ -5,6 +5,7 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/safe_state.hpp"
 #include "logging/logger.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
@@ -35,10 +36,6 @@ bool has_fault_safe_state_hook(const AutomationConfig &automation) {
     const auto &hooks = automation.mode_transition_hooks;
     return std::any_of(hooks.before_transition.begin(), hooks.before_transition.end(), hook_covers_auto_to_fault) ||
            std::any_of(hooks.after_transition.begin(), hooks.after_transition.end(), hook_covers_auto_to_fault);
-}
-
-bool declares_software_safe_state(const SafetyConfig &safety) {
-    return !safety.safe_state.hooks.empty() || !safety.safe_state.setpoints.empty() || safety.safe_state.zero_is_safe;
 }
 
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
@@ -91,10 +88,11 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     // rather than leaving it to a startup warning they have already scrolled
     // past. Text only: the verdict does not depend on safety.safe_state,
     // because the ladder fires on operator request, never autonomously.
-    if (!declares_software_safe_state(safety)) {
+    if (control::planned_safe_state_kind(registry, safety) == control::SafeStateKind::None) {
         msg << ". Note: that hook satisfies this gate but is NOT what POST /v0/estop runs — the e-stop runs "
-               "safety.safe_state, which is not declared here, so it would latch without driving anything. "
-               "Declare safety.safe_state as well";
+               "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would "
+               "latch without stopping anything. Declare safety.safe_state (setpoints count only if they cover "
+               "every actuating output)";
     }
 
     result.message = msg.str();

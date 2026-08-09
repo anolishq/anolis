@@ -38,6 +38,23 @@ class CallRouter;
 /** @brief Which rung of the safe-state ladder applies (or None). */
 enum class SafeStateKind { None, Hooks, Setpoints, Zero };
 
+/**
+ * @brief What the e-stop ladder would drive for this config against this
+ *        inventory, without needing a controller.
+ *
+ * The single answer to "does this machine have a working software safe state".
+ * Callers outside the controller (the refuse-hookless gate, diagnostics) must
+ * use this rather than inspecting `safety.safe_state` themselves: the setpoints
+ * rung counts only when it covers EVERY actuating output, so a config with
+ * setpoints that cover nothing still plans `None` and drives nothing. A second,
+ * weaker answer to this question is precisely how a machine gets reported as
+ * safe while its e-stop does nothing (#251, #258).
+ *
+ * @param uncovered_out optional count of actuating outputs no setpoint covers.
+ */
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety,
+                                      size_t *uncovered_out = nullptr);
+
 const char *safe_state_kind_to_string(SafeStateKind kind);
 
 /** @brief Per-call outcome recorded while running the ladder. */

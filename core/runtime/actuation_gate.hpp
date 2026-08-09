@@ -32,20 +32,6 @@ struct AutomationConfig;
 struct SafetyConfig;
 
 /**
- * @brief True when `safety.safe_state` declares any rung at all.
- *
- * Config-level and deliberately permissive: hooks, setpoints, or an asserted
- * `zero_is_safe` all count. It answers "did the operator declare a manual
- * e-stop path", not "is that path adequate" — `SafeStateController` owns the
- * second question, which needs the live inventory.
- *
- * Used only to decide whether the gate's refusal should also mention
- * `safety.safe_state`. An operator who already declared one does not need to be
- * told to (#258).
- */
-bool declares_software_safe_state(const SafetyConfig &safety);
-
-/**
  * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.
  *
  * Exposed so callers that need to reason about "does this machine have a
@@ -77,8 +63,15 @@ struct HooklessAutoGate {
  *
  * `safety` does not change the verdict — only the refusal text. Following this
  * message names one declaration and produces a machine with no manual e-stop
- * path, which is the configuration #251 makes dangerous; when none is declared
- * the message says so rather than leaving the operator to discover it (#258).
+ * path, which is the configuration #251 makes dangerous; when the ladder would
+ * drive nothing the message says so rather than leaving the operator to
+ * discover it (#258).
+ *
+ * "Would drive nothing" is `control::planned_safe_state_kind`, not a local
+ * inspection of the config: the setpoints rung counts only when it covers every
+ * actuating output, so a config with setpoints covering nothing declares a safe
+ * state that plans `None`. Answering this question twice is how a machine gets
+ * reported as safe while its e-stop does nothing.
  *
  * Read-only; safe to call on every AUTO transition attempt.
  */

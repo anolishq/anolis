@@ -118,6 +118,13 @@ If your machine has actuating outputs, you must also declare safe-state
 `mode_transition_hooks` or the runtime will refuse `MANUAL -> AUTO` — see
 [automation.md](automation.md) and [safety.md](safety.md#manual---auto).
 
+**Declare `safety.safe_state` as well.** These are two different declarations
+for two different triggers: the hook above runs on an *autonomous* fault, while
+`safety.safe_state` is what `POST /v0/estop` runs. Only the hook is required to
+enter AUTO, so it is possible to satisfy the gate and still have a machine whose
+e-stop drives nothing — and whose latch then suppresses the hook you just added.
+See [safety.md](safety.md#software-e-stop).
+
 Update a parameter at runtime:
 
 ```bash

@@ -61,6 +61,26 @@ bool setpoint_matches(const runtime::ModeTransitionCallConfig &setpoint, const s
     return has_id || has_name;
 }
 
+// The ladder EXECUTES against explicitly-declared actuators only. This is
+// deliberately narrower than the CallRouter latch's fail-closed `is_actuating`
+// (any not-READ function): the latch refuses unknown calls (conservative about
+// ALLOWING), while the ladder must not blindly invoke a CONFIG change or an
+// untagged command to "make it safe" (conservative about ACTING). Untagged
+// actuators are still latched; declare a hook/setpoint to drive them.
+std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions_for(
+    const registry::DeviceRegistry &registry) {
+    std::vector<std::pair<std::string, registry::FunctionSpec>> out;
+    for (const auto &device : registry.get_all_devices()) {
+        for (const auto &[name, spec] : device.capabilities.functions_by_id) {
+            (void)name;
+            if (spec.category == anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE) {
+                out.emplace_back(device.get_handle(), spec);
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 const char *safe_state_kind_to_string(SafeStateKind kind) {
@@ -87,31 +107,15 @@ void SafeStateController::set_mode_manager(automation::ModeManager *mode_manager
 bool SafeStateController::is_engaged() const { return latched_.load(std::memory_order_acquire); }
 
 std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController::actuating_functions() const {
-    // The ladder EXECUTES against explicitly-declared actuators only. This is
-    // deliberately narrower than the CallRouter latch's fail-closed
-    // `is_actuating` (any not-READ function): the latch refuses unknown calls
-    // (conservative about ALLOWING), while the ladder must not blindly invoke a
-    // CONFIG change or an untagged command to "make it safe" (conservative about
-    // ACTING). Untagged actuators are still latched; declare a hook/setpoint to
-    // drive them.
-    std::vector<std::pair<std::string, registry::FunctionSpec>> out;
-    for (const auto &device : registry_.get_all_devices()) {
-        for (const auto &[name, spec] : device.capabilities.functions_by_id) {
-            (void)name;
-            if (spec.category == anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE) {
-                out.emplace_back(device.get_handle(), spec);
-            }
-        }
-    }
-    return out;
+    return actuating_functions_for(registry_);
 }
 
-SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
-    const auto actuators = actuating_functions();
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety,
+                                      size_t *uncovered_out) {
     size_t uncovered = 0;
-    for (const auto &[handle, spec] : actuators) {
+    for (const auto &[handle, spec] : actuating_functions_for(registry)) {
         bool covered = false;
-        for (const auto &setpoint : safety_.safe_state.setpoints) {
+        for (const auto &setpoint : safety.safe_state.setpoints) {
             if (setpoint_matches(setpoint, handle, spec)) {
                 covered = true;
                 break;
@@ -125,17 +129,21 @@ SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
         *uncovered_out = uncovered;
     }
 
-    if (!safety_.safe_state.hooks.empty()) {
+    if (!safety.safe_state.hooks.empty()) {
         return SafeStateKind::Hooks;
     }
     // Setpoints apply only if they cover every actuating output (fail closed).
-    if (!safety_.safe_state.setpoints.empty() && uncovered == 0) {
+    if (!safety.safe_state.setpoints.empty() && uncovered == 0) {
         return SafeStateKind::Setpoints;
     }
-    if (safety_.safe_state.zero_is_safe) {
+    if (safety.safe_state.zero_is_safe) {
         return SafeStateKind::Zero;
     }
     return SafeStateKind::None;
+}
+
+SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
+    return planned_safe_state_kind(registry_, safety_, uncovered_out);
 }
 
 CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfig &call) {
