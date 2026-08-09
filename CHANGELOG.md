@@ -13,6 +13,30 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- **The refuse-hookless gate no longer steers operators into a machine with no
+  e-stop** (#258). A machine declares its safe state twice over, for two
+  different triggers: `safety.safe_state` is what `POST /v0/estop` runs, and a
+  `-> FAULT` entry in `automation.mode_transition_hooks` is what an autonomous
+  fault runs. The gate only ever asked for the second, so an operator who
+  followed its refusal message to the letter got AUTO permitted *and* a machine
+  whose e-stop drove nothing — and whose latch then suppressed the very hooks
+  they had just added (#251). That is not hypothetical: it is the state
+  `bioreactor-v1` shipped in until anolishq/anolis-projects#58, and why its
+  E-stop was latch-only on the reference machine for weeks.
+
+  When no `safety.safe_state` is declared, the refusal now says that the hook it
+  is asking for is not what the e-stop runs, and names `safety.safe_state`. When
+  one *is* declared the message is unchanged — an operator who already did this
+  does not need telling.
+
+  **No behaviour change.** `safety.safe_state` still does not satisfy the gate,
+  and correctly so: it fires only on operator request, never on an autonomous
+  transition, so it is not a fault-safe path. Requiring it would refuse configs
+  that are legal today, which on a running culture is its own incident. This is
+  the companion to #262, which named the same hazard at startup.
+
 ### Added
 
 - **Device identity is no longer discarded on arrival** (anolishq/anolis-provider-bread#126).

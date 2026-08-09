@@ -64,13 +64,16 @@ protected:
     runtime::AutomationConfig automation;  // enabled=false, no hooks by default
     std::unique_ptr<registry::DeviceRegistry> registry;
     std::shared_ptr<MockProviderHandle> mock_provider;
+
+    // Default-constructed: declares no safe state. Tests that care set it.
+    runtime::SafetyConfig safety;
 };
 
 TEST_F(ActuationGateTest, RefusesEnabledActuatingWithoutHooks) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
 
-    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation);
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     EXPECT_TRUE(gate.refused);
     ASSERT_EQ(gate.actuating_functions.size(), 1u);
     EXPECT_EQ(gate.actuating_functions[0], "sim0/dev0/set_output");
@@ -81,19 +84,19 @@ TEST_F(ActuationGateTest, RefusesEnabledActuatingWithoutHooks) {
 TEST_F(ActuationGateTest, RefusesUnspecifiedCategoryFailClosed) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_UNSPECIFIED);
     automation.enabled = true;
-    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, RefusesConfigCategory) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_CONFIG);
     automation.enabled = true;
-    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsReadOnlyFunctions) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
     automation.enabled = true;
-    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation);
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     EXPECT_FALSE(gate.refused);
     EXPECT_TRUE(gate.actuating_functions.empty());
 }
@@ -102,14 +105,14 @@ TEST_F(ActuationGateTest, AllowsWhenBeforeTransitionHookDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWhenAfterTransitionHookDeclared) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.after_transition.push_back(make_fault_hook());
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, RefusesWhenOnlyNonFaultHookDeclared) {
@@ -119,7 +122,7 @@ TEST_F(ActuationGateTest, RefusesWhenOnlyNonFaultHookDeclared) {
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
 
-    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation);
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     EXPECT_TRUE(gate.refused);
     ASSERT_EQ(gate.actuating_functions.size(), 1u);
     EXPECT_EQ(gate.actuating_functions[0], "sim0/dev0/set_output");
@@ -134,7 +137,7 @@ TEST_F(ActuationGateTest, RefusesWhenNonFaultHooksInBothLists) {
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
     automation.mode_transition_hooks.after_transition.push_back(make_hook("IDLE"));
-    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWildcardToHook) {
@@ -142,7 +145,7 @@ TEST_F(ActuationGateTest, AllowsWildcardToHook) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("*"));
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsEmptyToHook) {
@@ -150,7 +153,7 @@ TEST_F(ActuationGateTest, AllowsEmptyToHook) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook(""));
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, RefusesWhenFaultHookRestrictedToNonAutoFrom) {
@@ -159,7 +162,7 @@ TEST_F(ActuationGateTest, RefusesWhenFaultHookRestrictedToNonAutoFrom) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("FAULT", "IDLE"));
-    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsFaultHookFromAuto) {
@@ -167,7 +170,7 @@ TEST_F(ActuationGateTest, AllowsFaultHookFromAuto) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("FAULT", "AUTO"));
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsFaultHookAmongNonFaultHooks) {
@@ -176,19 +179,19 @@ TEST_F(ActuationGateTest, AllowsFaultHookAmongNonFaultHooks) {
     automation.enabled = true;
     automation.mode_transition_hooks.before_transition.push_back(make_hook("MANUAL"));
     automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWhenAutomationDisabled) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = false;
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 TEST_F(ActuationGateTest, AllowsWhenRegistryEmpty) {
     // No devices discovered: nothing can actuate, so hookless AUTO is allowed.
     automation.enabled = true;
-    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation).refused);
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }
 
 // --- enforce_hookless_gate_in_auto (#233: in-AUTO restart re-check) ----------
@@ -199,7 +202,7 @@ TEST_F(ActuationGateTest, EnforceInAuto_RefusalForcesFault) {
     automation.enabled = true;
     automation::ModeManager mode(automation::RuntimeMode::AUTO);
 
-    EXPECT_TRUE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_TRUE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
 }
 
@@ -210,7 +213,7 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenGatePasses) {
     automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
     automation::ModeManager mode(automation::RuntimeMode::AUTO);
 
-    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
 }
 
@@ -221,7 +224,7 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpForReadOnlyInventory) {
     automation.enabled = true;
     automation::ModeManager mode(automation::RuntimeMode::AUTO);
 
-    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
 }
 
@@ -233,7 +236,7 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenNotInAuto) {
     for (auto m : {automation::RuntimeMode::MANUAL, automation::RuntimeMode::IDLE}) {
         SCOPED_TRACE(automation::mode_to_string(m));
         automation::ModeManager mode(m);
-        EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+        EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
         EXPECT_EQ(mode.current_mode(), m);
     }
 }
@@ -242,7 +245,7 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenAutomationDisabled) {
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = false;
     automation::ModeManager mode(automation::RuntimeMode::AUTO);
-    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, mode, "test"));
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
 }
 
@@ -286,4 +289,63 @@ TEST_F(ActuationGateTest, FaultHookPredicateFindsAfterTransitionHooks) {
 TEST_F(ActuationGateTest, FaultHookPredicateIsFalseWithNoHooks) {
     runtime::AutomationConfig cfg;
     EXPECT_FALSE(runtime::has_fault_safe_state_hook(cfg));
+}
+
+// --- #258: the refusal must not steer operators into the #251 shape ---------
+
+TEST_F(ActuationGateTest, RefusalNamesSafeStateWhenNoneIsDeclared) {
+    // Following this message to the letter satisfies the gate and leaves a
+    // machine whose e-stop drives nothing — and whose latch then suppresses the
+    // very hooks the operator just added (#251). The message has to say so.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    ASSERT_FALSE(runtime::declares_software_safe_state(safety));
+
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
+    ASSERT_TRUE(gate.refused);
+    EXPECT_THAT(gate.message, HasSubstr("safety.safe_state"));
+    EXPECT_THAT(gate.message, HasSubstr("/v0/estop"));
+}
+
+TEST_F(ActuationGateTest, RefusalStaysQuietWhenSafeStateIsDeclared) {
+    // An operator who already declared one does not need to be told to.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    safety.safe_state.hooks.push_back({});
+    ASSERT_TRUE(runtime::declares_software_safe_state(safety));
+
+    const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
+    ASSERT_TRUE(gate.refused) << "safety.safe_state must not satisfy the gate — it is not an autonomous path";
+    EXPECT_THAT(gate.message, Not(HasSubstr("safety.safe_state")));
+    // The actual fix is still named.
+    EXPECT_THAT(gate.message, HasSubstr("mode_transition_hooks"));
+}
+
+TEST_F(ActuationGateTest, SafeStateIsDeclaredByAnyRung) {
+    // Config-level and permissive: it asks "did the operator declare a manual
+    // e-stop path", not "is it adequate" — that needs the live inventory.
+    runtime::SafetyConfig none;
+    EXPECT_FALSE(runtime::declares_software_safe_state(none));
+
+    runtime::SafetyConfig by_hooks;
+    by_hooks.safe_state.hooks.push_back({});
+    EXPECT_TRUE(runtime::declares_software_safe_state(by_hooks));
+
+    runtime::SafetyConfig by_setpoints;
+    by_setpoints.safe_state.setpoints.push_back({});
+    EXPECT_TRUE(runtime::declares_software_safe_state(by_setpoints));
+
+    runtime::SafetyConfig by_zero;
+    by_zero.safe_state.zero_is_safe = true;
+    EXPECT_TRUE(runtime::declares_software_safe_state(by_zero));
+}
+
+TEST_F(ActuationGateTest, SafeStateDoesNotChangeTheVerdict) {
+    // Text only. The ladder fires on operator request, never autonomously, so
+    // it cannot stand in for a fault-safe path.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    safety.safe_state.zero_is_safe = true;
+
+    EXPECT_TRUE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
 }

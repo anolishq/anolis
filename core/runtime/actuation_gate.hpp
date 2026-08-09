@@ -29,6 +29,21 @@ class ModeManager;
 namespace runtime {
 
 struct AutomationConfig;
+struct SafetyConfig;
+
+/**
+ * @brief True when `safety.safe_state` declares any rung at all.
+ *
+ * Config-level and deliberately permissive: hooks, setpoints, or an asserted
+ * `zero_is_safe` all count. It answers "did the operator declare a manual
+ * e-stop path", not "is that path adequate" — `SafeStateController` owns the
+ * second question, which needs the live inventory.
+ *
+ * Used only to decide whether the gate's refusal should also mention
+ * `safety.safe_state`. An operator who already declared one does not need to be
+ * told to (#258).
+ */
+bool declares_software_safe_state(const SafetyConfig &safety);
 
 /**
  * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.
@@ -60,10 +75,15 @@ struct HooklessAutoGate {
  * does NOT satisfy this gate either: it fires only on operator `POST /v0/estop`,
  * never on autonomous transitions.
  *
+ * `safety` does not change the verdict — only the refusal text. Following this
+ * message names one declaration and produces a machine with no manual e-stop
+ * path, which is the configuration #251 makes dangerous; when none is declared
+ * the message says so rather than leaving the operator to discover it (#258).
+ *
  * Read-only; safe to call on every AUTO transition attempt.
  */
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
-                                             const AutomationConfig &automation);
+                                             const AutomationConfig &automation, const SafetyConfig &safety);
 
 /**
  * @brief Re-enforce the refuse-hookless gate while already in AUTO (#233).
@@ -79,7 +99,8 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
  * @return true iff the gate refused and FAULT was requested.
  */
 bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
-                                   automation::ModeManager &mode_manager, const std::string &context);
+                                   const SafetyConfig &safety, automation::ModeManager &mode_manager,
+                                   const std::string &context);
 
 }  // namespace runtime
 }  // namespace anolis
