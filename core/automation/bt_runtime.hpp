@@ -153,16 +153,9 @@ public:
      *
      * Note: Normally called by tick loop thread, but exposed for unit testing.
      *
-     * Virtual so a test can substitute a throwing tick and exercise the tick
-     * loop's exception path for real (#279). The nodes are all written to
-     * swallow their own errors and return FAILURE, so a genuine tick exception
-     * cannot be provoked through a tree -- but BT.CPP itself can still raise one
-     * from tickOnce(), which is why the handler exists. The class is already
-     * polymorphic, so this costs nothing.
-     *
      * @return BT::NodeStatus (SUCCESS, FAILURE, RUNNING)
      */
-    virtual BT::NodeStatus tick();
+    BT::NodeStatus tick();
 
     /**
      * Get the path to the currently loaded BT file (returned by value — the
@@ -257,6 +250,7 @@ private:
     // Event emitter (optional, for error notifications)
     std::shared_ptr<events::EventEmitter> event_emitter_;
     FaultSink fault_sink_;
+
     std::atomic<uint64_t> next_event_id_{1};
 };
 

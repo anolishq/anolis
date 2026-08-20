@@ -202,22 +202,26 @@ TEST(BTRuntimeTest, ConcurrentStatusReadsDuringReloadAreRaceFree) {
     std::filesystem::remove(tree_path, ec);
 }
 
-// A tick that throws for real. Every BT node in this codebase catches its own
-// errors and returns FAILURE, so no tree can provoke a tick exception -- but
-// BT.CPP can still raise one out of tickOnce(), which is why the handler exists.
-// Substituting the tick is the only honest way to exercise that path.
-class ThrowingTickRuntime : public anolis::automation::BTRuntime {
-public:
-    using BTRuntime::BTRuntime;
-    BT::NodeStatus tick() override { throw std::runtime_error("induced tick failure"); }
-};
+// A tree that BUILDS but throws on its first tick. SetBlackboard writes a
+// std::string into the key populate_blackboard() fills with the service context,
+// so the type collision happens at tick, not at load. This matters: the nodes in
+// this codebase guard their INPUTS, but every setOutput is unguarded and
+// checkPreConditions has no try/catch at all, so a tick exception is reachable
+// from ordinary tree edits -- not just from BT.CPP internals.
+constexpr char kThrowingTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <SetBlackboard output_key="anolis.bt_service_context" value="not-a-service-context"/>
+  </BehaviorTree>
+</root>
+)";
 
 // #279: a tick exception must HALT autonomous actuation, not merely report it.
 // Without the fix the loop simply ticks again and the runtime stays in AUTO with
 // outputs latched at whatever the tree last commanded -- and the DCMT firmware
 // command watchdog does not catch it, because it is fed by the state poller on a
 // separate thread that this exception does not touch.
-TEST(BTRuntimeTest, TickExceptionDrivesFault) {
+TEST(BTRuntimeTest, TickExceptionDrivesFaultAndStopsTicking) {
     using namespace anolis::automation;
     anolis::registry::DeviceRegistry registry;
     anolis::state::StateCache state_cache(registry, 100);
@@ -225,11 +229,11 @@ TEST(BTRuntimeTest, TickExceptionDrivesFault) {
     anolis::provider::ProviderRegistry provider_registry;
     ModeManager mode_manager(RuntimeMode::MANUAL);
     ParameterManager parameter_manager;
-    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
 
-    ThrowingTickRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
-    const auto tree_path = write_tree_file("anolis-bt-throwing", kSimpleTreeXml);
-    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-throwing", kThrowingTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok)
+        << "the throwing tree must LOAD cleanly, or it proves nothing -- load errors are already handled";
 
     // The tick loop only ticks in AUTO, so the exception path is only reachable there.
     std::string err;
@@ -246,9 +250,16 @@ TEST(BTRuntimeTest, TickExceptionDrivesFault) {
         << "a throwing tick left the runtime in " << mode_to_string(mode_manager.current_mode())
         << "; autonomous actuation was not halted";
 
-    // Confirm the exception was actually observed, so a pass cannot come from
-    // the loop never having run.
+    // Confirm the tick really threw, so a pass cannot come from the loop never
+    // having run.
     EXPECT_GT(runtime.get_health().error_count, 0);
+
+    // The property #279 is actually about: the loop must stop ticking, not just
+    // change mode. Sample across several tick periods (10 Hz default).
+    const auto ticks_at_fault = runtime.get_health().total_ticks;
+    std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    EXPECT_EQ(ticks_at_fault, runtime.get_health().total_ticks)
+        << "the tick loop kept running after FAULT; the exception would repeat indefinitely";
 
     runtime.stop();
     std::error_code ec;

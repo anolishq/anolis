@@ -472,10 +472,15 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         execution_reason = "no_definition";
     } else if (!active) {
         execution_reason = "stopped";
-    } else if (mode_manager_->current_mode() != automation::RuntimeMode::AUTO) {
-        execution_reason = "mode_gate";
+        // An engine failure is checked BEFORE the mode gate, because the engine
+        // now drives FAULT itself on a tick exception (#279). Testing the mode
+        // first would report "mode_gate" -- "someone changed the mode" -- for a
+        // fault that changed the mode itself, hiding the actual cause behind its
+        // own effect.
     } else if (view.status == automation::AutomationStatus::Failed) {
         execution_reason = "terminal_failure";
+    } else if (mode_manager_->current_mode() != automation::RuntimeMode::AUTO) {
+        execution_reason = "mode_gate";
     } else if (view.status == automation::AutomationStatus::Blocked) {
         execution_reason = "waiting";
     }

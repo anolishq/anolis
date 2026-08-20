@@ -31,6 +31,21 @@ Transition rules:
 Note: FAULT is not globally auto-entered for every error condition in the current runtime;
 it is a defined mode and transition target with strict recovery pathing.
 
+The runtime does enter FAULT autonomously in two cases:
+
+- **A behaviour-tree tick raises an exception** (#279). The control logic has reached a
+  state its author did not model, so autonomous actuation is halted rather than continued.
+  Note this is reachable from ordinary tree edits, not only from internal errors: BT nodes
+  guard their inputs but not their outputs, and a precondition script referencing an
+  undefined blackboard entry throws on the first tick of a tree that loaded cleanly.
+- **A provider restart republishes an inventory that fails the refuse-hookless gate**
+  while in AUTO (#233).
+
+In both cases the declared `*->FAULT` mode hooks run, and recovery is the ordinary
+`FAULT -> MANUAL` path. An operator who finds a machine in FAULT should check the runtime
+log and `GET /v0/automation/status` (`execution_reason: terminal_failure` indicates the
+engine faulted rather than an operator changing mode).
+
 ## Standard Startup Sequence
 
 1. Start runtime (enters `IDLE`).

@@ -291,16 +291,29 @@ void BTRuntime::tick_loop() {
             // loop) and fires the declared *->FAULT hooks that drive outputs to
             // their safe state. Called outside health_mutex_, and set_mode
             // releases its own lock before dispatching callbacks.
+            const auto mode_before = mode_manager_.current_mode();
             std::string mode_error;
-            if (!mode_manager_.set_mode(RuntimeMode::FAULT, mode_error)) {
-                // Near-impossible (only a concurrent transition that already left
-                // AUTO). Say so loudly: autonomous actuation is still live.
+            const bool set_ok = mode_manager_.set_mode(RuntimeMode::FAULT, mode_error);
+            const auto mode_after = mode_manager_.current_mode();
+
+            // What matters for safety is only whether we are out of AUTO, so
+            // report on that rather than on the call's return value. Any -> FAULT
+            // is always valid and a before-hook can neither veto it nor abort it
+            // by throwing, so a false return means a concurrent transition
+            // already moved us -- in which case the gate at the top of this loop
+            // has stopped ticking and actuation is halted regardless.
+            if (mode_after == RuntimeMode::AUTO) {
                 LOG_ERROR(
-                    "[BTRuntime] Could not drive FAULT after a tick exception, autonomous "
-                    "actuation may still be running: "
+                    "[BTRuntime] Still in AUTO after a tick exception; autonomous actuation may still be "
+                    "running: "
                     << mode_error);
+            } else if (mode_before == RuntimeMode::FAULT) {
+                // set_mode() no-ops when already in the target mode, so no hooks
+                // ran here and this tick changed nothing.
+                LOG_WARN("[BTRuntime] Tick exception while already in FAULT; autonomous actuation already halted.");
             } else {
-                LOG_ERROR("[BTRuntime] Drove FAULT after a tick exception; autonomous actuation halted.");
+                LOG_ERROR("[BTRuntime] Halted autonomous actuation after a tick exception; mode is now "
+                          << mode_to_string(mode_after) << (set_ok ? "." : " (raced a concurrent transition)."));
             }
         }
 
