@@ -202,6 +202,59 @@ TEST(BTRuntimeTest, ConcurrentStatusReadsDuringReloadAreRaceFree) {
     std::filesystem::remove(tree_path, ec);
 }
 
+// A tick that throws for real. Every BT node in this codebase catches its own
+// errors and returns FAILURE, so no tree can provoke a tick exception -- but
+// BT.CPP can still raise one out of tickOnce(), which is why the handler exists.
+// Substituting the tick is the only honest way to exercise that path.
+class ThrowingTickRuntime : public anolis::automation::BTRuntime {
+public:
+    using BTRuntime::BTRuntime;
+    BT::NodeStatus tick() override { throw std::runtime_error("induced tick failure"); }
+};
+
+// #279: a tick exception must HALT autonomous actuation, not merely report it.
+// Without the fix the loop simply ticks again and the runtime stays in AUTO with
+// outputs latched at whatever the tree last commanded -- and the DCMT firmware
+// command watchdog does not catch it, because it is fed by the state poller on a
+// separate thread that this exception does not touch.
+TEST(BTRuntimeTest, TickExceptionDrivesFault) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
+
+    ThrowingTickRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-throwing", kSimpleTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+
+    // The tick loop only ticks in AUTO, so the exception path is only reachable there.
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    // Wait for the fault rather than sleeping a fixed period.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mode_manager.current_mode() != RuntimeMode::FAULT && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    EXPECT_EQ(RuntimeMode::FAULT, mode_manager.current_mode())
+        << "a throwing tick left the runtime in " << mode_to_string(mode_manager.current_mode())
+        << "; autonomous actuation was not halted";
+
+    // Confirm the exception was actually observed, so a pass cannot come from
+    // the loop never having run.
+    EXPECT_GT(runtime.get_health().error_count, 0);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
 // Pins the C++ AutomationStatus -> wire-string mapping. The wire side
 // (execution_status enum in runtime-http.openapi.v0.yaml) is validated against a
 // live response by the runtime-http conformance check; this guards the C++ half

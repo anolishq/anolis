@@ -278,6 +278,30 @@ void BTRuntime::tick_loop() {
             if (fault_sink_) {
                 fault_sink_("tick", e.what(), fault_ms);
             }
+
+            // Halt autonomous actuation (#279). Emitting an event is observation,
+            // not intervention: without this the loop simply ticks again, the
+            // runtime stays in AUTO, and outputs stay at whatever the tree last
+            // commanded. Nothing else catches it -- the firmware command watchdog
+            // is a BUS-liveness watchdog, and the state poller (a separate thread,
+            // unaffected by this exception) keeps it fed, so it never trips.
+            //
+            // Any -> FAULT is always a valid transition and cannot be vetoed, so
+            // this both stops further ticking (the AUTO gate at the top of the
+            // loop) and fires the declared *->FAULT hooks that drive outputs to
+            // their safe state. Called outside health_mutex_, and set_mode
+            // releases its own lock before dispatching callbacks.
+            std::string mode_error;
+            if (!mode_manager_.set_mode(RuntimeMode::FAULT, mode_error)) {
+                // Near-impossible (only a concurrent transition that already left
+                // AUTO). Say so loudly: autonomous actuation is still live.
+                LOG_ERROR(
+                    "[BTRuntime] Could not drive FAULT after a tick exception, autonomous "
+                    "actuation may still be running: "
+                    << mode_error);
+            } else {
+                LOG_ERROR("[BTRuntime] Drove FAULT after a tick exception; autonomous actuation halted.");
+            }
         }
 
         // Sleep until next tick
