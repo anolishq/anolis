@@ -278,6 +278,43 @@ void BTRuntime::tick_loop() {
             if (fault_sink_) {
                 fault_sink_("tick", e.what(), fault_ms);
             }
+
+            // Halt autonomous actuation (#279). Emitting an event is observation,
+            // not intervention: without this the loop simply ticks again, the
+            // runtime stays in AUTO, and outputs stay at whatever the tree last
+            // commanded. Nothing else catches it -- the firmware command watchdog
+            // is a BUS-liveness watchdog, and the state poller (a separate thread,
+            // unaffected by this exception) keeps it fed, so it never trips.
+            //
+            // Any -> FAULT is always a valid transition and cannot be vetoed, so
+            // this both stops further ticking (the AUTO gate at the top of the
+            // loop) and fires the declared *->FAULT hooks that drive outputs to
+            // their safe state. Called outside health_mutex_, and set_mode
+            // releases its own lock before dispatching callbacks.
+            const auto mode_before = mode_manager_.current_mode();
+            std::string mode_error;
+            const bool set_ok = mode_manager_.set_mode(RuntimeMode::FAULT, mode_error);
+            const auto mode_after = mode_manager_.current_mode();
+
+            // What matters for safety is only whether we are out of AUTO, so
+            // report on that rather than on the call's return value. Any -> FAULT
+            // is always valid and a before-hook can neither veto it nor abort it
+            // by throwing, so a false return means a concurrent transition
+            // already moved us -- in which case the gate at the top of this loop
+            // has stopped ticking and actuation is halted regardless.
+            if (mode_after == RuntimeMode::AUTO) {
+                LOG_ERROR(
+                    "[BTRuntime] Still in AUTO after a tick exception; autonomous actuation may still be "
+                    "running: "
+                    << mode_error);
+            } else if (mode_before == RuntimeMode::FAULT) {
+                // set_mode() no-ops when already in the target mode, so no hooks
+                // ran here and this tick changed nothing.
+                LOG_WARN("[BTRuntime] Tick exception while already in FAULT; autonomous actuation already halted.");
+            } else {
+                LOG_ERROR("[BTRuntime] Halted autonomous actuation after a tick exception; mode is now "
+                          << mode_to_string(mode_after) << (set_ok ? "." : " (raced a concurrent transition)."));
+            }
         }
 
         // Sleep until next tick

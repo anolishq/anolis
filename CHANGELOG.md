@@ -100,6 +100,31 @@ commit messages only.
 
 ### Fixed
 
+- **A behaviour-tree tick exception no longer leaves the runtime actuating**
+  (anolishq/anolis#279). A tick that threw was caught, logged, counted, and
+  emitted as an `AutomationFaultEvent` — and then the loop ticked again. The
+  runtime stayed in AUTO and every actuator held whatever the tree last
+  commanded, indefinitely.
+
+  Nothing else caught it. The DCMT firmware command watchdog is a *bus*-liveness
+  watchdog, not a control-liveness one: it is fed by every reply builder,
+  including the routine state poll, and the poller runs on a separate thread that
+  a tick exception does not touch. So the watchdog stayed fed while the
+  controller was dead, the `*->FAULT` hooks never ran because nothing drove
+  FAULT, and `safety.safe_state` has exactly one trigger in the whole runtime
+  (`POST /v0/estop`).
+
+  The engine now drives FAULT from the exception handler, which stops further
+  ticking via the loop's own AUTO gate and fires the declared `*->FAULT` hooks.
+  This path is more reachable than it looks: BT nodes guard their inputs but not
+  their outputs, and a precondition script referencing an undefined blackboard
+  entry throws on the first tick of a tree that loaded cleanly — so an edited
+  tree can fault the engine on reload.
+
+  `GET /v0/automation/status` now reports `execution_reason: terminal_failure`
+  rather than `mode_gate` for this case, so the cause is not hidden behind its
+  own effect.
+
 - **A provider-supplied string could forge an InfluxDB row.** `escape_field_string`
   escaped only `"` and `\`, but line protocol is newline-delimited and a field
   string has no encoding for a literal newline. A raw `\n` in a provider value

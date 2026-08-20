@@ -250,6 +250,7 @@ private:
     // Event emitter (optional, for error notifications)
     std::shared_ptr<events::EventEmitter> event_emitter_;
     FaultSink fault_sink_;
+
     std::atomic<uint64_t> next_event_id_{1};
 };
 
