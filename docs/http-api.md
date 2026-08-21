@@ -70,7 +70,7 @@ Notes:
 1. Request currently requires `function_id`.
 2. Args use typed ADPP value encoding.
 
-### Safe-state (software e-stop)
+### Safe-state (software stop)
 
 1. `POST /v0/estop` - engage the latching software safe-state.
 2. `POST /v0/estop/clear` - release the latch.
@@ -200,7 +200,7 @@ curl -s -X POST http://127.0.0.1:8080/v0/parameters \
   -d '{"name":"temp_setpoint","value":30.0}' | jq
 ```
 
-### Software safe-state (e-stop)
+### Software safe-state (software stop)
 
 ```bash
 # Engage: runs the safe-state ladder and latches actuation.

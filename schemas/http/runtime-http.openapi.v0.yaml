@@ -403,16 +403,20 @@ paths:
     post:
       tags: [system]
       operationId: postEstop
-      summary: Engage the software safe-state (latching protective stop)
-      description: >-
+      summary: Engage the software safe-state (latching software stop)
+      description: |-
         Run the declared safe-state ladder and latch actuation. While latched,
         actuating calls to POST /v0/call are refused until POST /v0/estop/clear.
 
-        This is a CATEGORY 2 PROTECTIVE STOP (IEC 60204-1): it commands devices
-        that remain powered. It is NOT an emergency stop and cannot be one -- it
-        removes no power, and it requires the runtime, the providers and the bus
-        to be working. ISO 13850 does not permit a Category 2 stop as an
-        emergency stop. The machine's emergency stop is external hardware.
+        At best this is a Category 2 stop in the sense of IEC 60204-1:2005
+        §9.2.2 -- power is maintained at the actuators. It is an operational
+        stop, not a rated safety function: it has no determined performance
+        level, no standstill monitoring, and it does not execute at all if the
+        runtime, a provider, or the bus has failed.
+
+        It is NOT an emergency stop and cannot be one. ISO 13850:2015 §4.1.3
+        permits only Category 0 or 1 for an emergency stop. The machine's
+        emergency stop is external hardware.
 
         The path is named /v0/estop for wire compatibility only.
       responses:
