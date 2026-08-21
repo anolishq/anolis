@@ -403,11 +403,18 @@ paths:
     post:
       tags: [system]
       operationId: postEstop
-      summary: Engage the software safe-state (latching e-stop)
+      summary: Engage the software safe-state (latching protective stop)
       description: >-
         Run the declared safe-state ladder and latch actuation. While latched,
         actuating calls to POST /v0/call are refused until POST /v0/estop/clear.
-        A software stop, not a substitute for the hardware backplane cut.
+
+        This is a CATEGORY 2 PROTECTIVE STOP (IEC 60204-1): it commands devices
+        that remain powered. It is NOT an emergency stop and cannot be one -- it
+        removes no power, and it requires the runtime, the providers and the bus
+        to be working. ISO 13850 does not permit a Category 2 stop as an
+        emergency stop. The machine's emergency stop is external hardware.
+
+        The path is named /v0/estop for wire compatibility only.
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'

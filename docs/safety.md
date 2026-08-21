@@ -8,7 +8,90 @@ This guide defines safe operating procedures for Anolis-managed hardware systems
 2. Explicit control: mode transitions require operator action (`POST /v0/mode`).
 3. Controlled automation: in `AUTO`, manual calls are policy-gated (`BLOCK` or `OVERRIDE`).
 4. Visibility first: read-only diagnostics remain available across modes.
-5. Hardware safety remains external: software controls do not replace interlocks/E-stop systems.
+5. Hardware safety remains external: software controls do not replace interlocks or
+   emergency-stop systems. The runtime can only perform a Category 2 protective
+   stop — see below.
+
+## Stop categories — what software can and cannot be
+
+Read this before any other section. Most confusion about this system's safety
+behaviour comes from using one word, "e-stop", for three unrelated mechanisms.
+
+IEC 60204-1 §9.2.2 defines three stop categories, and ISO 13850 requires an
+emergency stop to be Category 0 or 1 — never Category 2:
+
+| Category | Behaviour | Power to actuators |
+| -------- | --------- | ------------------ |
+| **0** | immediate power removal, uncontrolled stop | removed immediately |
+| **1** | controlled stop, then power removal | available during the stop, then removed |
+| **2** | controlled stop, power maintained | never removed |
+
+**A bus command to a powered device is Category 2.** That is the whole of what
+this runtime can do on its own, and it means:
+
+> `POST /v0/estop` is a **protective stop**, not an emergency stop. It cannot
+> remove power, and no amount of runtime work makes it compliant as one. The
+> machine's emergency stop is external hardware, and it always is.
+
+A Category 2 protective stop is a legitimate and useful thing — it is the correct
+response to an automation fault, a dead controller, or a failed provider. It is
+just not the emergency stop, and it must never be presented as one.
+
+### The three mechanisms, kept apart
+
+| Mechanism | Category | Authority | Observable after? |
+| --------- | -------- | --------- | ----------------- |
+| Button + contactor cutting device power | 0 | hardware | no — devices are gone |
+| Hardware stop input to a device, device self-safes | 2 (1 with power removal) | firmware | yes |
+| `POST /v0/estop` / `safety.safe_state` ladder | 2 | runtime | yes |
+| Firmware command watchdog (bus goes quiet) | 2 | firmware | yes |
+
+Authority matters: every layer above can fail, so a stop is only as reliable as
+the lowest layer that can enforce it alone. The runtime is the weakest layer in
+this table, which is why it must never be the sole stop path on a machine that
+can hurt someone or destroy a batch.
+
+### Consequences that surprise people
+
+- **Under Category 0 there is nothing to read back.** Every device disappears at
+  once. That is the *success* signal, not a fault — but the runtime does not yet
+  know that, and reads it as a fleet of device failures (anolishq/anolis#284).
+- **Under Category 0 a motor coasts, by construction.** Power is gone, so an
+  H-bridge cannot brake. If a coast is unacceptable for the hazard, the answer is
+  Category 1 — controlled deceleration *then* power removal, which is a
+  contactor **plus** a signal path, not one instead of the other.
+- **Releasing an emergency stop must never restart the machine** (ISO 13850
+  §4.1.4). The runtime does not model this yet (anolishq/anolis#285).
+- **"Confirmed safe" is not always achievable.** Any reporting that claims it
+  unconditionally is asserting something the system cannot observe.
+
+### The machine profile already names this
+
+`machine-profile.yaml` has carried a `safety.estop_topology` field since before
+this section was written, with exactly the right two values and an accurate
+description of each one's software signature:
+
+- `power_cut` — the stop cuts actuator-board power. Signature: device blackout,
+  I/O failures accruing, recovery on release.
+- `signal` — the stop drives the boards' ESTOP inputs. Signature: `estop=true` in
+  device state, bus stays alive.
+
+Both are first-class supported wirings, and a machine that uses `power_cut` with
+its signal inputs unwired is a deliberate, correct design — not every device has
+a stop input, so the total-cut path has to exist.
+
+Two gaps, and they are the reason this distinction kept getting re-litigated:
+
+1. The field is declared **informational**: "nothing may branch runtime behavior
+   on these fields beyond presentation/interpretation". So the runtime knows the
+   answer and is forbidden from acting on it.
+2. Neither reference machine profile actually sets it.
+
+Promoting it from informational to behavioural — so the runtime can tell an
+expected `power_cut` blackout from a genuine fleet fault — is the substance of
+anolishq/anolis#284, and the smallest useful piece of anolishq/anolis#283.
+
+Design work on this model is tracked in anolishq/anolis#283.
 
 ## Runtime Mode Safety Semantics
 
@@ -116,18 +199,33 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 
 ## Emergency Response
 
-1. Immediate software stop: `POST /v0/estop` engages the latching software
-   safe-state (runs the declared safe-state ladder and refuses further
-   actuating calls until `POST /v0/estop/clear`). It works whether or not
-   automation is enabled; on an automation machine it also drives `FAULT`.
-2. If software path is insufficient: terminate runtime process.
-3. If physical hazard persists: use hardware E-stop / power isolation.
-4. After incident: inspect hardware, collect logs, and restart from full startup checklist.
+**If there is a physical hazard — a person at risk, fire, a machine damaging
+itself — hit the hardware emergency stop. First, not third.** It is the only
+control that removes power, and it is the only one that works when the software
+is the thing that has failed.
 
-The software e-stop is a convenience within reach of an operator; per principle
-5 it does not replace the hardware E-stop / interlocks. A machine that declares
-no software safe-state (`safety.safe_state`) reports `software_safe_state:
-"none"` and still latches, but performs no safe-state actuation.
+The order below was previously written the other way round, with the software
+stop first. That is wrong and was corrected: a control that cannot remove power
+must never be the first reach in an emergency.
+
+1. **Physical hazard → hardware emergency stop / power isolation.** Category 0.
+   No software involvement, works regardless of runtime or provider state.
+2. **Process or control problem, no physical hazard →** `POST /v0/estop`. This is
+   a Category 2 *protective* stop: it runs the declared safe-state ladder and
+   refuses further actuating calls until `POST /v0/estop/clear`. It works whether
+   or not automation is enabled; on an automation machine it also drives `FAULT`.
+   It requires the runtime, the providers, and the bus to be working.
+3. **Runtime misbehaving and unresponsive →** terminate the runtime process. On
+   machines with a firmware command watchdog this also causes devices to self-safe
+   once bus traffic stops; on machines without one it leaves outputs latched, so
+   prefer step 1.
+4. **After any incident:** inspect hardware, collect logs, and restart from the
+   full startup checklist.
+
+Per principle 5, the software protective stop does not replace the hardware
+emergency stop or interlocks. A machine that declares no software safe-state
+(`safety.safe_state`) reports `software_safe_state: "none"` and still latches,
+but performs no safe-state actuation at all.
 
 ## Common Risks and Mitigations
 
