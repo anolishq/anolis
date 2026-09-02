@@ -89,10 +89,10 @@ runtime refuses `MANUAL -> AUTO` (HTTP 409) without them — see
 [safety.md](safety.md#manual---auto). Add a `*->FAULT` hook that drives actuators
 to a safe value:
 
-> This hook is **not** what the software e-stop runs. `POST /v0/estop` runs
+> This hook is **not** what the software stop runs. `POST /v0/estop` runs
 > `safety.safe_state`, which this gate does not check — declare both. A machine
-> with the hook and no `safety.safe_state` passes the gate while its e-stop
-> drives nothing, and the e-stop latch then suppresses the hook as well.
+> with the hook and no `safety.safe_state` passes the gate while its software stop
+> drives nothing, and the software-stop latch then suppresses the hook as well.
 
 ```yaml
 automation:
