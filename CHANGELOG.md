@@ -13,7 +13,43 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-09-10
+
 ### Added
+
+- **Startup preflight for declared hook and safe-state calls** (#252). Once
+  providers have reported their capabilities, every call declared in
+  `safety.safe_state` and `automation.mode_transition_hooks` is dry-run against
+  the live registry, and the ones that cannot resolve or type-check are logged.
+  These calls otherwise only execute during a mode transition or an e-stop, so a
+  broken one stayed invisible until the moment it was needed. `--check-config`
+  cannot cover this: it exits before any provider starts, so no `ArgSpec` exists.
+  The log names which ladder rung `POST /v0/estop` would actually run, warns when
+  a machine declares no software safe state at all, and re-runs after a provider
+  restart republishes its inventory. It reports; it never refuses to start.
+  Passing means *dispatchable*, not *will run* — runtime gating (IDLE/AUTO mode,
+  the actuation latch) lives in `execute_call` and is deliberately not simulated.
+
+- **The startup preflight now names the specific hazard behind #251.** A machine
+  can declare its safe state twice over, for two different triggers:
+  `safety.safe_state` is what `POST /v0/estop` runs, while a `-> FAULT` entry in
+  `automation.mode_transition_hooks` is what an autonomous fault runs. The
+  refuse-hookless gate only ever asks for the second, so following its refusal
+  message produces a machine whose e-stop reads nothing.
+
+  Pressing the e-stop there is worse than not pressing it: the latch engages
+  before FAULT is entered, so it also **suppresses** the `-> FAULT` hooks that
+  reaching FAULT by any other route would have run. The preflight previously said
+  only "no software safe-state is declared"; on this shape it now says that the
+  hooks exist, that the e-stop will not run them, and that it will prevent them
+  from running. `has_fault_safe_state_hook` is shared with the gate rather than
+  reimplemented, so the two cannot disagree about what a fault safe-state hook is.
+
+  Diagnostic only — no behaviour change. Two attempts to fix this in the runtime
+  were closed after review (#259, #260): the runtime cannot know whether a
+  machine's FAULT hooks constitute a safe state for that machine in its current
+  state, and on DCMT hardware sending them can clear a watchdog trip and release
+  a brake (#261).
 
 - **Device identity is no longer discarded on arrival** (anolishq/anolis-provider-bread#126).
   The runtime read exactly two descriptor tags — `hw.bus_path` and
@@ -63,6 +99,34 @@ commit messages only.
   unattributable regardless.
 
 ### Changed
+
+- **`POST /v0/estop` is documented as what it is: a software stop, not an
+  emergency stop.** Most confusion about this system's safety behaviour came
+  from using one word for three unrelated mechanisms — the physical button and
+  contactor, the `safety.safe_state` ladder, and the firmware command watchdog —
+  and then comparing them as alternatives.
+
+  `docs/safety.md` now opens with the stop categories from IEC 60204-1:2005
+  §9.2.2, and states plainly that a bus command to a powered device is at best a
+  Category 2 stop: it removes no power, has no determined performance level, is
+  not necessarily a *controlled* stop in the standard's sense, and does not
+  execute at all if the runtime, a provider, or the bus has failed. ISO
+  13850:2015 §4.1.3 permits only Category 0 or 1 as an emergency stop, so no
+  amount of runtime work makes this endpoint one. The endpoint's OpenAPI
+  description says the same. The path keeps its name for wire compatibility.
+
+  `Emergency Response` previously listed the software stop **first** and the
+  hardware e-stop **third**, which teaches an operator to reach for a control
+  that cannot remove power while a person is at risk. Hardware is now first for
+  any physical hazard, with an explicit rule for when the operator cannot tell
+  which case applies.
+
+  Also records two consequences that keep surprising people: under a Category 0
+  stop every device disappears at once and that is the *success* signal rather
+  than a fault, and under Category 0 a motor coasts by construction because an
+  unpowered H-bridge cannot brake.
+
+  Documentation and one endpoint description only — no behaviour change.
 
 - **The refuse-hookless gate no longer steers operators into a machine with no
   e-stop** (#258). A machine declares its safe state twice over, for two
@@ -125,6 +189,23 @@ commit messages only.
   rather than `mode_gate` for this case, so the cause is not hidden behind its
   own effect.
 
+- **A `uint64` provider parameter could not be driven from any config-declared
+  hook** (#252). Call arguments in `safety.safe_state` and
+  `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
+  no unsigned alternative — every YAML integer became `int64` and `CallRouter`
+  rejected it as a type mismatch. On the reference bioreactor this left the
+  heater (`set_open_duty_pct`, uint64 args) with **no expressible software safe
+  state**: the e-stop ladder ran and that call failed. `CallRouter` now
+  reconciles argument types against the target's declared `ArgSpec` before
+  validating — `int64 <-> uint64`, and integer to `double` (so `setpoint_c: 0`
+  works alongside `duty_pct: 0` on the same device). Widening only, and never
+  silent: a negative into a `uint64`, a value above `INT64_MAX` into an `int64`,
+  or an integer past 2^53 into a `double` is **refused, not wrapped or rounded**.
+  Declared min/max bounds still apply to the converted value, and `double` is
+  never narrowed to an integer. Applies to every caller, so `POST /v0/call` also
+  now accepts an in-range `int64` for an unsigned parameter where it previously
+  returned 400.
+
 - **A provider-supplied string could forge an InfluxDB row.** `escape_field_string`
   escaped only `"` and `\`, but line protocol is newline-delimited and a field
   string has no encoding for a literal newline. A raw `\n` in a provider value
@@ -139,25 +220,6 @@ commit messages only.
   escapes and any other C0/DEL byte is dropped. This affected every
   provider-controlled string field, `anolis_signal`'s `value_string` included,
   so it predates the health-identity fields that prompted the audit.
-
-- **The staged bundle's `.sha256` sidecar could not be checked with
-  `sha256sum -c`** (#268). `--stage` piped the digest through `awk '{print $1}'`,
-  so the sidecar held a bare 64-character hash with no filename. The air-gap
-  operator's obvious command — the single most important thing they do after
-  carrying a tarball across a trust boundary on removable media — failed with
-  `no properly formatted checksum lines found`, which reads like a corrupt
-  download rather than a misformatted checksum file. The digest itself was
-  always correct.
-
-  The sidecar is now standard `sha256sum` output, generated from within the
-  staging directory so the recorded filename is bare; an absolute path would
-  name a file that does not exist on the target machine after the handoff. This
-  also aligns `--stage` with the release workflow's `SHA256SUMS`, which already
-  used the two-field convention. The bundle-internal `checksums.sha256` was
-  already correct and is unchanged.
-
-  `--stage` now also prints the verify command above the install hint, so the
-  order shown is the order the operator should follow.
 
 - **`install.sh` never enabled I2C on a Pi with a display** (#249). `phase_i2c`
   decided the bus was already up by globbing `/dev/i2c-*`, which matches the
@@ -180,23 +242,6 @@ commit messages only.
   behaviour — including a DDC-only adapter set, which is what a desktop Pi with
   no dtparam actually looks like.
 
-- **A `uint64` provider parameter could not be driven from any config-declared
-  hook** (#252). Call arguments in `safety.safe_state` and
-  `automation.mode_transition_hooks` are parsed into `ParameterValue`, which has
-  no unsigned alternative — every YAML integer became `int64` and `CallRouter`
-  rejected it as a type mismatch. On the reference bioreactor this left the
-  heater (`set_open_duty_pct`, uint64 args) with **no expressible software safe
-  state**: the e-stop ladder ran and that call failed. `CallRouter` now
-  reconciles argument types against the target's declared `ArgSpec` before
-  validating — `int64 <-> uint64`, and integer to `double` (so `setpoint_c: 0`
-  works alongside `duty_pct: 0` on the same device). Widening only, and never
-  silent: a negative into a `uint64`, a value above `INT64_MAX` into an `int64`,
-  or an integer past 2^53 into a `double` is **refused, not wrapped or rounded**.
-  Declared min/max bounds still apply to the converted value, and `double` is
-  never narrowed to an integer. Applies to every caller, so `POST /v0/call` also
-  now accepts an in-range `int64` for an unsigned parameter where it previously
-  returned 400.
-
 - **The uninstall's data-purge instruction named a directory that does not
   exist** (#247). It told the operator their recorded telemetry lived in
   `/var/lib/influxdb2`; the Debian `influxdb2` package stores under
@@ -212,41 +257,24 @@ commit messages only.
   list was modified, and enough to resurrect the repo on a later reinstall) and
   the non-empty `/etc/influxdb` and `/etc/grafana` that dpkg declines to remove.
 
-### Added
+- **The staged bundle's `.sha256` sidecar could not be checked with
+  `sha256sum -c`** (#268). `--stage` piped the digest through `awk '{print $1}'`,
+  so the sidecar held a bare 64-character hash with no filename. The air-gap
+  operator's obvious command — the single most important thing they do after
+  carrying a tarball across a trust boundary on removable media — failed with
+  `no properly formatted checksum lines found`, which reads like a corrupt
+  download rather than a misformatted checksum file. The digest itself was
+  always correct.
 
-- **The startup preflight now names the specific hazard behind #251.** A machine
-  can declare its safe state twice over, for two different triggers:
-  `safety.safe_state` is what `POST /v0/estop` runs, while a `-> FAULT` entry in
-  `automation.mode_transition_hooks` is what an autonomous fault runs. The
-  refuse-hookless gate only ever asks for the second, so following its refusal
-  message produces a machine whose e-stop reads nothing.
+  The sidecar is now standard `sha256sum` output, generated from within the
+  staging directory so the recorded filename is bare; an absolute path would
+  name a file that does not exist on the target machine after the handoff. This
+  also aligns `--stage` with the release workflow's `SHA256SUMS`, which already
+  used the two-field convention. The bundle-internal `checksums.sha256` was
+  already correct and is unchanged.
 
-  Pressing the e-stop there is worse than not pressing it: the latch engages
-  before FAULT is entered, so it also **suppresses** the `-> FAULT` hooks that
-  reaching FAULT by any other route would have run. The preflight previously said
-  only "no software safe-state is declared"; on this shape it now says that the
-  hooks exist, that the e-stop will not run them, and that it will prevent them
-  from running. `has_fault_safe_state_hook` is shared with the gate rather than
-  reimplemented, so the two cannot disagree about what a fault safe-state hook is.
-
-  Diagnostic only — no behaviour change. Two attempts to fix this in the runtime
-  were closed after review (#259, #260): the runtime cannot know whether a
-  machine's FAULT hooks constitute a safe state for that machine in its current
-  state, and on DCMT hardware sending them can clear a watchdog trip and release
-  a brake (#261).
-
-- **Startup preflight for declared hook and safe-state calls** (#252). Once
-  providers have reported their capabilities, every call declared in
-  `safety.safe_state` and `automation.mode_transition_hooks` is dry-run against
-  the live registry, and the ones that cannot resolve or type-check are logged.
-  These calls otherwise only execute during a mode transition or an e-stop, so a
-  broken one stayed invisible until the moment it was needed. `--check-config`
-  cannot cover this: it exits before any provider starts, so no `ArgSpec` exists.
-  The log names which ladder rung `POST /v0/estop` would actually run, warns when
-  a machine declares no software safe state at all, and re-runs after a provider
-  restart republishes its inventory. It reports; it never refuses to start.
-  Passing means *dispatchable*, not *will run* — runtime gating (IDLE/AUTO mode,
-  the actuation latch) lives in `execute_call` and is deliberately not simulated.
+  `--stage` now also prints the verify command above the install hint, so the
+  order shown is the order the operator should follow.
 
 ## [0.1.40] - 2026-08-02
 
