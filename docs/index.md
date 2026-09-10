@@ -10,6 +10,13 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 4. [configuration.md](configuration.md) - How to author and validate runtime YAML.
 5. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
 
+## Deployment
+
+1. [deploy/README.md](deploy/README.md) - One provisioning engine, and the routes to it.
+2. [deploy/install-sh.md](deploy/install-sh.md) - Canonical headless deploy, online or offline.
+3. [deploy/workbench-ssh.md](deploy/workbench-ssh.md) - Provision a remote machine over SSH.
+4. [deploy/developer.md](deploy/developer.md) - Running a locally built runtime on a rig.
+
 ## Contracts and Schemas
 
 1. [schemas/README.md](https://github.com/anolishq/anolis/blob/main/schemas/README.md) - Machine-readable contract artifacts.

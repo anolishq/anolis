@@ -99,6 +99,14 @@ curl -s http://127.0.0.1:8080/v0/state/sim0/motorctl0 | jq
 
 See [http-api.md](http-api.md) for full API details.
 
+## Deploying to a real machine
+
+This guide builds and runs from source. To provision an actual machine — a Pi on
+a bench, with systemd and a pinned set of components — see
+[deploy/README.md](deploy/README.md). Everything there routes through one engine,
+`install.sh`, whether you reach it from the shell, the CLI wrapper, or the
+workbench UI.
+
 ## Automation Quickstart
 
 Enable automation in runtime config:
