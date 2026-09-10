@@ -6,9 +6,10 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 
 1. [getting-started.md](getting-started.md) - Build, run, and first validation.
 2. [architecture.md](architecture.md) - Runtime architecture and subsystem boundaries.
-3. [system-surfaces.md](system-surfaces.md) - Boundary & ownership map of every external surface (org-wide).
-4. [configuration.md](configuration.md) - How to author and validate runtime YAML.
-5. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
+3. [decoupling.md](decoupling.md) - The ecosystem model and the invariant every change is tested against.
+4. [system-surfaces.md](system-surfaces.md) - Boundary & ownership map of every external surface (org-wide).
+5. [configuration.md](configuration.md) - How to author and validate runtime YAML.
+6. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
 
 ## Deployment
 
@@ -29,6 +30,7 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 2. [automation.md](automation.md) - Automation architecture, mode semantics, and operation.
 3. [providers.md](providers.md) - Provider model and runtime interaction rules.
 4. [safety.md](safety.md) - Safety boundaries and operational expectations.
+5. [rfcs/provider-declared-safe-state.md](rfcs/provider-declared-safe-state.md) - Accepted-with-revisions design for provider-owned safe state.
 
 ## Contributor Reference
 
