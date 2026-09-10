@@ -11,7 +11,7 @@ The surfaces above it are conveniences, not alternatives:
 
 | route | what it is | guide |
 | --- | --- | --- |
-| `install.sh` directly | Headless. No Python, no UI, no network on the target if you stage first. | [install-sh.md](install-sh.md) |
+| `install.sh` directly | Headless. Online from a config, or stage a bundle elsewhere and install it with nothing but a shell on the target. | [install-sh.md](install-sh.md) |
 | `anolis-provision` | A CLI wrapper that manages projects and adds SSH provisioning of a remote machine. Delegates the install itself. | [workbench-ssh.md](workbench-ssh.md) |
 | Workbench UI | A browser tool that authors the config and drives the same path. | [workbench-ssh.md](workbench-ssh.md) |
 | Build from source | For working on the runtime or a provider. | [developer.md](developer.md) |
@@ -28,10 +28,12 @@ means editing the pins and re-running, not passing a different flag.
 
 ## What gets installed
 
-One systemd unit — **`anolis-runtime.service`**. Providers are **child processes
-of the runtime**, not separate units, so `journalctl -u anolis-runtime` carries
-everything. Optional extras add their own units: `anolis-telemetry-export.service`,
-and InfluxDB and Grafana if you ask for observability.
+One systemd unit — **`anolis-runtime.service`**. Providers are **forked child
+processes** of the runtime, not separate units, so their diagnostics reach
+`journalctl -u anolis-runtime` — via **stderr**, since a provider's stdout is the
+protocol pipe. Optional extras add their own units:
+`anolis-telemetry-export.service`, and InfluxDB and Grafana if you ask for
+observability.
 
 ## Before you deploy anything
 

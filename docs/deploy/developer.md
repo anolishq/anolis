@@ -10,12 +10,21 @@ onto a rig and iterating on it.
 config directory are enough — no install, no systemd, no root:
 
 ```bash
+cmake --preset dev-release && cmake --build --preset dev-release
 ./build/dev-release/core/anolis-runtime --config /path/to/runtime.yaml
 ```
+
+(`just` builds `ci-linux-release` by default, so ask for the `dev-release` preset
+explicitly if that is the path you want.)
 
 Provider paths in that config are resolved relative to the working directory, so
 a dev config can point straight at sibling build trees. This is the fastest loop
 and the one to use while changing code.
+
+**That trick is dev-only.** The runtime `execv`s a provider — there is no `PATH`
+lookup — and the installed unit sets no `WorkingDirectory`, so systemd's CWD is
+`/`. A relative provider path copied from a dev config into an installed
+`runtime.yaml` will not resolve.
 
 **Install it like a real deployment.** When you need to test the deployed shape —
 systemd, the `anolis` user, the install prefix, log routing — use
@@ -28,16 +37,21 @@ are where "works on my box" comes from.
 ./build/dev-release/core/anolis-runtime --check-config /path/to/runtime.yaml
 ```
 
-Know what this does and does not catch. It validates structure and exits **before
-any provider starts**, so no `ArgSpec` exists yet and it **cannot check the
-arguments of a declared hook**. A safe-state call with a wrong argument name
-passes `--check-config` cleanly and fails at the moment it is needed.
+Know what this does and does not catch. It validates structure — including
+rejecting a non-scalar or out-of-range argument value — but exits **before any
+provider starts**, so no `ArgSpec` exists and it **cannot check argument names or
+types against the provider's declaration**. A safe-state call with a misspelled
+argument name passes `--check-config` cleanly and fails at the moment it is needed.
 
-The runtime's **startup preflight** is what covers that gap: it dry-runs every
-declared `safety.safe_state` and `automation.mode_transition_hooks` call against
-the live registry once providers report capabilities. Start the runtime against
-the real inventory and read that output — it is the only check that exercises
-those calls before an emergency does.
+The runtime's **startup preflight** covers part of that gap: it dry-runs declared
+safe-state calls against the live registry once providers report capabilities. Its
+limits are described in [install-sh.md](install-sh.md#the-startup-preflight), and
+two of them matter here — the `mode_transition_hooks` half runs only when
+`automation.enabled` is true, and the whole preflight is skipped if a provider
+fails to start. It also validates *dispatchability*, not that a call will run:
+runtime gating such as the actuation latch is deliberately not simulated, which is
+exactly why a declared `-> FAULT` hook can pass preflight and still be refused
+during a software stop.
 
 ## Iterating against a rig
 
@@ -53,12 +67,16 @@ If you installed with `install.sh`, `--rollback` restores the previous binaries
 from `<prefix>/.prev` and restarts. It restores **binaries only** — config is left
 as it is.
 
+Note that a deploy driven through the workbench uses the `install.sh` from the
+*pinned runtime release*, not your working copy. Editing `tools/install.sh`
+locally does not change what a remote provision runs.
+
 ## Building a bundle for a target you do not have
 
 `--stage` needs no root and no target, and cross-stages by architecture:
 
 ```bash
-./install.sh --stage ./out --arch arm64 --project /path/to/bioreactor-v1
+tools/install.sh --stage ./out --arch arm64 --project /path/to/bioreactor-v1
 ```
 
 Useful for checking that a config assembles and that its pinned components
