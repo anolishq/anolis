@@ -20,5 +20,6 @@
     "software_safe_state": "hooks",
     "latched_at_epoch_ms": null,
     "uncovered_actuating_functions": 0
-  }
+  },
+  "device_loss_latched": []
 }

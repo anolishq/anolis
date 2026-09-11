@@ -89,6 +89,22 @@ Notes:
    `GET /v0/runtime/status`.
 4. This is a software stop, not a substitute for the hardware backplane cut.
 
+### Device-loss latch
+
+`GET /v0/runtime/status` carries `device_loss_latched`: an array of device
+handles that went unreachable at the transport level and have not been re-armed.
+
+Notes:
+
+1. While a device is latched, behaviour-tree calls that actuate it are refused
+   with `FAILED_PRECONDITION`. Manual `POST /v0/call`, mode-transition hooks and
+   safe-state calls are unaffected — an operator commanding a device they can
+   see is the deliberate action that "permit restarting" means.
+2. Latches clear on a `MANUAL -> AUTO` transition, and on nothing else. Releasing
+   an emergency stop must not restart the machine (ISO 13850 §4.1.4).
+3. The array is always present and always an array, empty when nothing is
+   latched.
+
 ### Automation and parameters
 
 1. `GET /v0/mode`

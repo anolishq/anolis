@@ -26,6 +26,7 @@ class ModeManager;
 namespace control {
 
 class IActuationLatch;
+class IDeviceLossLatch;
 
 /**
  * @brief High-level request for executing a device function.
@@ -39,6 +40,10 @@ struct CallRequest {
     std::string function_name;  // Optional selector used by automation/internal callers
     std::map<std::string, anolis::deviceprovider::v1::Value> args;
     bool is_automated = false;  // true if called from BT automation, false if manual (HTTP/UI)
+    // True only for calls issued by the behaviour tree's control loop. Narrower
+    // than `is_automated`, which mode-transition hooks also set: the device-loss
+    // latch must block the tree without blocking the hooks that re-arm it (#285).
+    bool is_behavior_tree = false;
     // true only for e-stop safe-state actions. Bypasses IDLE/AUTO gating and the
     // actuation latch so the safe-state ladder can still drive actuators while
     // the latch blocks every other actuating call. Never set from an HTTP call.
@@ -98,6 +103,18 @@ public:
     void set_actuation_latch(const IActuationLatch *latch);
 
     /**
+     * @brief Supply the per-device loss latch (#285).
+     *
+     * Refuses BEHAVIOUR-TREE calls to a device that went unreachable and has not
+     * been re-armed. Deliberately not applied to mode-transition hooks: those
+     * carry `is_automated` too, and `AUTO -> MANUAL` is `fail_on_error: true`, so
+     * refusing them fails the before-callback and VETOES the transition --
+     * stranding the operator in AUTO with no way to re-arm. That is #251's shape,
+     * and refusing a zeroing command from a hook has no safety value anyway.
+     */
+    void set_device_loss_latch(const IDeviceLossLatch *latch);
+
+    /**
      * @brief Execute a validated device function call.
      *
      * Error handling:
@@ -126,7 +143,8 @@ private:
     state::StateCache &state_cache_;
     automation::ModeManager *mode_manager_ = nullptr;  // optional
     std::string manual_gating_policy_ = "BLOCK";
-    const IActuationLatch *actuation_latch_ = nullptr;  // optional e-stop latch view
+    const IActuationLatch *actuation_latch_ = nullptr;     // optional e-stop latch view
+    const IDeviceLossLatch *device_loss_latch_ = nullptr;  // optional per-device loss latch view
 
     // Per-provider lock table for serialized access (v0: prevent concurrent calls to same provider).
     // Callers hold a shared_ptr copy so lock lifetime is independent of lock-table mutation scope.

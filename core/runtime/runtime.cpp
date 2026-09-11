@@ -153,6 +153,15 @@ bool Runtime::init_core_services(std::string & /*error*/) {
         std::make_unique<control::SafeStateController>(*registry_, *call_router_, provider_registry_, config_.safety);
     call_router_->set_actuation_latch(safe_state_controller_.get());
 
+    // Per-device loss latch (#285). Blocks the behaviour tree from re-commanding
+    // a device that went unreachable, until an operator deliberately re-enters
+    // AUTO. Owned here rather than by StateCache because `anolis_control` links
+    // `anolis_state` and not the reverse; StateCache reaches it through the
+    // reachability sink wired below.
+    device_loss_latch_ = std::make_unique<control::DeviceLossLatch>();
+    call_router_->set_device_loss_latch(device_loss_latch_.get());
+    wire_device_loss_latch();
+
     // Create provider supervisor
     supervisor_ = std::make_unique<provider::ProviderSupervisor>();
     LOG_INFO("[Runtime] Provider supervisor created");
@@ -502,6 +511,23 @@ bool Runtime::init_automation(std::string &error) {
 
     // Register mode change callback to emit telemetry events (only if automation enabled)
     if (mode_manager_) {
+        // Re-arm device-loss latches on the deliberate MANUAL -> AUTO transition
+        // (#285). Registered as an AFTER-change callback, not a before-change
+        // one: a vetoed transition must not clear the latch.
+        mode_manager_->on_mode_change([this](automation::RuntimeMode prev, automation::RuntimeMode next) {
+            if (prev != automation::RuntimeMode::MANUAL || next != automation::RuntimeMode::AUTO) {
+                return;
+            }
+            const auto released = device_loss_latch_->release_all();
+            for (const auto &handle : released) {
+                LOG_WARN("[Runtime] re-armed " << handle << " for automation (MANUAL -> AUTO)");
+            }
+            if (!released.empty()) {
+                LOG_INFO("[Runtime] " << released.size()
+                                      << " device loss latch(es) released by operator re-entry into AUTO");
+            }
+        });
+
         mode_manager_->on_mode_change([this](automation::RuntimeMode prev, automation::RuntimeMode next) {
             if (event_emitter_) {
                 events::ModeChangeEvent event;
@@ -615,6 +641,8 @@ bool Runtime::init_http(std::string &error) {
         // Expose the e-stop controller to the HTTP surface (POST /v0/estop and
         // the status snapshot) regardless of automation.
         dependencies.safe_state = safe_state_controller_.get();
+        // Latched devices are reported on GET /v0/runtime/status (#285).
+        dependencies.device_loss_latch = device_loss_latch_.get();
         // Device-liveness staleness thresholds (#220): derived from the poll
         // cadence + device count unless explicitly overridden.
         dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
@@ -834,6 +862,79 @@ void Runtime::shutdown() {
 
     // Provider cleanup handled by ProviderRegistry destructor
     provider_registry_.clear();
+}
+
+void Runtime::wire_device_loss_latch() {
+    state_cache_->set_device_reachability_sink(
+        [this](const std::string &device_handle, bool reachable, anolis::deviceprovider::v1::Status_Code last_status) {
+            if (!reachable) {
+                // Latch on TRANSPORT-level unreachability only. A decode or
+                // frame-header mismatch reports INTERNAL and means the device
+                // answered -- the reference rig produced three such reads in
+                // three minutes while entirely healthy, and latching on those
+                // would force a human re-arm several times a day. A powered-off
+                // board cannot answer at all, so this loses no detection for the
+                // case the latch exists for.
+                const bool transport_failure =
+                    last_status == anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE ||
+                    last_status == anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+                if (transport_failure) {
+                    device_loss_latch_->engage(device_handle);
+                }
+                return;
+            }
+
+            // The device answered again. If it was latched, re-assert its
+            // declared safe state ONCE, in whatever mode we are in.
+            //
+            // A device that rebooted is already at its power-on default and
+            // these calls are harmless. A device that returned WITHOUT
+            // rebooting -- a bus outage shorter than the firmware watchdog --
+            // is still running its last command, and the latch now refuses the
+            // tree's next command to it, including a stop. Leaving that running
+            // would be worse than the behaviour this latch replaces.
+            if (device_loss_latch_->is_latched(device_handle)) {
+                reissue_safe_state_for(device_handle);
+            }
+        });
+}
+
+void Runtime::reissue_safe_state_for(const std::string &device_handle) {
+    int issued = 0;
+    for (const auto &call : config_.safety.safe_state.hooks) {
+        if (call.device_handle != device_handle) {
+            continue;
+        }
+        control::CallRequest request;
+        request.device_handle = call.device_handle;
+        request.function_id = call.function_id;
+        request.function_name = call.function_name;
+        for (const auto &[arg_name, arg_value] : call.args) {
+            request.args[arg_name] = control::to_provider_value(arg_value);
+        }
+        request.is_automated = true;
+        // Marked safe_state so it passes IDLE gating and the e-stop latch, the
+        // same exemption the ladder itself uses. Not a behaviour-tree call, so
+        // the device-loss latch does not refuse it either.
+        request.safe_state = true;
+
+        const auto result = call_router_->execute_call(request, provider_registry_);
+        if (result.success) {
+            ++issued;
+        } else {
+            LOG_WARN("[Runtime] safe-state re-issue failed for " << device_handle << "/" << call.function_name << ": "
+                                                                 << result.error_message);
+        }
+    }
+
+    if (issued > 0) {
+        LOG_WARN("[Runtime] " << device_handle << " returned while latched; re-asserted " << issued
+                              << " declared safe-state call(s). It stays latched until MANUAL -> AUTO.");
+    } else {
+        LOG_WARN("[Runtime] " << device_handle
+                              << " returned while latched, but no safety.safe_state hook targets it -- if it did not "
+                                 "reboot it may still be running its last command.");
+    }
 }
 
 bool Runtime::restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config) {

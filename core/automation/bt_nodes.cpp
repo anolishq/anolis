@@ -213,7 +213,8 @@ BT::NodeStatus CallDeviceNode::tick() {
     control::CallRequest request;
     request.device_handle = device_handle.value();
     request.function_name = function_name.value();
-    request.is_automated = true;  // Mark as automated (BT) call to bypass manual gating
+    request.is_automated = true;      // Mark as automated (BT) call to bypass manual gating
+    request.is_behavior_tree = true;  // Subject to the device-loss latch (#285)
 
     // Parse args JSON and convert to protobuf Value map
     auto args_str = getInput<std::string>("args").value_or("{}");

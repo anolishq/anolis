@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 #include "anolis_build_config.hpp"
+#include "control/i_device_loss_latch.hpp"
 #include "events/event_types.hpp"
 #include "health/health_snapshot.hpp"
 #include "provider/i_provider_handle.hpp"  // Updated include
@@ -77,10 +78,11 @@ struct HttpServerDependencies {
     std::shared_ptr<events::EventEmitter> event_emitter = nullptr;
     automation::ModeManager *mode_manager = nullptr;
     automation::ParameterManager *parameter_manager = nullptr;
-    telemetry::InfluxSink *telemetry_sink = nullptr;     // optional: telemetry health surface
-    runs::RunJournal *run_journal = nullptr;             // optional: run registry
-    control::SafeStateController *safe_state = nullptr;  // optional: e-stop safe-state + latch
-    health::StalenessPolicy staleness_policy;            // #220: device-liveness thresholds
+    telemetry::InfluxSink *telemetry_sink = nullptr;               // optional: telemetry health surface
+    runs::RunJournal *run_journal = nullptr;                       // optional: run registry
+    control::SafeStateController *safe_state = nullptr;            // optional: e-stop safe-state + latch
+    const control::IDeviceLossLatch *device_loss_latch = nullptr;  // optional: per-device loss latch (#285)
+    health::StalenessPolicy staleness_policy;                      // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -161,11 +163,12 @@ private:
     provider::ProviderSupervisor *supervisor_;         // optional: nullptr when supervision disabled
     automation::ParameterManager *parameter_manager_;  // optional
     std::shared_ptr<events::EventEmitter> event_emitter_;
-    automation::ModeManager *mode_manager_;     // optional
-    telemetry::InfluxSink *telemetry_sink_;     // optional: nullptr when telemetry disabled
-    runs::RunJournal *run_journal_;             // optional: nullptr when run registry unavailable
-    control::SafeStateController *safe_state_;  // optional: e-stop safe-state + latch
-    health::StalenessPolicy staleness_policy_;  // #220: device-liveness thresholds
+    automation::ModeManager *mode_manager_;               // optional
+    telemetry::InfluxSink *telemetry_sink_;               // optional: nullptr when telemetry disabled
+    runs::RunJournal *run_journal_;                       // optional: nullptr when run registry unavailable
+    control::SafeStateController *safe_state_;            // optional: e-stop safe-state + latch
+    const control::IDeviceLossLatch *device_loss_latch_;  // optional: per-device loss latch (#285)
+    health::StalenessPolicy staleness_policy_;            // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif

@@ -7,6 +7,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     sanity_test.cpp
     state_cache_test.cpp
     call_router_test.cpp
+    device_loss_latch_test.cpp
     safe_state_test.cpp
     actuation_gate_test.cpp
     config_test.cpp

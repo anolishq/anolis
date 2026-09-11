@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "control/call_router.hpp"
+#include "control/device_loss_latch.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
@@ -1412,6 +1413,92 @@ TEST_F(HttpHandlersTest, PostCallBytesArg_SpaceMidString_Returns400) {
     EXPECT_EQ(400, res->status);
     auto json = nlohmann::json::parse(res->body);
     EXPECT_EQ("INVALID_ARGUMENT", json["status"]["code"]);
+}
+
+//=============================================================================
+// GET /v0/runtime/status - device-loss latch surface (#285)
+//=============================================================================
+
+/**
+ * A latched device is an actuator that is refusing the behaviour tree's
+ * commands until an operator re-enters AUTO. That state has to be readable from
+ * the status endpoint: the journal is not a surface an operator watches, and an
+ * impeller that silently stopped gets discovered by the culture instead.
+ */
+class HttpRuntimeStatusLatchTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        latch = std::make_unique<control::DeviceLossLatch>();
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 9997;  // Distinct from 9999 / 9998
+        http_config.cors_allowed_origins = {"*"};
+
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.device_loss_latch = latch.get();
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        client = std::make_unique<httplib::Client>("http://127.0.0.1:9997");
+        client->set_connection_timeout(1, 0);
+    }
+
+    void TearDown() override {
+        client.reset();
+        server->stop();
+        server.reset();
+    }
+
+    nlohmann::json get_status() {
+        auto res = client->Get("/v0/runtime/status");
+        EXPECT_TRUE(res);
+        EXPECT_EQ(200, res->status);
+        return nlohmann::json::parse(res->body);
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<control::DeviceLossLatch> latch;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+};
+
+TEST_F(HttpRuntimeStatusLatchTest, ReportsEmptyArrayWhenNothingIsLatched) {
+    const auto json = get_status();
+    ASSERT_TRUE(json.contains("device_loss_latched"));
+    // Always an array, never absent or null: a client reading this to decide
+    // whether an operator must re-arm should not have to special-case "quiet".
+    ASSERT_TRUE(json["device_loss_latched"].is_array());
+    EXPECT_TRUE(json["device_loss_latched"].empty());
+}
+
+TEST_F(HttpRuntimeStatusLatchTest, ReportsLatchedDeviceHandles) {
+    latch->engage("bread0/dcmt0");
+
+    const auto json = get_status();
+    ASSERT_TRUE(json["device_loss_latched"].is_array());
+    ASSERT_EQ(1u, json["device_loss_latched"].size());
+    EXPECT_EQ("bread0/dcmt0", json["device_loss_latched"][0]);
+}
+
+TEST_F(HttpRuntimeStatusLatchTest, ClearsAfterRelease) {
+    latch->engage("bread0/dcmt0");
+    ASSERT_EQ(1u, get_status()["device_loss_latched"].size());
+
+    latch->release_all();
+
+    EXPECT_TRUE(get_status()["device_loss_latched"].empty());
 }
 
 #else  // ANOLIS_SKIP_HTTP_TESTS
