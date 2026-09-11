@@ -29,7 +29,9 @@ public:
     MOCK_METHOD(bool, hello, (anolis::deviceprovider::v1::HelloResponse &), (override));
     MOCK_METHOD(bool, list_devices, (std::vector<Device> &), (override));
     MOCK_METHOD(bool, describe_device, (const std::string &, DescribeDeviceResponse &), (override));
-    MOCK_METHOD(bool, read_signals, (const std::string &, const std::vector<std::string> &, ReadSignalsResponse &),
+    MOCK_METHOD(bool, read_signals,
+                (const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                 anolis::deviceprovider::v1::Status_Code &),
                 (override));
     MOCK_METHOD(bool, call, (const std::string &, uint32_t, const std::string &, const ValueMap &, CallResponse &),
                 (override));

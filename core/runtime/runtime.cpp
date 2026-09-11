@@ -408,6 +408,29 @@ bool Runtime::init_automation(std::string &error) {
                                                                  << " parameters");
     }
 
+    // Re-arm device-loss latches on the deliberate MANUAL -> AUTO transition
+    // (#285). Registered as an AFTER-change callback, not a before-change one: a
+    // vetoed transition must not clear the latch. Registered BEFORE the
+    // after-transition hooks below, which do provider I/O: ModeManager commits
+    // the mode before running these callbacks and the tree ticks on the
+    // committed mode, so every callback ahead of this one widens the window in
+    // which the tree is refused for a device the operator just re-armed.
+    if (mode_manager_ != nullptr) {
+        mode_manager_->on_mode_change([this](automation::RuntimeMode prev, automation::RuntimeMode next) {
+            if (prev != automation::RuntimeMode::MANUAL || next != automation::RuntimeMode::AUTO) {
+                return;
+            }
+            const auto released = device_loss_latch_->release_all();
+            for (const auto &handle : released) {
+                LOG_WARN("[Runtime] re-armed " << handle << " for automation (MANUAL -> AUTO)");
+            }
+            if (!released.empty()) {
+                LOG_INFO("[Runtime] " << released.size()
+                                      << " device loss latch(es) released by operator re-entry into AUTO");
+            }
+        });
+    }
+
     // Register transition hooks when configured.
     if (mode_manager_ != nullptr) {
         const auto before_hooks = config_.automation.mode_transition_hooks.before_transition;
@@ -511,23 +534,6 @@ bool Runtime::init_automation(std::string &error) {
 
     // Register mode change callback to emit telemetry events (only if automation enabled)
     if (mode_manager_) {
-        // Re-arm device-loss latches on the deliberate MANUAL -> AUTO transition
-        // (#285). Registered as an AFTER-change callback, not a before-change
-        // one: a vetoed transition must not clear the latch.
-        mode_manager_->on_mode_change([this](automation::RuntimeMode prev, automation::RuntimeMode next) {
-            if (prev != automation::RuntimeMode::MANUAL || next != automation::RuntimeMode::AUTO) {
-                return;
-            }
-            const auto released = device_loss_latch_->release_all();
-            for (const auto &handle : released) {
-                LOG_WARN("[Runtime] re-armed " << handle << " for automation (MANUAL -> AUTO)");
-            }
-            if (!released.empty()) {
-                LOG_INFO("[Runtime] " << released.size()
-                                      << " device loss latch(es) released by operator re-entry into AUTO");
-            }
-        });
-
         mode_manager_->on_mode_change([this](automation::RuntimeMode prev, automation::RuntimeMode next) {
             if (event_emitter_) {
                 events::ModeChangeEvent event;
@@ -900,40 +906,31 @@ void Runtime::wire_device_loss_latch() {
 }
 
 void Runtime::reissue_safe_state_for(const std::string &device_handle) {
-    int issued = 0;
-    for (const auto &call : config_.safety.safe_state.hooks) {
-        if (call.device_handle != device_handle) {
-            continue;
-        }
-        control::CallRequest request;
-        request.device_handle = call.device_handle;
-        request.function_id = call.function_id;
-        request.function_name = call.function_name;
-        for (const auto &[arg_name, arg_value] : call.args) {
-            request.args[arg_name] = control::to_provider_value(arg_value);
-        }
-        request.is_automated = true;
-        // Marked safe_state so it passes IDLE gating and the e-stop latch, the
-        // same exemption the ladder itself uses. Not a behaviour-tree call, so
-        // the device-loss latch does not refuse it either.
-        request.safe_state = true;
+    // The controller runs whichever rung the machine actually declares --
+    // hooks, else setpoints, else zero -- filtered to this device. Walking
+    // safety.safe_state.hooks here would silently do nothing on a machine
+    // that declares setpoints or relies on zeroing.
+    const auto result = safe_state_controller_->reassert_for(device_handle);
 
-        const auto result = call_router_->execute_call(request, provider_registry_);
-        if (result.success) {
+    int issued = 0;
+    for (const auto &action : result.actions) {
+        if (action.success) {
             ++issued;
         } else {
-            LOG_WARN("[Runtime] safe-state re-issue failed for " << device_handle << "/" << call.function_name << ": "
-                                                                 << result.error_message);
+            LOG_WARN("[Runtime] safe-state re-issue failed for " << action.device_handle << "/" << action.function
+                                                                 << ": " << action.error);
         }
     }
 
     if (issued > 0) {
-        LOG_WARN("[Runtime] " << device_handle << " returned while latched; re-asserted " << issued
-                              << " declared safe-state call(s). It stays latched until MANUAL -> AUTO.");
+        LOG_WARN("[Runtime] " << device_handle << " returned while latched; re-asserted " << issued << " "
+                              << control::safe_state_kind_to_string(result.kind)
+                              << " safe-state call(s). It stays latched until MANUAL -> AUTO.");
     } else {
-        LOG_WARN("[Runtime] " << device_handle
-                              << " returned while latched, but no safety.safe_state hook targets it -- if it did not "
-                                 "reboot it may still be running its last command.");
+        LOG_WARN("[Runtime] " << device_handle << " returned while latched, but the planned safe state ("
+                              << control::safe_state_kind_to_string(result.kind)
+                              << ") drives nothing on it -- if it did not reboot it may still be running its last "
+                                 "command.");
     }
 }
 

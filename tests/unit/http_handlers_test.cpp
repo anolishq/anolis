@@ -242,8 +242,9 @@ protected:
      * Simplified version - directly calls read_signals on provider
      */
     void PopulateStateCache(const std::string& device_id = "test_device") {
-        EXPECT_CALL(*mock_provider, read_signals(device_id, _, _))
-            .WillOnce(Invoke([](const std::string&, const std::vector<std::string>&, ReadSignalsResponse& response) {
+        EXPECT_CALL(*mock_provider, read_signals(device_id, _, _, _))
+            .WillOnce(Invoke([](const std::string&, const std::vector<std::string>&, ReadSignalsResponse& response,
+                                anolis::deviceprovider::v1::Status_Code&) {
                 auto* value = response.add_values();
                 value->set_signal_id("1");
                 value->mutable_value()->set_double_value(23.5);

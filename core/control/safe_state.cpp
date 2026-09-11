@@ -211,23 +211,33 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     return outcome;
 }
 
-EstopResult SafeStateController::run_ladder() {
+EstopResult SafeStateController::run_ladder(const std::string *only_device) {
+    const auto wanted = [only_device](const std::string &handle) {
+        return only_device == nullptr || handle == *only_device;
+    };
+
     EstopResult result;
     result.kind = planned_kind(nullptr);
     switch (result.kind) {
         case SafeStateKind::Hooks:
             for (const auto &call : safety_.safe_state.hooks) {
-                result.actions.push_back(run_call(call));
+                if (wanted(call.device_handle)) {
+                    result.actions.push_back(run_call(call));
+                }
             }
             break;
         case SafeStateKind::Setpoints:
             for (const auto &call : safety_.safe_state.setpoints) {
-                result.actions.push_back(run_call(call));
+                if (wanted(call.device_handle)) {
+                    result.actions.push_back(run_call(call));
+                }
             }
             break;
         case SafeStateKind::Zero:
             for (const auto &[handle, spec] : actuating_functions()) {
-                result.actions.push_back(run_zero_call(handle, spec));
+                if (wanted(handle)) {
+                    result.actions.push_back(run_zero_call(handle, spec));
+                }
             }
             break;
         case SafeStateKind::None:
@@ -235,6 +245,8 @@ EstopResult SafeStateController::run_ladder() {
     }
     return result;
 }
+
+EstopResult SafeStateController::reassert_for(const std::string &device_handle) { return run_ladder(&device_handle); }
 
 EstopResult SafeStateController::trigger(const std::string &reason) {
     // The mutex is held across the whole ladder so a trigger is atomic with

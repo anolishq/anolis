@@ -117,12 +117,18 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             poll_configs_.end());
     }
 
-    // Remove old device states for this provider
+    // Remove old device states for this provider, remembering each device's
+    // reachability. The fresh state below inherits it rather than resetting to
+    // "reachable": a device that was unreachable before the restart has not
+    // been polled since, and claiming otherwise would swallow its return edge
+    // -- the one the device-loss latch (#285) re-asserts safe state on.
+    std::unordered_map<std::string, bool> was_reachable;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = device_states_.begin(); it != device_states_.end();) {
             // Check if device_handle starts with "provider_id/"
             if (it->first.find(provider_id + "/") == 0) {
+                was_reachable[it->first] = it->second.provider_available;
                 it = device_states_.erase(it);
             } else {
                 ++it;
@@ -162,7 +168,8 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             // Initialize empty device state
             DeviceState state;
             state.device_handle = device.get_handle();
-            state.provider_available = true;
+            const auto prior = was_reachable.find(state.device_handle);
+            state.provider_available = prior == was_reachable.end() ? true : prior->second;
             state.last_poll_time = std::chrono::system_clock::now();
 
             {
@@ -365,15 +372,16 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
                              const std::vector<std::string> &signal_ids, provider::IProviderHandle &provider) {
     std::string device_handle = provider_id + "/" + device_id;
 
-    // Call ReadSignals
+    // Call ReadSignals. `failure_status` is the code for THIS read, not the
+    // provider's shared last-value field: the sink below classifies the loss
+    // by it, and a concurrent RPC on another thread (a health probe, a tree
+    // call) could overwrite the shared field between the read returning and
+    // us looking. That is the difference between the latch engaging and the
+    // impeller restarting on its own.
     anolis::deviceprovider::v1::ReadSignalsResponse response;
-    if (!provider.read_signals(device_id, signal_ids, response)) {
+    anolis::deviceprovider::v1::Status_Code failure_status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+    if (!provider.read_signals(device_id, signal_ids, response, failure_status)) {
         LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
-
-        // Captured here, next to the read that produced it: the consumer
-        // classifies the loss by this code, and it is provider-wide state that a
-        // later call on another device could overwrite.
-        const auto failure_status = provider.last_status_code();
 
         // A failed read invalidates the last successful snapshot for this
         // device. Clearing the signal set prevents consumers from interpreting

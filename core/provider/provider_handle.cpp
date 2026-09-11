@@ -86,7 +86,8 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
     hello_req->set_client_version("0.1.0");
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    anolis::deviceprovider::v1::Status_Code status;
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -112,8 +113,9 @@ bool ProviderHandle::wait_ready(anolis::deviceprovider::v1::WaitReadyResponse &r
     ready_req->set_max_wait_ms_hint(ready_timeout_ms_);
 
     anolis::deviceprovider::v1::Response resp;
+    anolis::deviceprovider::v1::Status_Code status;
     // Use ready_timeout_ms_ for this RPC (hardware initialization can be slow)
-    if (!send_request(request, resp, request_id)) {
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -133,7 +135,8 @@ bool ProviderHandle::list_devices(std::vector<anolis::deviceprovider::v1::Device
     request.mutable_list_devices();
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    anolis::deviceprovider::v1::Status_Code status;
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -157,7 +160,8 @@ bool ProviderHandle::describe_device(const std::string &device_id,
     request.mutable_describe_device()->set_device_id(device_id);
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    anolis::deviceprovider::v1::Status_Code status;
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -171,7 +175,8 @@ bool ProviderHandle::describe_device(const std::string &device_id,
 }
 
 bool ProviderHandle::read_signals(const std::string &device_id, const std::vector<std::string> &signal_ids,
-                                  anolis::deviceprovider::v1::ReadSignalsResponse &response) {
+                                  anolis::deviceprovider::v1::ReadSignalsResponse &response,
+                                  anolis::deviceprovider::v1::Status_Code &status) {
     anolis::deviceprovider::v1::Request request;
     uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
     request.set_request_id(request_id);
@@ -182,12 +187,13 @@ bool ProviderHandle::read_signals(const std::string &device_id, const std::vecto
     }
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
     if (!resp.has_read_signals()) {
         set_error("Response missing read_signals field");
+        status = anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
         return false;
     }
 
@@ -210,7 +216,8 @@ bool ProviderHandle::call(const std::string &device_id, uint32_t function_id, co
     }
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    anolis::deviceprovider::v1::Status_Code status;
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -230,7 +237,8 @@ bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &r
     request.mutable_get_health();
 
     anolis::deviceprovider::v1::Response resp;
-    if (!send_request(request, resp, request_id)) {
+    anolis::deviceprovider::v1::Status_Code status;
+    if (!send_request(request, resp, request_id, status)) {
         return false;
     }
 
@@ -244,28 +252,40 @@ bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &r
 }
 
 bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &request,
-                                  anolis::deviceprovider::v1::Response &response, uint64_t request_id) {
+                                  anolis::deviceprovider::v1::Response &response, uint64_t request_id,
+                                  anolis::deviceprovider::v1::Status_Code &status) {
+    using anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
+    using anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
+
     std::lock_guard<std::mutex> lock(mutex_);
+
+    // Every exit below assigns `status` and mirrors it into last_status_code_
+    // while still holding the lock, so the shared view and the per-call value
+    // can never disagree for this exchange. A transport failure is a status of
+    // its own, not "whatever the previous exchange returned".
+    const auto fail = [&](anolis::deviceprovider::v1::Status_Code code, std::string message) {
+        status = code;
+        last_status_code_ = code;
+        error_ = std::move(message);
+        return false;
+    };
 
     // One in-flight request per provider session keeps framing simple and makes
     // request_id mismatch a hard protocol error rather than a multiplexing case.
     if (!session_healthy_.load(std::memory_order_acquire)) {
-        error_ = "Provider session not healthy";
-        return false;
+        return fail(Status_Code_CODE_UNAVAILABLE, "Provider session not healthy");
     }
 
     // Check provider is running
     if (!process_.is_running()) {
         session_healthy_.store(false, std::memory_order_release);
-        error_ = "Provider process not running";
-        return false;
+        return fail(Status_Code_CODE_UNAVAILABLE, "Provider process not running");
     }
 
     // Serialize request
     std::string serialized;
     if (!request.SerializeToString(&serialized)) {
-        error_ = "Failed to serialize request";
-        return false;
+        return fail(Status_Code_CODE_INTERNAL, "Failed to serialize request");
     }
 
     // Handshake and ready RPCs intentionally use dedicated timeout budgets that
@@ -281,20 +301,22 @@ bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &req
     if (!process_.client().write_frame(reinterpret_cast<const uint8_t *>(serialized.data()), serialized.size(),
                                        timeout_to_use)) {
         session_healthy_.store(false, std::memory_order_release);
-        error_ = "Failed to write request: " + process_.client().last_error();
-        return false;
+        return fail(Status_Code_CODE_UNAVAILABLE, "Failed to write request: " + process_.client().last_error());
     }
 
-    // Wait for response with request_id validation
-    if (!wait_for_response(response, request_id, timeout_to_use)) {
+    // Wait for response with request_id validation. On failure it has already
+    // set error_ and the transport-class status.
+    if (!wait_for_response(response, request_id, timeout_to_use, status)) {
+        last_status_code_ = status;
         return false;
     }
 
     // Capture status code
-    last_status_code_ = response.status().code();
+    status = response.status().code();
+    last_status_code_ = status;
 
     // Check status code
-    if (last_status_code_ != anolis::deviceprovider::v1::Status_Code_CODE_OK) {
+    if (status != anolis::deviceprovider::v1::Status_Code_CODE_OK) {
         error_ = "Provider returned error: " + response.status().message();
         return false;
     }
@@ -303,7 +325,11 @@ bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &req
 }
 
 bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &response, uint64_t expected_request_id,
-                                       int timeout_ms) {
+                                       int timeout_ms, anolis::deviceprovider::v1::Status_Code &status) {
+    using anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+    using anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
+    using anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
+
     auto start = std::chrono::steady_clock::now();
 
     // Simple polling loop with timeout
@@ -314,6 +340,7 @@ bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &res
         if (elapsed_ms >= timeout_ms) {
             session_healthy_.store(false, std::memory_order_release);
             error_ = "Timeout waiting for response (" + std::to_string(timeout_ms) + "ms)";
+            status = Status_Code_CODE_DEADLINE_EXCEEDED;
             LOG_ERROR("[" << process_.provider_id() << "] " << error_);
             return false;
         }
@@ -338,6 +365,7 @@ bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &res
                 if (!response.ParseFromArray(frame_data.data(), static_cast<int>(frame_data.size()))) {
                     session_healthy_.store(false, std::memory_order_release);
                     error_ = "Failed to parse response protobuf";
+                    status = Status_Code_CODE_INTERNAL;
                     return false;
                 }
 
@@ -348,6 +376,7 @@ bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &res
                     session_healthy_.store(false, std::memory_order_release);
                     error_ = "Response request_id mismatch (expected " + std::to_string(expected_request_id) +
                              ", got " + std::to_string(response.request_id()) + ")";
+                    status = Status_Code_CODE_INTERNAL;
                     LOG_ERROR("[" << process_.provider_id() << "] " << error_);
                     return false;
                 }
@@ -358,13 +387,16 @@ bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &res
             if (!process_.client().last_error().empty()) {
                 session_healthy_.store(false, std::memory_order_release);
                 error_ = "Failed to read response: " + process_.client().last_error();
+                status = Status_Code_CODE_UNAVAILABLE;
             } else {
                 error_ = "Timed out reading response payload";
+                status = Status_Code_CODE_DEADLINE_EXCEEDED;
             }
             return false;
         } else if (!process_.client().last_error().empty()) {
             session_healthy_.store(false, std::memory_order_release);
             error_ = "Failed waiting for response: " + process_.client().last_error();
+            status = Status_Code_CODE_UNAVAILABLE;
             return false;
         }
 
@@ -372,6 +404,7 @@ bool ProviderHandle::wait_for_response(anolis::deviceprovider::v1::Response &res
         if (!process_.is_running()) {
             session_healthy_.store(false, std::memory_order_release);
             error_ = "Provider process died while waiting for response";
+            status = Status_Code_CODE_UNAVAILABLE;
             return false;
         }
     }
