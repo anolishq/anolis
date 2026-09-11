@@ -118,6 +118,15 @@ curl -s http://127.0.0.1:8080/v0/providers/health | jq
 There is one unit. Providers are **forked child processes** of the runtime, so
 there is no `anolis-provider-*` service to check.
 
+The install's own health check confirms two things: `/v0/runtime/status`
+answers, and `/v0/runs` answers 200. The second matters because the run registry
+fails soft — if its data directory cannot be created, the runtime logs one
+warning at boot and then serves 503 on every run endpoint for as long as it
+runs, while status stays green. The unit starts the runtime in `<prefix>` so the
+default `anolis-data/` directory resolves somewhere the service user can write;
+an install that warns `run registry NOT available` is one where that did not
+hold.
+
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is
 > inherited and reaches the journal. Provider diagnostics appear in
