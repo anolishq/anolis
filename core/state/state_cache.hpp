@@ -68,6 +68,12 @@ struct DeviceState {
     std::unordered_map<std::string, CachedSignalValue> signals;  // signal_id -> value
     std::chrono::system_clock::time_point last_poll_time;
     bool provider_available;
+    // True from the moment the reachability sink was told this device was lost
+    // until the successful poll that tells it the device is back. Kept apart
+    // from `provider_available`, which also goes false on provider loss (no
+    // sink call): deriving the edges from that flag would swallow the loss
+    // edge of a device that is dark across a provider restart (#285).
+    bool loss_reported = false;
 };
 
 /**

@@ -445,3 +445,35 @@ TEST_F(StateCacheReachabilityTest, OutOfBandFailureDoesNotFireTheSink) {
     EXPECT_FALSE(state->provider_available);
     EXPECT_TRUE(events.empty());
 }
+
+// A board that is dark when its provider dies. Provider loss marks the device
+// unavailable without a sink call; the supervisor restarts the provider; the
+// first poll afterwards fails IN-BAND because the board is still dark. That
+// is the loss edge, and it must fire -- deriving it from provider_available,
+// which the restart carried over as false, would swallow it and the board
+// would never latch for that outage.
+TEST_F(StateCacheReachabilityTest, DeviceDarkAcrossProviderRestartStillLatches) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    // Provider loss, seen by the poll loop: no sink call.
+    ASSERT_TRUE(provider_registry->remove_provider("sim0"));
+    state_cache->poll_once(*provider_registry);
+    ASSERT_TRUE(events.empty());
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+
+    // Supervisor brings the provider back and rebuilds; the board is still dark.
+    provider_registry->add_provider("sim0", mock_provider);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    ASSERT_EQ(events.size(), 1U) << "the first in-band failure after a provider restart is the loss edge";
+    EXPECT_FALSE(events[0].reachable);
+    EXPECT_EQ(events[0].status, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE);
+
+    // And the board's return is still reported once.
+    state_cache->poll_once(*provider_registry);
+    ASSERT_EQ(events.size(), 2U);
+    EXPECT_TRUE(events[1].reachable);
+}
