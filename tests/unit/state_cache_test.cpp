@@ -418,3 +418,30 @@ TEST_F(StateCacheReachabilityTest, ReturnEdgeSurvivesProviderRebuild) {
     ASSERT_EQ(events.size(), 2U);
     EXPECT_TRUE(events[1].reachable);
 }
+
+// An OUT-OF-BAND failure -- the provider itself did not answer and its session
+// is now unhealthy -- is provider loss, not device loss, whichever thread
+// notices it first. The device goes unavailable but the sink is not told, the
+// same outcome as the poll loop's own is_available() check. The status code
+// alone cannot make this distinction: a hung provider yields DEADLINE_EXCEEDED
+// exactly like a dark board does.
+TEST_F(StateCacheReachabilityTest, OutOfBandFailureDoesNotFireTheSink) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([&available](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                                      anolis::deviceprovider::v1::Status_Code &status) {
+            // What ProviderHandle does on a transport failure: mark the session
+            // unhealthy and report a transport-class code.
+            available = false;
+            status = anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+            return false;
+        }));
+
+    state_cache->poll_once(*provider_registry);
+
+    auto state = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(state != nullptr);
+    EXPECT_FALSE(state->provider_available);
+    EXPECT_TRUE(events.empty());
+}

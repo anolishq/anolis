@@ -383,6 +383,19 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
     if (!provider.read_signals(device_id, signal_ids, response, failure_status)) {
         LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
 
+        // In-band or out-of-band? An in-band failure means the PROVIDER
+        // answered and reported that the DEVICE did not -- the session stays
+        // healthy. An out-of-band failure means the provider itself did not
+        // answer (hung, crashed, pipe broken) and the handle has marked its
+        // session unhealthy. Only the first is a device loss. The second is
+        // provider loss, the same event `mark_provider_devices_unavailable`
+        // handles when the poll loop notices it first, and it is reported the
+        // same way: the device goes unavailable, the sink is not told. Devices
+        // did not lose power because their provider did, and a supervised
+        // restart must not force an operator re-arm. This keeps the outcome
+        // independent of which thread happened to notice the provider die.
+        const bool provider_lost = !provider.is_available();
+
         // A failed read invalidates the last successful snapshot for this
         // device. Clearing the signal set prevents consumers from interpreting
         // stale values as current while the provider is unavailable.
@@ -400,7 +413,7 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
         // Dispatched OUTSIDE the lock (#285): the consumer's handler issues
         // safe-state calls, which re-enter this class via CallRouter's post-call
         // poll. Notifying under `mutex_` would self-deadlock.
-        if (became_unreachable && device_reachability_sink_) {
+        if (became_unreachable && !provider_lost && device_reachability_sink_) {
             device_reachability_sink_(device_handle, false, failure_status);
         }
 
