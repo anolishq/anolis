@@ -66,9 +66,18 @@ public:
      * @brief Read one or more signals from a device.
      *
      * Implementations are expected to block until a response or timeout.
+     *
+     * `status` is the code for THIS read, set on every path: CODE_OK on
+     * success, the provider's code when it answered with an error, or a
+     * transport-class code (UNAVAILABLE / DEADLINE_EXCEEDED) when it did not
+     * answer at all. Callers that need to classify a failure must use this
+     * rather than `last_status_code()`, which is provider-wide and can be
+     * overwritten by a concurrent RPC on another thread between the failing
+     * read returning and the caller looking.
      */
     virtual bool read_signals(const std::string &device_id, const std::vector<std::string> &signal_ids,
-                              anolis::deviceprovider::v1::ReadSignalsResponse &response) = 0;
+                              anolis::deviceprovider::v1::ReadSignalsResponse &response,
+                              anolis::deviceprovider::v1::Status_Code &status) = 0;
 
     /**
      * @brief Execute a device function call.

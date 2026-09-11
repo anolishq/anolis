@@ -77,8 +77,9 @@ TEST_F(StateCacheTest, PollAndRead) {
     EXPECT_TRUE(state_cache->initialize());
 
     // Expect polls
-    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
-        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &ids, ReadSignalsResponse &response) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &ids, ReadSignalsResponse &response,
+                            anolis::deviceprovider::v1::Status_Code &) {
             // Verify we are asked for "temp"
             bool asking_temp = false;
             for (const auto &id : ids)
@@ -108,8 +109,9 @@ TEST_F(StateCacheTest, Staleness) {
     EXPECT_TRUE(state_cache->initialize());
 
     // 1. Initial State: Stale Quality
-    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
-        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                            anolis::deviceprovider::v1::Status_Code &) {
             auto *v = response.add_values();
             v->set_signal_id("temp");
             v->mutable_value()->set_double_value(25.5);
@@ -129,8 +131,9 @@ TEST_F(StateCacheTest, TimeBasedStaleness) {
     EXPECT_TRUE(state_cache->initialize());
 
     // 1. Poll with OK quality
-    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
-        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                            anolis::deviceprovider::v1::Status_Code &) {
             auto *v = response.add_values();
             v->set_signal_id("temp");
             v->mutable_value()->set_double_value(25.5);
@@ -179,15 +182,15 @@ TEST_F(StateCacheTest, ConcurrencyStress) {
     // Writer Thread (Simulated Poll)
     std::thread writer([&]() {
         // Setup a persistent expectation that returns changing values
-        EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
-            .WillRepeatedly(
-                Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
-                    auto *v = response.add_values();
-                    v->set_signal_id("temp");
-                    v->mutable_value()->set_double_value(rand() % 100);
-                    v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
-                    return true;
-                }));
+        EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+            .WillRepeatedly(Invoke([](const std::string &, const std::vector<std::string> &,
+                                      ReadSignalsResponse &response, anolis::deviceprovider::v1::Status_Code &) {
+                auto *v = response.add_values();
+                v->set_signal_id("temp");
+                v->mutable_value()->set_double_value(rand() % 100);
+                v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                return true;
+            }));
 
         while (running) {
             state_cache->poll_once(*provider_registry);
@@ -228,9 +231,10 @@ TEST_F(StateCacheTest, InitializeIsIdempotentAndDoesNotDuplicatePollConfigs) {
     EXPECT_TRUE(state_cache->initialize());
     EXPECT_TRUE(state_cache->initialize());
 
-    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
         .Times(1)
-        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                            anolis::deviceprovider::v1::Status_Code &) {
             auto *v = response.add_values();
             v->set_signal_id("temp");
             v->mutable_value()->set_double_value(42.0);
@@ -246,9 +250,10 @@ TEST_F(StateCacheTest, MissingProviderMarksCachedDeviceUnavailable) {
     state_cache = std::make_unique<state::StateCache>(*registry, 100);
     EXPECT_TRUE(state_cache->initialize());
 
-    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _))
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
         .Times(1)
-        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                            anolis::deviceprovider::v1::Status_Code &) {
             auto *v = response.add_values();
             v->set_signal_id("temp");
             v->mutable_value()->set_double_value(25.5);
@@ -264,4 +269,211 @@ TEST_F(StateCacheTest, MissingProviderMarksCachedDeviceUnavailable) {
     auto state = state_cache->get_device_state("sim0/dev1");
     ASSERT_TRUE(state != nullptr);
     EXPECT_FALSE(state->provider_available);
+}
+
+//=============================================================================
+// Device reachability sink (#285)
+//=============================================================================
+
+namespace {
+
+struct ReachabilityEvent {
+    std::string device_handle;
+    bool reachable;
+    anolis::deviceprovider::v1::Status_Code status;
+};
+
+// A read that succeeds with one value, and one that fails with a given code.
+auto good_read() {
+    return Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                     anolis::deviceprovider::v1::Status_Code &status) {
+        auto *v = response.add_values();
+        v->set_signal_id("temp");
+        v->mutable_value()->set_double_value(25.5);
+        v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+        status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+        return true;
+    });
+}
+
+auto failed_read(anolis::deviceprovider::v1::Status_Code code) {
+    return Invoke([code](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                         anolis::deviceprovider::v1::Status_Code &status) {
+        status = code;
+        return false;
+    });
+}
+
+}  // namespace
+
+class StateCacheReachabilityTest : public StateCacheTest {
+protected:
+    void SetUp() override {
+        StateCacheTest::SetUp();
+        RegisterMockDevice();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        state_cache->set_device_reachability_sink(
+            [this](const std::string &handle, bool reachable, anolis::deviceprovider::v1::Status_Code status) {
+                events.push_back({handle, reachable, status});
+            });
+        ASSERT_TRUE(state_cache->initialize());
+        // The poll loop logs last_error() on a failed read.
+        EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("read failed"));
+    }
+
+    std::vector<ReachabilityEvent> events;
+};
+
+// The single most important property: the sink is told the code of the read
+// that failed, NOT the provider's shared last-value field. A concurrent RPC on
+// another thread (a health probe answering OK, a tree call) can overwrite that
+// field between the failing read returning and the poll loop looking. Here
+// the shared field says OK while the read itself says DEADLINE_EXCEEDED; the
+// latch must see DEADLINE_EXCEEDED or a dark board is never latched.
+TEST_F(StateCacheReachabilityTest, LossEdgeCarriesTheFailingReadsStatusNotTheSharedField) {
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_OK));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED));
+
+    state_cache->poll_once(*provider_registry);
+
+    ASSERT_EQ(events.size(), 1U);
+    EXPECT_EQ(events[0].device_handle, "sim0/dev1");
+    EXPECT_FALSE(events[0].reachable);
+    EXPECT_EQ(events[0].status, anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED);
+}
+
+// The poll loop re-reports a lost device every cycle. The sink must fire on
+// the EDGE only; the latch it feeds is idempotent, but the safe-state re-issue
+// on the return edge is not something to run every 2.5 s.
+TEST_F(StateCacheReachabilityTest, FiresOncePerEdgeNotOncePerFailedPoll) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read())
+        .WillOnce(good_read());
+
+    for (int i = 0; i < 5; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+
+    ASSERT_EQ(events.size(), 2U);
+    EXPECT_FALSE(events[0].reachable);
+    EXPECT_EQ(events[0].status, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE);
+    EXPECT_TRUE(events[1].reachable);
+    EXPECT_EQ(events[1].status, anolis::deviceprovider::v1::Status_Code_CODE_OK);
+}
+
+// A device that starts reachable and stays reachable produces no edge. In
+// particular the FIRST successful poll must not fire "became reachable": that
+// would re-issue safe state to every device at startup.
+TEST_F(StateCacheReachabilityTest, NoEdgeWhileHealthy) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).Times(3).WillRepeatedly(good_read());
+
+    for (int i = 0; i < 3; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+
+    EXPECT_TRUE(events.empty());
+}
+
+// The supervised-provider-restart path marks every device of the provider
+// unavailable WITHOUT going through the sink. That is deliberate: the devices
+// did not lose power, and latching on a supervised restart would recreate the
+// spurious-re-arm problem the transport classification exists to avoid.
+TEST_F(StateCacheReachabilityTest, ProviderUnavailableDoesNotFireTheSink) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillOnce(good_read());
+    state_cache->poll_once(*provider_registry);
+
+    ASSERT_TRUE(provider_registry->remove_provider("sim0"));
+    state_cache->poll_once(*provider_registry);
+
+    auto state = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(state != nullptr);
+    EXPECT_FALSE(state->provider_available);
+    EXPECT_TRUE(events.empty());
+}
+
+// A supervised provider restart rebuilds poll configs. The rebuilt state must
+// inherit the device's reachability: if it was lost before the restart, its
+// first successful poll afterwards IS the return edge, and resetting the flag
+// to "reachable" during the rebuild would swallow it.
+TEST_F(StateCacheReachabilityTest, ReturnEdgeSurvivesProviderRebuild) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    ASSERT_EQ(events.size(), 1U);
+    EXPECT_FALSE(events[0].reachable);
+
+    state_cache->rebuild_poll_configs("sim0");
+    auto state = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(state != nullptr);
+    EXPECT_FALSE(state->provider_available) << "rebuild must not claim a device reachable before polling it";
+
+    state_cache->poll_once(*provider_registry);
+    ASSERT_EQ(events.size(), 2U);
+    EXPECT_TRUE(events[1].reachable);
+}
+
+// An OUT-OF-BAND failure -- the provider itself did not answer and its session
+// is now unhealthy -- is provider loss, not device loss, whichever thread
+// notices it first. The device goes unavailable but the sink is not told, the
+// same outcome as the poll loop's own is_available() check. The status code
+// alone cannot make this distinction: a hung provider yields DEADLINE_EXCEEDED
+// exactly like a dark board does.
+TEST_F(StateCacheReachabilityTest, OutOfBandFailureDoesNotFireTheSink) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([&available](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                                      anolis::deviceprovider::v1::Status_Code &status) {
+            // What ProviderHandle does on a transport failure: mark the session
+            // unhealthy and report a transport-class code.
+            available = false;
+            status = anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+            return false;
+        }));
+
+    state_cache->poll_once(*provider_registry);
+
+    auto state = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(state != nullptr);
+    EXPECT_FALSE(state->provider_available);
+    EXPECT_TRUE(events.empty());
+}
+
+// A board that is dark when its provider dies. Provider loss marks the device
+// unavailable without a sink call; the supervisor restarts the provider; the
+// first poll afterwards fails IN-BAND because the board is still dark. That
+// is the loss edge, and it must fire -- deriving it from provider_available,
+// which the restart carried over as false, would swallow it and the board
+// would never latch for that outage.
+TEST_F(StateCacheReachabilityTest, DeviceDarkAcrossProviderRestartStillLatches) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    // Provider loss, seen by the poll loop: no sink call.
+    ASSERT_TRUE(provider_registry->remove_provider("sim0"));
+    state_cache->poll_once(*provider_registry);
+    ASSERT_TRUE(events.empty());
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+
+    // Supervisor brings the provider back and rebuilds; the board is still dark.
+    provider_registry->add_provider("sim0", mock_provider);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    ASSERT_EQ(events.size(), 1U) << "the first in-band failure after a provider restart is the loss edge";
+    EXPECT_FALSE(events[0].reachable);
+    EXPECT_EQ(events[0].status, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE);
+
+    // And the board's return is still reported once.
+    state_cache->poll_once(*provider_registry);
+    ASSERT_EQ(events.size(), 2U);
+    EXPECT_TRUE(events[1].reachable);
 }

@@ -58,6 +58,10 @@ StateCache::~StateCache() { stop_polling(); }
 
 void StateCache::set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter) { event_emitter_ = emitter; }
 
+void StateCache::set_device_reachability_sink(DeviceReachabilitySink sink) {
+    device_reachability_sink_ = std::move(sink);
+}
+
 bool StateCache::initialize() {
     std::vector<PollConfig> new_poll_configs;
     std::unordered_map<std::string, DeviceState> new_device_states;
@@ -113,12 +117,22 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             poll_configs_.end());
     }
 
-    // Remove old device states for this provider
+    // Remove old device states for this provider, remembering each device's
+    // reachability. The fresh state below inherits it rather than resetting to
+    // "reachable": a device that was unreachable before the restart has not
+    // been polled since, and claiming otherwise would swallow its return edge
+    // -- the one the device-loss latch (#285) re-asserts safe state on.
+    struct Carried {
+        bool provider_available;
+        bool loss_reported;
+    };
+    std::unordered_map<std::string, Carried> carried;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = device_states_.begin(); it != device_states_.end();) {
             // Check if device_handle starts with "provider_id/"
             if (it->first.find(provider_id + "/") == 0) {
+                carried[it->first] = {it->second.provider_available, it->second.loss_reported};
                 it = device_states_.erase(it);
             } else {
                 ++it;
@@ -158,7 +172,9 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             // Initialize empty device state
             DeviceState state;
             state.device_handle = device.get_handle();
-            state.provider_available = true;
+            const auto prior = carried.find(state.device_handle);
+            state.provider_available = prior == carried.end() ? true : prior->second.provider_available;
+            state.loss_reported = prior == carried.end() ? false : prior->second.loss_reported;
             state.last_poll_time = std::chrono::system_clock::now();
 
             {
@@ -361,21 +377,57 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
                              const std::vector<std::string> &signal_ids, provider::IProviderHandle &provider) {
     std::string device_handle = provider_id + "/" + device_id;
 
-    // Call ReadSignals
+    // Call ReadSignals. `failure_status` is the code for THIS read, not the
+    // provider's shared last-value field: the sink below classifies the loss
+    // by it, and a concurrent RPC on another thread (a health probe, a tree
+    // call) could overwrite the shared field between the read returning and
+    // us looking. That is the difference between the latch engaging and the
+    // impeller restarting on its own.
     anolis::deviceprovider::v1::ReadSignalsResponse response;
-    if (!provider.read_signals(device_id, signal_ids, response)) {
+    anolis::deviceprovider::v1::Status_Code failure_status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+    if (!provider.read_signals(device_id, signal_ids, response, failure_status)) {
         LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
+
+        // In-band or out-of-band? An in-band failure means the PROVIDER
+        // answered and reported that the DEVICE did not -- the session stays
+        // healthy. An out-of-band failure means the provider itself did not
+        // answer (hung, crashed, pipe broken) and the handle has marked its
+        // session unhealthy. Only the first is a device loss. The second is
+        // provider loss, the same event `mark_provider_devices_unavailable`
+        // handles when the poll loop notices it first, and it is reported the
+        // same way: the device goes unavailable, the sink is not told. Devices
+        // did not lose power because their provider did, and a supervised
+        // restart must not force an operator re-arm. This keeps the outcome
+        // independent of which thread happened to notice the provider die.
+        const bool provider_lost = !provider.is_available();
 
         // A failed read invalidates the last successful snapshot for this
         // device. Clearing the signal set prevents consumers from interpreting
         // stale values as current while the provider is unavailable.
+        // The loss edge is "first in-band failure since the sink was last told
+        // this device was back", tracked by loss_reported -- NOT by
+        // provider_available, which provider loss also clears without a sink
+        // call. A board that is dark when its provider dies must still latch
+        // on the first in-band failure after the provider comes back.
+        bool report_loss = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = device_states_.find(device_handle);
             if (it != device_states_.end()) {
                 it->second.provider_available = false;
                 it->second.signals.clear();
+                if (!provider_lost && !it->second.loss_reported && device_reachability_sink_) {
+                    it->second.loss_reported = true;
+                    report_loss = true;
+                }
             }
+        }
+
+        // Dispatched OUTSIDE the lock (#285): the consumer's handler issues
+        // safe-state calls, which re-enter this class via CallRouter's post-call
+        // poll. Notifying under `mutex_` would self-deadlock.
+        if (report_loss) {
+            device_reachability_sink_(device_handle, false, failure_status);
         }
 
         return false;
@@ -398,6 +450,7 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         anolis::deviceprovider::v1::SignalValue_Quality quality;
     };
     std::vector<PendingEvent> pending_events;
+    bool report_return = false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -410,6 +463,10 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         auto &state = it->second;
         state.last_poll_time = std::chrono::system_clock::now();
         state.provider_available = true;
+        if (state.loss_reported) {
+            state.loss_reported = false;
+            report_return = true;
+        }
 
         // Update signal values with change detection
         for (const auto &signal_value : response.values()) {
@@ -451,6 +508,13 @@ void StateCache::update_device_state(const std::string &device_handle, const std
     // Emit events outside critical section
     for (const auto &pending : pending_events) {
         emit_state_update(provider_id, device_id, pending.signal_id, pending.value, pending.quality);
+    }
+
+    // Reachability edge, dispatched outside the lock for the same reason as the
+    // loss edge: the consumer re-issues safe state for a returning device, and
+    // that call path re-enters this class.
+    if (report_return && device_reachability_sink_) {
+        device_reachability_sink_(device_handle, true, anolis::deviceprovider::v1::Status_Code_CODE_OK);
     }
 }
 

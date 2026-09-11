@@ -74,6 +74,14 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
         response["estop"] = estop;
     }
 
+    // Devices blocked from autonomous actuation after going unreachable (#285).
+    // A latch here means a real actuator is refusing the behaviour tree's
+    // commands until an operator re-enters AUTO; that has to be visible on a
+    // surface an operator watches, not only in the journal.
+    if (device_loss_latch_ != nullptr) {
+        response["device_loss_latched"] = device_loss_latch_->latched();
+    }
+
     send_json(res, StatusCode::OK, response);
 }
 

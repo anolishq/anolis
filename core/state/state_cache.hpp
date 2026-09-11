@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -67,6 +68,12 @@ struct DeviceState {
     std::unordered_map<std::string, CachedSignalValue> signals;  // signal_id -> value
     std::chrono::system_clock::time_point last_poll_time;
     bool provider_available;
+    // True from the moment the reachability sink was told this device was lost
+    // until the successful poll that tells it the device is back. Kept apart
+    // from `provider_available`, which also goes false on provider loss (no
+    // sink call): deriving the edges from that flag would swallow the loss
+    // edge of a device that is dark across a provider restart (#285).
+    bool loss_reported = false;
 };
 
 /**
@@ -108,6 +115,26 @@ public:
      * @param emitter Shared pointer to EventEmitter (can be nullptr to disable)
      */
     void set_event_emitter(const std::shared_ptr<events::EventEmitter> &emitter);
+
+    /**
+     * @brief Sink for per-device reachability edges (#285).
+     *
+     * Called when a device transitions reachable <-> unreachable, with the
+     * provider's status code for the failing read so the consumer can tell a
+     * transport failure from a decode one. `anolis_control` links `anolis_state`
+     * and not the reverse, so the loss latch is reached through this callback
+     * rather than a direct dependency -- the same shape as BTRuntime's fault
+     * sink.
+     *
+     * INVOKED OUTSIDE `mutex_`. The consumer's handler runs safe-state calls,
+     * which re-enter StateCache through CallRouter's post-call poll; dispatching
+     * under the lock would self-deadlock on a non-recursive mutex.
+     *
+     * Must be set before start_polling().
+     */
+    using DeviceReachabilitySink = std::function<void(const std::string &device_handle, bool reachable,
+                                                      anolis::deviceprovider::v1::Status_Code last_status)>;
+    void set_device_reachability_sink(DeviceReachabilitySink sink);
 
     /**
      * @brief Build poll configuration and empty device snapshots from the registry.
@@ -181,6 +208,7 @@ private:
 
     // Event emitter for change notifications
     std::shared_ptr<events::EventEmitter> event_emitter_;
+    DeviceReachabilitySink device_reachability_sink_;
 
     mutable std::mutex mutex_;
 

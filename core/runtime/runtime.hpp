@@ -12,6 +12,7 @@
 #include "anolis_build_config.hpp"
 #include "config.hpp"
 #include "control/call_router.hpp"
+#include "control/device_loss_latch.hpp"
 #include "control/safe_state.hpp"
 #include "events/event_emitter.hpp"
 #include "http/server.hpp"
@@ -125,6 +126,12 @@ private:
      */
     bool restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config);
 
+    /** @brief Wire StateCache's reachability sink to the device-loss latch (#285). */
+    void wire_device_loss_latch();
+
+    /** @brief Re-assert a returning latched device's declared safe state, in any mode. */
+    void reissue_safe_state_for(const std::string &device_handle);
+
     RuntimeConfig config_;
 
     provider::ProviderRegistry provider_registry_;
@@ -133,6 +140,7 @@ private:
     std::unique_ptr<state::StateCache> state_cache_;
     std::unique_ptr<control::CallRouter> call_router_;
     std::unique_ptr<control::SafeStateController> safe_state_controller_;
+    std::unique_ptr<control::DeviceLossLatch> device_loss_latch_;
     std::unique_ptr<http::HttpServer> http_server_;
     std::unique_ptr<telemetry::InfluxSink> telemetry_sink_;
     std::unique_ptr<telemetry::HealthSnapshotTask> health_snapshot_task_;

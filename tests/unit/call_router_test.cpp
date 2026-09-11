@@ -6,6 +6,7 @@
 #include <atomic>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -13,6 +14,7 @@
 
 #include "automation/mode_manager.hpp"
 #include "control/i_actuation_latch.hpp"
+#include "control/i_device_loss_latch.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
@@ -27,6 +29,13 @@ using namespace anolis::tests;
 struct StubLatch : anolis::control::IActuationLatch {
     std::atomic<bool> engaged{false};
     bool is_engaged() const override { return engaged.load(); }
+};
+
+// Test double for the per-device loss latch (#285).
+struct StubDeviceLossLatch : anolis::control::IDeviceLossLatch {
+    std::set<std::string> handles;
+    bool is_latched(const std::string& device_handle) const override { return handles.count(device_handle) != 0; }
+    std::vector<std::string> latched() const override { return {handles.begin(), handles.end()}; }
 };
 
 class CallRouterTest : public Test {
@@ -1215,6 +1224,109 @@ TEST_F(CallRouterRangeBugTest, MaxOnlyInt64_AboveMaxFails) {
     std::string error;
     EXPECT_FALSE(router->validate_call(req, error));
     EXPECT_THAT(error, HasSubstr("above maximum"));
+}
+
+//=============================================================================
+// Device-loss latch (#285)
+//=============================================================================
+
+TEST_F(CallRouterTest, DeviceLossLatchBlocksBehaviorTreeActuation) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubDeviceLossLatch loss;
+    loss.handles.insert("sim0/dev1");
+    router->set_device_loss_latch(&loss);
+
+    // StrictMock: no call() expectation, so dispatching would fail the test.
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";  // untagged -> actuating (fail closed)
+    req.is_automated = true;
+    req.is_behavior_tree = true;
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+    EXPECT_THAT(result.error_message, HasSubstr("re-armed"));
+}
+
+// The load-bearing exemption. Mode-transition hooks also set is_automated, and
+// AUTO -> MANUAL is fail_on_error: true, so refusing them fails the
+// before-callback and VETOES the transition -- stranding the operator in AUTO
+// with no way to re-arm. That is #251's shape: a latch suppressing the hooks
+// that would clear it.
+TEST_F(CallRouterTest, DeviceLossLatchDoesNotBlockModeTransitionHooks) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubDeviceLossLatch loss;
+    loss.handles.insert("sim0/dev1");
+    router->set_device_loss_latch(&loss);
+
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.is_automated = true;       // a hook sets this too ...
+    req.is_behavior_tree = false;  // ... but is not the control loop
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+// An operator commanding a device they can see is deliberate -- which is what
+// "permit restarting" means.
+TEST_F(CallRouterTest, DeviceLossLatchDoesNotBlockManualCalls) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubDeviceLossLatch loss;
+    loss.handles.insert("sim0/dev1");
+    router->set_device_loss_latch(&loss);
+
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";  // is_automated defaults false -> manual
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+// Step 4: a returning latched device gets its safe state re-asserted, and that
+// re-issue must not be refused by the latch that prompted it.
+TEST_F(CallRouterTest, DeviceLossLatchDoesNotBlockSafeStateReissue) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubDeviceLossLatch loss;
+    loss.handles.insert("sim0/dev1");
+    router->set_device_loss_latch(&loss);
+
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.is_automated = true;
+    req.is_behavior_tree = true;
+    req.safe_state = true;  // ... but exempt
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, DeviceLossLatchIsPerDevice) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubDeviceLossLatch loss;
+    loss.handles.insert("sim0/other");  // a different device
+    router->set_device_loss_latch(&loss);
+
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.is_automated = true;
+    req.is_behavior_tree = true;
+
+    auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
 }
 
 //=============================================================================

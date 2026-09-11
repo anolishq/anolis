@@ -711,6 +711,15 @@ components:
           type: integer
         estop:
           $ref: '#/components/schemas/EstopStatus'
+        device_loss_latched:
+          type: array
+          description: >-
+            Device handles blocked from autonomous actuation after going
+            unreachable at the transport level. Cleared only by a MANUAL -> AUTO
+            transition: releasing an emergency stop may permit a restart but
+            must not cause one (ISO 13850 4.1.4). Empty when nothing is latched.
+          items:
+            type: string
     SoftwareSafeState:
       type: string
       description: >-

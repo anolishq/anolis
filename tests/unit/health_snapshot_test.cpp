@@ -117,9 +117,10 @@ protected:
     // stamped poll time of dev0.
     std::chrono::system_clock::time_point PollWithQuality(anolis::deviceprovider::v1::SignalValue_Quality quality,
                                                           std::optional<int64_t> sample_epoch_ms = std::nullopt) {
-        ON_CALL(*mock_provider, read_signals(_, _, _))
+        ON_CALL(*mock_provider, read_signals(_, _, _, _))
             .WillByDefault(Invoke([quality, sample_epoch_ms](const std::string &, const std::vector<std::string> &,
-                                                             ReadSignalsResponse &response) {
+                                                             ReadSignalsResponse &response,
+                                                             anolis::deviceprovider::v1::Status_Code &) {
                 auto *v = response.add_values();
                 v->set_signal_id("temp");
                 v->set_quality(quality);
@@ -141,15 +142,15 @@ protected:
     // Poll once so every device has a fresh last_poll_time, and return the
     // stamped poll time of dev0 so tests can offset `now` deterministically.
     std::chrono::system_clock::time_point PollAndGetPollTime() {
-        ON_CALL(*mock_provider, read_signals(_, _, _))
-            .WillByDefault(
-                Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response) {
-                    auto *v = response.add_values();
-                    v->set_signal_id("temp");
-                    v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
-                    v->mutable_value()->set_double_value(21.0);
-                    return true;
-                }));
+        ON_CALL(*mock_provider, read_signals(_, _, _, _))
+            .WillByDefault(Invoke([](const std::string &, const std::vector<std::string> &,
+                                     ReadSignalsResponse &response, anolis::deviceprovider::v1::Status_Code &) {
+                auto *v = response.add_values();
+                v->set_signal_id("temp");
+                v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                v->mutable_value()->set_double_value(21.0);
+                return true;
+            }));
         state_cache = std::make_unique<state::StateCache>(*registry, 500);
         EXPECT_TRUE(state_cache->initialize());
         state_cache->poll_once(*provider_registry);

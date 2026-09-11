@@ -107,13 +107,31 @@ public:
     /** @brief Current latch + planned-safe-state snapshot for the status surface. */
     EstopCapability capability() const;
 
+    /**
+     * @brief Re-assert the planned safe state for ONE device, in place.
+     *
+     * Runs the same rung `trigger()` would -- hooks, else setpoints, else zero
+     * -- restricted to calls targeting `device_handle`. Does not engage the
+     * latch, does not drive FAULT, does not take `mutex_`: this runs on the
+     * poll thread when a lost device answers again (#285), and an e-stop
+     * arriving over HTTP must never wait behind it. Per-provider serialization
+     * in CallRouter is the only ordering the two need.
+     *
+     * `result.actions` is empty when the planned rung has nothing for this
+     * device, which the caller should log: the device may still be running
+     * its last command.
+     */
+    EstopResult reassert_for(const std::string &device_handle);
+
 private:
     // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
     std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;
     // Which rung would run now; if uncovered_out is set, reports how many
     // actuating outputs lack a declared setpoint.
     SafeStateKind planned_kind(size_t *uncovered_out) const;
-    EstopResult run_ladder();
+    // Runs the planned rung. With `only_device` set, only calls whose target is
+    // that handle are issued.
+    EstopResult run_ladder(const std::string *only_device = nullptr);
     CallOutcome run_call(const runtime::ModeTransitionCallConfig &call);
     CallOutcome run_zero_call(const std::string &device_handle, const registry::FunctionSpec &spec);
 

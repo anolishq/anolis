@@ -15,6 +15,7 @@
 
 #include "automation/mode_manager.hpp"
 #include "control/i_actuation_latch.hpp"
+#include "control/i_device_loss_latch.hpp"
 #include "logging/logger.hpp"
 
 namespace anolis {
@@ -29,6 +30,8 @@ void CallRouter::set_mode_manager(automation::ModeManager* mode_manager, const s
 }
 
 void CallRouter::set_actuation_latch(const IActuationLatch* latch) { actuation_latch_ = latch; }
+
+void CallRouter::set_device_loss_latch(const IDeviceLossLatch* latch) { device_loss_latch_ = latch; }
 
 CallRouter::ProviderLock CallRouter::get_or_create_provider_lock(const std::string& provider_id) {
     std::lock_guard<std::mutex> map_lock(provider_locks_mutex_);
@@ -118,6 +121,23 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         return result;
     }
 
+    // Refuse behaviour-tree calls to a device that went unreachable and has not
+    // been re-armed (#285). Without this, a device that loses power and returns
+    // is re-commanded by the tree's keepalive -- measured at ~1.4 s after power
+    // returned on the reference rig -- which is the machine restarting because
+    // power came back rather than because anyone decided it should.
+    //
+    // Scoped to `is_behavior_tree`, NOT `is_automated`: mode-transition hooks
+    // set the latter too, and refusing them vetoes the very MANUAL -> AUTO
+    // transition that clears this latch.
+    if (!request.safe_state && request.is_behavior_tree && device_loss_latch_ != nullptr &&
+        device_loss_latch_->is_latched(request.device_handle) && registry::is_actuating(*func_spec)) {
+        result.error_message = "Device was unreachable and has not been re-armed; re-enter AUTO to resume automation";
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+        LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
+        return result;
+    }
+
     // Reconcile integer signedness against the resolved spec BEFORE validating.
     // A config-authored argument carries no declared type (YAML integers all
     // arrive as int64), so a uint64 parameter would otherwise be uncallable from
@@ -149,6 +169,18 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
+        return result;
+    }
+
+    // Re-check the loss latch after acquiring the provider lock, for the same
+    // reason as the e-stop latch above: the device could have gone unreachable
+    // while this call waited, and the tree's command would land on a device
+    // nobody has re-armed.
+    if (!request.safe_state && request.is_behavior_tree && device_loss_latch_ != nullptr &&
+        device_loss_latch_->is_latched(request.device_handle) && registry::is_actuating(*func_spec)) {
+        result.error_message = "Device was unreachable and has not been re-armed; re-enter AUTO to resume automation";
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+        LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
         return result;
     }
 

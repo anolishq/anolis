@@ -254,3 +254,52 @@ TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
 }
+
+//=============================================================================
+// reassert_for: per-device re-issue on a lost device's return (#285)
+//=============================================================================
+
+// The setpoints rung is the one the hooks-only walk missed. A machine that
+// declares setpoints and no hooks must still get its safe state re-asserted.
+TEST_F(SafeStateTest, ReassertForRunsTheSetpointsRungForOneDevice) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->reassert_for("sim0/heater");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_TRUE(result.actions[0].success);
+
+    // Re-asserting is not an e-stop: no latch, no FAULT.
+    EXPECT_FALSE(controller->is_engaged());
+    EXPECT_FALSE(result.fault_requested);
+}
+
+TEST_F(SafeStateTest, ReassertForRunsTheZeroRungForOneDevice) {
+    RegisterActuator();
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->reassert_for("sim0/heater");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_FALSE(controller->is_engaged());
+}
+
+// Only the returning device is driven. A hook for some other device on the
+// same provider is not re-run just because this one came back.
+TEST_F(SafeStateTest, ReassertForIssuesNothingForOtherDevices) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    // StrictMock: any call() would fail this test.
+    const auto result = controller->reassert_for("sim0/pump");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Hooks);
+    EXPECT_TRUE(result.actions.empty());
+}

@@ -68,7 +68,8 @@ public:
                          anolis::deviceprovider::v1::DescribeDeviceResponse &response) override;
     /** @brief Issue `ReadSignals` for one device and requested signal subset. */
     bool read_signals(const std::string &device_id, const std::vector<std::string> &signal_ids,
-                      anolis::deviceprovider::v1::ReadSignalsResponse &response) override;
+                      anolis::deviceprovider::v1::ReadSignalsResponse &response,
+                      anolis::deviceprovider::v1::Status_Code &status) override;
     /** @brief Issue `Call` for one device/function selector and argument map. */
     bool call(const std::string &device_id, uint32_t function_id, const std::string &function_name,
               const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
@@ -132,13 +133,24 @@ private:
         error_ = std::move(message);
     }
 
-    /** @brief Serialize, send, and validate one ADPP request/response exchange. */
+    /**
+     * @brief Serialize, send, and validate one ADPP request/response exchange.
+     *
+     * `status` is set on EVERY path, under `mutex_`, to the code for this
+     * exchange: the provider's own code when a response completed, otherwise a
+     * transport-class code (UNAVAILABLE for a dead or unwritable session,
+     * DEADLINE_EXCEEDED for a timeout, INTERNAL for a malformed reply). It is
+     * the per-call value; `last_status_code_` is the shared last-value view of
+     * the same thing, which a concurrent RPC on another thread can overwrite
+     * before the caller reads it back.
+     */
     bool send_request(const anolis::deviceprovider::v1::Request &request,
-                      anolis::deviceprovider::v1::Response &response, uint64_t request_id);
+                      anolis::deviceprovider::v1::Response &response, uint64_t request_id,
+                      anolis::deviceprovider::v1::Status_Code &status);
 
     /** @brief Wait for one correlated response frame within the given timeout. */
-    bool wait_for_response(anolis::deviceprovider::v1::Response &response, uint64_t expected_request_id,
-                           int timeout_ms);
+    bool wait_for_response(anolis::deviceprovider::v1::Response &response, uint64_t expected_request_id, int timeout_ms,
+                           anolis::deviceprovider::v1::Status_Code &status);
 };
 
 }  // namespace provider
