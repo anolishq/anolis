@@ -125,3 +125,37 @@ _make_bundle() {
     [ "$status" -eq 0 ]
     [[ "${output}" == *"skipping verification"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# #302 — the run registry's default data dir is relative; the unit must start
+# the runtime somewhere the service user can write, and the install must
+# notice when the registry did not come up.
+# ---------------------------------------------------------------------------
+
+@test "302: runtime unit sets WorkingDirectory to the prefix" {
+    PREFIX=/srv/anolis
+    run emit_systemd_unit
+    [ "$status" -eq 0 ]
+    grep -qE '^WorkingDirectory=/srv/anolis$' <<< "${output}"
+}
+
+@test "302: run-registry probe passes on 200 and fails on 503" {
+    # Shadow curl: -w '%{http_code}' is the only output the probe reads.
+    curl() { printf '%s' "${FAKE_HTTP_CODE}"; }
+    export -f curl
+
+    FAKE_HTTP_CODE=200
+    run _run_registry_available "http://localhost:8080"
+    [ "$status" -eq 0 ]
+
+    FAKE_HTTP_CODE=503
+    run _run_registry_available "http://localhost:8080"
+    [ "$status" -ne 0 ]
+}
+
+@test "302: run-registry probe fails when curl itself fails" {
+    curl() { return 7; }
+    export -f curl
+    run _run_registry_available "http://localhost:8080"
+    [ "$status" -ne 0 ]
+}

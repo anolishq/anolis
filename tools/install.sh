@@ -423,7 +423,8 @@ phase_directories() {
     # Explicit modes — mkdir -p inherits the caller's umask, and a permissive
     # caller left bin/ world-writable (777) on CI (#154).
     install -d -m 755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/config" \
-        "${PREFIX}/config/providers" "${PREFIX}/projects" "${PREFIX}/.prev"
+        "${PREFIX}/config/providers" "${PREFIX}/projects" "${PREFIX}/.prev" \
+        "${PREFIX}/anolis-data"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
 }
@@ -1435,6 +1436,18 @@ _runtime_port() {
     fi
 }
 
+# The run registry fails soft: if its data dir cannot be created the runtime
+# logs one WARN at boot and GET /v0/runs answers 503 for the life of the
+# process, while /v0/runtime/status stays green. An install that only checks
+# status reports success over a registry that is not recording (#302). Pure:
+# stdout only, exit status is the answer.
+_run_registry_available() {
+    local base_url="$1"
+    local code
+    code=$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/v0/runs" 2>/dev/null || echo 000)
+    [[ "${code}" == "200" ]]
+}
+
 phase_health() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "health: skipped (services not started)"
@@ -1451,6 +1464,12 @@ phase_health() {
             local version
             version=$(curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
             log_ok "health: runtime responding (v${version})"
+            if _run_registry_available "http://localhost:${port}"; then
+                log_ok "health: run registry available"
+            else
+                log_warn "health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded"
+                log_info "  sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'"
+            fi
             return
         fi
         sleep ${HEALTH_INTERVAL}
@@ -1699,6 +1718,12 @@ SupplementaryGroups=i2c gpio dialout
 # Injects ANOLIS_API_TOKEN. Read by systemd as root, so the secret stays out of
 # runtime.yaml (which is world-readable and preserved across upgrades).
 EnvironmentFile=${RUNTIME_ENV_FILE}
+# The runtime's default data dir (run registry, \`runtime.data_dir\` unset) is
+# the RELATIVE path anolis-data/, so the service must start somewhere the
+# service user can write. Without this it starts in / and the run registry
+# fails soft at boot -- one WARN, then 503 on /v0/runs for the life of the
+# process (#302).
+WorkingDirectory=${PREFIX}
 ExecStart=${PREFIX}/bin/anolis-runtime --config ${PREFIX}/config/runtime.yaml
 Restart=on-failure
 RestartSec=5
