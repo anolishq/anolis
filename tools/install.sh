@@ -1569,6 +1569,33 @@ _observability_data_dirs() {
     return 0
 }
 
+# Remove the install prefix, keeping recorded runtime data (#304). The run
+# journal lives at <prefix>/anolis-data; an uninstall must not silently destroy
+# it -- the same contract the observability data has further down. Removes every
+# other entry (dotfiles included), and the prefix itself only when nothing was
+# kept. Pure: acts on the path given, prints the kept directory (if any) on
+# stdout, so the bats suite can cover it without root.
+_remove_prefix_keeping_data() {
+    local prefix="$1"
+    local data="${prefix}/anolis-data"
+    local kept=""
+    if [[ -d "${data}" && -n "$(ls -A "${data}" 2>/dev/null)" ]]; then
+        kept="${data}"
+    fi
+    local entry
+    for entry in "${prefix}"/* "${prefix}"/.[!.]*; do
+        [[ -e "${entry}" || -L "${entry}" ]] || continue
+        if [[ -n "${kept}" && "${entry}" == "${data}" ]]; then
+            continue
+        fi
+        rm -rf "${entry}"
+    done
+    if [[ -z "${kept}" ]]; then
+        rm -rf "${prefix}"
+    fi
+    printf '%s' "${kept}"
+}
+
 do_uninstall() {
     log_info "Uninstalling anolis from ${PREFIX}..."
 
@@ -1583,10 +1610,18 @@ do_uninstall() {
     done
     systemctl daemon-reload 2>/dev/null || true
 
-    # Remove installation directory
+    # Remove installation directory, keeping the run journal (#304).
     if [[ -d "${PREFIX}" ]]; then
-        rm -rf "${PREFIX}"
-        log_ok "removed ${PREFIX}"
+        local kept_runs
+        kept_runs=$(_remove_prefix_keeping_data "${PREFIX}")
+        if [[ -n "${kept_runs}" ]]; then
+            log_ok "removed ${PREFIX} contents (kept ${kept_runs})"
+            log_info "Kept: the run journal in ${kept_runs}"
+            log_info "Full purge (DESTROYS recorded runs):"
+            log_info "  rm -rf ${PREFIX}"
+        else
+            log_ok "removed ${PREFIX}"
+        fi
     fi
 
     # Secrets live outside ${PREFIX}, so they survive the rm -rf above.
