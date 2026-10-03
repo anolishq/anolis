@@ -1569,35 +1569,101 @@ _observability_data_dirs() {
     return 0
 }
 
+# Print the canonical path of an install prefix that is safe to remove
+# recursively, or refuse: non-zero, reason on stderr. The uninstall runs as
+# root, so a wrong prefix must never reach rm. Empty, relative and
+# control-character input is refused before canonicalizing (realpath would
+# resolve a relative path against $PWD, and $( ) strips a trailing newline).
+# A symlink is refused rather than followed, tested on the lexically normalized
+# path so `link/.` and `link/x/..` count. The canonical path must then have at
+# least two components, must not be $HOME or hold it, must have no mount at or
+# below it (rm -rf would empty the mount, and a bind mount's source with it),
+# and must hold bin/anolis-runtime.
+#
+# ANOLIS_MOUNTINFO exists so the mount check is testable without mounting.
+_removable_prefix() {
+    local p="${1:-}"
+    local refuse="refusing to remove '${p}'"
+    if [[ -z "${p}" || "${p}" != /* || "${p}" == *[[:cntrl:]]* ]]; then
+        log_err "${refuse}: not a plain absolute path" >&2
+        return 1
+    fi
+    if [[ -L "$(realpath -m -s -- "${p}")" ]]; then
+        log_err "${refuse}: it is a symlink" >&2
+        return 1
+    fi
+    local real home
+    real=$(realpath -m -- "${p}") || { log_err "${refuse}: cannot resolve it" >&2; return 1; }
+    home=$(realpath -m -- "${HOME:-/}")
+    if [[ "${real}" != /*/* ]]; then
+        log_err "${refuse}: it resolves to ${real}, the root or a top-level directory" >&2
+        return 1
+    fi
+    if [[ "${home}" == "${real}" || "${home}" == "${real}"/* ]]; then
+        log_err "${refuse}: it is or holds \$HOME (${home})" >&2
+        return 1
+    fi
+    local mountinfo="${ANOLIS_MOUNTINFO:-/proc/self/mountinfo}" mnt
+    if [[ ! -r "${mountinfo}" ]]; then
+        log_err "${refuse}: cannot read the mount table ${mountinfo}" >&2
+        return 1
+    fi
+    while read -r _ _ _ _ mnt _; do
+        mnt=$(printf '%b' "${mnt}")
+        if [[ "${mnt}" == "${real}" || "${mnt}" == "${real}"/* ]]; then
+            log_err "${refuse}: ${mnt} is mounted at or below it" >&2
+            return 1
+        fi
+    done <"${mountinfo}"
+    if [[ ! -f "${real}/bin/anolis-runtime" ]]; then
+        log_err "${refuse}: no bin/anolis-runtime, so not an anolis install" >&2
+        return 1
+    fi
+    printf '%s' "${real}"
+}
+
 # Remove the install prefix, keeping recorded runtime data (#304). The run
 # journal lives at <prefix>/anolis-data; an uninstall must not silently destroy
-# it -- the same contract the observability data has further down. Removes every
-# other entry (dotfiles included), and the prefix itself only when nothing was
-# kept. Pure: acts on the path given, prints the kept directory (if any) on
-# stdout, so the bats suite can cover it without root.
+# it -- the same contract the observability data has further down. A non-empty
+# journal is moved aside, the prefix is removed as one canonical path, and the
+# journal is moved back. Prints the kept directory (if any) on stdout. Pure:
+# acts on the path given, so the bats suite can cover it without root.
 _remove_prefix_keeping_data() {
-    local prefix="$1"
+    local prefix
+    prefix=$(_removable_prefix "${1:-}") || return 1
     local data="${prefix}/anolis-data"
-    local kept=""
-    if [[ -d "${data}" && -n "$(ls -A "${data}" 2>/dev/null)" ]]; then
-        kept="${data}"
+    if [[ ! -d "${data}" || -L "${data}" || -z "$(ls -A "${data}" 2>/dev/null)" ]]; then
+        rm -rf --one-file-system -- "${prefix}"
+        return
     fi
-    local entry
-    for entry in "${prefix}"/* "${prefix}"/.[!.]*; do
-        [[ -e "${entry}" || -L "${entry}" ]] || continue
-        if [[ -n "${kept}" && "${entry}" == "${data}" ]]; then
-            continue
-        fi
-        rm -rf "${entry}"
-    done
-    if [[ -z "${kept}" ]]; then
-        rm -rf "${prefix}"
+    local owner mode aside
+    owner=$(stat -c '%u:%g' -- "${prefix}") && mode=$(stat -c '%a' -- "${prefix}") || return 1
+    aside=$(mktemp -d "${prefix%/*}/.anolis-data.XXXXXX") || return 1
+    if ! mv -- "${data}" "${aside}/"; then
+        rmdir -- "${aside}"
+        log_err "could not move the run journal aside; nothing was removed" >&2
+        return 1
     fi
-    printf '%s' "${kept}"
+    if ! { rm -rf --one-file-system -- "${prefix}" && mkdir -- "${prefix}" && mv -- "${aside}/anolis-data" "${prefix}/"; }; then
+        log_err "uninstall stopped partway: the run journal is at ${aside}/anolis-data" >&2
+        return 1
+    fi
+    rmdir -- "${aside}"
+    if ! { chown -- "${owner}" "${prefix}" && chmod -- "${mode}" "${prefix}"; }; then
+        log_warn "could not restore ${owner} mode ${mode} on ${prefix}" >&2
+    fi
+    printf '%s' "${data}"
 }
 
 do_uninstall() {
     log_info "Uninstalling anolis from ${PREFIX}..."
+
+    # Refuse before anything is stopped: a prefix that is not provably an
+    # install is not touched at all.
+    if [[ -e "${PREFIX}" || -L "${PREFIX}" ]]; then
+        _removable_prefix "${PREFIX}" >/dev/null \
+            || die "uninstall: ${PREFIX} is not a removable install prefix; nothing was changed"
+    fi
 
     # Stop and disable services
     for unit in "${SYSTEMD_DIR}"/anolis-*.service; do
@@ -1613,7 +1679,8 @@ do_uninstall() {
     # Remove installation directory, keeping the run journal (#304).
     if [[ -d "${PREFIX}" ]]; then
         local kept_runs
-        kept_runs=$(_remove_prefix_keeping_data "${PREFIX}")
+        kept_runs=$(_remove_prefix_keeping_data "${PREFIX}") \
+            || die "uninstall: could not remove ${PREFIX}"
         if [[ -n "${kept_runs}" ]]; then
             log_ok "removed ${PREFIX} contents (kept ${kept_runs})"
             log_info "Kept: the run journal in ${kept_runs}"
