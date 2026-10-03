@@ -101,11 +101,19 @@ on each install that actually changes the binaries — an install of a byte-iden
 the last *different* install.
 
 > **`--uninstall` is destructive beyond the binaries.** It stops, disables and
-> removes every `anolis-*` unit, then `rm -rf`s the whole prefix — which includes
+> removes every `anolis-*` unit, then removes the prefix — which includes
 > `<prefix>/projects/<profile>`, your installed config and behaviours — and deletes
-> the environment files holding the runtime's API token. Observability data,
-> packages and the system user are kept. Back up your config directory first if it
-> is not also held elsewhere.
+> the environment files holding the runtime's API token. Recorded data is kept:
+> the run journal in `<prefix>/anolis-data` (when it holds anything), observability
+> data, packages and the system user. The uninstall prints the purge command for
+> what it kept. Back up your config directory first if it is not also held
+> elsewhere.
+>
+> Before it stops anything, the uninstall checks the prefix and refuses one that
+> is not an absolute path to an anolis install (it must hold `bin/anolis-runtime`),
+> is a symlink, resolves to `/` or a top-level directory, is or holds `$HOME`, or
+> has anything mounted at or below it. A refusal changes nothing. If the run
+> journal is on its own mount, unmount it first.
 
 ## After installing
 
