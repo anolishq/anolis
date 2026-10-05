@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-10-05
+
 ### Fixed
 
 - **Releasing an emergency stop no longer lets automation restart a device by
@@ -46,6 +48,17 @@ commit messages only.
   `<prefix>/anolis-data`. The install's health phase probes `GET /v0/runs` and
   warns when it does not answer 200. The unit is re-rendered on every install,
   so existing machines pick this up at their next upgrade.
+
+- **`install.sh --uninstall` keeps the run journal** (#304, #305). With the
+  run registry working (#303), recorded runs live in `<prefix>/anolis-data`,
+  and `--uninstall` removed them with the rest of the prefix. A non-empty
+  journal is now kept, the way observability data already is, and the
+  uninstall prints the `rm -rf` that would purge it. Before anything is
+  stopped, the prefix must be an absolute path to an anolis install
+  (`bin/anolis-runtime`), not a symlink, not `/` or a top-level directory,
+  not `$HOME` or a directory holding it, and with nothing mounted at or below
+  it; a refusal changes nothing. The prefix is then removed as one canonical
+  path with `rm -rf --one-file-system`.
 
 ## [0.1.41] - 2026-09-10
 
