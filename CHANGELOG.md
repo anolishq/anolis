@@ -13,6 +13,40 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Releasing an emergency stop no longer lets automation restart a device by
+  itself** (#285, #299). Reproduced on hardware on 2026-08-20: with the machine
+  in AUTO, a Category 0 stop and its release restarted the impeller about 1.4 s
+  later with no human action. The runtime survives the power cut, the boards
+  reboot to motors-off, and the behaviour tree's keepalive re-issued its
+  command on the next tick.
+
+  A device whose read fails with `UNAVAILABLE` or `DEADLINE_EXCEEDED` is now
+  latched: behaviour-tree calls that actuate it are refused with
+  `FAILED_PRECONDITION` until the next `MANUAL -> AUTO`. Mode-transition hooks
+  and safe-state calls are not blocked, so the latch cannot veto the transition
+  that clears it. `INTERNAL` (a reply that arrived but did not decode) does not
+  latch, and neither does a provider restart: provider loss is not device loss.
+  When a latched device answers again, its declared `safety.safe_state` calls
+  are re-issued in any mode, since a device that came back without rebooting is
+  still running its last command. Latched handles are listed as
+  `device_loss_latched` on `GET /v0/runtime/status`.
+
+  Not covered: whether sustained device loss should stop the whole machine
+  (#301), and the `device_availability` SSE event, which is still never emitted
+  (#300).
+
+- **The run registry comes up on installed machines** (#302, #303). The
+  runtime unit set `User=anolis` but no `WorkingDirectory`, so the default
+  relative data directory resolved to `/anolis-data`, creating it failed, and
+  every `/v0/runs` endpoint answered 503 for the life of the process while
+  `/v0/runtime/status` stayed green and the install reported success. The unit
+  now sets `WorkingDirectory=<prefix>` and the install creates
+  `<prefix>/anolis-data`. The install's health phase probes `GET /v0/runs` and
+  warns when it does not answer 200. The unit is re-rendered on every install,
+  so existing machines pick this up at their next upgrade.
+
 ## [0.1.41] - 2026-09-10
 
 ### Added
