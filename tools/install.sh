@@ -137,7 +137,8 @@ Common:
   --no-start             Install but don't start services
   --allow-unmet-host     Install even when a provider reports unmet host
                          requirements (e.g. before the host-prep reboot). The
-                         provider then starts up not ready until they are met.
+                         provider then starts up not ready; once the host is
+                         fixed, restart the service (or reboot) to pick it up.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -748,7 +749,8 @@ phase_host_preflight() {
     [[ ${failed} -eq 0 ]] || die "host preflight failed"
     if [[ ${unmet} -eq 1 ]]; then
         if [[ ${ALLOW_UNMET_HOST} -eq 1 ]]; then
-            log_warn "host preflight: continuing (--allow-unmet-host); those providers start up not ready until the host is fixed"
+            log_warn "host preflight: continuing (--allow-unmet-host); those providers start up not ready"
+            log_info "Once the host is fixed, restart the service (or reboot): providers check the host only at startup."
         else
             log_info "Fix the host (the project's host prep, then any reboot it asks for) and re-run,"
             log_info "or pass --allow-unmet-host to install now and fix the host after."

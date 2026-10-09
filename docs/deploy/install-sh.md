@@ -182,6 +182,8 @@ install prefix, it runs:
 
 Unmet requirements stop the install. `--allow-unmet-host` installs anyway, for
 example before the host-prep reboot; those providers then start up not ready and
-report why in `/v0/providers/health` until the host is fixed. A binary that cannot
+report why in `/v0/providers/health`. A provider checks the host only at startup,
+so once the host is fixed, restart the service (or reboot, which host prep may
+ask for anyway). A binary that cannot
 run always stops the install. A provider that gives no answer (one that predates
 `--check-host`) is reported and skipped.
