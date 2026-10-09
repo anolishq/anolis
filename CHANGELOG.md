@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.43] - 2026-10-09
+
 The runtime and `install.sh` stop knowing about one transport and one platform
 (#318, #319). Ships together with anolis-provider-bread 0.5.0 and
 anolis-provider-ezo 0.4.0, which publish claims and answer `--check-host`.
