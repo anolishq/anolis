@@ -100,6 +100,12 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+This is a minimal unit for running the runtime by hand. `install.sh` generates its
+own (`User=anolis`, see [system surfaces](system-surfaces.md)). With
+`DynamicUser=yes` the runtime and its provider children have no stable user, so a
+provider that opens a device node needs a real user that the host's device groups
+include.
+
 ## Reverse proxy (alternative)
 
 You may instead keep the runtime on `127.0.0.1` and front it with a reverse

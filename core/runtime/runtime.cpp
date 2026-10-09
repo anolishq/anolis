@@ -198,14 +198,20 @@ bool Runtime::init_providers(std::string &error) {
         provider_registry_.add_provider(provider_config.id, provider);
     }
 
+    const auto all_devices = registry_->get_all_devices();
     std::string ownership_error;
-    if (!validate_i2c_ownership_claims(registry_->get_all_devices(), ownership_error)) {
+    if (!validate_ownership_claims(all_devices, ownership_error)) {
         LOG_ERROR("[Runtime] " << ownership_error);
         error = ownership_error;
         return false;
     }
+    for (const auto &legacy_provider : providers_with_unchecked_legacy_ownership(all_devices)) {
+        LOG_WARN("[Runtime] Provider '" << legacy_provider
+                                        << "' publishes the old hw.* ownership tags and no anolis.claim; its "
+                                           "devices' ownership is not checked. Upgrade the provider.");
+    }
 
-    LOG_INFO("[Runtime] Ownership validation passed for discovered I2C devices");
+    LOG_INFO("[Runtime] Ownership validation passed");
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
     return true;
@@ -985,8 +991,8 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     }
 
     std::string ownership_error;
-    if (!validate_i2c_ownership_claims_after_provider_replacement(registry_->get_all_devices(), provider_id,
-                                                                  replacement_devices, ownership_error)) {
+    if (!validate_ownership_claims_after_provider_replacement(registry_->get_all_devices(), provider_id,
+                                                              replacement_devices, ownership_error)) {
         LOG_ERROR("[Runtime] " << ownership_error);
         return false;
     }

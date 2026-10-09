@@ -165,8 +165,10 @@ how the engines diverged):
   (`providers[].command` + `restart_policy`, framed stdio). There is no
   connect-to-a-running-provider mode.
 - A deployment is therefore **one systemd unit**, `anolis-runtime.service`
-  (`User=anolis`, `SupplementaryGroups=i2c gpio dialout`); providers are never
-  independent services. The canonical unit ships inside `install.sh`.
+  (`User=anolis`, `Group=anolis`, and the user's own groups); providers are
+  never independent services. The canonical unit ships inside `install.sh`.
+  Device access comes from the platform's host prep adding `anolis` to the
+  groups that own its device nodes, not from the unit (anolis#318).
 - **`tools/install.sh` is the single provisioning engine** (release asset;
   verbs: `--project` online config-driven install, `--stage`+`--local`
   offline bundle, `--rollback`, `--uninstall`). The machine-profile

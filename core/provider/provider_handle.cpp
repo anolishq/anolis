@@ -65,9 +65,18 @@ bool ProviderHandle::start() {
         }
 
         // Log initialization diagnostics
-        if (ready_response.diagnostics().count("init_time_ms")) {
-            LOG_INFO("[" << process_.provider_id() << "] Provider initialized in "
-                         << ready_response.diagnostics().at("init_time_ms") << "ms");
+        const auto &diagnostics = ready_response.diagnostics();
+        if (diagnostics.count("init_time_ms")) {
+            LOG_INFO("[" << process_.provider_id() << "] Provider initialized in " << diagnostics.at("init_time_ms")
+                         << "ms");
+        }
+        // Executable profile v1 §3/§6: a provider whose host requirements are
+        // unmet stays up and not ready; say which ones, since its devices will
+        // be missing. The text is the provider's; the runtime only relays it.
+        if (diagnostics.count("host_check") && diagnostics.at("host_check") == "unmet") {
+            const auto unmet = diagnostics.find("host_unmet");
+            LOG_WARN("[" << process_.provider_id() << "] Host requirements unmet: "
+                         << (unmet == diagnostics.end() ? std::string("(no detail)") : unmet->second));
         }
     } else {
         LOG_INFO("[" << process_.provider_id() << "] Provider does not support WaitReady");
