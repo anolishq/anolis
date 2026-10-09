@@ -23,92 +23,114 @@ anolis::registry::RegisteredDevice make_device(const std::string &provider_id, c
     return device;
 }
 
+anolis::registry::RegisteredDevice claiming(const std::string &provider_id, const std::string &device_id,
+                                            const std::string &claim) {
+    return make_device(provider_id, device_id, {{"anolis.claim", claim}});
+}
+
 }  // namespace
 
-TEST(RuntimeOwnershipValidationTest, AllowsDevicesWithoutOwnershipTags) {
+TEST(RuntimeOwnershipValidationTest, AllowsDevicesWithoutClaims) {
     const std::vector<anolis::registry::RegisteredDevice> devices = {make_device("sim", "temp0", {})};
 
     std::string error;
-    EXPECT_TRUE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims(devices, error));
     EXPECT_TRUE(error.empty());
 }
 
-TEST(RuntimeOwnershipValidationTest, AllowsUniqueOwnershipClaims) {
-    const std::vector<anolis::registry::RegisteredDevice> devices = {
-        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x08"}}),
-        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}}),
-        make_device("ezo", "ph_1", {{"hw.bus_path", "/dev/i2c-2"}, {"hw.i2c_address", "0x63"}})};
+TEST(RuntimeOwnershipValidationTest, AllowsUniqueClaims) {
+    const std::vector<anolis::registry::RegisteredDevice> devices = {claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x08"),
+                                                                     claiming("ezo", "ph_0", "i2c:/dev/i2c-1:0x63"),
+                                                                     claiming("ezo", "ph_1", "i2c:/dev/i2c-2:0x63")};
 
     std::string error;
-    EXPECT_TRUE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims(devices, error));
     EXPECT_TRUE(error.empty());
 }
 
-TEST(RuntimeOwnershipValidationTest, RejectsDuplicateOwnershipAcrossProviders) {
-    const std::vector<anolis::registry::RegisteredDevice> devices = {
-        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}}),
-        make_device("ezo", "do_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0X61"}})};
+TEST(RuntimeOwnershipValidationTest, RejectsDuplicateClaimAcrossProviders) {
+    const std::vector<anolis::registry::RegisteredDevice> devices = {claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x61"),
+                                                                     claiming("ezo", "do_0", "i2c:/dev/i2c-1:0x61")};
 
     std::string error;
-    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
+    EXPECT_FALSE(anolis::runtime::validate_ownership_claims(devices, error));
     EXPECT_NE(error.find("bread/dcmt_0"), std::string::npos);
     EXPECT_NE(error.find("ezo/do_0"), std::string::npos);
-    EXPECT_NE(error.find("0x61"), std::string::npos);
+    EXPECT_NE(error.find("'i2c:/dev/i2c-1:0x61'"), std::string::npos);
 }
 
-TEST(RuntimeOwnershipValidationTest, RejectsIncompleteOwnershipTags) {
-    const std::vector<anolis::registry::RegisteredDevice> devices = {
-        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}})};
+TEST(RuntimeOwnershipValidationTest, ComparesKeysAsExactStrings) {
+    // The runtime parses nothing: spelling the same address differently is a
+    // different key. Providers agree by using the SDK's claim_key.
+    const std::vector<anolis::registry::RegisteredDevice> devices = {claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x61"),
+                                                                     claiming("ezo", "do_0", "i2c:/dev/i2c-1:0X61")};
 
     std::string error;
-    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
-    EXPECT_NE(error.find("incomplete ownership tags"), std::string::npos);
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims(devices, error));
 }
 
-TEST(RuntimeOwnershipValidationTest, RejectsLegacyOnlyOwnershipTags) {
+TEST(RuntimeOwnershipValidationTest, ChecksEveryKeyOfAMultiKeyClaim) {
     const std::vector<anolis::registry::RegisteredDevice> devices = {
-        make_device("legacy", "device_0", {{"bus_path", "/dev/i2c-1"}, {"i2c_address", "0x61"}})};
+        claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x14 gpio:17"), claiming("other", "relay_0", "gpio:17")};
 
     std::string error;
-    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
-    EXPECT_NE(error.find("uses legacy ownership tags"), std::string::npos);
+    EXPECT_FALSE(anolis::runtime::validate_ownership_claims(devices, error));
+    EXPECT_NE(error.find("'gpio:17'"), std::string::npos);
+    EXPECT_EQ(error.find("i2c:/dev/i2c-1:0x14"), std::string::npos);  // that key is unique
 }
 
-TEST(RuntimeOwnershipValidationTest, RejectsInvalidI2cAddressTagValue) {
+TEST(RuntimeOwnershipValidationTest, AKeyRepeatedWithinOneDeviceIsNotAConflict) {
     const std::vector<anolis::registry::RegisteredDevice> devices = {
-        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "not-a-hex-address"}})};
+        claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x14  i2c:/dev/i2c-1:0x14")};
 
     std::string error;
-    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims(devices, error));
-    EXPECT_NE(error.find("invalid tag 'hw.i2c_address'"), std::string::npos);
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims(devices, error));
 }
 
-TEST(RuntimeOwnershipValidationTest, AllowsProviderReplacementWhenOwnershipRemainsUnique) {
+TEST(RuntimeOwnershipValidationTest, IgnoresTheOldOwnershipTags) {
+    // No fallback: hw.* tags are not read, so a duplicate expressed only with
+    // them is not caught. providers_with_unchecked_legacy_ownership names it.
+    const std::vector<anolis::registry::RegisteredDevice> devices = {
+        make_device("old_bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}}),
+        make_device("old_ezo", "do_0", {{"bus_path", "/dev/i2c-1"}, {"i2c_address", "0x61"}}),
+        claiming("ezo", "ph_0", "i2c:/dev/i2c-1:0x63"), make_device("sim", "temp0", {})};
+
+    std::string error;
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims(devices, error));
+    EXPECT_EQ(anolis::runtime::providers_with_unchecked_legacy_ownership(devices),
+              (std::vector<std::string>{"old_bread", "old_ezo"}));
+}
+
+TEST(RuntimeOwnershipValidationTest, AClaimSilencesTheLegacyWarning) {
+    const std::vector<anolis::registry::RegisteredDevice> devices = {
+        make_device("bread", "dcmt_0", {{"anolis.claim", "i2c:/dev/i2c-1:0x14"}, {"hw.bus_path", "/dev/i2c-1"}})};
+
+    EXPECT_TRUE(anolis::runtime::providers_with_unchecked_legacy_ownership(devices).empty());
+}
+
+TEST(RuntimeOwnershipValidationTest, AllowsProviderReplacementWhenClaimsRemainUnique) {
     const std::vector<anolis::registry::RegisteredDevice> current_devices = {
-        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x08"}}),
-        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}})};
+        claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x08"), claiming("ezo", "ph_0", "i2c:/dev/i2c-1:0x63")};
 
     const std::vector<anolis::registry::RegisteredDevice> replacement_devices = {
-        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}}),
-        make_device("ezo", "orp_0", {{"hw.bus_path", "/dev/i2c-2"}, {"hw.i2c_address", "0x62"}})};
+        claiming("ezo", "ph_0", "i2c:/dev/i2c-1:0x63"), claiming("ezo", "orp_0", "i2c:/dev/i2c-2:0x62")};
 
     std::string error;
-    EXPECT_TRUE(anolis::runtime::validate_i2c_ownership_claims_after_provider_replacement(current_devices, "ezo",
-                                                                                          replacement_devices, error));
+    EXPECT_TRUE(anolis::runtime::validate_ownership_claims_after_provider_replacement(current_devices, "ezo",
+                                                                                      replacement_devices, error));
     EXPECT_TRUE(error.empty());
 }
 
-TEST(RuntimeOwnershipValidationTest, RejectsProviderReplacementWithDuplicateOwnership) {
+TEST(RuntimeOwnershipValidationTest, RejectsProviderReplacementWithDuplicateClaim) {
     const std::vector<anolis::registry::RegisteredDevice> current_devices = {
-        make_device("bread", "dcmt_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}}),
-        make_device("ezo", "ph_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x63"}})};
+        claiming("bread", "dcmt_0", "i2c:/dev/i2c-1:0x61"), claiming("ezo", "ph_0", "i2c:/dev/i2c-1:0x63")};
 
     const std::vector<anolis::registry::RegisteredDevice> replacement_devices = {
-        make_device("ezo", "do_0", {{"hw.bus_path", "/dev/i2c-1"}, {"hw.i2c_address", "0x61"}})};
+        claiming("ezo", "do_0", "i2c:/dev/i2c-1:0x61")};
 
     std::string error;
-    EXPECT_FALSE(anolis::runtime::validate_i2c_ownership_claims_after_provider_replacement(current_devices, "ezo",
-                                                                                           replacement_devices, error));
+    EXPECT_FALSE(anolis::runtime::validate_ownership_claims_after_provider_replacement(current_devices, "ezo",
+                                                                                       replacement_devices, error));
     EXPECT_NE(error.find("Restart-time ownership validation failed for provider 'ezo'"), std::string::npos);
     EXPECT_NE(error.find("bread/dcmt_0"), std::string::npos);
     EXPECT_NE(error.find("ezo/do_0"), std::string::npos);
