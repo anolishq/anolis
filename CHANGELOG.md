@@ -13,6 +13,42 @@ commit messages only.
 
 ## [Unreleased]
 
+The runtime and `install.sh` stop knowing about one transport and one platform
+(#318, #319). Ships together with anolis-provider-bread 0.5.0 and
+anolis-provider-ezo 0.4.0, which publish claims and answer `--check-host`.
+
+### Changed
+
+- **Ownership is checked over opaque claims.** A device's `anolis.claim` tag
+  lists the resources it needs exclusively, space-separated; the runtime
+  requires every key to have one owner, at startup and on provider restart, as
+  before. It compares exact strings and parses nothing (providers spell an I2C
+  key with the provider SDK's `i2c::claim_key`). The `hw.bus_path` /
+  `hw.i2c_address` tags are no longer read: there is no fallback. A provider
+  that still publishes only those is logged once at startup as unchecked; with
+  an older bread or ezo, the ownership check covers nothing until they are
+  upgraded. The startup line is now `Ownership validation passed`.
+- **`install.sh` no longer sets up hardware.** Removed: the I2C phase (the
+  Pi `dtparam=i2c_arm=on` edit and its reboot notice), the `i2c-tools`
+  install, adding `anolis` to `i2c,gpio,dialout`, and the unit's
+  `SupplementaryGroups=`. The unit's user keeps its own groups, so access the
+  host already granted to `anolis` is unchanged. Enabling buses and granting
+  device access belong to the project's host prep for its platform, run before
+  `install.sh`.
+
+### Added
+
+- **Host preflight in `install.sh`.** Before starting anything it runs, as
+  `anolis` from the prefix, every binary's `--version` (a binary the host's
+  glibc/libstdc++ cannot load fails with the loader's message) and each
+  provider's `--check-host <its config>`, printing each unmet requirement with
+  the provider's fix. Unmet requirements stop the install unless
+  `--allow-unmet-host`; a provider that gives no answer is reported and
+  skipped. See `docs/deploy/install-sh.md`, Host requirements.
+- **Provider host-check readiness keys are logged.** When a provider's
+  WaitReady reports `host_check=unmet`, the runtime logs its `host_unmet` text
+  (executable profile v1 §3).
+
 ## [0.1.42] - 2026-10-05
 
 ### Fixed

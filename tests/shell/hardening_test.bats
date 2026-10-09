@@ -43,12 +43,14 @@ setup() {
     [[ "${output}" == *'`Wants=`'* ]]
 }
 
-@test "B4: still one unit — User/Group anolis, SupplementaryGroups, no per-provider Wants" {
+@test "B4: still one unit — User/Group anolis, no SupplementaryGroups, no per-provider Wants" {
     PREFIX=/opt/anolis
     run emit_systemd_unit
     [[ "${output}" == *"User=anolis"* ]]
     [[ "${output}" == *"Group=anolis"* ]]
-    [[ "${output}" == *"SupplementaryGroups=i2c gpio dialout"* ]]
+    # Device access is the platform's host prep (the user's own groups), not a
+    # hardcoded list in the unit (anolis#318).
+    ! grep -qE '^SupplementaryGroups=' <<< "${output}"
     # No active Wants= directive (the only occurrence is the escaped comment).
     ! grep -qE '^Wants=' <<< "${output}"
 }

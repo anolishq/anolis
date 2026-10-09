@@ -91,6 +91,7 @@ at the repo root on the trade-offs first.
 | --- | --- |
 | `--no-start` | Install without starting the runtime. Does not gate observability. |
 | `--dry-run` | Print what would happen, change nothing. |
+| `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
 | `--prefix <path>` | Override the install prefix (default `/opt/anolis`). |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
 | `--uninstall` | See the warning below. |
@@ -160,10 +161,27 @@ limits:
 - The derived `zero` rung has no declared calls, so a machine relying on it gets a
   clean preflight having checked nothing.
 
-## Raspberry Pi note
+## Host requirements
 
-I2C must be enabled and the GPIO-header bus present; the phase is skipped entirely
-on x86_64. `install.sh` looks for `/dev/i2c-1` specifically, or an adapter naming
-the ARM/BSC controller — a Pi with a display also publishes HDMI DDC adapters,
-which are not the bus you want. If the dtparam is missing it appends it and tells
-you a reboot is required before providers can open `/dev/i2c-1`.
+`install.sh` deploys anolis; it does not set up the host's hardware. Enabling a bus
+(on a Raspberry Pi, the `config.txt` lines), loading modules, and giving the
+`anolis` user access to device nodes belong to the project's host prep for its
+platform, run first: host prep, then any reboot it asks for, then `install.sh`. The
+`anolis` system user is a contract between the two: host prep may create it, and
+`install.sh` accepts an existing one.
+
+Before anything starts, `install.sh` checks the result. As `anolis`, from the
+install prefix, it runs:
+
+- every binary's `--version`. A binary the host cannot load (its glibc or
+  libstdc++ is too old) fails here, with the loader's message naming the missing
+  version.
+- each provider's `--check-host <its config>` (executable profile v1 §6), and
+  prints what the provider reports: each unmet requirement with its fix, and any
+  the provider could not determine.
+
+Unmet requirements stop the install. `--allow-unmet-host` installs anyway, for
+example before the host-prep reboot; those providers then start up not ready and
+report why in `/v0/providers/health` until the host is fixed. A binary that cannot
+run always stops the install. A provider that gives no answer (one that predates
+`--check-host`) is reported and skipped.

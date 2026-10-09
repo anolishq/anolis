@@ -25,7 +25,6 @@ readonly DEFAULT_PORT=8080
 readonly HEALTH_TIMEOUT=30
 readonly HEALTH_INTERVAL=2
 readonly ANOLIS_USER="anolis"
-readonly ANOLIS_GROUPS="i2c,gpio,dialout"
 readonly SYSTEMD_DIR="/etc/systemd/system"
 # Telemetry-export secrets live here — OUTSIDE ${PREFIX}, so phase_directories'
 # `chown -R anolis` never touches this root-only file. See #137.
@@ -71,8 +70,9 @@ PREFIX_EXPLICIT=0
 # Active runtime variant (a runtime_profiles map key). Empty = the reserved
 # inert default `manual`. install.sh only ever installs an inert variant.
 RUNTIME_VARIANT=""
-REBOOT_NEEDED=0
 HEALTH_FAILED=0
+# Continue past providers' unmet host requirements (--allow-unmet-host).
+ALLOW_UNMET_HOST=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -135,6 +135,9 @@ Common:
                          mode-transition hooks); a non-inert variant is refused.
                          Activate automation from Operate after install.
   --no-start             Install but don't start services
+  --allow-unmet-host     Install even when a provider reports unmet host
+                         requirements (e.g. before the host-prep reboot). The
+                         provider then starts up not ready until they are met.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -171,6 +174,7 @@ parse_args() {
                 WITH_OBSERVABILITY=1
                 shift ;;
             --no-start)  NO_START=1; shift ;;
+            --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -297,10 +301,11 @@ phase_verify() {
 # Phase 6: System user
 # =============================================================================
 
+# The service user is a contract: host prep may create it first, and grants it
+# whatever device access the platform needs (which group owns a device node is
+# the platform's business, not install.sh's). install.sh only ensures it exists.
 phase_system_user() {
     if id "${ANOLIS_USER}" &>/dev/null; then
-        # User exists — ensure groups are correct
-        usermod -aG "${ANOLIS_GROUPS}" "${ANOLIS_USER}" 2>/dev/null || true
         log_skip "system user: ${ANOLIS_USER} already exists"
     else
         # No --create-home: it copies /etc/skel into ${PREFIX}, polluting the
@@ -308,111 +313,8 @@ phase_system_user() {
         # is created explicitly in phase_directories.
         useradd --system --shell /usr/sbin/nologin --home-dir "${PREFIX}" "${ANOLIS_USER}" || \
             die "Failed to create system user: ${ANOLIS_USER}"
-        usermod -aG "${ANOLIS_GROUPS}" "${ANOLIS_USER}" 2>/dev/null || \
-            log_warn "system user: could not add to all groups (${ANOLIS_GROUPS}) — some may not exist yet"
         log_ok "system user: created ${ANOLIS_USER}"
     fi
-}
-
-# =============================================================================
-# Phase 7: I2C
-# =============================================================================
-
-# True when the GPIO-header I2C bus is live -- the one `dtparam=i2c_arm=on`
-# creates and the one every provider config in this project opens
-# (`bus_path: /dev/i2c-1`).
-#
-# Deliberately NOT a glob over /dev/i2c-*. On any Pi with HDMI attached the VC4
-# driver publishes DDC buses (i2c-20 / i2c-21, named "fef04500.i2c") which exist
-# regardless of dtparam, so a glob always matched and the enablement below was
-# unreachable on exactly the hardware it was written for: the install reported
-# "i2c: already enabled", then failed 30s later with the providers unable to open
-# /dev/i2c-1 and nothing naming the cause (#249).
-#
-# The two roots are overridable so this is testable without real hardware --
-# the original bug shipped undetected because nothing could exercise it.
-_arm_i2c_bus_present() {
-    local dev_root="${ANOLIS_I2C_DEV_ROOT:-/dev}"
-    local sys_root="${ANOLIS_I2C_SYS_ROOT:-/sys/class/i2c-dev}"
-
-    # Conventional GPIO bus on Pi 3/4/5.
-    [[ -e "${dev_root}/i2c-1" ]] && return 0
-
-    # Fallback for a nonstandard adapter number: match the ARM/BSC controller by
-    # name so a renumbered header bus still counts, while the DDC adapters
-    # (fef0*.i2c) never do.
-    local name_file
-    for name_file in "${sys_root}"/*/name; do
-        [[ -e "${name_file}" ]] || continue
-        if grep -qiE 'bcm2835|bcm2708|bsc' "${name_file}" 2>/dev/null; then
-            return 0
-        fi
-    done
-    return 1
-}
-
-phase_i2c() {
-    # Skip on non-Pi (x86_64 dev machines)
-    if [[ "${ARCH}" == "x86_64" ]]; then
-        log_skip "i2c: skipped on x86_64"
-        return
-    fi
-
-    if _arm_i2c_bus_present; then
-        log_ok "i2c: already enabled"
-        return
-    fi
-
-    # Try Bookworm path first, then legacy
-    local config_file=""
-    if [[ -f /boot/firmware/config.txt ]]; then
-        config_file="/boot/firmware/config.txt"
-    elif [[ -f /boot/config.txt ]]; then
-        config_file="/boot/config.txt"
-    else
-        log_warn "i2c: cannot find boot config — enable I2C manually"
-        return
-    fi
-
-    if grep -q "^dtparam=i2c_arm=on" "${config_file}"; then
-        log_warn "i2c: enabled in ${config_file} but the GPIO bus is not live yet — REBOOT REQUIRED before providers can open /dev/i2c-1"
-        REBOOT_NEEDED=1
-        return
-    fi
-
-    echo "dtparam=i2c_arm=on" >> "${config_file}"
-    REBOOT_NEEDED=1
-    log_ok "i2c: enabled in ${config_file} (reboot required)"
-}
-
-# =============================================================================
-# Phase 8: Dependencies
-# =============================================================================
-
-phase_deps() {
-    # Skip if offline (no LOCAL_PATH means online, but check if apt works)
-    if ! command -v apt-get &>/dev/null; then
-        log_skip "deps: apt-get not available"
-        return
-    fi
-
-    if dpkg -s i2c-tools &>/dev/null 2>&1; then
-        log_skip "deps: i2c-tools already installed"
-        return
-    fi
-
-    # Only install if online
-    if [[ -n "${LOCAL_PATH}" ]] && ! curl -fsS --connect-timeout 3 http://archive.ubuntu.com &>/dev/null 2>&1; then
-        log_warn "deps: i2c-tools not installed (offline — install manually: apt-get install i2c-tools)"
-        return
-    fi
-
-    # shellcheck disable=SC2015  # intentional: error handler covers both failures
-    apt-get update -qq && apt-get install -y -qq i2c-tools || {
-        log_warn "deps: failed to install i2c-tools (non-fatal)"
-        return
-    }
-    log_ok "deps: i2c-tools installed"
 }
 
 # =============================================================================
@@ -701,6 +603,161 @@ phase_config_providers() {
 }
 
 # =============================================================================
+# Host preflight (anolis#318)
+# =============================================================================
+#
+# Before anything starts, run what the service will run, as the user it will
+# run as, from the directory it will start in:
+#   - every binary's --version: a binary this host cannot load (glibc or
+#     libstdc++ too old) fails here with the loader's own message;
+#   - each provider's --check-host <its config> (executable profile v1 §6): what
+#     that provider needs from the host. install.sh prints the requirements and
+#     never interprets them; their meaning is the provider's.
+# Unmet requirements fail the install unless --allow-unmet-host is given (the
+# provider then starts up not ready). A binary that cannot run, or an envelope
+# with exit 2 (evaluated, could not decide), always fails. A provider that gives
+# no answer (a non-zero exit with no JSON: it predates the verb, or it exited 2
+# on a config it could not read, which the profile lets it do with empty
+# stdout) is reported with its stderr and skipped, as the conformance harness
+# skips it.
+
+# Run a command as the service user from ${PREFIX} (the unit's WorkingDirectory).
+# runuser uses the user's groups from /etc/group, as a User= service gets them.
+_run_as_service() {
+    ( cd "${PREFIX}" && runuser -u "${ANOLIS_USER}" -- "$@" )
+}
+
+# Print "<id>\t<command>\t<config>" for each provider in a runtime config; the
+# config is the value after --config in args (flow or block list).
+_runtime_providers() {
+    local cfg="$1"
+    [[ -f "${cfg}" ]] || return 0
+    awk '
+        function flush() {
+            if (id != "") print id "\t" cmd "\t" conf
+            id = ""; cmd = ""; conf = ""; want = 0; in_args = 0
+        }
+        { sub(/\r$/, "") }
+        /^[[:alpha:]]/ { if (in_blk) flush(); in_blk = ($1 == "providers:"); next }
+        !in_blk { next }
+        $1 == "-" && $2 == "id:" { flush(); id = $3; gsub(/["\047]/, "", id); next }
+        in_args && $1 == "-" {
+            v = $2; gsub(/["\047]/, "", v)
+            if (want) { conf = v; want = 0 } else if (v == "--config") { want = 1 }
+            next
+        }
+        { in_args = 0 }
+        $1 == "command:" { cmd = $2; gsub(/["\047]/, "", cmd); next }
+        $1 == "args:" {
+            line = $0
+            sub(/^[^:]*:[[:space:]]*/, "", line)
+            if (line ~ /^\[/) {
+                gsub(/[][",\047]/, " ", line)
+                n = split(line, a, " ")
+                for (i = 1; i < n; i++) if (a[i] == "--config") conf = a[i + 1]
+            } else {
+                in_args = 1
+            }
+            next
+        }
+        END { if (in_blk) flush() }
+    ' "${cfg}"
+}
+
+# Print a --check-host envelope's unmet and unknown requirements, indented.
+_print_host_requirements() {
+    local file="$1"
+    if command -v python3 &>/dev/null; then
+        python3 - "${file}" <<'PY' && return 0
+import json, sys
+doc = json.load(open(sys.argv[1]))
+for r in doc.get("requirements", []):
+    status = r.get("status")
+    if status not in ("unmet", "unknown"):
+        continue
+    print(f"    {r.get('id', '?')} ({status}): {r.get('detail', '')}")
+    if status == "unmet" and r.get("remedy"):
+        print(f"      fix: {r['remedy']}")
+PY
+    fi
+    sed 's/^/    /' "${file}"
+}
+
+phase_host_preflight() {
+    local tmp out err
+    tmp=$(mktemp -d) || die "host preflight: cannot create a temp dir"
+    out="${tmp}/out"
+    err="${tmp}/err"
+    local failed=0 unmet=0
+
+    if _run_as_service "${PREFIX}/bin/anolis-runtime" --version >"${out}" 2>"${err}"; then
+        log_ok "host preflight: anolis-runtime runs as ${ANOLIS_USER}"
+    else
+        log_err "host preflight: anolis-runtime cannot run on this host as ${ANOLIS_USER}"
+        sed 's/^/    /' "${err}" | head -5
+        failed=1
+    fi
+
+    local id cmd conf rc
+    while IFS=$'\t' read -r id cmd conf; do
+        [[ -n "${cmd}" ]] || continue
+        if ! _run_as_service "${cmd}" --version >"${out}" 2>"${err}"; then
+            log_err "host preflight: ${id}: ${cmd} cannot run on this host as ${ANOLIS_USER}"
+            sed 's/^/    /' "${err}" | head -5
+            failed=1
+            continue
+        fi
+        if [[ -z "${conf}" ]]; then
+            log_warn "host preflight: ${id}: no --config in its runtime.yaml args; host requirements not checked"
+            continue
+        fi
+        rc=0
+        _run_as_service "${cmd}" --check-host "${conf}" >"${out}" 2>"${err}" || rc=$?
+        # Same rule as the conformance harness: a non-zero exit with no JSON on
+        # stdout gave no answer (an older provider, or a config it could not
+        # read). Show its stderr so either is visible, and move on.
+        if [[ ${rc} -ne 0 ]] && ! grep -q '^[[:space:]]*[{[]' "${out}"; then
+            log_warn "host preflight: ${id}: --check-host gave no answer (exit ${rc}); host requirements not checked"
+            sed 's/^/    /' "${err}" | head -3
+            continue
+        fi
+        case ${rc} in
+            0)
+                log_ok "host preflight: ${id}: host requirements met"
+                _print_host_requirements "${out}"
+                ;;
+            1)
+                log_err "host preflight: ${id}: host requirements unmet"
+                _print_host_requirements "${out}"
+                unmet=1
+                ;;
+            2)
+                log_err "host preflight: ${id}: could not evaluate its host requirements (config ${conf})"
+                sed 's/^/    /' "${err}" | head -5
+                failed=1
+                ;;
+            *)
+                log_err "host preflight: ${id}: --check-host exited ${rc}"
+                sed 's/^/    /' "${err}" | head -5
+                failed=1
+                ;;
+        esac
+    done < <(_runtime_providers "${PREFIX}/config/runtime.yaml")
+    rm -rf "${tmp}"
+
+    [[ ${failed} -eq 0 ]] || die "host preflight failed"
+    if [[ ${unmet} -eq 1 ]]; then
+        if [[ ${ALLOW_UNMET_HOST} -eq 1 ]]; then
+            log_warn "host preflight: continuing (--allow-unmet-host); those providers start up not ready until the host is fixed"
+        else
+            log_info "Fix the host (the project's host prep, then any reboot it asks for) and re-run,"
+            log_info "or pass --allow-unmet-host to install now and fix the host after."
+            die "host preflight: requirements unmet"
+        fi
+    fi
+}
+
+# =============================================================================
 # Phase 15: Manifest
 # =============================================================================
 
@@ -887,8 +944,8 @@ phase_telemetry_export() {
         return
     fi
 
-    # python3 -m venv needs the python3-venv package (ensurepip); install.sh
-    # otherwise ships only i2c-tools. Non-fatal — skip the feature if it fails.
+    # python3 -m venv needs the python3-venv package (ensurepip), which install.sh
+    # does not otherwise need. Non-fatal — skip the feature if it fails.
     if ! dpkg -s python3-venv &>/dev/null 2>&1; then
         if ! { apt-get update -qq && apt-get install -y -qq python3-venv; }; then
             log_warn "telemetry-export: could not install python3-venv — skipped"
@@ -1477,17 +1534,11 @@ phase_health() {
     done
 
     log_warn "health: runtime not responding after ${HEALTH_TIMEOUT}s"
-    if [[ ${REBOOT_NEEDED} -eq 1 ]]; then
-        # I2C was just enabled and the bus is not live until the reboot — the
-        # runtime being down is expected here, not an install failure.
-        log_info "This may be normal — I2C was just enabled. Reboot and check:"
-    else
-        # A runtime that never came up is a failed install. Do not exit 0 here:
-        # `curl | sudo bash` and workbench's deploy.py both read the exit code,
-        # and a green exit on a crash-looping service hides the breakage (#172).
-        HEALTH_FAILED=1
-        log_info "Check logs:"
-    fi
+    # A runtime that never came up is a failed install. Do not exit 0 here:
+    # `curl | sudo bash` and workbench's deploy.py both read the exit code, and
+    # a green exit on a crash-looping service hides the breakage (#172).
+    HEALTH_FAILED=1
+    log_info "Check logs:"
     log_info "  sudo systemctl status anolis-runtime"
     log_info "  sudo journalctl -u anolis-runtime --no-pager -n 20"
 }
@@ -1532,12 +1583,6 @@ phase_summary() {
         log_info "API token: ${RUNTIME_ENV_FILE} (read it with: sudo cat ${RUNTIME_ENV_FILE})"
         log_info "           Remote clients must send it as: Authorization: Bearer <token>"
         log_info "           Requests from the device itself are exempt."
-    fi
-
-    if [[ ${REBOOT_NEEDED} -eq 1 ]]; then
-        echo ""
-        log_warn "REBOOT REQUIRED for I2C changes to take effect"
-        log_info "  sudo reboot"
     fi
 
     if [[ ${HEALTH_FAILED} -eq 1 ]]; then
@@ -1806,8 +1851,9 @@ emit_systemd_unit() {
 # The runtime spawns and supervises each provider as a child subprocess (per the
 # \`providers:\` block in runtime.yaml), over the child's stdin/stdout. Providers
 # are NOT independent systemd services. Do not add per-provider units or \`Wants=\`
-# them; that double-spawns each provider and contends for the I2C bus. The
-# provider children inherit this unit's SupplementaryGroups for bus access.
+# them; that double-spawns each provider and contends for its hardware. The
+# provider children run as this unit's user, with that user's groups: granting
+# device access is the platform's host prep, not this unit (anolis#318).
 [Unit]
 Description=Anolis Runtime
 After=network.target
@@ -1816,7 +1862,6 @@ After=network.target
 Type=simple
 User=${ANOLIS_USER}
 Group=${ANOLIS_USER}
-SupplementaryGroups=i2c gpio dialout
 # Injects ANOLIS_API_TOKEN. Read by systemd as root, so the secret stays out of
 # runtime.yaml (which is world-readable and preserved across upgrades).
 EnvironmentFile=${RUNTIME_ENV_FILE}
@@ -2196,8 +2241,6 @@ main() {
         fi
         dry_run_phase "verify checksums"
         dry_run_phase "create system user ${ANOLIS_USER}"
-        dry_run_phase "enable I2C"
-        dry_run_phase "install dependencies (i2c-tools)"
         dry_run_phase "create directories at ${PREFIX}"
         dry_run_phase "backup existing binaries"
         dry_run_phase "install binaries to ${PREFIX}/bin/"
@@ -2205,6 +2248,7 @@ main() {
         dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
         dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
         dry_run_phase "install provider configs (skip each if exists)"
+        dry_run_phase "host preflight: run each binary and each provider's --check-host as ${ANOLIS_USER}"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
         [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] && dry_run_phase "provision telemetry-export service (venv + config + unit; inert until secrets)"
@@ -2222,8 +2266,6 @@ main() {
     phase_verify
     preflight_variant_selection
     phase_system_user
-    phase_i2c
-    phase_deps
     phase_directories
     phase_backup
     phase_install_binaries
@@ -2231,6 +2273,7 @@ main() {
     phase_config_runtime
     phase_runtime_auth
     phase_config_providers
+    phase_host_preflight
     phase_manifest
     phase_systemd
     phase_telemetry_export
