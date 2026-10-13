@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Anolis!
 
 ### Prerequisites
 
-- **Windows**: Visual Studio 2026 with C++ desktop development workload
+- **Windows**: Visual Studio 2026 with C++ desktop development workload, CMake 4.2+
 - **Linux**: GCC 13+, CMake 3.20+
 - **Git**: For version control
 

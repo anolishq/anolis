@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Windows**: Visual Studio 2026 with C++ desktop development
+- **Windows**: Visual Studio 2026 with C++ desktop development, CMake 4.2+
 - **Linux**: GCC 13+, CMake 3.20+
 - **vcpkg**: dependency management
 - **Python 3**: test tooling

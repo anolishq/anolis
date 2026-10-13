@@ -128,7 +128,7 @@ Key: BTs never bypass CallRouter or StateCache.
 ## Technology Stack
 
 - **Language**: C++20
-- **Build**: CMake 3.20+
+- **Build**: CMake 3.20+ (4.2+ on Windows, for the Visual Studio 2026 generator)
 - **Dependencies**: vcpkg (protobuf, yaml-cpp, cpp-httplib, nlohmann-json, BehaviorTree.CPP)
 - **Protocol**: ADPP (protobuf over framed stdio)
 - **Platform**: Windows, Linux
