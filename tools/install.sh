@@ -366,7 +366,41 @@ phase_backup() {
         log_warn "backup: failed to copy binaries to .prev/"
         return
     }
+    _record_prev_meta
     log_ok "backup: existing binaries saved to .prev/"
+}
+
+# Record what .prev now holds so --rollback can name it (#315). The metadata
+# lives in a subdirectory because replace_binaries restores only regular files.
+# Metadata from an older backup is removed first: a stale name is a wrong one.
+_record_prev_meta() {
+    local meta="${PREFIX}/.prev/meta" ver
+    rm -f "${meta}/runtime-version" "${meta}/manifest.json"
+    mkdir -p "${meta}" || { log_warn "backup: cannot create ${meta}; --rollback will not name the version"; return 0; }
+
+    if [[ -f "${PREFIX}/manifest.json" ]]; then
+        cp "${PREFIX}/manifest.json" "${meta}/manifest.json" || true
+    fi
+    ver=$(timeout 10 "${PREFIX}/bin/anolis-runtime" --version 2>/dev/null | head -n1) || ver=""
+    if [[ -n "${ver}" ]]; then
+        printf '%s\n' "${ver}" > "${meta}/runtime-version"
+    else
+        log_warn "backup: could not read the runtime version; --rollback will not name it"
+    fi
+}
+
+# Name the rollback target from the metadata _record_prev_meta wrote.
+_print_rollback_target() {
+    local meta="${PREFIX}/.prev/meta" ver=""
+    [[ -f "${meta}/runtime-version" ]] && ver=$(head -n1 "${meta}/runtime-version")
+    if [[ -n "${ver}" ]]; then
+        log_info "rollback target: ${ver}"
+    else
+        log_warn "rollback target: version unknown (not recorded when this backup was taken)"
+    fi
+    if [[ -f "${meta}/manifest.json" ]]; then
+        log_info "rollback target components: ${meta}/manifest.json"
+    fi
 }
 
 # =============================================================================
@@ -1802,6 +1836,8 @@ do_rollback() {
     [[ -f "${PREFIX}/.prev/anolis-runtime" ]] \
         || die "nothing to roll back: ${PREFIX}/.prev/anolis-runtime not found (no previous install was backed up)"
 
+    _print_rollback_target
+
     replace_binaries "${PREFIX}/.prev" "${PREFIX}/bin" \
         || die "rollback: failed to restore binaries from ${PREFIX}/.prev/"
     chmod +x "${PREFIX}"/bin/* 2>/dev/null || true
@@ -2221,6 +2257,7 @@ main() {
     if [[ ${ROLLBACK} -eq 1 ]]; then
         if [[ ${DRY_RUN} -eq 1 ]]; then
             log_info "[dry-run] would roll back binaries from ${PREFIX}/.prev"
+            _print_rollback_target
             exit 0
         fi
         do_rollback

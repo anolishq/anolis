@@ -74,6 +74,53 @@ teardown() {
 }
 
 # ===========================================================================
+# Naming the rollback target from the metadata phase_backup records (#315)
+# ===========================================================================
+
+_setup_prev_with_meta() {
+    mkdir -p "${PREFIX_DIR}/bin" "${PREFIX_DIR}/.prev/meta"
+    printf 'new-runtime' > "${PREFIX_DIR}/bin/anolis-runtime"
+    printf 'old-runtime' > "${PREFIX_DIR}/.prev/anolis-runtime"
+    printf 'anolis-runtime 0.1.39\n' > "${PREFIX_DIR}/.prev/meta/runtime-version"
+    printf '{}\n' > "${PREFIX_DIR}/.prev/meta/manifest.json"
+}
+
+@test "--rollback names the version before restoring it (#315)" {
+    _setup_prev_with_meta
+
+    run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --rollback --prefix "${PREFIX_DIR}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"rollback target: anolis-runtime 0.1.39"* ]]
+    [[ "${output}" == *"${PREFIX_DIR}/.prev/meta/manifest.json"* ]]
+    # Named BEFORE the restore, not after.
+    [[ "${output}" == *"rollback target: anolis-runtime 0.1.39"*"restored binaries from .prev/"* ]]
+    [ "$(cat "${PREFIX_DIR}/bin/anolis-runtime")" = "old-runtime" ]
+    # The metadata is not a binary: it must not be restored into bin/.
+    [ ! -e "${PREFIX_DIR}/bin/meta" ]
+    [ ! -e "${PREFIX_DIR}/bin/runtime-version" ]
+}
+
+@test "--dry-run --rollback names the version and restores nothing (#315)" {
+    _setup_prev_with_meta
+
+    run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --dry-run --rollback --prefix "${PREFIX_DIR}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"rollback target: anolis-runtime 0.1.39"* ]]
+    [[ "${output}" == *"would roll back"* ]]
+    [ "$(cat "${PREFIX_DIR}/bin/anolis-runtime")" = "new-runtime" ]
+}
+
+@test "--rollback of a backup without metadata says the version is unknown (#315)" {
+    mkdir -p "${PREFIX_DIR}/bin" "${PREFIX_DIR}/.prev"
+    printf 'old-runtime' > "${PREFIX_DIR}/.prev/anolis-runtime"
+
+    run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --rollback --prefix "${PREFIX_DIR}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"rollback target: version unknown"* ]]
+    [ "$(cat "${PREFIX_DIR}/bin/anolis-runtime")" = "old-runtime" ]
+}
+
+# ===========================================================================
 # phase_backup: same-version re-run must not clobber the rollback point (#184)
 # ===========================================================================
 
@@ -131,4 +178,33 @@ _setup_backup_dirs() {
     run phase_backup
     [ "$status" -eq 0 ]
     [[ "${output}" == *"saved to .prev"* ]]
+}
+
+@test "phase_backup records the saved runtime version and manifest in .prev/meta (#315)" {
+    _setup_backup_dirs
+    printf '#!/bin/sh\necho "anolis-runtime 0.1.39"\n' > "${PREFIX}/bin/anolis-runtime"
+    chmod +x "${PREFIX}/bin/anolis-runtime"
+    printf '{"version": "0.1.39"}\n' > "${PREFIX}/manifest.json"
+    printf 'runtime-v3\n' > "${BUNDLE_DIR}/bin/anolis-runtime"
+
+    run phase_backup
+    [ "$status" -eq 0 ]
+    [ "$(cat "${PREFIX}/.prev/meta/runtime-version")" = "anolis-runtime 0.1.39" ]
+    cmp -s "${PREFIX}/manifest.json" "${PREFIX}/.prev/meta/manifest.json"
+}
+
+@test "phase_backup drops stale metadata when the version cannot be read (#315)" {
+    _setup_backup_dirs
+    # .prev/meta describes an older backup; the runtime being saved now is not
+    # executable, so its version is unknown. A stale name would be a wrong one.
+    mkdir -p "${PREFIX}/.prev/meta"
+    printf 'anolis-runtime 0.1.1\n' > "${PREFIX}/.prev/meta/runtime-version"
+    printf '{}\n' > "${PREFIX}/.prev/meta/manifest.json"
+    printf 'runtime-v3\n' > "${BUNDLE_DIR}/bin/anolis-runtime"
+
+    run phase_backup
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"could not read the runtime version"* ]]
+    [ ! -e "${PREFIX}/.prev/meta/runtime-version" ]
+    [ ! -e "${PREFIX}/.prev/meta/manifest.json" ]
 }

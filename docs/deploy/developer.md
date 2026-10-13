@@ -65,7 +65,10 @@ journalctl -u anolis-runtime -f
 
 If you installed with `install.sh`, `--rollback` restores the previous binaries
 from `<prefix>/.prev` and restarts. It restores **binaries only** — config is left
-as it is.
+as it is. It names the runtime version it restores before restoring it (with
+`--dry-run`, without restoring), from `<prefix>/.prev/meta/`, which the backup
+step fills. A backup taken by an older `install.sh` has no record there, and
+the version is reported as unknown.
 
 Note that a deploy driven through the workbench uses the `install.sh` from the
 *pinned runtime release*, not your working copy. Editing `tools/install.sh`
