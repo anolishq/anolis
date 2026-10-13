@@ -6,8 +6,8 @@ Thank you for your interest in contributing to Anolis!
 
 ### Prerequisites
 
-- **Windows**: Visual Studio 2022 with C++ desktop development workload
-- **Linux**: GCC 11+, CMake 3.20+
+- **Windows**: Visual Studio 2026 with C++ desktop development workload
+- **Linux**: GCC 13+, CMake 3.20+
 - **Git**: For version control
 
 ### Setup
@@ -91,7 +91,7 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 
 ### C++ Style
 
-- C++17 standard
+- C++20 standard; use `std::format` for diagnostics and log messages
 - Use `std::filesystem` for path handling
 - Platform-specific code must be guarded with `#ifdef _WIN32` / `#else`
 - Prefer RAII for resource management
@@ -125,7 +125,7 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 Both `anolis` and `anolis-provider-sim` use GitHub Actions for CI. Tests run on:
 
 - Ubuntu 24.04 (GCC)
-- Windows Server 2022 (MSVC 2022)
+- Windows Server 2025 (Visual Studio 2026)
 
 ### Test Requirements
 

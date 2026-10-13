@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- **Windows**: Visual Studio 2022 with C++ desktop development
-- **Linux**: GCC 11+, CMake 3.20+
+- **Windows**: Visual Studio 2026 with C++ desktop development
+- **Linux**: GCC 13+, CMake 3.20+
 - **vcpkg**: dependency management
 - **Python 3**: test tooling
 - **Git**: source control
@@ -26,7 +26,7 @@ winget install Git.Git
 winget install Python.Python.3.12
 ```
 
-Install Visual Studio 2022 (or Build Tools) with the `Desktop development with C++` workload.
+Install Visual Studio 2026 (or Build Tools) with the `Desktop development with C++` workload.
 
 Install vcpkg (Linux/macOS):
 

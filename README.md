@@ -362,7 +362,8 @@ Higher-level orchestration and UI layers build on top of this foundation.
 
 - **CMake** (≥3.20) — Build system
 - **vcpkg** — C++ package management
-- **C++17** compiler — MSVC 2022, GCC 11+, or Clang 14+
+- **C++20** compiler with `std::format` — Visual Studio 2026 (MSVC), GCC 13+,
+  or Clang 17+
 
 ---
 
