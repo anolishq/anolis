@@ -1,14 +1,17 @@
 #!/usr/bin/env bats
-# Tests for the --prefix guard on install and rollback (#335).
+# Tests for the --prefix guard on install, rollback and uninstall (#335).
 #
-# Both modes run as root and act on ${PREFIX}: install chowns the prefix
+# All three modes run as root and act on ${PREFIX}: install chowns the prefix
 # recursively and every file in ${PREFIX}/bin, rollback the files in
 # ${PREFIX}/bin. With an empty prefix or `/`, that is the system /bin.
+# Uninstall stops and deletes every anolis unit and the secrets in
+# /etc/anolis whatever the prefix, so a prefix that names no install must
+# stop it before it starts.
 #
 # main runs in-process. Every command that changes the host -- chown, chmod,
-# rm, install, cp, mv, systemctl, useradd, runuser -- is a stub that records
-# its arguments and does nothing else. The phases that act on the prefix and
-# are named in the issue (directories, install binaries, rollback) stay real,
+# rm, rmdir, install, cp, mv, systemctl, useradd, runuser -- is a stub that
+# records its arguments and does nothing else. The phases that act on the
+# prefix (directories, install binaries, rollback, uninstall) stay real,
 # so a missing guard shows up as a recorded chown on the wrong path; every
 # other phase is a stub that records its name. A refusal test therefore cannot
 # act on the host even when the guard under test is missing.
@@ -34,12 +37,12 @@ setup() {
     CALLS="${BATS_TEST_TMPDIR}/calls.log"
     : >"${CALLS}"
 
-    _stub_cmd chown chmod rm install cp mv systemctl useradd runuser
+    _stub_cmd chown chmod rm rmdir install cp mv systemctl useradd runuser
     _stub_cmd phase_root_check phase_detect phase_verify preflight_variant_selection \
         phase_system_user phase_backup phase_config_project phase_config_runtime \
         phase_runtime_auth phase_config_providers phase_host_preflight phase_manifest \
         phase_systemd phase_telemetry_export phase_observability phase_hostname \
-        phase_start phase_health phase_summary do_stage do_uninstall
+        phase_start phase_health phase_summary do_stage
 
     # An offline bundle with one binary and no recorded prefix.
     BUNDLE="${FIX}/bundle"
@@ -49,7 +52,7 @@ setup() {
 }
 
 teardown() {
-    unset -f chown chmod rm install cp mv systemctl useradd runuser
+    unset -f chown chmod rm rmdir install cp mv systemctl useradd runuser
 }
 
 # Refused: non-zero, the reason names --prefix, and no command was run.
@@ -59,23 +62,23 @@ assert_refused() {
     [ ! -s "${CALLS}" ] || return 1
 }
 
-# Each input on its own, for install and rollback: the call log is reset
+# Each input on its own, for each mode: the call log is reset
 # first, and every failure names the input, the mode and the commands that
 # were recorded.
 assert_each_refused() {
     local input mode failed=0
     for input in "$@"; do
-        for mode in install rollback; do
+        for mode in install rollback uninstall; do
             : >"${CALLS}"
             if [[ "${mode}" == install ]]; then
                 run main --local "${BUNDLE}" --no-start --prefix "${input}"
             else
-                run main --rollback --prefix "${input}"
+                run main "--${mode}" --prefix "${input}"
             fi
             assert_refused || {
                 failed=1
                 echo "not refused: ${mode} --prefix '${input}' (status ${status})" >&2
-                grep -E '^(chown|chmod|install|cp|mv|rm|systemctl) ' "${CALLS}" | cut -c1-120 | sed 's/^/  recorded: /' >&2 || true
+                grep -E '^(chown|chmod|install|cp|mv|rm|rmdir|systemctl) ' "${CALLS}" | cut -c1-120 | sed 's/^/  recorded: /' >&2 || true
             }
         done
     done
@@ -91,6 +94,13 @@ assert_each_refused() {
     touch "${FIX}/rel/bin/anolis-runtime" "${FIX}/rel/.prev/anolis-runtime"
     cd "${FIX}"
     assert_each_refused "rel" "./rel" "rel/"
+}
+
+# Uninstall only checked a prefix that exists, so one that does not exist
+# from here skipped the guard and the units and secrets went anyway.
+@test "335: a relative prefix that does not exist is refused" {
+    cd "${FIX}"
+    assert_each_refused "opt/anolis" "./gone"
 }
 
 @test "335: / and paths that collapse to it are refused" {
@@ -151,4 +161,13 @@ assert_each_refused() {
     [ "$status" -eq 0 ]
     [[ "${output}" == *"rollback complete"* ]]
     grep -qxF "chown anolis:anolis ${p}/bin/anolis-runtime" "${CALLS}"
+}
+
+# An install whose prefix is already gone still has units and secrets to
+# remove.
+@test "335: uninstall still runs for an absolute prefix that no longer exists" {
+    run main --uninstall --prefix "${FIX}/opt/anolis"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"uninstall complete"* ]]
+    grep -qxF "systemctl daemon-reload" "${CALLS}"
 }

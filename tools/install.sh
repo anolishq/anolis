@@ -1324,7 +1324,10 @@ phase_observability() {
     systemctl enable --now influxdb 2>/dev/null || { log_warn "observability: failed to start influxdb"; return 0; }
     _obs_setup_influx || return 0
     _obs_provision_grafana || { log_warn "observability: grafana provisioning failed — grafana-server NOT enabled/started"; return 0; }
-    systemctl enable --now grafana-server 2>/dev/null || { log_warn "observability: failed to start grafana"; return 0; }
+    # Restart, not `enable --now`: a running grafana-server keeps the drop-in,
+    # env file and datasource it read at start, and starting it is a no-op.
+    { systemctl enable grafana-server && systemctl restart grafana-server; } 2>/dev/null \
+        || { log_warn "observability: failed to start grafana"; return 0; }
 
     local i
     for i in $(seq 1 15); do
@@ -2255,9 +2258,11 @@ main() {
 
     parse_args "$@"
 
-    # Uninstall checks its prefix with the stricter _removable_prefix; stage
-    # runs on another machine than the one the prefix names.
-    if [[ -z "${STAGE_DIR}" && ${UNINSTALL} -eq 0 ]]; then
+    # Stage runs on another machine than the one the prefix names. Uninstall
+    # also checks an existing prefix with the stricter _removable_prefix, but
+    # stops units and removes secrets whatever the prefix, so it needs this
+    # check for a prefix that does not exist.
+    if [[ -z "${STAGE_DIR}" ]]; then
         check_prefix "refusing --prefix '${PREFIX}'"
     fi
 

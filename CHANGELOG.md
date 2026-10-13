@@ -13,6 +13,46 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-10-13
+
+### Added
+
+- **`install.sh --rollback` names the version it restores** (#315). The
+  backup step records the replaced runtime's `--version` and a copy of
+  `manifest.json` under `<prefix>/.prev/meta/`. `--rollback` and
+  `--rollback --dry-run` print `rollback target: <version>` and the path of
+  that manifest before restoring. A backup taken by an older `install.sh` has
+  no record, and the target is reported as unknown. Rollback still restores
+  binaries only.
+
+### Fixed
+
+- **`install.sh` refuses an unsafe `--prefix` on install and rollback**
+  (#335). An empty, relative or symlinked prefix, `/` or a top-level
+  directory, or a path that is or holds `$HOME`, is refused before anything
+  runs, and so is such a prefix recorded in a staged bundle. Before, an empty
+  prefix or `/` would have had the install chown every file in `/bin` to the
+  service user. `--uninstall` keeps its stricter guard.
+- **A behaviour tree that fails to take the service context now fails its
+  load** (#281). A tree that remapped a port onto the runtime's
+  service-context key built, then made `load()` throw after it had replaced
+  the active definition. The context is now written to the candidate before
+  it is published, so the load fails and the previous definition stays
+  active.
+- **`--with-observability` sets Grafana's log level to `warn`** (#248).
+  Grafana logged every request at `info`, so an open dashboard's auto-refresh
+  flooded the journal and evicted runtime logs. On a host where Grafana is
+  already running, re-running `install.sh --with-observability` writes the
+  setting but does not restart Grafana; run
+  `systemctl restart grafana-server` once.
+
+### Changed
+
+- `docs/http-api.md` defines `mode` in `GET /v0/runtime/status` when
+  automation is disabled: always `MANUAL`, with `GET /v0/mode` returning 503
+  as the way to tell (#250).
+- `AGENTS.md` describes CI's clang-tidy gate as diff-based (#317).
+
 ## [0.1.43] - 2026-10-09
 
 The runtime and `install.sh` stop knowing about one transport and one platform
