@@ -360,9 +360,10 @@ Higher-level orchestration and UI layers build on top of this foundation.
 
 ### Build & Development
 
-- **CMake** (≥3.20) — Build system
+- **CMake** (≥3.20; ≥4.2 for the Windows presets, which use the Visual Studio 2026 generator) — Build system
 - **vcpkg** — C++ package management
-- **C++17** compiler — MSVC 2022, GCC 11+, or Clang 14+
+- **C++20** compiler with `std::format` — Visual Studio 2026 (MSVC), GCC 13+,
+  or Clang 17+ (with libc++ 17+ or libstdc++ 13+, which provide `std::format`)
 
 ---
 
