@@ -1069,8 +1069,11 @@ emit_grafana_dropin() {
 # The '-' prefix: a missing env file leaves Grafana up (datasource degraded)
 # instead of hard-failing the unit — the already-set-up-influx path can
 # legitimately lack the file until the operator writes it.
+# GF_LOG_LEVEL=warn: Grafana logs requests at level=info, so an open
+# dashboard's auto-refresh can flood the journal and evict runtime logs.
 [Service]
 EnvironmentFile=-${GRAFANA_ENV_FILE}
+Environment=GF_LOG_LEVEL=warn
 EOF
 }
 
