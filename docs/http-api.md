@@ -51,6 +51,19 @@ Common status-code mapping:
 1. `GET /v0/runtime/status` - high-level runtime/provider summary.
 2. `GET /v0/providers/health` - per-provider lifecycle/supervision and device health.
 
+Notes:
+
+1. `mode` in `GET /v0/runtime/status` is the control regime in effect, not a
+   probe for the mode machine. With automation enabled it is the mode
+   machine's current mode. With `automation.enabled: false` there is no mode
+   machine and `mode` is always `MANUAL`, which is accurate: manual
+   `POST /v0/call` is permitted and nothing actuates on its own.
+2. To tell whether a mode machine exists, call `GET /v0/mode`. On an
+   automation-disabled runtime it returns `503 UNAVAILABLE`
+   (`Automation layer not enabled`), as do `POST /v0/mode`,
+   `GET /v0/automation/tree` and `GET /v0/automation/status`. A `MANUAL`
+   from `/v0/runtime/status` alone does not distinguish the two cases.
+
 ### Discovery and capabilities
 
 1. `GET /v0/devices`
