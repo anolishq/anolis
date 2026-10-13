@@ -81,3 +81,37 @@ setup() {
     [ "$status" -eq 0 ]
     [ -z "${output}" ]
 }
+
+# A re-run over an installed stack rewrites Grafana's drop-in, env file and
+# datasource. A running grafana-server keeps what it read at start, and
+# `enable --now` does nothing to a running unit, so every run restarts it.
+# Everything that touches the host or the network is a recording stub.
+_stub_obs_host() {
+    CALLS="${BATS_TEST_TMPDIR}/calls.log"
+    : >"${CALLS}"
+    local name
+    for name in systemctl apt-get curl dpkg sleep _obs_apt_repos _obs_setup_influx _obs_provision_grafana; do
+        eval "${name}() { printf '%s\n' \"${name} \$*\" >>\"\${CALLS}\"; }"
+    done
+    WITH_OBSERVABILITY=1
+}
+
+@test "an observability run restarts grafana-server, never only enable --now" {
+    _stub_obs_host
+    run phase_observability
+    [ "$status" -eq 0 ]
+    grep -qxF "systemctl enable grafana-server" "${CALLS}"
+    grep -qxF "systemctl restart grafana-server" "${CALLS}"
+    if grep -qxF "systemctl enable --now grafana-server" "${CALLS}"; then return 1; fi
+}
+
+@test "grafana-server is restarted after Grafana is provisioned" {
+    _stub_obs_host
+    run phase_observability
+    [ "$status" -eq 0 ]
+    local provisioned restarted
+    provisioned=$(grep -nxF "_obs_provision_grafana " "${CALLS}" | cut -d: -f1)
+    restarted=$(grep -nxF "systemctl restart grafana-server" "${CALLS}" | cut -d: -f1)
+    [ -n "${provisioned}" ] && [ -n "${restarted}" ]
+    [ "${restarted}" -gt "${provisioned}" ]
+}
