@@ -37,6 +37,13 @@ setup() {
     [[ "${output}" == *"EnvironmentFile=-/etc/anolis/observability-grafana.env"* ]]
 }
 
+@test "emit_grafana_dropin sets Grafana's log level to warn (#248)" {
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    # level=info request logging must not compete with runtime logs in the journal.
+    grep -qx 'Environment=GF_LOG_LEVEL=warn' <<<"${output}"
+}
+
 @test "emit_grafana_env renders connection, token, and first-boot admin password" {
     run emit_grafana_env "read-token-123" "grafana-pw-456"
     [ "$status" -eq 0 ]
