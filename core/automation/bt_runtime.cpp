@@ -105,6 +105,17 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
         return outcome;  // previous active definition preserved
     }
 
+    // Stage the service context on the unpublished candidate: a tree that
+    // remaps a port onto the context key builds fine but makes this throw,
+    // and that must fail the load like any other bad definition (#281).
+    try {
+        populate_blackboard(*candidate);
+    } catch (const std::exception &e) {
+        outcome.error = std::string("failed to initialise automation definition blackboard: ") + e.what();
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
+    }
+
     AutomationVersion version;
     version.engine_kind = "behavior_tree";
     version.id = file_basename(path);
@@ -119,7 +130,6 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
         loaded_def_bytes_ = std::move(bytes);
         version_ = version;
         tree_loaded_ = true;
-        populate_blackboard(*tree_);
     }
 
     outcome.ok = true;

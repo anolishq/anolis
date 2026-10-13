@@ -154,6 +154,46 @@ TEST(BTRuntimeTest, FailedLoadPreservesPreviousDefinition) {
     std::filesystem::remove(bad, ec);
 }
 
+// A tree that remaps a port onto the service-context key builds, but the
+// runtime's blackboard write then throws. load() must report that as a failed
+// load and keep the previous definition, not throw after committing (#281).
+TEST(BTRuntimeTest, ServiceContextKeyCollisionFailsLoadAndPreservesPrevious) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+
+    const auto good = write_tree_file("anolis-bt-good", kSimpleTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{good.string()}).ok);
+    const auto good_digest = runtime.definition()->digest;
+
+    const std::string poisoned_xml = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <GetParameter param="x" value="{anolis.bt_service_context}"/>
+  </BehaviorTree>
+</root>
+)";
+    const auto poisoned = write_tree_file("anolis-bt-poisoned", poisoned_xml);
+
+    LoadOutcome outcome;
+    EXPECT_NO_THROW(outcome = runtime.load(AutomationDefinitionRef{poisoned.string()}));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_FALSE(outcome.error.empty());
+    ASSERT_TRUE(runtime.definition().has_value());
+    EXPECT_EQ(runtime.definition()->digest, good_digest);
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, runtime.tick());
+
+    std::error_code ec;
+    std::filesystem::remove(good, ec);
+    std::filesystem::remove(poisoned, ec);
+}
+
 // Concurrent neutral reads while the lifecycle churns (stop -> load -> start).
 // Exercises def_mutex_; run under TSAN to catch races on the active-definition
 // pointers (the latent lock-free race this seam fixes).
