@@ -264,6 +264,7 @@ phase_prepare_bundle() {
         else
             # Adopt the baked prefix (no-op when it already matches).
             PREFIX="${baked_prefix}"
+            check_prefix "refusing the bundle's staged prefix '${PREFIX}'"
         fi
 
         log_ok "prepare: using local bundle"
@@ -1653,21 +1654,15 @@ _observability_data_dirs() {
     return 0
 }
 
-# Print the canonical path of an install prefix that is safe to remove
-# recursively, or refuse: non-zero, reason on stderr. The uninstall runs as
-# root, so a wrong prefix must never reach rm. Empty, relative and
-# control-character input is refused before canonicalizing (realpath would
-# resolve a relative path against $PWD, and $( ) strips a trailing newline).
-# A symlink is refused rather than followed, tested on the lexically normalized
-# path so `link/.` and `link/x/..` count. The canonical path must then have at
-# least two components, must not be $HOME or hold it, must have no mount at or
-# below it (rm -rf would empty the mount, and a bind mount's source with it),
-# and must hold bin/anolis-runtime.
-#
-# ANOLIS_MOUNTINFO exists so the mount check is testable without mounting.
-_removable_prefix() {
-    local p="${1:-}"
-    local refuse="refusing to remove '${p}'"
+# Print the canonical path of a prefix that root may write under, or refuse:
+# non-zero, "<$2>: <reason>" on stderr. Empty, relative and control-character
+# input is refused before canonicalizing (realpath would resolve a relative
+# path against $PWD, and $( ) strips a trailing newline). A symlink is refused
+# rather than followed, tested on the lexically normalized path so `link/.`
+# and `link/x/..` count. The canonical path must then have at least two
+# components and must not be $HOME or hold it.
+_checked_prefix() {
+    local p="${1:-}" refuse="$2"
     if [[ -z "${p}" || "${p}" != /* || "${p}" == *[[:cntrl:]]* ]]; then
         log_err "${refuse}: not a plain absolute path" >&2
         return 1
@@ -1687,6 +1682,30 @@ _removable_prefix() {
         log_err "${refuse}: it is or holds \$HOME (${home})" >&2
         return 1
     fi
+    printf '%s' "${real}"
+}
+
+# Install and rollback chmod and chown ${PREFIX}/bin/* as root, and install
+# chowns ${PREFIX} recursively, so an empty prefix or `/` would hand the
+# system's /bin to the service user (#335). Neither removes the prefix, so a
+# prefix that is its own mount is still a place to install into; only the
+# uninstall guard below refuses mounts.
+check_prefix() {
+    _checked_prefix "${PREFIX}" "$1" >/dev/null || exit 1
+}
+
+# Print the canonical path of an install prefix that is safe to remove
+# recursively, or refuse: non-zero, reason on stderr. The uninstall runs as
+# root, so a wrong prefix must never reach rm. On top of _checked_prefix, the
+# canonical path must have no mount at or below it (rm -rf would empty the
+# mount, and a bind mount's source with it), and must hold bin/anolis-runtime.
+#
+# ANOLIS_MOUNTINFO exists so the mount check is testable without mounting.
+_removable_prefix() {
+    local p="${1:-}"
+    local refuse="refusing to remove '${p}'"
+    local real
+    real=$(_checked_prefix "${p}" "${refuse}") || return 1
     local mountinfo="${ANOLIS_MOUNTINFO:-/proc/self/mountinfo}" mnt
     if [[ ! -r "${mountinfo}" ]]; then
         log_err "${refuse}: cannot read the mount table ${mountinfo}" >&2
@@ -2235,6 +2254,12 @@ main() {
     umask 022
 
     parse_args "$@"
+
+    # Uninstall checks its prefix with the stricter _removable_prefix; stage
+    # runs on another machine than the one the prefix names.
+    if [[ -z "${STAGE_DIR}" && ${UNINSTALL} -eq 0 ]]; then
+        check_prefix "refusing --prefix '${PREFIX}'"
+    fi
 
     # Stage mode: build an offline bundle from a local config. Dev-side — no
     # root, no install, no network beyond fetching release assets.

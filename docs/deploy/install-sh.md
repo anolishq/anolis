@@ -92,7 +92,7 @@ at the repo root on the trade-offs first.
 | `--no-start` | Install without starting the runtime. Does not gate observability. |
 | `--dry-run` | Print what would happen, change nothing. |
 | `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
-| `--prefix <path>` | Override the install prefix (default `/opt/anolis`). |
+| `--prefix <path>` | Override the install prefix (default `/opt/anolis`). Install and rollback refuse, before changing anything, a prefix that is empty, relative or a symlink, resolves to `/` or a top-level directory, or is or holds `$HOME`; so does an install that adopts a staged bundle's prefix. |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
 | `--uninstall` | See the warning below. |
 
