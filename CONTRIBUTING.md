@@ -91,7 +91,7 @@ python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 
 ### C++ Style
 
-- C++20 standard; use `std::format` for diagnostics and log messages
+- C++20 standard
 - Use `std::filesystem` for path handling
 - Platform-specific code must be guarded with `#ifdef _WIN32` / `#else`
 - Prefer RAII for resource management
