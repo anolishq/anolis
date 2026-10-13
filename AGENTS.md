@@ -35,9 +35,11 @@ C++20 control runtime for the Anolis system.
   gtest test-noise such as `bugprone-unchecked-optional-access` (false positives
   against gtest macros). Don't "fix" test code to satisfy a check that the test
   config already suppresses.
-- There is a **whole-repo clang-tidy job** in `extended.yml` (preset
-  `ci-linux-clang-tidy`) separate from the per-PR `ok` gate — a change can pass
-  `ok` and still trip extended tidy.
+- **clang-tidy in CI is diff-based**: the `clang-tidy` job in `ci.yml` calls
+  the shared `clang-tidy-diff.yml` workflow (preset `ci-linux-release`,
+  blocking) and lints only the lines a PR changes. It is part of the `ok` gate
+  and skips when no C++ file or `.clang-tidy` changed. No CI job runs
+  clang-tidy over the whole repo; `just lint` does that locally.
 - **HTTP API** lives under `core/http/` (cpp-httplib) with **Bearer auth** and a
   loopback bind gate (`core/http/auth.hpp`, `core/http/server.cpp`). Don't widen
   the bind or weaken auth without intent.
