@@ -77,6 +77,8 @@ RUNTIME_VARIANT=""
 HEALTH_FAILED=0
 # Continue past providers' unmet host requirements (--allow-unmet-host).
 ALLOW_UNMET_HOST=0
+# Install an older runtime over a newer one (--allow-downgrade).
+ALLOW_DOWNGRADE=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -146,6 +148,10 @@ Common:
                          requirements (e.g. before the host-prep reboot). The
                          provider then starts up not ready; once the host is
                          fixed, restart the service (or reboot) to pick it up.
+  --allow-downgrade      Install even when the bundle's runtime is older than
+                         the installed one. Without it, the install is refused
+                         before anything changes; --rollback is the way back
+                         to the previous install.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -186,6 +192,7 @@ parse_args() {
                 shift ;;
             --no-start)  NO_START=1; shift ;;
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
+            --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -258,33 +265,37 @@ phase_prepare_bundle() {
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
 
-        # #222/D11: a staged bundle bakes ${PREFIX} into the systemd unit and the
-        # rendered config paths. Installing at a different prefix would leave the
-        # unit/config pointing at the staged one — a silent broken install. Refuse
-        # a differing EXPLICIT --prefix; with no --prefix, adopt the baked one.
-        local baked_prefix
-        baked_prefix=$(_manifest_prefix "${BUNDLE_DIR}/manifest.json")
-        if [[ -z "${baked_prefix}" ]]; then
-            if [[ "${PREFIX_EXPLICIT}" -eq 1 ]]; then
-                log_warn "prepare: bundle predates prefix recording (no 'prefix' in manifest); cannot verify --prefix ${PREFIX}"
-            fi
-        elif [[ "${PREFIX_EXPLICIT}" -eq 1 && "${PREFIX}" != "${baked_prefix}" ]]; then
-            log_err "prepare: this bundle was staged for prefix ${baked_prefix}, but --prefix ${PREFIX} was requested"
-            log_info "The bundle's systemd unit and rendered configs bake the stage-time prefix."
-            log_info "Re-stage for this prefix: ./install.sh --stage <out> --project <config> --prefix ${PREFIX}"
-            log_info "Or install without --prefix to use the staged prefix."
-            die "refusing to install a prefix-mismatched bundle"
-        else
-            # Adopt the baked prefix (no-op when it already matches).
-            PREFIX="${baked_prefix}"
-            check_prefix "refusing the bundle's staged prefix '${PREFIX}'"
-        fi
+        _adopt_bundle_prefix
 
         log_ok "prepare: using local bundle"
         return
     fi
 
     die "one of --project <dir> (online) or --local <bundle> (offline) is required"
+}
+
+# #222/D11: a staged bundle bakes ${PREFIX} into the systemd unit and the
+# rendered config paths. Installing at a different prefix would leave the
+# unit/config pointing at the staged one — a silent broken install. Refuse
+# a differing EXPLICIT --prefix; with no --prefix, adopt the baked one.
+_adopt_bundle_prefix() {
+    local baked_prefix
+    baked_prefix=$(_manifest_prefix "${BUNDLE_DIR}/manifest.json")
+    if [[ -z "${baked_prefix}" ]]; then
+        if [[ "${PREFIX_EXPLICIT}" -eq 1 ]]; then
+            log_warn "prepare: bundle predates prefix recording (no 'prefix' in manifest); cannot verify --prefix ${PREFIX}"
+        fi
+    elif [[ "${PREFIX_EXPLICIT}" -eq 1 && "${PREFIX}" != "${baked_prefix}" ]]; then
+        log_err "prepare: this bundle was staged for prefix ${baked_prefix}, but --prefix ${PREFIX} was requested"
+        log_info "The bundle's systemd unit and rendered configs bake the stage-time prefix."
+        log_info "Re-stage for this prefix: ./install.sh --stage <out> --project <config> --prefix ${PREFIX}"
+        log_info "Or install without --prefix to use the staged prefix."
+        die "refusing to install a prefix-mismatched bundle"
+    else
+        # Adopt the baked prefix (no-op when it already matches).
+        PREFIX="${baked_prefix}"
+        check_prefix "refusing the bundle's staged prefix '${PREFIX}'"
+    fi
 }
 
 # =============================================================================
@@ -310,6 +321,58 @@ phase_verify() {
         die "Checksum verification failed — bundle may be corrupted"
     fi
     log_ok "verify: all checksums pass"
+}
+
+# =============================================================================
+# Version check: refuse to downgrade a newer runtime (#366)
+# =============================================================================
+
+# The first X.Y.Z on stdin, or nothing. A pre-release or build suffix is
+# dropped, so 0.1.44-rc1 compares equal to 0.1.44.
+_version_xyz() {
+    { grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true; } | head -n1
+}
+
+# X.Y.Z from a runtime's --version, empty when the binary will not run or
+# reports no version. Measures the binary: an installed manifest.json can be
+# stale (#345).
+_runtime_binary_version() {
+    [[ -x "$1" ]] || return 0
+    { timeout 10 "$1" --version 2>/dev/null || true; } | _version_xyz
+}
+
+# Compare the bundle's runtime with the installed one before anything changes.
+# Older is refused unless --allow-downgrade; same or newer carries on. Under
+# --dry-run the verdict is reported and nothing is refused.
+phase_version_check() {
+    local installed incoming
+    if [[ ! -f "${PREFIX}/bin/anolis-runtime" ]]; then
+        log_skip "version: no installed runtime"
+        return 0
+    fi
+    installed=$(_runtime_binary_version "${PREFIX}/bin/anolis-runtime")
+    incoming=$(_runtime_binary_version "${BUNDLE_DIR}/bin/anolis-runtime")
+    [[ -n "${incoming}" ]] \
+        || incoming=$({ _manifest_version "${BUNDLE_DIR}/manifest.json" || true; } | _version_xyz)
+    if [[ -z "${installed}" || -z "${incoming}" ]]; then
+        log_warn "version: cannot compare (installed ${installed:-unknown}, bundle ${incoming:-unknown}); continuing"
+        return 0
+    fi
+
+    if [[ "${incoming}" == "${installed}" ]]; then
+        log_ok "version: ${incoming}, same as installed"
+    elif [[ "$(printf '%s\n%s\n' "${incoming}" "${installed}" | sort -V | head -n1)" == "${installed}" ]]; then
+        log_ok "version: upgrade ${installed} -> ${incoming}"
+    elif [[ ${ALLOW_DOWNGRADE} -eq 1 ]]; then
+        log_warn "version: downgrading the runtime from ${installed} to ${incoming} (--allow-downgrade)"
+    elif [[ ${DRY_RUN} -eq 1 ]]; then
+        log_warn "version: would refuse to downgrade the runtime from ${installed} to ${incoming} (pass --allow-downgrade to install it)"
+    else
+        log_err "version: the bundle's runtime ${incoming} is older than the installed ${installed}"
+        log_info "Nothing was changed. To return to the previous install, run --rollback."
+        log_info "To install ${incoming} over ${installed} anyway, re-run with --allow-downgrade."
+        die "refusing to downgrade the runtime"
+    fi
 }
 
 # =============================================================================
@@ -2474,7 +2537,25 @@ main() {
         else
             dry_run_phase "use local bundle ${LOCAL_PATH:-<required: --project or --local>}"
         fi
-        dry_run_phase "verify checksums"
+        if [[ -z "${PROJECT_DIR}" && ( -d "${LOCAL_PATH}" || -f "${LOCAL_PATH}" ) ]]; then
+            # Reading a local bundle changes nothing on the host. Adopt its
+            # staged prefix and verify it as the install would, before the
+            # version check runs its binary.
+            BUNDLE_DIR="${LOCAL_PATH}"
+            if [[ -f "${LOCAL_PATH}" ]]; then
+                BUNDLE_DIR=$(mktemp -d)
+                trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+                tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
+            fi
+            if [[ -f "${BUNDLE_DIR}/manifest.json" ]]; then
+                _adopt_bundle_prefix
+            fi
+            phase_verify
+            phase_version_check
+        else
+            dry_run_phase "verify checksums"
+            dry_run_phase "compare the bundle's runtime version with the installed one (refuse an older one without --allow-downgrade)"
+        fi
         dry_run_phase "create system user ${ANOLIS_USER}"
         dry_run_phase "create directories at ${PREFIX}"
         dry_run_phase "backup existing binaries"
@@ -2500,6 +2581,7 @@ main() {
     phase_prepare_bundle
     phase_verify
     preflight_variant_selection
+    phase_version_check
     phase_system_user
     phase_directories
     phase_backup
