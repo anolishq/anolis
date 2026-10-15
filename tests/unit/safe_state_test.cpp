@@ -3,7 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "control/call_router.hpp"
@@ -154,6 +156,32 @@ TEST_F(SafeStateTest, NoRungMeansSafeStateNotAchieved) {
     const auto result = controller->trigger("test");
     EXPECT_EQ(result.kind, control::SafeStateKind::None);
     EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// A rung that issues nothing has achieved nothing: the zero rung on an
+// inventory with no ACTUATE function sends no call.
+TEST_F(SafeStateTest, RungThatIssuesNoCallMeansSafeStateNotAchieved) {
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// The verdict is logged at WARN when the safe state was not achieved.
+TEST_F(SafeStateTest, UnachievedVerdictIsLoggedAtWarn) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    controller->trigger("test");
+    std::cerr.rdbuf(previous);
+
+    EXPECT_THAT(captured.str(),
+                HasSubstr("[WARN]  [SafeState] E-stop ladder=none actions=0 safe_state_achieved=false"));
 }
 
 TEST_F(SafeStateTest, SetpointsApplyOnlyWithFullCoverage) {

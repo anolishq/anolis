@@ -774,9 +774,13 @@ components:
           type: boolean
           description: >-
             True only when a rung ran, issued at least one call, and every
-            call succeeded. False when any call of the active rung failed, and
-            when software_safe_state is "none". The per-call outcomes are in
-            actions.
+            call succeeded. False when any call of the active rung failed,
+            when the rung issued no call, and when software_safe_state is
+            "none". It covers only the calls the rung issued: under hooks it
+            can be true while actuating functions no hook drives remain. A
+            call succeeds when its provider reports it OK, which confirms the
+            command was accepted, not that the device was seen in the
+            commanded state. The per-call outcomes are in actions.
         warning:
           type: string
           description: Present when software_safe_state is "none".

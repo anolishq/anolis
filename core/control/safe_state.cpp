@@ -282,9 +282,13 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
         }
     }
 
-    LOG_INFO("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
-                                          << " actions=" << result.actions.size() << " safe_state_achieved="
-                                          << (result.safe_state_achieved ? "true" : "false"));
+    if (result.safe_state_achieved) {
+        LOG_INFO("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
+                                              << " actions=" << result.actions.size() << " safe_state_achieved=true");
+    } else {
+        LOG_WARN("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
+                                              << " actions=" << result.actions.size() << " safe_state_achieved=false");
+    }
     return result;
 }
 
