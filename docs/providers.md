@@ -64,7 +64,9 @@ Behavior:
 1. Crash/unresponsive provider is marked unavailable.
 2. Runtime applies backoff then attempts restart. Each restart stops the old
    process before it starts the new one, so a provider that is unresponsive but
-   still running never has a second process beside it.
+   still running never has a second process beside it. `timeout_ms` starts
+   once the old process has stopped, so the time a wedged process takes to stop
+   (up to `runtime.shutdown_timeout_ms` plus 500 ms) does not count against it.
 3. Device inventory is rediscovered after restart.
 4. Circuit opens after `max_attempts` consecutive failures.
 5. While the circuit is open, the runtime makes one restart attempt (a
