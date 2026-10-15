@@ -1333,7 +1333,10 @@ components:
           type: string
           enum: [idle, running, blocked, failed, completed, unknown]
           description: >-
-            Engine-neutral execution status. "blocked" means "not advancing"
+            Engine-neutral execution status. "idle" is reported whenever the
+            runtime mode is not AUTO (execution_reason "mode_gate"), because
+            automation only advances in AUTO; "failed" takes precedence over
+            it. "blocked" means "not advancing"
             (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
             necessarily benign waiting). "completed" is emitted ONLY when the
             engine declares a terminal completed state (a behaviour tree may
