@@ -61,6 +61,7 @@ WITH_TELEMETRY_EXPORT=0
 WITH_OBSERVABILITY=0
 GRAFANA_NETWORK=0
 _OBS_GRAFANA_WAS_NETWORK=0
+_OBS_GRAFANA_BIND_APPLIED=0
 NO_START=0
 UNINSTALL=0
 ROLLBACK=0
@@ -197,6 +198,9 @@ parse_args() {
             *)           die "Unknown option: $1 (use --help for usage)" ;;
         esac
     done
+    if [[ ${GRAFANA_NETWORK} -eq 1 && ${WITH_OBSERVABILITY} -eq 0 ]]; then
+        log_warn "--with-grafana-network has no effect without --with-observability"
+    fi
 }
 
 # =============================================================================
@@ -1371,6 +1375,9 @@ phase_observability() {
     # env file and datasource it read at start, and starting it is a no-op.
     { systemctl enable grafana-server && systemctl restart grafana-server; } 2>/dev/null \
         || { log_warn "observability: failed to start grafana"; return 0; }
+    # The drop-in is written and grafana-server restarted with it: only now
+    # does the summary report the bind (#351).
+    _OBS_GRAFANA_BIND_APPLIED=1
 
     local i
     for i in $(seq 1 15); do
@@ -1652,14 +1659,18 @@ phase_summary() {
         if [[ "${ARCH}" != "x86_64" ]]; then
             grafana_host="$(hostname 2>/dev/null || echo localhost).local"
         fi
-        if [[ ${GRAFANA_NETWORK} -eq 1 ]]; then
+        if [[ ${_OBS_GRAFANA_BIND_APPLIED} -eq 0 ]]; then
+            log_info "Grafana bind unchanged: the observability step did not finish (see the warnings above)"
+        elif [[ ${GRAFANA_NETWORK} -eq 1 ]]; then
             log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
         else
             if [[ ${_OBS_GRAFANA_WAS_NETWORK} -eq 1 ]]; then
                 log_info "Grafana:   now bound to 127.0.0.1 — no longer on the network (re-run with --with-grafana-network to open it)"
             fi
             log_info "Grafana:   127.0.0.1:3000 on this machine (admin password: ${OBSERVABILITY_ENV_FILE})"
-            log_info "  from another machine: ssh -L 3000:127.0.0.1:3000 ${SUDO_USER:-<user>}@${grafana_host}, then http://localhost:3000"
+            local tunnel_host="${grafana_host}"
+            [[ "${tunnel_host}" == "localhost" ]] && tunnel_host="<host>"
+            log_info "  from another machine: ssh -L 3000:127.0.0.1:3000 ${SUDO_USER:-<user>}@${tunnel_host}, then http://localhost:3000"
         fi
         log_info "InfluxDB:  ${INFLUX_HOST} (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
     fi
@@ -1699,6 +1710,11 @@ phase_summary() {
 # if the package layout ever changes, and only what exists is reported.
 #
 # ANOLIS_DATA_ROOT_PREFIX exists so this is testable without touching real paths.
+# True when install.sh provisioned observability on this host.
+_obs_provisioned() {
+    [[ -d "${GRAFANA_DROPIN_DIR}" || -f /etc/apt/sources.list.d/influxdata.list ]]
+}
+
 _observability_data_dirs() {
     local prefix="${ANOLIS_DATA_ROOT_PREFIX:-}"
     local candidate
@@ -1860,7 +1876,7 @@ do_uninstall() {
     # Observability (#162): stop what we enabled and remove what we
     # provisioned. The apt packages and the DATA are deliberately kept — an
     # uninstall must not silently destroy recorded telemetry.
-    if [[ -d "${GRAFANA_DROPIN_DIR}" || -f /etc/apt/sources.list.d/influxdata.list ]]; then
+    if _obs_provisioned; then
         systemctl disable --now grafana-server 2>/dev/null || true
         systemctl disable --now influxdb 2>/dev/null || true
         rm -rf "${GRAFANA_DROPIN_DIR}" "${INFLUX_DROPIN_DIR}"

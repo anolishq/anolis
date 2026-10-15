@@ -119,13 +119,15 @@ Each opens one port:
 
 | Port | Service | Bind | Authentication | Who needs it |
 | --- | --- | --- | --- | --- |
-| 8086 | InfluxDB | `127.0.0.1`, always | API token. The runtime writes with a write-scoped token and Grafana reads with a read-scoped one; the admin token stays in root's influx CLI config. | The runtime and Grafana, both on the device. |
+| 8086 | InfluxDB | `127.0.0.1`, always | API token. The runtime writes with a write-scoped token and Grafana reads with a read-scoped one; the admin token is in root's influx CLI config and, as `INFLUXDB_ADMIN_TOKEN`, in `/etc/anolis/observability.env` (mode 0600, root). | The runtime and Grafana, both on the device. |
 | 3000 | Grafana | `127.0.0.1`; `0.0.0.0` with `--with-grafana-network` | Anonymous **Viewer**: anyone who reaches the port sees the dashboards and the data behind them without logging in. Editing needs the `admin` login, whose first-boot password is in `/etc/anolis/observability.env`. | The operator, from a browser. |
 
 By default reach Grafana over an ssh tunnel, which the install summary prints:
 `ssh -L 3000:127.0.0.1:3000 <user>@<host>`, then open `http://localhost:3000`.
 `--with-grafana-network` opens Grafana, and only Grafana, to the network; every
-host that can reach the device can then read the dashboards. A later install
-without the flag binds it to `127.0.0.1` again, and its summary says so.
+host that can reach the device can then read the dashboards. A later
+`--with-observability` install without the flag binds it to `127.0.0.1` again,
+and its summary says so. If that install's observability step does not finish,
+the bind is left as it was, and the summary says the Grafana bind is unchanged.
 
 The install configures no host firewall.
