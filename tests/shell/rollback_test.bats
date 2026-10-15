@@ -208,3 +208,69 @@ _setup_backup_dirs() {
     [ ! -e "${PREFIX}/.prev/meta/runtime-version" ]
     [ ! -e "${PREFIX}/.prev/meta/manifest.json" ]
 }
+
+# ===========================================================================
+# --rollback restores the manifest of the install it rolls back to (#345)
+# ===========================================================================
+
+# Source install.sh and point it at a prefix under BATS_TEST_TMPDIR. chown and
+# systemctl are recording stubs, so nothing outside the temp prefix is touched.
+_setup_install_cycle() {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    source "${INSTALL_SH}"
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
+
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    STUB_LOG="${BATS_TEST_TMPDIR}/stub.log"
+    chown() { echo "chown $*" >> "${STUB_LOG}"; }
+    systemctl() { echo "systemctl $*" >> "${STUB_LOG}"; }
+}
+
+# Install a bundle whose runtime reports <version> and whose manifest names it.
+_install_version() {
+    local version="$1"
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/bundle-${version}"
+    mkdir -p "${BUNDLE_DIR}/bin"
+    printf '#!/bin/sh\necho "anolis-runtime %s"\n' "${version}" > "${BUNDLE_DIR}/bin/anolis-runtime"
+    chmod +x "${BUNDLE_DIR}/bin/anolis-runtime"
+    printf '{\n  "version": "%s"\n}\n' "${version}" > "${BUNDLE_DIR}/manifest.json"
+
+    phase_directories
+    phase_backup
+    phase_install_binaries
+    phase_manifest
+}
+
+@test "--rollback restores the manifest of the rolled-back install (#345)" {
+    _setup_install_cycle
+    _install_version 0.1.43
+    _install_version 0.1.44
+    grep -q '"version": "0.1.44"' "${PREFIX}/manifest.json"
+
+    run do_rollback
+    [ "$status" -eq 0 ]
+    [ "$("${PREFIX}/bin/anolis-runtime")" = "anolis-runtime 0.1.43" ]
+    cmp -s "${BATS_TEST_TMPDIR}/bundle-0.1.43/manifest.json" "${PREFIX}/manifest.json"
+    [[ "${output}" == *"restored manifest.json from .prev/"* ]]
+    grep -qx "chown ${ANOLIS_USER}:${ANOLIS_USER} ${PREFIX}/manifest.json" "${STUB_LOG}"
+
+    # The next upgrade's backup then records a manifest that agrees with the
+    # runtime version it saves.
+    _install_version 0.1.44
+    [ "$(cat "${PREFIX}/.prev/meta/runtime-version")" = "anolis-runtime 0.1.43" ]
+    grep -q '"version": "0.1.43"' "${PREFIX}/.prev/meta/manifest.json"
+}
+
+@test "--rollback of a backup with no saved manifest warns that manifest.json is stale (#345)" {
+    _setup_install_cycle
+    _install_version 0.1.43
+    _install_version 0.1.44
+    # A backup taken before .prev/meta existed (#334) has no saved manifest.
+    rm -rf "${PREFIX}/.prev/meta"
+
+    run do_rollback
+    [ "$status" -eq 0 ]
+    [ "$("${PREFIX}/bin/anolis-runtime")" = "anolis-runtime 0.1.43" ]
+    [[ "${output}" == *"manifest.json still describes the newer install"* ]]
+    grep -q '"version": "0.1.44"' "${PREFIX}/manifest.json"
+}

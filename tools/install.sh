@@ -1869,6 +1869,17 @@ do_rollback() {
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
     log_ok "restored binaries from .prev/"
 
+    # manifest.json is the operator's record of what is installed, and the next
+    # backup copies it into .prev/meta, so it must follow the binaries (#345).
+    if [[ -f "${PREFIX}/.prev/meta/manifest.json" ]]; then
+        cp "${PREFIX}/.prev/meta/manifest.json" "${PREFIX}/manifest.json" \
+            || die "rollback: binaries restored but manifest.json could not be restored from .prev/meta/"
+        chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/manifest.json" 2>/dev/null || true
+        log_ok "restored manifest.json from .prev/"
+    elif [[ -f "${PREFIX}/manifest.json" ]]; then
+        log_warn "rollback: no manifest saved with this backup; ${PREFIX}/manifest.json still describes the newer install"
+    fi
+
     if command -v systemctl >/dev/null 2>&1 \
         && [[ -f "${SYSTEMD_DIR}/anolis-runtime.service" ]]; then
         systemctl restart anolis-runtime.service \
