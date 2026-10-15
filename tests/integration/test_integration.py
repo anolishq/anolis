@@ -98,9 +98,9 @@ def test_estop_suite(
 @pytest.mark.integration
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize(
-    ("_check_name", "on_startup", "check_fn"),
+    ("_check_name", "on_startup", "hook_function", "check_fn"),
     STARTUP_CHECKS,
-    ids=[name for name, _, _ in STARTUP_CHECKS],
+    ids=[name for name, _, _, _ in STARTUP_CHECKS],
 )
 def test_startup_safe_state(
     runtime_exe: Path,
@@ -108,9 +108,12 @@ def test_startup_safe_state(
     unique_port: int,
     _check_name: str,
     on_startup: str | None,
+    hook_function: str | None,
     check_fn,
 ) -> None:
-    tester = StartupSafeStateTester(runtime_exe, provider_exe, port=unique_port, on_startup=on_startup)
+    tester = StartupSafeStateTester(
+        runtime_exe, provider_exe, port=unique_port, on_startup=on_startup, hook_function=hook_function
+    )
     try:
         tester.start_runtime()
         check_fn(tester)

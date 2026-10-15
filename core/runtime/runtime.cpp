@@ -1005,10 +1005,12 @@ void Runtime::apply_startup_outputs() {
         return;
     }
 
+    // A rung that ran and failed leaves outputs in an unknown state: ERROR.
+    // The runtime still starts; GET /v0/runtime/status reports it (#362).
     for (const auto &action : result.actions) {
         if (!action.success) {
-            LOG_WARN("[Runtime] safety.on_startup=safe_state did not drive "
-                     << action.device_handle << "/" << action.function << ": " << action.error);
+            LOG_ERROR("[Runtime] safety.on_startup=safe_state did not drive "
+                      << action.device_handle << "/" << action.function << ": " << action.error);
         }
     }
     if (result.safe_state_achieved) {
@@ -1016,9 +1018,9 @@ void Runtime::apply_startup_outputs() {
                                                                    << " actions=" << result.actions.size()
                                                                    << " safe_state_achieved=true");
     } else {
-        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
-                                                                   << " actions=" << result.actions.size()
-                                                                   << " safe_state_achieved=false");
+        LOG_ERROR("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
+                                                                    << " actions=" << result.actions.size()
+                                                                    << " safe_state_achieved=false");
     }
 }
 

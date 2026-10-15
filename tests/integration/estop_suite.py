@@ -125,22 +125,30 @@ class StartupSafeStateTester(EstopTester):
 
     The sim's relays power on open, so a safe state that only zeroed outputs
     would leave it exactly as it booted. Closing relay 1 makes the ladder's
-    effect visible through GET /v0/state.
+    effect visible through GET /v0/state. `hook_function` None declares no
+    safe state; a function the sim does not have makes the run fail.
     """
 
-    def __init__(self, runtime_path: Path, provider_path: Path, port: int, on_startup: Optional[str]):
+    def __init__(
+        self,
+        runtime_path: Path,
+        provider_path: Path,
+        port: int,
+        on_startup: Optional[str],
+        hook_function: Optional[str] = "set_relay_ch1",
+    ):
         super().__init__(runtime_path, provider_path, port=port)
-        safety: Dict[str, Any] = {
-            "safe_state": {
+        safety: Dict[str, Any] = {}
+        if hook_function is not None:
+            safety["safe_state"] = {
                 "hooks": [
                     {
                         "device_handle": "sim0/relayio0",
-                        "function_name": "set_relay_ch1",
+                        "function_name": hook_function,
                         "args": {"enabled": True},
                     }
                 ]
             }
-        }
         if on_startup is not None:
             safety["on_startup"] = on_startup
         config = self.fixture.config_dict
@@ -161,6 +169,12 @@ class StartupSafeStateTester(EstopTester):
         assert hits, f"'{marker}' not in the runtime log"
         return hits[0]
 
+    def startup_status(self) -> Dict[str, Any]:
+        status = self.http_get("/v0/runtime/status")
+        assert status["status_code"] == 200, status
+        startup: Dict[str, Any] = status["body"]["startup_safe_state"]
+        return startup
+
 
 def check_startup_runs_safe_state(tester: StartupSafeStateTester) -> None:
     """With no safety.on_startup, the safe state runs once at startup."""
@@ -171,6 +185,40 @@ def check_startup_runs_safe_state(tester: StartupSafeStateTester) -> None:
     # Ran without engaging the e-stop latch.
     status = tester.http_get("/v0/runtime/status")["body"]
     assert status["estop"]["latched"] is False, status
+    assert tester.startup_status() == {
+        "on_startup": "safe_state",
+        "ran": True,
+        "software_safe_state": "hooks",
+        "safe_state_achieved": True,
+        "failed_actions": [],
+    }
+
+
+def check_startup_safe_state_failed(tester: StartupSafeStateTester) -> None:
+    """A startup run that fails is logged at ERROR and reported; the runtime still starts."""
+    startup = tester.startup_status()
+    assert startup["ran"] is True, startup
+    assert startup["software_safe_state"] == "hooks", startup
+    assert startup["safe_state_achieved"] is False, startup
+    assert len(startup["failed_actions"]) == 1, startup
+    failed = startup["failed_actions"][0]
+    assert failed["device_handle"] == "sim0/relayio0" and failed["function"] == "no_such_function", failed
+    assert failed["success"] is False and failed.get("error"), failed
+    assert tester.http_get("/v0/runtime/status")["body"]["estop"]["latched"] is False
+    tester.log_index("[ERROR] [Runtime] safety.on_startup=safe_state did not drive sim0/relayio0/no_such_function")
+    tester.log_index("[ERROR] [Runtime] safety.on_startup=safe_state: ladder=hooks actions=1 safe_state_achieved=false")
+
+
+def check_startup_no_safe_state(tester: StartupSafeStateTester) -> None:
+    """With no safe state declared there is nothing to run, and the status says it did not run."""
+    assert tester.startup_status() == {
+        "on_startup": "safe_state",
+        "ran": False,
+        "software_safe_state": "none",
+        "safe_state_achieved": False,
+        "failed_actions": [],
+    }
+    tester.log_index("no software safe state is declared, nothing to run")
 
 
 def check_startup_leave(tester: StartupSafeStateTester) -> None:
@@ -178,6 +226,13 @@ def check_startup_leave(tester: StartupSafeStateTester) -> None:
     time.sleep(1.5)  # three poll intervals
     assert tester.relay_ch1_closed() is False, "on_startup: leave still ran the safe state"
     tester.log_index("outputs were left as they were")
+    assert tester.startup_status() == {
+        "on_startup": "leave",
+        "ran": False,
+        "software_safe_state": "none",
+        "safe_state_achieved": False,
+        "failed_actions": [],
+    }
 
 
 def check_startup_safe_state_order(tester: StartupSafeStateTester) -> None:
@@ -192,12 +247,15 @@ def check_startup_safe_state_order(tester: StartupSafeStateTester) -> None:
     assert discovered < ran < http_open, (discovered, ran, http_open)
 
 
-StartupCheck = Tuple[str, Optional[str], Callable[[StartupSafeStateTester], None]]
+# (id, safety.on_startup, hook function or None for no safe state, check)
+StartupCheck = Tuple[str, Optional[str], Optional[str], Callable[[StartupSafeStateTester], None]]
 
 STARTUP_CHECKS: List[StartupCheck] = [
-    ("default_runs_safe_state", None, check_startup_runs_safe_state),
-    ("leave", "leave", check_startup_leave),
-    ("order", None, check_startup_safe_state_order),
+    ("default_runs_safe_state", None, "set_relay_ch1", check_startup_runs_safe_state),
+    ("failed", None, "no_such_function", check_startup_safe_state_failed),
+    ("no_safe_state", None, None, check_startup_no_safe_state),
+    ("leave", "leave", "set_relay_ch1", check_startup_leave),
+    ("order", None, "set_relay_ch1", check_startup_safe_state_order),
 ]
 
 

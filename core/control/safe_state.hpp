@@ -98,6 +98,15 @@ struct EstopCapability {
     size_t uncovered_actuating_functions = 0;  // ACTUATE functions the active rung cannot drive
 };
 
+/** @brief What the `safety.on_startup` run did, for GET /v0/runtime/status (#362). */
+struct StartupSafeStateReport {
+    runtime::StartupOutputs on_startup = runtime::StartupOutputs::SafeState;
+    bool ran = false;  // a rung ran; false for `leave` and for no declared safe state
+    SafeStateKind kind = SafeStateKind::None;
+    bool safe_state_achieved = false;  // same verdict as EstopResult
+    std::vector<CallOutcome> failed_actions;
+};
+
 /**
  * @brief Owns the e-stop latch and the declared safe-state ladder.
  *
@@ -145,9 +154,13 @@ public:
      *
      * The same ladder and verdict as `trigger()`, without engaging the latch
      * or driving FAULT. Used by `safety.on_startup: safe_state` before the
-     * HTTP server opens, so nothing else is calling in yet.
+     * HTTP server opens, so nothing else is calling in yet. The outcome is
+     * kept for `startup_report()`.
      */
     EstopResult drive_safe_state();
+
+    /** @brief The outcome of `drive_safe_state()`; `ran` is false if it never ran a rung. */
+    StartupSafeStateReport startup_report() const;
 
 private:
     // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
@@ -169,8 +182,9 @@ private:
     automation::ModeManager *mode_manager_ = nullptr;  // optional
 
     std::atomic<bool> latched_{false};
-    mutable std::mutex mutex_;              // serialize trigger()/clear(); guard metadata
-    std::optional<int64_t> latched_at_ms_;  // guarded by mutex_
+    mutable std::mutex mutex_;               // serialize trigger()/clear(); guard metadata
+    std::optional<int64_t> latched_at_ms_;   // guarded by mutex_
+    StartupSafeStateReport startup_report_;  // guarded by mutex_
 };
 
 }  // namespace control

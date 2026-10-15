@@ -21,5 +21,12 @@
     "latched_at_epoch_ms": null,
     "uncovered_actuating_functions": 0
   },
+  "startup_safe_state": {
+    "on_startup": "safe_state",
+    "ran": true,
+    "software_safe_state": "hooks",
+    "safe_state_achieved": true,
+    "failed_actions": []
+  },
   "device_loss_latched": []
 }

@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 
+#include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
@@ -493,11 +494,14 @@ TEST_F(SafeStateTest, ReassertForIssuesNothingForOtherDevices) {
 }
 
 // The startup run (#362) is the e-stop ladder and verdict without the e-stop:
-// no latch, no FAULT.
+// no latch, no FAULT. A mode manager is attached, as on an automation
+// machine, so "no FAULT" is something the controller could have done.
 TEST_F(SafeStateTest, DriveSafeStateRunsTheLadderWithoutLatching) {
     RegisterActuator();
     safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
     auto controller = make_controller();
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    controller->set_mode_manager(&mode);
 
     EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
 
@@ -506,5 +510,45 @@ TEST_F(SafeStateTest, DriveSafeStateRunsTheLadderWithoutLatching) {
     ASSERT_EQ(result.actions.size(), 1u);
     EXPECT_TRUE(result.safe_state_achieved);
     EXPECT_FALSE(result.fault_requested);
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::MANUAL);
     EXPECT_FALSE(controller->is_engaged());
+
+    const auto report = controller->startup_report();
+    EXPECT_TRUE(report.ran);
+    EXPECT_EQ(report.kind, control::SafeStateKind::Hooks);
+    EXPECT_TRUE(report.safe_state_achieved);
+    EXPECT_TRUE(report.failed_actions.empty());
+}
+
+TEST_F(SafeStateTest, StartupReportKeepsOnlyTheFailedCalls) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("bus timeout"));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    EXPECT_TRUE(report.ran);
+    EXPECT_FALSE(report.safe_state_achieved);
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].device_handle, "sim0/heater");
+    EXPECT_FALSE(report.failed_actions[0].success);
+    EXPECT_FALSE(report.failed_actions[0].error.empty());
+}
+
+TEST_F(SafeStateTest, StartupReportIsNotRunBeforeDriveOrWithNoSafeState) {
+    RegisterActuator();
+    auto controller = make_controller();
+    EXPECT_FALSE(controller->startup_report().ran);
+
+    controller->drive_safe_state();  // no safe state declared: rung none
+    const auto report = controller->startup_report();
+    EXPECT_FALSE(report.ran);
+    EXPECT_EQ(report.kind, control::SafeStateKind::None);
+    EXPECT_FALSE(report.safe_state_achieved);
 }
