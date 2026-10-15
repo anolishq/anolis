@@ -221,6 +221,15 @@ bool Runtime::init_providers(std::string &error) {
 
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
+
+    // The firmware command watchdog is what stops a device when the runtime or
+    // its provider is lost (#297). Keyed on the SDK-reserved watchdog_armed
+    // metric; a device that does not report it makes no claim and stays quiet.
+    for (const auto &handle : health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_)) {
+        LOG_WARN("[Runtime] preflight: " << handle
+                                         << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
+                                            "watchdog will not stop it if the runtime or its provider is lost");
+    }
     return true;
 }
 
