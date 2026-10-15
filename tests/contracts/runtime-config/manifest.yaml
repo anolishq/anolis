@@ -28,7 +28,13 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/09-health-staleness.yaml
     expect: valid
     note: health.staleness absolute overrides for device-liveness thresholds (#220)
-  - file: tests/contracts/runtime-config/valid/10-safety-on-startup-leave.yaml
+  - file: tests/contracts/runtime-config/valid/10-health-excluded-signals.yaml
+    expect: valid
+    note: health.excluded_signals leaves unused signals out of device health (#325)
+  - file: tests/contracts/runtime-config/valid/11-health-excluded-signals-extra-key.yaml
+    expect: valid
+    note: an unknown key in a health.excluded_signals entry is warn-and-ignore
+  - file: tests/contracts/runtime-config/valid/12-safety-on-startup-leave.yaml
     expect: valid
     note: safety.on_startup leave opts out of the startup safe state (#362)
 
@@ -53,7 +59,10 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/07-negative-health-staleness.yaml
     expect: invalid/schema
     note: health.staleness.stale_after_ms must be >= 0
-  - file: tests/contracts/runtime-config/invalid/schema/08-safety-on-startup-unknown.yaml
+  - file: tests/contracts/runtime-config/invalid/schema/08-health-excluded-signals-bad-handle.yaml
+    expect: invalid/schema
+    note: health.excluded_signals device_handle must be provider_id/device_id
+  - file: tests/contracts/runtime-config/invalid/schema/09-safety-on-startup-unknown.yaml
     expect: invalid/schema
     note: safety.on_startup must be safe_state or leave
 
@@ -72,3 +81,6 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/05-health-staleness-order.yaml
     expect: invalid/runtime
     note: health.staleness.stale_after_ms must be > warn_after_ms when both set
+  - file: tests/contracts/runtime-config/invalid/runtime/06-health-excluded-signals-duplicate.yaml
+    expect: invalid/runtime
+    note: health.excluded_signals lists one device_handle twice

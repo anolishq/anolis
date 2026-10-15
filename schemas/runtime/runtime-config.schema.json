@@ -380,6 +380,31 @@
             }
           },
           "additionalProperties": true
+        },
+        "excluded_signals": {
+          "type": "array",
+          "description": "Per-device signals left out of the device health rollup. Excluded signals are still polled, served over HTTP and sent to telemetry; only the device health string and its signal counts skip them. For signals a machine leaves unused, such as a disabled output or an empty input channel. Each device_handle may appear once.",
+          "items": {
+            "type": "object",
+            "required": ["device_handle", "signals"],
+            "properties": {
+              "device_handle": {
+                "type": "string",
+                "pattern": "^[^/]+/[^/]+$",
+                "description": "Device handle, provider_id/device_id."
+              },
+              "signals": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Signal ids on that device to leave out of its health rollup."
+              }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true
