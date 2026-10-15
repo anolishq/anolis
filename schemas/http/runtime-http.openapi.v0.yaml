@@ -1103,6 +1103,13 @@ components:
           type: array
           items:
             type: string
+        source:
+          type: string
+          enum: [default, operator]
+          description: >-
+            "default" while the value is the config default; "operator" once a
+            POST /v0/parameters has changed it. Values are not persisted, so
+            every parameter is back to "default" after a runtime restart.
       additionalProperties: false
     ParametersResponse:
       type: object
