@@ -102,7 +102,10 @@ cmake --preset ci-linux-release
 cmake --build --preset ci-linux-release
 ```
 
-To use a binary somewhere else, pass its path: `just test-py /path/to/anolis-provider-sim`.
+To use a binary somewhere else, pass its path to either recipe:
+`just test-py /path/to/anolis-provider-sim` or
+`just test /path/to/anolis-provider-sim`. A relative path is taken from the
+directory you run `just` in.
 Without a sim, `just test-py` stops before pytest starts and says how to get
 one; the suite is never skipped.
 

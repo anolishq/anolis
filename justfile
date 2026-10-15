@@ -59,7 +59,8 @@ check-py:
     uv run mypy .
 
 # Build + test both lanes.
-test: test-cpp test-py
+[doc("Build + test both lanes (`just test /path/to/anolis-provider-sim` names the sim).")]
+test provider="": test-cpp (test-py provider)
 
 # Build and run the C++ test suite.
 test-cpp:
@@ -81,7 +82,11 @@ test-cpp:
 test-py provider="":
     #!/usr/bin/env bash
     set -euo pipefail
-    provider='{{provider}}'
+    provider={{quote(provider)}}
+    # A relative path is the caller's, not the justfile directory's.
+    if [[ -n "${provider}" && "${provider}" != /* ]]; then
+        provider={{quote(invocation_directory())}}/"${provider}"
+    fi
     # Exit 3 means the harness's own resolver found no sim; any other failure
     # is reported as itself.
     rc=0
