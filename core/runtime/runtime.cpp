@@ -311,6 +311,15 @@ void Runtime::preflight_declared_calls() const {
         };
         check_group(config_.automation.mode_transition_hooks.before_transition, "before_transition");
         check_group(config_.automation.mode_transition_hooks.after_transition, "after_transition");
+
+        // The refuse-hookless gate admits AUTO on a hook's from/to filters, so
+        // one AUTO->FAULT hook satisfies it for every output, driven or not
+        // (#246). Name the ones it leaves alone. A warning, not a refusal: an
+        // output can be left alone on purpose.
+        for (const auto &function : fault_hook_uncovered_functions(*registry_, *call_router_, config_.automation)) {
+            LOG_WARN("[Runtime] preflight: no dispatchable AUTO->FAULT hook call drives "
+                     << function << "; a fault in AUTO leaves it as it was");
+        }
     }
 
     // Stated unconditionally: "no software safe state" and "preflight did not run"
