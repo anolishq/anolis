@@ -1083,15 +1083,31 @@ emit_grafana_dropin() {
 # The '-' prefix: a missing env file leaves Grafana up (datasource degraded)
 # instead of hard-failing the unit — the already-set-up-influx path can
 # legitimately lack the file until the operator writes it.
-# GF_LOG_LEVEL=warn: Grafana logs requests at level=info, so an open
-# dashboard's auto-refresh can flood the journal and evict runtime logs.
+# GF_LOG_LEVEL=warn: Grafana's own log (stdout) at warn and above.
+# LogFilterPatterns: the InfluxDB datasource (loggers tsdb.influxdb and
+# tsdb.influx_flux) logs every query at debug as JSON on stderr through the
+# plugin SDK's logger, which GF_LOG_LEVEL and [log] filters do not reach. A
+# dashboard on 5 s refresh wrote ~3000 such lines per 10 min and could evict
+# runtime logs (#349). The pattern drops debug JSON lines only, so errors and
+# Grafana's own log still reach the journal. Needs systemd 253 or newer.
 # GF_SERVER_HTTP_ADDR: 127.0.0.1 unless install.sh ran with
 # --with-grafana-network, which binds 0.0.0.0 (Grafana's empty default).
 [Service]
 EnvironmentFile=-${GRAFANA_ENV_FILE}
 Environment=GF_LOG_LEVEL=warn
 Environment=GF_SERVER_HTTP_ADDR=$([[ ${GRAFANA_NETWORK} -eq 1 ]] && echo 0.0.0.0 || echo 127.0.0.1)
+LogFilterPatterns=~.@level.:.debug.
 EOF
+}
+
+# LogFilterPatterns= arrived in systemd 253; older systemd ignores the key, and
+# the datasource's debug output then still reaches the journal (#349).
+_warn_if_no_log_filter() {
+    local ver
+    ver=$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')
+    if [[ "${ver}" =~ ^[0-9]+$ ]] && [[ ${ver} -lt 253 ]]; then
+        log_warn "observability: systemd ${ver} cannot filter Grafana's datasource debug output (needs 253); an open dashboard will fill the journal"
+    fi
 }
 
 # True when an existing Grafana drop-in opened Grafana to the network, so a
@@ -1327,6 +1343,7 @@ _obs_provision_grafana() {
         _OBS_GRAFANA_WAS_NETWORK=1
     fi
     emit_grafana_dropin > "${GRAFANA_DROPIN_DIR}/anolis.conf" || return 1
+    _warn_if_no_log_filter
     systemctl daemon-reload
     return 0
 }
