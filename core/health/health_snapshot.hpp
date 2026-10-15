@@ -180,7 +180,9 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
  * is lost. A disarmed one on a device that can actuate is worth a startup
  * warning. Absence of the key is "unknown" by the SDK contract
  * (anolis-provider-sdk docs/metrics.md), so only the exact value "false"
- * counts. One live GetHealth round-trip per available provider. Report-only.
+ * counts. A provider reports the key only for a configured watchdog it read
+ * live, so a watchdog that was never configured is silent here too. One
+ * live GetHealth round-trip per available provider. Report-only.
  *
  * @return device handles, "provider/device".
  */
