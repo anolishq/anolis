@@ -119,7 +119,7 @@ Compatibility aliases (deprecated but accepted):
 
 ## `health`
 
-Purpose: device-health liveness staleness policy.
+Purpose: device-health liveness staleness policy and signal exclusions.
 
 Fields:
 
@@ -132,6 +132,16 @@ Fields:
 When both overrides are positive, `stale_after_ms` must be `> warn_after_ms`. The
 derivation keeps the historic `2000`/`5000` behavior at one device @ 500ms while
 letting a serialized multi-device bus loosen proportionally instead of false-flapping.
+
+2. `excluded_signals` array (optional, default empty). Each entry:
+   - `device_handle` (string, required): `provider_id/device_id`. Listed at most
+     once.
+   - `signals` (array of non-empty strings, required, at least one): signal ids
+     left out of that device's health rollup. They are still polled, served and
+     sent to telemetry.
+
+   A handle or signal id that matches nothing after discovery is logged as a
+   warning at startup.
 
 ## `logging`
 

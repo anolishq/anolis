@@ -1,0 +1,17 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+logging:
+  level: info
+
+# An unknown key in an entry is warn-and-ignore, as everywhere else in the
+# runtime config, so it stays valid.
+health:
+  excluded_signals:
+    - device_handle: test0/dev0
+      signals: [output2_state]
+      note: left disabled on this machine
