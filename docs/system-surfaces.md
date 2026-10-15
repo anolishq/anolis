@@ -69,13 +69,9 @@ convention distinct from (and waivable independently of) ADPP conformance.
 
 ## Device protocols
 
-- **CRUMBS** (bread, I2C): session/bus behavior terminates in
-  `anolis-provider-bread/src/crumbs/` (see its README); the RLHT/DCMT wire
-  *meaning* lives in external `feastorg` repos (`bread-crumbs-contracts`
-  v0.4.3, `CRUMBS` v0.12.4, `linux-wire`) — a cross-org ownership edge.
-- **EZO** (I2C sensors): 6 device families (`sensor.ezo.{ph,orp,ec,do,rtd,hum}`),
-  3 shared safe functions per family; contract in
-  `anolis-provider-ezo/docs/device-contracts-v1.md`.
+- **Hardware providers**: each provider's README documents its device
+  protocol, its device families and the wire dependencies it pins. The
+  ecosystem map above names the repository that holds each one.
 - **sim**: `Tempctl, Motorctl, Relayio, Analogsensor` + a chaos fault-injection
   device; simulation engines local/null/remote, with an optional
   **FluxGraph** adapter (gRPC to `anolishq/fluxgraph`, a standalone C++
