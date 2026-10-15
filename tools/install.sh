@@ -1548,6 +1548,54 @@ _run_registry_available() {
     [[ "${code}" == "200" ]]
 }
 
+# Print "<provider_id> <lifecycle_state>" for each provider in
+# GET /v0/providers/health; exit non-zero when the endpoint does not answer.
+# The runtime serialises objects with sorted keys, so each provider's
+# lifecycle_state comes right before its provider_id, and device entries
+# carry neither key.
+_provider_states() {
+    local base_url="$1" body
+    body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
+    { grep -o '"lifecycle_state":"[^"]*"\|"provider_id":"[^"]*"' <<< "${body}" || true; } \
+        | sed 's/^"[a-z_]*":"\(.*\)"$/\1/' | paste - - | awk 'NF == 2 { print $2, $1 }'
+}
+
+# Poll until every provider is available (RUNNING or RECOVERING) or the health
+# timeout elapses, then report how many are running (#344). A shortfall is a
+# warning, like the run-registry check: it does not set HEALTH_FAILED. This
+# counts providers, not devices, which would need provider-specific knowledge.
+_check_provider_liveness() {
+    local base_url="$1" elapsed=0 out states="" answered=0 total=0 running=0
+    while true; do
+        if out=$(_provider_states "${base_url}"); then
+            answered=1
+            states="${out}"
+            total=$(grep -c . <<< "${states}" || true)
+            running=$(awk '$2 == "RUNNING" || $2 == "RECOVERING" { n++ } END { print n + 0 }' <<< "${states}")
+            [[ ${running} -eq ${total} ]] && break
+        fi
+        [[ ${elapsed} -ge ${HEALTH_TIMEOUT} ]] && break
+        sleep ${HEALTH_INTERVAL}
+        elapsed=$((elapsed + HEALTH_INTERVAL))
+    done
+
+    if [[ ${answered} -eq 0 ]]; then
+        log_warn "health: providers unknown (GET /v0/providers/health did not answer)"
+        return
+    fi
+    if [[ ${running} -eq ${total} ]]; then
+        log_ok "health: providers: ${running} of ${total} running"
+        return
+    fi
+    log_warn "health: providers: ${running} of ${total} running"
+    local id state
+    while read -r id state; do
+        [[ "${state}" == "RUNNING" || "${state}" == "RECOVERING" ]] && continue
+        log_warn "health: provider ${id}: ${state}"
+    done <<< "${states}"
+    log_info "  sudo journalctl -u anolis-runtime --no-pager -n 50"
+}
+
 phase_health() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "health: skipped (services not started)"
@@ -1570,6 +1618,7 @@ phase_health() {
                 log_warn "health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded"
                 log_info "  sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'"
             fi
+            _check_provider_liveness "http://localhost:${port}"
             return
         fi
         sleep ${HEALTH_INTERVAL}
