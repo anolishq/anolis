@@ -741,7 +741,12 @@ components:
           description: Epoch milliseconds when the latch engaged, or null if not latched.
         uncovered_actuating_functions:
           type: integer
-          description: Count of actuating outputs with no declared safe setpoint.
+          description: >-
+            Count of ACTUATE functions the active rung cannot drive. For hooks
+            and setpoints, a function is covered only by a call that targets
+            it and passes the same dispatch check as the startup preflight; for
+            zero, only if the zero rung can build its call. Every ACTUATE
+            function counts when software_safe_state is "none".
     EstopAction:
       type: object
       additionalProperties: false

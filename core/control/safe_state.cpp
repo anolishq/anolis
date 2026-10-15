@@ -1,6 +1,7 @@
 #include "control/safe_state.hpp"
 
 #include <chrono>
+#include <map>
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
@@ -39,6 +40,44 @@ std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovid
         default:
             return std::nullopt;
     }
+}
+
+// Rung 3's arguments for `spec`: every required argument zeroed. Returns why
+// rung 3 cannot drive the function, or an empty string when `args` is complete.
+std::string build_zero_args(const registry::FunctionSpec &spec,
+                            std::map<std::string, anolis::deviceprovider::v1::Value> &args) {
+    for (const auto &arg : spec.args) {
+        if (!arg.required()) {
+            continue;
+        }
+        auto zero = zero_value(arg.type());
+        if (!zero.has_value()) {
+            return "cannot zero required non-numeric argument '" + arg.name() + "'";
+        }
+        args[arg.name()] = *zero;
+    }
+
+    // Refuse to bare-invoke a function with nothing to zero: "zero the outputs"
+    // means driving a numeric setpoint to 0, not calling a no-argument command
+    // (which could energize hardware). Still latches; the operator should
+    // declare a hook for such a function.
+    if (args.empty()) {
+        return "cannot zero: no numeric required argument to drive to zero";
+    }
+    return {};
+}
+
+CallRequest to_call_request(const runtime::ModeTransitionCallConfig &call) {
+    CallRequest request;
+    request.device_handle = call.device_handle;
+    request.function_id = call.function_id;
+    request.function_name = call.function_name;
+    request.is_automated = false;
+    request.safe_state = true;
+    for (const auto &[name, value] : call.args) {
+        request.args[name] = to_provider_value(value);
+    }
+    return request;
 }
 
 // True if `setpoint` targets the same function as an actuating `spec` on `handle`.
@@ -82,6 +121,26 @@ std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions_
 }
 
 }  // namespace
+
+std::vector<std::string> uncovered_actuating_functions(const registry::DeviceRegistry &registry,
+                                                       const CallRouter &call_router,
+                                                       const std::vector<runtime::ModeTransitionCallConfig> &calls) {
+    std::vector<std::string> out;
+    for (const auto &[handle, spec] : actuating_functions_for(registry)) {
+        bool covered = false;
+        for (const auto &call : calls) {
+            std::string err;
+            if (setpoint_matches(call, handle, spec) && call_router.validate_call(to_call_request(call), err)) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered) {
+            out.push_back(handle + "/" + spec.function_name);
+        }
+    }
+    return out;
+}
 
 const char *safe_state_kind_to_string(SafeStateKind kind) {
     switch (kind) {
@@ -147,17 +206,7 @@ SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
 }
 
 CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfig &call) {
-    CallRequest request;
-    request.device_handle = call.device_handle;
-    request.function_id = call.function_id;
-    request.function_name = call.function_name;
-    request.is_automated = false;
-    request.safe_state = true;
-    for (const auto &[name, value] : call.args) {
-        request.args[name] = to_provider_value(value);
-    }
-
-    const auto res = call_router_.execute_call(request, provider_registry_);
+    const auto res = call_router_.execute_call(to_call_request(call), provider_registry_);
 
     CallOutcome outcome;
     outcome.device_handle = call.device_handle;
@@ -180,26 +229,9 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     request.function_name = spec.function_name;
     request.is_automated = false;
     request.safe_state = true;
-    for (const auto &arg : spec.args) {
-        if (!arg.required()) {
-            continue;
-        }
-        auto zero = zero_value(arg.type());
-        if (!zero.has_value()) {
-            outcome.success = false;
-            outcome.error = "cannot zero required non-numeric argument '" + arg.name() + "'";
-            return outcome;
-        }
-        request.args[arg.name()] = *zero;
-    }
-
-    // Refuse to bare-invoke a function with nothing to zero: "zero the outputs"
-    // means driving a numeric setpoint to 0, not calling a no-argument command
-    // (which could energize hardware). Still latches; the operator should
-    // declare a hook for such a function.
-    if (request.args.empty()) {
+    if (auto why = build_zero_args(spec, request.args); !why.empty()) {
         outcome.success = false;
-        outcome.error = "cannot zero: no numeric required argument to drive to zero";
+        outcome.error = std::move(why);
         return outcome;
     }
 
@@ -287,11 +319,35 @@ void SafeStateController::clear() {
     LOG_INFO("[SafeState] E-stop latch cleared");
 }
 
+size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
+    // Coverage of the rung that would actually run, counted the way it would
+    // run: a call covers a function only if it can dispatch (#253).
+    switch (kind) {
+        case SafeStateKind::Hooks:
+            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.hooks).size();
+        case SafeStateKind::Setpoints:
+            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.setpoints).size();
+        case SafeStateKind::Zero: {
+            size_t uncovered = 0;
+            for (const auto &[handle, spec] : actuating_functions()) {
+                (void)handle;
+                std::map<std::string, anolis::deviceprovider::v1::Value> args;
+                if (!build_zero_args(spec, args).empty()) {
+                    ++uncovered;
+                }
+            }
+            return uncovered;
+        }
+        case SafeStateKind::None:
+        default:
+            return actuating_functions().size();
+    }
+}
+
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
-    size_t uncovered = 0;
-    cap.software_safe_state = planned_kind(&uncovered);
-    cap.uncovered_actuating_functions = uncovered;
+    cap.software_safe_state = planned_kind(nullptr);
+    cap.uncovered_actuating_functions = uncovered_count(cap.software_safe_state);
     {
         // Read latch flag and timestamp together so the pair is consistent
         // against a concurrent clear() (no {latched:true, latched_at:null}).

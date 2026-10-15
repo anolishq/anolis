@@ -168,6 +168,78 @@ TEST_F(SafeStateTest, ZeroRungRefusesNonNumericRequiredArg) {
     EXPECT_THAT(result.actions[0].error, HasSubstr("cannot zero"));
 }
 
+//=============================================================================
+// uncovered_actuating_functions: dispatchable coverage of the active rung (#253)
+//=============================================================================
+
+// A hooks safe state that drives every actuating function has no gap. The
+// count used to look at setpoints only, so this read 1.
+TEST_F(SafeStateTest, HooksCoveringEveryActuatorCountZeroUncovered) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Hooks);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+}
+
+// A hook that names the function but cannot pass validate_call (here: its
+// required argument is missing) does not cover it.
+TEST_F(SafeStateTest, UndispatchableHookDoesNotCover) {
+    RegisterActuator();
+    auto call = make_call("sim0/heater", "set_output");
+    call.args.clear();
+    safety.safe_state.hooks.push_back(call);
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, HookOnAnotherFunctionDoesNotCover) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "some_other_fn"));
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, SetpointsCoveringEveryActuatorCountZeroUncovered) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 0u);
+}
+
+// The zero rung covers a function only when it can build the call.
+TEST_F(SafeStateTest, ZeroRungCoversNumericActuator) {
+    RegisterActuator();
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 0u);
+}
+
+TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorItCannotBuild) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, UncoveredHelperNamesTheFunction) {
+    RegisterActuator();
+    const auto uncovered = control::uncovered_actuating_functions(*registry, *call_router, {});
+    ASSERT_EQ(uncovered.size(), 1u);
+    EXPECT_EQ(uncovered[0], "sim0/heater/set_output");
+
+    EXPECT_TRUE(
+        control::uncovered_actuating_functions(*registry, *call_router, {make_call("sim0/heater", "set_output")})
+            .empty());
+}
+
 TEST_F(SafeStateTest, ClearReleasesLatch) {
     RegisterActuator();
     auto controller = make_controller();
