@@ -392,14 +392,25 @@ _record_prev_meta() {
     rm -f "${meta}/runtime-version" "${meta}/manifest.json"
     mkdir -p "${meta}" || { log_warn "backup: cannot create ${meta}; --rollback will not name the version"; return 0; }
 
-    if [[ -f "${PREFIX}/manifest.json" ]]; then
-        cp "${PREFIX}/manifest.json" "${meta}/manifest.json" || true
-    fi
     ver=$(timeout 10 "${PREFIX}/bin/anolis-runtime" --version 2>/dev/null | head -n1) || ver=""
     if [[ -n "${ver}" ]]; then
         printf '%s\n' "${ver}" > "${meta}/runtime-version"
     else
         log_warn "backup: could not read the runtime version; --rollback will not name it"
+    fi
+
+    # Record manifest.json only when it describes the runtime being saved. A
+    # rollback of an older backup can leave a newer install's manifest in
+    # place, and recording that would have the next rollback restore it.
+    if [[ -f "${PREFIX}/manifest.json" ]]; then
+        local measured="" listed
+        measured=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "${ver}" | head -n1) || measured=""
+        listed=$(_manifest_version "${PREFIX}/manifest.json")
+        if [[ -n "${measured}" && "${listed}" == "${measured}" ]]; then
+            cp "${PREFIX}/manifest.json" "${meta}/manifest.json" || true
+        else
+            log_warn "backup: ${PREFIX}/manifest.json lists version ${listed:-unknown} but the saved runtime is ${measured:-unknown}; not recording it"
+        fi
     fi
 }
 
@@ -825,6 +836,12 @@ phase_manifest() {
 # Read fields from install.sh's OWN manifest.json (the writer uses
 # json.dump(indent=2), so keys are on their own two-space-indented lines) — these
 # are NOT general JSON parsers. Empty output on a missing field or legacy bundle.
+_manifest_version() {
+    # Top-level "version": "..." (indent 2), the runtime version the bundle
+    # was assembled at.
+    sed -n 's/^  "version": *"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n1
+}
+
 _manifest_prefix() {
     # Top-level "prefix": "..." (indent 2). [^"]* keeps it robust to trailing
     # commas and portable across sed implementations.
@@ -2002,6 +2019,19 @@ do_rollback() {
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
     log_ok "restored binaries from .prev/"
 
+    # manifest.json is the operator's record of what is installed, and the next
+    # backup copies it into .prev/meta, so it must follow the binaries (#345).
+    if [[ -f "${PREFIX}/.prev/meta/manifest.json" ]]; then
+        if cp "${PREFIX}/.prev/meta/manifest.json" "${PREFIX}/manifest.json"; then
+            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/manifest.json" 2>/dev/null || true
+            log_ok "restored manifest.json from .prev/"
+        else
+            log_warn "rollback: could not restore manifest.json from .prev/meta/; ${PREFIX}/manifest.json still describes the newer install"
+        fi
+    elif [[ -f "${PREFIX}/manifest.json" ]]; then
+        log_warn "rollback: no manifest saved with this backup; ${PREFIX}/manifest.json still describes the newer install"
+    fi
+
     if command -v systemctl >/dev/null 2>&1 \
         && [[ -f "${SYSTEMD_DIR}/anolis-runtime.service" ]]; then
         systemctl restart anolis-runtime.service \
@@ -2422,7 +2452,7 @@ main() {
     # Handle rollback early
     if [[ ${ROLLBACK} -eq 1 ]]; then
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            log_info "[dry-run] would roll back binaries from ${PREFIX}/.prev"
+            log_info "[dry-run] would roll back binaries and the saved manifest.json from ${PREFIX}/.prev"
             _print_rollback_target
             exit 0
         fi
