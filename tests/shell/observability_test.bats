@@ -188,6 +188,7 @@ _summary_stubs() {
 
 @test "351: the default summary prints the ssh tunnel to Grafana, not a network address" {
     _summary_stubs
+    _OBS_GRAFANA_BIND_APPLIED=1
     GRAFANA_NETWORK=0
     _OBS_GRAFANA_WAS_NETWORK=0
     run phase_summary
@@ -197,6 +198,7 @@ _summary_stubs() {
 
 @test "351: with --with-grafana-network the summary prints Grafana's network address" {
     _summary_stubs
+    _OBS_GRAFANA_BIND_APPLIED=1
     GRAFANA_NETWORK=1
     run phase_summary
     [[ "${output}" == *"Grafana:   http://pi-test.local:3000"* ]]
@@ -205,6 +207,7 @@ _summary_stubs() {
 
 @test "351: a re-run without the flag says Grafana went back to loopback" {
     _summary_stubs
+    _OBS_GRAFANA_BIND_APPLIED=1
     GRAFANA_NETWORK=0
     _OBS_GRAFANA_WAS_NETWORK=1
     run phase_summary
@@ -244,4 +247,61 @@ _summary_stubs() {
     systemctl() { [[ "$1" == "--version" ]] && printf 'systemd 257 (257.13-1~deb13u1)\n'; }
     run _warn_if_no_log_filter
     [ -z "${output}" ]
+}
+
+@test "351: a failed provisioning run reports Grafana's bind as unchanged" {
+    _stub_obs_host
+    # Provisioning fails before the drop-in is written or grafana restarted.
+    _obs_provision_grafana() { printf '%s\n' "_obs_provision_grafana $*" >>"${CALLS}"; return 1; }
+    phase_observability > /dev/null 2>&1
+    _summary_stubs
+    GRAFANA_NETWORK=0
+    run phase_summary
+    [[ "${output}" == *"Grafana bind unchanged"* ]]
+    [[ "${output}" != *"ssh -L 3000"* ]]
+    [[ "${output}" != *"127.0.0.1:3000 on this machine"* ]]
+}
+
+@test "351: a run that restarts grafana reports the bind it applied" {
+    _stub_obs_host
+    phase_observability > /dev/null 2>&1
+    _summary_stubs
+    GRAFANA_NETWORK=0
+    run phase_summary
+    [[ "${output}" == *"ssh -L 3000:127.0.0.1:3000"* ]]
+    [[ "${output}" != *"bind unchanged"* ]]
+}
+
+@test "351: on x86_64 the tunnel names a host placeholder, not localhost" {
+    _summary_stubs
+    ARCH=x86_64
+    GRAFANA_NETWORK=0
+    _OBS_GRAFANA_BIND_APPLIED=1
+    run phase_summary
+    [[ "${output}" == *"ssh -L 3000:127.0.0.1:3000 operator@<host>"* ]]
+    [[ "${output}" != *"@localhost"* ]]
+}
+
+@test "351: --with-grafana-network without --with-observability warns" {
+    WITH_OBSERVABILITY=0
+    GRAFANA_NETWORK=0
+    run parse_args --with-grafana-network
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"--with-grafana-network has no effect without --with-observability"* ]]
+    run parse_args --with-observability --with-grafana-network
+    [[ "${output}" != *"no effect"* ]]
+}
+
+@test "351: uninstall removes the influxdb drop-in with grafana's" {
+    CALLS="${BATS_TEST_TMPDIR}/calls.log"
+    : >"${CALLS}"
+    local name
+    for name in rm rmdir systemctl mv chown chmod _observability_data_dirs; do
+        eval "${name}() { printf '%s\n' \"${name} \$*\" >>\"\${CALLS}\"; }"
+    done
+    _obs_provisioned() { return 0; }
+    PREFIX="${BATS_TEST_TMPDIR}/no-such-prefix"
+    run do_uninstall
+    [ "$status" -eq 0 ]
+    grep -qxF "rm -rf ${GRAFANA_DROPIN_DIR} ${INFLUX_DROPIN_DIR}" "${CALLS}"
 }
