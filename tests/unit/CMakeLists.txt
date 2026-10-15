@@ -12,6 +12,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     actuation_gate_test.cpp
     config_test.cpp
     runtime_ownership_validation_test.cpp
+    poll_hint_check_test.cpp
     http_handlers_test.cpp
     http_auth_test.cpp
     parameter_types_test.cpp

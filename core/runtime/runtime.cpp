@@ -24,6 +24,7 @@
 #include "health/health_snapshot.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
+#include "poll_hint_check.hpp"
 #include "provider/provider_handle.hpp"  // Required for instantiation
 #include "provider/provider_supervisor.hpp"
 #include "runtime/actuation_gate.hpp"
@@ -212,6 +213,12 @@ bool Runtime::init_providers(std::string &error) {
     }
 
     LOG_INFO("[Runtime] Ownership validation passed");
+
+    // Once, at startup: a restarted provider republishing its hints is not news.
+    for (const auto &line : poll_hint_mismatches(all_devices, config_.polling.interval_ms)) {
+        LOG_WARN("[Runtime] " << line);
+    }
+
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
     return true;
@@ -407,6 +414,11 @@ bool Runtime::init_automation(std::string &error) {
             if (!parameter_manager_->define(param_config.name, param_config.type, param_config.default_value,
                                             param_config.min, param_config.max, allowed)) {
                 LOG_WARN("[Runtime] Failed to define parameter: " << param_config.name);
+            } else {
+                // Operator changes are not persisted (#273), so a value set before
+                // a restart is back at its default here. Say so where it shows.
+                LOG_INFO("[Runtime] Parameter '" << param_config.name << "' at config default "
+                                                 << automation::parameter_value_to_string(param_config.default_value));
             }
         }
 
@@ -792,9 +804,15 @@ void Runtime::run() {
             if (!provider->is_available()) {
                 // Provider crashed or unavailable
 
-                // Check if circuit breaker is open
+                // Circuit open: no restarts from the budget, but one half-open
+                // probe per interval (#326), so an outage that outlasts the
+                // budget does not keep the provider down until a runtime restart.
                 if (supervisor_->is_circuit_open(id)) {
-                    continue;  // Circuit open, no more attempts
+                    if (supervisor_->should_probe(id)) {
+                        LOG_INFO("[Runtime] Circuit open; probing provider: " << id);
+                        supervisor_->record_probe_result(id, restart_provider(id, provider_config));
+                    }
+                    continue;
                 }
 
                 // The main loop runs every 100ms, so outage accounting is split
@@ -950,6 +968,14 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     LOG_INFO("[Runtime] Restarting provider: " << provider_id);
     LOG_DEBUG("[Runtime]   Command: " << provider_config.command);
+
+    // Stop the old process before starting its replacement (#326). A provider
+    // can be unavailable and still running -- wedged on a hung bus -- and
+    // starting a second one beside it would put two processes on one bus. The
+    // stopped handle stays registered, so a failed restart is retried as before.
+    if (auto old_provider = provider_registry_.get_provider(provider_id)) {
+        old_provider->stop();
+    }
 
     // Replacement is a two-phase operation: bring up and inspect the new
     // provider off to the side first, then publish the new device inventory and

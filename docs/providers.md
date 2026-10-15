@@ -62,9 +62,15 @@ providers:
 Behavior:
 
 1. Crash/unresponsive provider is marked unavailable.
-2. Runtime applies backoff then attempts restart.
+2. Runtime applies backoff then attempts restart. Each restart stops the old
+   process before it starts the new one, so a provider that is unresponsive but
+   still running never has a second process beside it.
 3. Device inventory is rediscovered after restart.
 4. Circuit opens after `max_attempts` consecutive failures.
+5. While the circuit is open, the runtime makes one restart attempt (a
+   half-open probe) every 60 seconds. The interval is fixed, not configurable.
+   `supervision.circuit_open` stays `true` until a probe restarts the provider;
+   a crash soon after that re-opens it.
 
 Operational observability:
 

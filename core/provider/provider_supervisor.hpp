@@ -50,7 +50,18 @@ public:
         int64_t uptime_seconds = 0;                 // 0 before first heartbeat or when unavailable
     };
 
-    ProviderSupervisor() = default;
+    /**
+     * @brief Interval between half-open probes of an open circuit (#326).
+     *
+     * Fixed rather than configurable: it bounds how long an outage that outlasts
+     * the restart budget keeps a provider down, at one restart attempt per
+     * interval.
+     */
+    static constexpr std::chrono::milliseconds kCircuitProbeInterval{60000};
+
+    /** @param probe_interval overridable so tests need not wait a full minute. */
+    explicit ProviderSupervisor(std::chrono::milliseconds probe_interval = kCircuitProbeInterval)
+        : probe_interval_(probe_interval) {}
 
     /**
      * @brief Register a provider and initialize its supervision state.
@@ -99,6 +110,24 @@ public:
     /** @brief Report whether the circuit breaker is currently open. */
     bool is_circuit_open(const std::string &provider_id) const;
 
+    /**
+     * @brief Report whether an open circuit is due a half-open probe (#326).
+     *
+     * True once per probe interval while the circuit is open and supervision is
+     * enabled. The caller makes one restart attempt and reports it through
+     * record_probe_result().
+     */
+    bool should_probe(const std::string &provider_id) const;
+
+    /**
+     * @brief Record the outcome of a half-open probe.
+     *
+     * A successful restart closes the circuit; the crash streak is kept until the
+     * provider stays healthy for `success_reset_ms`, so a crash straight after the
+     * probe re-opens it. A failed probe schedules the next one.
+     */
+    void record_probe_result(const std::string &provider_id, bool restarted);
+
     /** @brief Get the current crash-attempt count for one provider. */
     int get_attempt_count(const std::string &provider_id) const;
 
@@ -137,13 +166,14 @@ private:
         int attempt_count = 0;                                    // Current restart attempt number
         bool circuit_open = false;                                // True when max attempts exceeded
         bool crash_detected = false;                              // True if we're currently handling a crash
-        std::chrono::steady_clock::time_point next_restart_time;  // Earliest time for next restart
+        std::chrono::steady_clock::time_point next_restart_time;  // Earliest next restart, or probe when open
         // Set on first record_heartbeat after start/restart; reset to {} by record_crash.
         std::chrono::steady_clock::time_point process_start_time;
         // Updated by record_heartbeat every healthy loop iteration.
         std::chrono::steady_clock::time_point last_healthy_time;
     };
 
+    std::chrono::milliseconds probe_interval_;
     mutable std::mutex mutex_;
     std::unordered_map<std::string, RestartPolicyConfig> policies_;
     std::unordered_map<std::string, RestartState> states_;

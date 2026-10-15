@@ -277,6 +277,8 @@ void HttpServer::handle_get_parameters(const httplib::Request &, httplib::Respon
             param_json["allowed_values"] = def.allowed_values.value();
         }
 
+        param_json["source"] = def.set_by_operator ? "operator" : "default";
+
         parameters_json.push_back(param_json);
     }
 

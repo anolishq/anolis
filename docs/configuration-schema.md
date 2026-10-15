@@ -108,8 +108,8 @@ Fields:
 3. `health_interval_ms` (int, default 15000, `0` disables): cadence of
    provider/device health snapshot ingestion into InfluxDB
    (`anolis_provider_health` / `anolis_device_health`). Each snapshot performs
-   a live provider GetHealth round-trip (bread: a GET_WATCHDOG bus query per
-   armed device), so raise/lower deliberately.
+   a live provider GetHealth round-trip (a provider may answer with a live
+   device query per device), so raise/lower deliberately.
 
 Compatibility aliases (deprecated but accepted):
 
@@ -182,7 +182,10 @@ independently of `automation`, so a pure-manual machine can declare one.
 2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
    only when they cover every actuating output (fail closed).
 3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
-   outputs when neither hooks nor full-coverage setpoints apply.
+   outputs when neither hooks nor full-coverage setpoints apply. Only
+   numeric required arguments are zeroed. A function with a required boolean,
+   string or bytes argument is not called and is reported as not driven:
+   the runtime cannot know which boolean value is safe.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires

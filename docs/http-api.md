@@ -109,7 +109,7 @@ Notes:
    actuating). Read-only calls are unaffected.
 3. Latch and planned safe-state are surfaced under `estop` in
    `GET /v0/runtime/status`.
-4. This is a software stop, not a substitute for the hardware backplane cut.
+4. This is a software stop, not a substitute for the hardware emergency stop.
 
 ### Device-loss latch
 
