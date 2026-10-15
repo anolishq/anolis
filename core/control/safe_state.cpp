@@ -1,5 +1,6 @@
 #include "control/safe_state.hpp"
 
+#include <algorithm>
 #include <chrono>
 
 #include "automation/mode_manager.hpp"
@@ -242,6 +243,12 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device) {
         case SafeStateKind::None:
             break;
     }
+    // No fall-through to another rung: a call that failed at run time mostly
+    // failed on transport, and a second rung would go to the same device. The
+    // verdict says so instead.
+    result.safe_state_achieved =
+        result.kind != SafeStateKind::None && !result.actions.empty() &&
+        std::all_of(result.actions.begin(), result.actions.end(), [](const CallOutcome &a) { return a.success; });
     return result;
 }
 
@@ -283,8 +290,13 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
         }
     }
 
-    LOG_INFO("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
-                                          << " actions=" << result.actions.size());
+    if (result.safe_state_achieved) {
+        LOG_INFO("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
+                                              << " actions=" << result.actions.size() << " safe_state_achieved=true");
+    } else {
+        LOG_WARN("[SafeState] E-stop ladder=" << safe_state_kind_to_string(result.kind)
+                                              << " actions=" << result.actions.size() << " safe_state_achieved=false");
+    }
     return result;
 }
 

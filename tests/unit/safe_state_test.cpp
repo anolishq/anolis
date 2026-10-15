@@ -119,6 +119,71 @@ TEST_F(SafeStateTest, HooksRungRunsDeclaredHooks) {
     EXPECT_TRUE(result.actions[0].success);
 }
 
+// One verdict for the whole rung (#256): a single failed call means the safe
+// state was not achieved, even though the other calls landed.
+TEST_F(SafeStateTest, OneFailedRungCallMeansSafeStateNotAchieved) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("bus timeout"));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    const auto result = controller->trigger("test");
+    ASSERT_EQ(result.actions.size(), 2u);
+    EXPECT_TRUE(result.actions[0].success);
+    EXPECT_FALSE(result.actions[1].success);
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+TEST_F(SafeStateTest, AllRungCallsSucceedingMeansSafeStateAchieved) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    EXPECT_TRUE(controller->trigger("test").safe_state_achieved);
+}
+
+TEST_F(SafeStateTest, NoRungMeansSafeStateNotAchieved) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::None);
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// A rung that issues nothing has achieved nothing: the zero rung on an
+// inventory with no ACTUATE function sends no call.
+TEST_F(SafeStateTest, RungThatIssuesNoCallMeansSafeStateNotAchieved) {
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// The verdict is logged at WARN when the safe state was not achieved.
+TEST_F(SafeStateTest, UnachievedVerdictIsLoggedAtWarn) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    controller->trigger("test");
+    std::cerr.rdbuf(previous);
+
+    EXPECT_THAT(captured.str(),
+                HasSubstr("[WARN]  [SafeState] E-stop ladder=none actions=0 safe_state_achieved=false"));
+}
+
 TEST_F(SafeStateTest, SetpointsApplyOnlyWithFullCoverage) {
     RegisterActuator();
     safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
