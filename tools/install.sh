@@ -265,33 +265,37 @@ phase_prepare_bundle() {
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
 
-        # #222/D11: a staged bundle bakes ${PREFIX} into the systemd unit and the
-        # rendered config paths. Installing at a different prefix would leave the
-        # unit/config pointing at the staged one — a silent broken install. Refuse
-        # a differing EXPLICIT --prefix; with no --prefix, adopt the baked one.
-        local baked_prefix
-        baked_prefix=$(_manifest_prefix "${BUNDLE_DIR}/manifest.json")
-        if [[ -z "${baked_prefix}" ]]; then
-            if [[ "${PREFIX_EXPLICIT}" -eq 1 ]]; then
-                log_warn "prepare: bundle predates prefix recording (no 'prefix' in manifest); cannot verify --prefix ${PREFIX}"
-            fi
-        elif [[ "${PREFIX_EXPLICIT}" -eq 1 && "${PREFIX}" != "${baked_prefix}" ]]; then
-            log_err "prepare: this bundle was staged for prefix ${baked_prefix}, but --prefix ${PREFIX} was requested"
-            log_info "The bundle's systemd unit and rendered configs bake the stage-time prefix."
-            log_info "Re-stage for this prefix: ./install.sh --stage <out> --project <config> --prefix ${PREFIX}"
-            log_info "Or install without --prefix to use the staged prefix."
-            die "refusing to install a prefix-mismatched bundle"
-        else
-            # Adopt the baked prefix (no-op when it already matches).
-            PREFIX="${baked_prefix}"
-            check_prefix "refusing the bundle's staged prefix '${PREFIX}'"
-        fi
+        _adopt_bundle_prefix
 
         log_ok "prepare: using local bundle"
         return
     fi
 
     die "one of --project <dir> (online) or --local <bundle> (offline) is required"
+}
+
+# #222/D11: a staged bundle bakes ${PREFIX} into the systemd unit and the
+# rendered config paths. Installing at a different prefix would leave the
+# unit/config pointing at the staged one — a silent broken install. Refuse
+# a differing EXPLICIT --prefix; with no --prefix, adopt the baked one.
+_adopt_bundle_prefix() {
+    local baked_prefix
+    baked_prefix=$(_manifest_prefix "${BUNDLE_DIR}/manifest.json")
+    if [[ -z "${baked_prefix}" ]]; then
+        if [[ "${PREFIX_EXPLICIT}" -eq 1 ]]; then
+            log_warn "prepare: bundle predates prefix recording (no 'prefix' in manifest); cannot verify --prefix ${PREFIX}"
+        fi
+    elif [[ "${PREFIX_EXPLICIT}" -eq 1 && "${PREFIX}" != "${baked_prefix}" ]]; then
+        log_err "prepare: this bundle was staged for prefix ${baked_prefix}, but --prefix ${PREFIX} was requested"
+        log_info "The bundle's systemd unit and rendered configs bake the stage-time prefix."
+        log_info "Re-stage for this prefix: ./install.sh --stage <out> --project <config> --prefix ${PREFIX}"
+        log_info "Or install without --prefix to use the staged prefix."
+        die "refusing to install a prefix-mismatched bundle"
+    else
+        # Adopt the baked prefix (no-op when it already matches).
+        PREFIX="${baked_prefix}"
+        check_prefix "refusing the bundle's staged prefix '${PREFIX}'"
+    fi
 }
 
 # =============================================================================
@@ -323,13 +327,18 @@ phase_verify() {
 # Version check: refuse to downgrade a newer runtime (#366)
 # =============================================================================
 
+# The first X.Y.Z on stdin, or nothing. A pre-release or build suffix is
+# dropped, so 0.1.44-rc1 compares equal to 0.1.44.
+_version_xyz() {
+    { grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true; } | head -n1
+}
+
 # X.Y.Z from a runtime's --version, empty when the binary will not run or
 # reports no version. Measures the binary: an installed manifest.json can be
 # stale (#345).
 _runtime_binary_version() {
     [[ -x "$1" ]] || return 0
-    { timeout 10 "$1" --version 2>/dev/null || true; } \
-        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true
+    { timeout 10 "$1" --version 2>/dev/null || true; } | _version_xyz
 }
 
 # Compare the bundle's runtime with the installed one before anything changes.
@@ -343,7 +352,8 @@ phase_version_check() {
     fi
     installed=$(_runtime_binary_version "${PREFIX}/bin/anolis-runtime")
     incoming=$(_runtime_binary_version "${BUNDLE_DIR}/bin/anolis-runtime")
-    [[ -n "${incoming}" ]] || incoming=$(_manifest_version "${BUNDLE_DIR}/manifest.json") || true
+    [[ -n "${incoming}" ]] \
+        || incoming=$({ _manifest_version "${BUNDLE_DIR}/manifest.json" || true; } | _version_xyz)
     if [[ -z "${installed}" || -z "${incoming}" ]]; then
         log_warn "version: cannot compare (installed ${installed:-unknown}, bundle ${incoming:-unknown}); continuing"
         return 0
@@ -2527,17 +2537,23 @@ main() {
         else
             dry_run_phase "use local bundle ${LOCAL_PATH:-<required: --project or --local>}"
         fi
-        dry_run_phase "verify checksums"
         if [[ -z "${PROJECT_DIR}" && ( -d "${LOCAL_PATH}" || -f "${LOCAL_PATH}" ) ]]; then
-            # Reading a local bundle changes nothing on the host.
+            # Reading a local bundle changes nothing on the host. Adopt its
+            # staged prefix and verify it as the install would, before the
+            # version check runs its binary.
             BUNDLE_DIR="${LOCAL_PATH}"
             if [[ -f "${LOCAL_PATH}" ]]; then
                 BUNDLE_DIR=$(mktemp -d)
                 trap 'rm -rf "${BUNDLE_DIR}"' EXIT
                 tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
             fi
+            if [[ -f "${BUNDLE_DIR}/manifest.json" ]]; then
+                _adopt_bundle_prefix
+            fi
+            phase_verify
             phase_version_check
         else
+            dry_run_phase "verify checksums"
             dry_run_phase "compare the bundle's runtime version with the installed one (refuse an older one without --allow-downgrade)"
         fi
         dry_run_phase "create system user ${ANOLIS_USER}"

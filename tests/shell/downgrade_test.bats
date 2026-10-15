@@ -37,13 +37,11 @@ _source_install_sh() {
 }
 
 # The phases main runs from the version check through the binary install.
+# Chained, because bats' run does not stop at a step that returns non-zero.
 _install_bundle() {  # <version>
     BUNDLE_DIR="${BATS_TEST_TMPDIR}/bundle-$1"
     _mk_bundle "${BUNDLE_DIR}" "$1"
-    phase_version_check
-    phase_directories
-    phase_backup
-    phase_install_binaries
+    phase_version_check && phase_directories && phase_backup && phase_install_binaries
 }
 
 @test "--help documents --allow-downgrade" {
@@ -168,4 +166,59 @@ _install_bundle() {  # <version>
     run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --dry-run --local "${BATS_TEST_TMPDIR}/b.tar.gz" --prefix "${prefix}"
     [ "$status" -eq 0 ]
     [[ "${output}" == *"would refuse to downgrade the runtime from 0.1.44 to 0.1.39"* ]]
+}
+
+@test "--dry-run --local checks the prefix the bundle was staged for (#366)" {
+    local prefix="${BATS_TEST_TMPDIR}/pfx" bundle="${BATS_TEST_TMPDIR}/bundle"
+    _runtime_stub "${prefix}/bin/anolis-runtime" 0.1.44
+    _mk_bundle "${bundle}" 0.1.39
+    printf '{\n  "version": "0.1.39",\n  "prefix": "%s"\n}\n' "${prefix}" > "${bundle}/manifest.json"
+
+    # No --prefix: the dry run adopts the staged one, as the install does.
+    run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --dry-run --local "${bundle}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"would refuse to downgrade the runtime from 0.1.44 to 0.1.39"* ]]
+    [[ "${output}" == *"create directories at ${prefix}"* ]]
+}
+
+@test "--dry-run --local verifies checksums before it runs the bundle's binary (#366)" {
+    local prefix="${BATS_TEST_TMPDIR}/prefix" bundle="${BATS_TEST_TMPDIR}/bundle"
+    _runtime_stub "${prefix}/bin/anolis-runtime" 0.1.44
+    _mk_bundle "${bundle}" 0.1.39
+    printf '#!/bin/sh\ntouch "%s"\necho "anolis-runtime 0.1.39"\n' "${BATS_TEST_TMPDIR}/ran" > "${bundle}/bin/anolis-runtime"
+    printf '%064d  ./bin/anolis-runtime\n' 0 > "${bundle}/checksums.sha256"
+
+    run bash "${RUN_AS_ROOT}" "${INSTALL_SH}" --dry-run --local "${bundle}" --prefix "${prefix}"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"Checksum verification failed"* ]]
+    [ ! -e "${BATS_TEST_TMPDIR}/ran" ]
+}
+
+@test "a bundle runtime that will not run falls back to its manifest, normalised to X.Y.Z (#366)" {
+    _source_install_sh
+    _install_bundle 0.1.44
+    BUNDLE_DIR="${BATS_TEST_TMPDIR}/bundle-fallback"
+    _mk_bundle "${BUNDLE_DIR}" 0.1.44
+    chmod -x "${BUNDLE_DIR}/bin/anolis-runtime"
+
+    printf '{\n  "version": "0.1.44-rc1"\n}\n' > "${BUNDLE_DIR}/manifest.json"
+    run phase_version_check
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"version: 0.1.44, same as installed"* ]]
+
+    printf '{\n  "version": "0.1.39-rc1"\n}\n' > "${BUNDLE_DIR}/manifest.json"
+    run phase_version_check
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"0.1.39 is older than the installed 0.1.44"* ]]
+}
+
+@test "an installed runtime that will not report a version: warns and installs (#366)" {
+    _source_install_sh
+    _install_bundle 0.1.44
+    printf 'not a runtime\n' > "${PREFIX}/bin/anolis-runtime"
+
+    run _install_bundle 0.1.39
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"version: cannot compare (installed unknown, bundle 0.1.39); continuing"* ]]
+    [ "$("${PREFIX}/bin/anolis-runtime" --version)" = "anolis-runtime 0.1.39" ]
 }
