@@ -28,6 +28,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/09-health-staleness.yaml
     expect: valid
     note: health.staleness absolute overrides for device-liveness thresholds (#220)
+  - file: tests/contracts/runtime-config/valid/10-health-excluded-signals.yaml
+    expect: valid
+    note: health.excluded_signals leaves unused signals out of device health (#325)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -50,6 +53,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/07-negative-health-staleness.yaml
     expect: invalid/schema
     note: health.staleness.stale_after_ms must be >= 0
+  - file: tests/contracts/runtime-config/invalid/schema/08-health-excluded-signals-bad-handle.yaml
+    expect: invalid/schema
+    note: health.excluded_signals device_handle must be provider_id/device_id
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime
@@ -66,3 +72,6 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/05-health-staleness-order.yaml
     expect: invalid/runtime
     note: health.staleness.stale_after_ms must be > warn_after_ms when both set
+  - file: tests/contracts/runtime-config/invalid/runtime/06-health-excluded-signals-duplicate.yaml
+    expect: invalid/runtime
+    note: health.excluded_signals lists one device_handle twice

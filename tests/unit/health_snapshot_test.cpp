@@ -268,6 +268,32 @@ TEST_F(HealthSnapshotCollectorTest, FreshFaultSignalDrivesFault) {
     EXPECT_EQ(d->stale_signal_count, 0u);
 }
 
+// #325: a signal the machine leaves unused (an empty input channel reads FAULT on
+// a correctly built rig) is left out of the rollup, so its device stays OK.
+TEST_F(HealthSnapshotCollectorTest, ExcludedFaultSignalLeavesDeviceOk) {
+    RegisterDevices(2);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_FAULT);
+    health::StalenessPolicy policy{500, 0, 0};
+    policy.excluded_signals["sim0/dev0"] = {"temp"};
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, policy,
+                                                 poll_time + std::chrono::milliseconds(100));
+
+    const auto *excluded = find_dev(snap, "dev0");
+    ASSERT_NE(excluded, nullptr);
+    EXPECT_EQ(excluded->health, "OK");
+    EXPECT_EQ(excluded->fault_signal_count, 0u);
+
+    // The exclusion is per device: the same signal on dev1 still counts.
+    const auto *other = find_dev(snap, "dev1");
+    ASSERT_NE(other, nullptr);
+    EXPECT_EQ(other->health, "FAULT");
+
+    // Still read and served: the cache keeps the excluded signal.
+    const auto state = state_cache->get_device_state("sim0/dev0");
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->signals.count("temp"), 1u);
+}
+
 TEST_F(HealthSnapshotCollectorTest, DegradedQualityDrivesStale) {
     RegisterDevices(1);
     for (auto q : {adpp::SignalValue_Quality_QUALITY_STALE, adpp::SignalValue_Quality_QUALITY_UNKNOWN}) {

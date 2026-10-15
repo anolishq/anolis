@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -48,9 +49,19 @@ namespace health {
  * with the real cycle cost, with absolute overrides for odd buses.
  */
 struct StalenessPolicy {
+    StalenessPolicy() = default;
+    // A constructor rather than aggregate init, so the three-int form callers
+    // use does not leave excluded_signals as a "missing initializer".
+    StalenessPolicy(int poll_interval, int warn_after, int stale_after)
+        : poll_interval_ms(poll_interval), warn_after_ms(warn_after), stale_after_ms(stale_after) {}
+
     int poll_interval_ms = 500;  // background poll period (runtime `polling.interval_ms`)
     int warn_after_ms = 0;       // explicit override; 0 => derive from cadence
     int stale_after_ms = 0;      // explicit override; 0 => derive from cadence
+    // Signals left out of the device health rollup, by `provider_id/device_id`
+    // (#325, runtime `health.excluded_signals`). They are still polled, served
+    // and sent to telemetry; only the health string and its counts skip them.
+    std::map<std::string, std::set<std::string>> excluded_signals;
 };
 
 /** @brief Resolved WARNING/STALE liveness thresholds for one provider. */

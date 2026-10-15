@@ -7,6 +7,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,10 @@ struct HealthStalenessConfig {
 /** @brief Device/provider health surface policy. */
 struct HealthConfig {
     HealthStalenessConfig staleness;
+    // `health.excluded_signals` (#325): per device handle (provider_id/device_id),
+    // signals left out of the device health rollup. Which signals a machine uses
+    // is a fact about the machine, not the provider.
+    std::map<std::string, std::set<std::string>> excluded_signals;
 };
 
 /**

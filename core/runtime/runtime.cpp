@@ -659,6 +659,7 @@ bool Runtime::init_http(std::string &error) {
         // cadence + device count unless explicitly overridden.
         dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
                                          config_.health.staleness.stale_after_ms};
+        dependencies.staleness_policy.excluded_signals = config_.health.excluded_signals;
         http_server_ =
             std::make_unique<http::HttpServer>(config_.http, config_.polling.interval_ms, std::move(dependencies));
 
@@ -701,11 +702,13 @@ bool Runtime::init_telemetry(std::string & /*error*/) {
 
             // Health snapshot ingestion (#203) rides the running sink.
             if (config_.telemetry.health_interval_ms > 0) {
+                health::StalenessPolicy health_policy{config_.polling.interval_ms,
+                                                      config_.health.staleness.warn_after_ms,
+                                                      config_.health.staleness.stale_after_ms};
+                health_policy.excluded_signals = config_.health.excluded_signals;
                 health_snapshot_task_ = std::make_unique<telemetry::HealthSnapshotTask>(
                     config_.telemetry.health_interval_ms, influx_config.runtime_name, provider_registry_, *registry_,
-                    *state_cache_, supervisor_.get(), *telemetry_sink_,
-                    health::StalenessPolicy{config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
-                                            config_.health.staleness.stale_after_ms});
+                    *state_cache_, supervisor_.get(), *telemetry_sink_, std::move(health_policy));
                 health_snapshot_task_->start();
             }
         }

@@ -181,7 +181,14 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                 // provider is unavailable) and, when available, escalate the
                 // device health: FAULT beats liveness STALE/WARNING/OK; a
                 // freshness-stale signal escalates OK/WARNING to STALE.
+                const auto excluded_it = staleness_policy.excluded_signals.find(device_handle);
                 for (const auto &[signal_id, cached] : device_state->signals) {
+                    // Signals the machine leaves unused (#325): still read and
+                    // served, but not evidence about the device.
+                    if (excluded_it != staleness_policy.excluded_signals.end() &&
+                        excluded_it->second.count(signal_id) > 0) {
+                        continue;
+                    }
                     const auto spec_it = device.capabilities.signals_by_id.find(signal_id);
                     const uint32_t declared =
                         spec_it != device.capabilities.signals_by_id.end() ? spec_it->second.stale_after_ms : 0;

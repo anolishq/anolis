@@ -126,6 +126,27 @@ poll age). Per-device precedence is `UNAVAILABLE > FAULT > STALE > WARNING > OK`
 the `stale_signal_count` / `fault_signal_count` fields on `/v0/providers/health`
 explain the result.
 
+### Signals left out of device health
+
+A device type has a fixed signal set, but a machine may not use all of it. An
+output the machine leaves disabled can read `QUALITY_UNKNOWN`, and an input
+channel with nothing connected can read `QUALITY_FAULT`, on a correctly built
+rig. Both would mark the device `STALE` or `FAULT`. List such signals per device
+under `health.excluded_signals`:
+
+```yaml
+health:
+  excluded_signals:
+    - device_handle: sim0/tempctl0   # provider_id/device_id
+      signals: [relay2_state]
+```
+
+Excluded signals are still polled, served by `/v0/state` and sent to telemetry.
+Only the device health string and its `stale_signal_count` /
+`fault_signal_count` skip them. Each `device_handle` may appear once, and needs
+at least one signal. Device health is display-only: nothing in the runtime acts
+on it, so an exclusion changes what is reported, not what the runtime does.
+
 ### Compatibility behavior
 
 1. Unknown keys are warn-and-ignore for forward compatibility.
