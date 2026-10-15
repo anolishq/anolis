@@ -76,6 +76,7 @@ install cannot bring a machine up already actuating.
 | --- | --- |
 | `--with-telemetry-export` | Installs `anolis-telemetry-export.service`, inert until secrets are provided. Online only. |
 | `--with-observability` | Installs InfluxDB 2.x and Grafana as native apt packages with their own units, 30-day bucket retention and scoped tokens. Online only. |
+| `--with-grafana-network` | With `--with-observability`, opens Grafana (:3000) to the network. Without it Grafana binds `127.0.0.1` and the summary prints the ssh tunnel to reach it; InfluxDB always binds `127.0.0.1`. See [Observability](../security.md#observability) in the security notes. |
 
 Two things about observability that surprise people. Its services **start
 immediately** — `--no-start` gates only the runtime. And if the vendor apt repos

@@ -90,7 +90,7 @@ _stub_obs_host() {
     CALLS="${BATS_TEST_TMPDIR}/calls.log"
     : >"${CALLS}"
     local name
-    for name in systemctl apt-get curl dpkg sleep _obs_apt_repos _obs_setup_influx _obs_provision_grafana; do
+    for name in systemctl apt-get curl dpkg sleep _obs_apt_repos _obs_write_influx_dropin _obs_setup_influx _obs_provision_grafana; do
         eval "${name}() { printf '%s\n' \"${name} \$*\" >>\"\${CALLS}\"; }"
     done
     WITH_OBSERVABILITY=1
@@ -114,4 +114,100 @@ _stub_obs_host() {
     restarted=$(grep -nxF "systemctl restart grafana-server" "${CALLS}" | cut -d: -f1)
     [ -n "${provisioned}" ] && [ -n "${restarted}" ]
     [ "${restarted}" -gt "${provisioned}" ]
+}
+
+# ---------------------------------------------------------------------------
+# #351: Grafana and InfluxDB bind loopback unless --with-grafana-network
+# ---------------------------------------------------------------------------
+
+@test "351: parse_args accepts --with-grafana-network" {
+    GRAFANA_NETWORK=0
+    parse_args --with-observability --with-grafana-network
+    [ "${GRAFANA_NETWORK}" -eq 1 ]
+}
+
+@test "351: Grafana binds 127.0.0.1 by default" {
+    GRAFANA_NETWORK=0
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    grep -qx 'Environment=GF_SERVER_HTTP_ADDR=127.0.0.1' <<<"${output}"
+    if grep -q 'GF_SERVER_HTTP_ADDR=0.0.0.0' <<<"${output}"; then return 1; fi
+}
+
+@test "351: --with-grafana-network binds Grafana to every interface" {
+    GRAFANA_NETWORK=1
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    grep -qx 'Environment=GF_SERVER_HTTP_ADDR=0.0.0.0' <<<"${output}"
+    if grep -q 'GF_SERVER_HTTP_ADDR=127.0.0.1' <<<"${output}"; then return 1; fi
+}
+
+@test "351: InfluxDB binds 127.0.0.1:8086 with or without the flag" {
+    local flag
+    for flag in 0 1; do
+        GRAFANA_NETWORK=${flag}
+        run emit_influxdb_dropin
+        [ "$status" -eq 0 ]
+        [[ "${output}" == *"[Service]"* ]]
+        grep -qx 'Environment=INFLUXD_HTTP_BIND_ADDRESS=127.0.0.1:8086' <<<"${output}"
+    done
+}
+
+@test "351: a Grafana drop-in written with the flag is recognised as network-bound" {
+    local dropin="${BATS_TEST_TMPDIR}/anolis.conf"
+    GRAFANA_NETWORK=1
+    emit_grafana_dropin >"${dropin}"
+    _grafana_dropin_is_network "${dropin}"
+    GRAFANA_NETWORK=0
+    emit_grafana_dropin >"${dropin}"
+    if _grafana_dropin_is_network "${dropin}"; then return 1; fi
+    if _grafana_dropin_is_network "${BATS_TEST_TMPDIR}/missing.conf"; then return 1; fi
+}
+
+@test "351: the InfluxDB drop-in is written before influxdb is restarted" {
+    _stub_obs_host
+    run phase_observability
+    [ "$status" -eq 0 ]
+    local written restarted
+    written=$(grep -nxF "_obs_write_influx_dropin " "${CALLS}" | cut -d: -f1)
+    restarted=$(grep -nxF "systemctl restart influxdb" "${CALLS}" | cut -d: -f1)
+    [ -n "${written}" ] && [ -n "${restarted}" ]
+    [ "${restarted}" -gt "${written}" ]
+    if grep -qxF "systemctl enable --now influxdb" "${CALLS}"; then return 1; fi
+}
+
+_summary_stubs() {
+    WITH_OBSERVABILITY=1
+    WITH_TELEMETRY_EXPORT=0
+    ARCH=arm64
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    _runtime_port() { echo 8080; }
+    hostname() { echo pi-test; }
+    SUDO_USER=operator
+}
+
+@test "351: the default summary prints the ssh tunnel to Grafana, not a network address" {
+    _summary_stubs
+    GRAFANA_NETWORK=0
+    _OBS_GRAFANA_WAS_NETWORK=0
+    run phase_summary
+    [[ "${output}" == *"ssh -L 3000:127.0.0.1:3000 operator@pi-test.local"* ]]
+    [[ "${output}" != *"http://pi-test.local:3000"* ]]
+}
+
+@test "351: with --with-grafana-network the summary prints Grafana's network address" {
+    _summary_stubs
+    GRAFANA_NETWORK=1
+    run phase_summary
+    [[ "${output}" == *"Grafana:   http://pi-test.local:3000"* ]]
+    [[ "${output}" != *"ssh -L 3000"* ]]
+}
+
+@test "351: a re-run without the flag says Grafana went back to loopback" {
+    _summary_stubs
+    GRAFANA_NETWORK=0
+    _OBS_GRAFANA_WAS_NETWORK=1
+    run phase_summary
+    [[ "${output}" == *"no longer on the network"* ]]
+    [[ "${output}" == *"ssh -L 3000:127.0.0.1:3000"* ]]
 }
