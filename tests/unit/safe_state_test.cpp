@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "control/call_router.hpp"
@@ -49,7 +50,8 @@ protected:
     // Register an actuating "set_output" (CATEGORY_ACTUATE) with a required double
     // "pwm" arg. `arg_type` lets a test force a non-numeric required arg.
     void RegisterActuator(
-        anolis::deviceprovider::v1::ValueType arg_type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE) {
+        anolis::deviceprovider::v1::ValueType arg_type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE,
+        std::optional<double> min_double = std::nullopt) {
         EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
             Device dev;
             dev.set_device_id("heater");
@@ -58,7 +60,7 @@ protected:
         }));
 
         EXPECT_CALL(*mock_provider, describe_device("heater", _))
-            .WillOnce(Invoke([arg_type](const std::string&, DescribeDeviceResponse& response) {
+            .WillOnce(Invoke([arg_type, min_double](const std::string&, DescribeDeviceResponse& response) {
                 response.mutable_device()->set_device_id("heater");
                 auto* caps = response.mutable_capabilities();
                 auto* fn = caps->add_functions();
@@ -70,6 +72,9 @@ protected:
                 arg->set_name("pwm");
                 arg->set_type(arg_type);
                 arg->set_required(true);
+                if (min_double.has_value()) {
+                    arg->set_min_double(*min_double);
+                }
                 return true;
             }));
 
@@ -223,6 +228,16 @@ TEST_F(SafeStateTest, ZeroRungCoversNumericActuator) {
 
 TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorItCannotBuild) {
     RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+// Rung 3 builds pwm=0, but the provider declares min 1: the e-stop call
+// fails validation, so the function is not covered.
+TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorWhoseMinExcludesZero) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 1.0);
     safety.safe_state.zero_is_safe = true;
     auto controller = make_controller();
 

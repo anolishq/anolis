@@ -169,8 +169,7 @@ std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController:
     return actuating_functions_for(registry_);
 }
 
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety,
-                                      size_t *uncovered_out) {
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety) {
     size_t uncovered = 0;
     for (const auto &[handle, spec] : actuating_functions_for(registry)) {
         bool covered = false;
@@ -183,9 +182,6 @@ SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, 
         if (!covered) {
             ++uncovered;
         }
-    }
-    if (uncovered_out != nullptr) {
-        *uncovered_out = uncovered;
     }
 
     if (!safety.safe_state.hooks.empty()) {
@@ -201,9 +197,7 @@ SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, 
     return SafeStateKind::None;
 }
 
-SafeStateKind SafeStateController::planned_kind(size_t *uncovered_out) const {
-    return planned_safe_state_kind(registry_, safety_, uncovered_out);
-}
+SafeStateKind SafeStateController::planned_kind() const { return planned_safe_state_kind(registry_, safety_); }
 
 CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfig &call) {
     const auto res = call_router_.execute_call(to_call_request(call), provider_registry_);
@@ -249,7 +243,7 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device) {
     };
 
     EstopResult result;
-    result.kind = planned_kind(nullptr);
+    result.kind = planned_kind();
     switch (result.kind) {
         case SafeStateKind::Hooks:
             for (const auto &call : safety_.safe_state.hooks) {
@@ -329,10 +323,15 @@ size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
             return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.setpoints).size();
         case SafeStateKind::Zero: {
             size_t uncovered = 0;
+            // Covered only if rung 3 can build the call AND the call would
+            // pass validation: a zero below an argument's min fails at e-stop.
             for (const auto &[handle, spec] : actuating_functions()) {
-                (void)handle;
-                std::map<std::string, anolis::deviceprovider::v1::Value> args;
-                if (!build_zero_args(spec, args).empty()) {
+                CallRequest request;
+                request.device_handle = handle;
+                request.function_id = spec.function_id;
+                request.function_name = spec.function_name;
+                std::string err;
+                if (!build_zero_args(spec, request.args).empty() || !call_router_.validate_call(request, err)) {
                     ++uncovered;
                 }
             }
@@ -346,7 +345,7 @@ size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
 
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
-    cap.software_safe_state = planned_kind(nullptr);
+    cap.software_safe_state = planned_kind();
     cap.uncovered_actuating_functions = uncovered_count(cap.software_safe_state);
     {
         // Read latch flag and timestamp together so the pair is consistent
