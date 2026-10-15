@@ -45,6 +45,7 @@ TELEMETRY_EXPORT_VERSION="${TELEMETRY_EXPORT_VERSION:-0.1.1}"
 readonly OBSERVABILITY_ENV_FILE="/etc/anolis/observability.env"
 readonly GRAFANA_ENV_FILE="/etc/anolis/observability-grafana.env"
 readonly GRAFANA_DROPIN_DIR="/etc/systemd/system/grafana-server.service.d"
+readonly INFLUX_DROPIN_DIR="/etc/systemd/system/influxdb.service.d"
 readonly INFLUX_HOST="http://127.0.0.1:8086"
 # Co-located Pi bucket retention (30 d). Raising it is a real trade-off (SD
 # wear, disk growth, query cost) — see observability/README.md "Data
@@ -58,6 +59,9 @@ OBSERVABILITY_RETENTION="${OBSERVABILITY_RETENTION:-720h}"
 LOCAL_PATH=""
 WITH_TELEMETRY_EXPORT=0
 WITH_OBSERVABILITY=0
+GRAFANA_NETWORK=0
+_OBS_GRAFANA_WAS_NETWORK=0
+_OBS_GRAFANA_BIND_APPLIED=0
 NO_START=0
 UNINSTALL=0
 ROLLBACK=0
@@ -129,7 +133,10 @@ Common:
                            Grafana as native apt packages + systemd services
                            (online; 30 d bucket retention; scoped tokens).
                            These services start immediately — the global
-                           --no-start gates only the runtime.
+                           --no-start gates only the runtime. Both bind
+                           127.0.0.1; reach Grafana over an ssh tunnel.
+  --with-grafana-network   With --with-observability, open Grafana (:3000) to
+                           the network. InfluxDB stays on 127.0.0.1.
   --variant <key>        Runtime variant to install, a runtime_profiles map key
                          (default: manual). Must be inert (automation off, no
                          mode-transition hooks); a non-inert variant is refused.
@@ -174,6 +181,9 @@ parse_args() {
             --with-observability)
                 WITH_OBSERVABILITY=1
                 shift ;;
+            --with-grafana-network)
+                GRAFANA_NETWORK=1
+                shift ;;
             --no-start)  NO_START=1; shift ;;
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
@@ -188,6 +198,9 @@ parse_args() {
             *)           die "Unknown option: $1 (use --help for usage)" ;;
         esac
     done
+    if [[ ${GRAFANA_NETWORK} -eq 1 && ${WITH_OBSERVABILITY} -eq 0 ]]; then
+        log_warn "--with-grafana-network has no effect without --with-observability"
+    fi
 }
 
 # =============================================================================
@@ -1087,12 +1100,55 @@ emit_grafana_dropin() {
 # The '-' prefix: a missing env file leaves Grafana up (datasource degraded)
 # instead of hard-failing the unit — the already-set-up-influx path can
 # legitimately lack the file until the operator writes it.
-# GF_LOG_LEVEL=warn: Grafana logs requests at level=info, so an open
-# dashboard's auto-refresh can flood the journal and evict runtime logs.
+# GF_LOG_LEVEL=warn: Grafana's own log (stdout) at warn and above.
+# LogFilterPatterns: the InfluxDB datasource (loggers tsdb.influxdb and
+# tsdb.influx_flux) logs every query at debug as JSON on stderr through the
+# plugin SDK's logger, which GF_LOG_LEVEL and [log] filters do not reach. A
+# dashboard on 5 s refresh wrote ~3000 such lines per 10 min and could evict
+# runtime logs (#349). The pattern drops debug JSON lines only, so errors and
+# Grafana's own log still reach the journal. Needs systemd 253 or newer.
+# GF_SERVER_HTTP_ADDR: 127.0.0.1 unless install.sh ran with
+# --with-grafana-network, which binds 0.0.0.0 (Grafana's empty default).
 [Service]
 EnvironmentFile=-${GRAFANA_ENV_FILE}
 Environment=GF_LOG_LEVEL=warn
+Environment=GF_SERVER_HTTP_ADDR=$([[ ${GRAFANA_NETWORK} -eq 1 ]] && echo 0.0.0.0 || echo 127.0.0.1)
+LogFilterPatterns=~.@level.:.debug.
 EOF
+}
+
+# LogFilterPatterns= arrived in systemd 253; older systemd ignores the key, and
+# the datasource's debug output then still reaches the journal (#349).
+_warn_if_no_log_filter() {
+    local ver
+    ver=$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')
+    if [[ "${ver}" =~ ^[0-9]+$ ]] && [[ ${ver} -lt 253 ]]; then
+        log_warn "observability: systemd ${ver} cannot filter Grafana's datasource debug output (needs 253); an open dashboard will fill the journal"
+    fi
+}
+
+# True when an existing Grafana drop-in opened Grafana to the network, so a
+# re-run without --with-grafana-network can say it went back to loopback.
+_grafana_dropin_is_network() {
+    grep -qx 'Environment=GF_SERVER_HTTP_ADDR=0.0.0.0' "$1" 2>/dev/null
+}
+
+# InfluxDB's default bind is every interface (:8086). Nothing off the device
+# needs it: the runtime and Grafana reach it at ${INFLUX_HOST}.
+emit_influxdb_dropin() {
+    cat <<EOF
+# Managed by anolis install.sh (--with-observability). Do not edit here.
+# Co-located topology: the runtime and Grafana are the only clients, so
+# InfluxDB listens on loopback only.
+[Service]
+Environment=INFLUXD_HTTP_BIND_ADDRESS=127.0.0.1:8086
+EOF
+}
+
+_obs_write_influx_dropin() {
+    install -d -m 755 "${INFLUX_DROPIN_DIR}" || return 1
+    emit_influxdb_dropin > "${INFLUX_DROPIN_DIR}/anolis.conf" || return 1
+    systemctl daemon-reload
 }
 
 emit_grafana_env() {
@@ -1300,7 +1356,11 @@ _obs_provision_grafana() {
     install -m 644 "${PREFIX}/observability/grafana/provisioning/dashboards/default.yml" /etc/grafana/provisioning/dashboards/ || return 1
 
     install -d -m 755 "${GRAFANA_DROPIN_DIR}" || return 1
+    if [[ ${GRAFANA_NETWORK} -eq 0 ]] && _grafana_dropin_is_network "${GRAFANA_DROPIN_DIR}/anolis.conf"; then
+        _OBS_GRAFANA_WAS_NETWORK=1
+    fi
     emit_grafana_dropin > "${GRAFANA_DROPIN_DIR}/anolis.conf" || return 1
+    _warn_if_no_log_filter
     systemctl daemon-reload
     return 0
 }
@@ -1338,13 +1398,20 @@ phase_observability() {
     # what was offered, not necessarily what the db holds).
     _OBS_GRAFANA_PW=$(_generate_api_token) || { log_warn "observability: secret generation failed — skipped"; return 0; }
 
-    systemctl enable --now influxdb 2>/dev/null || { log_warn "observability: failed to start influxdb"; return 0; }
+    # Restart, not `enable --now`: a running influxd keeps the bind address it
+    # read at start, so a re-run over an older install would leave :8086 open.
+    _obs_write_influx_dropin || { log_warn "observability: could not write the influxdb drop-in — skipped"; return 0; }
+    { systemctl enable influxdb && systemctl restart influxdb; } 2>/dev/null \
+        || { log_warn "observability: failed to start influxdb"; return 0; }
     _obs_setup_influx || return 0
     _obs_provision_grafana || { log_warn "observability: grafana provisioning failed — grafana-server NOT enabled/started"; return 0; }
     # Restart, not `enable --now`: a running grafana-server keeps the drop-in,
     # env file and datasource it read at start, and starting it is a no-op.
     { systemctl enable grafana-server && systemctl restart grafana-server; } 2>/dev/null \
         || { log_warn "observability: failed to start grafana"; return 0; }
+    # The drop-in is written and grafana-server restarted with it: only now
+    # does the summary report the bind (#351).
+    _OBS_GRAFANA_BIND_APPLIED=1
 
     local i
     for i in $(seq 1 15); do
@@ -1565,6 +1632,54 @@ _run_registry_available() {
     [[ "${code}" == "200" ]]
 }
 
+# Print "<provider_id> <lifecycle_state>" for each provider in
+# GET /v0/providers/health; exit non-zero when the endpoint does not answer.
+# The runtime serialises objects with sorted keys, so each provider's
+# lifecycle_state comes right before its provider_id, and device entries
+# carry neither key.
+_provider_states() {
+    local base_url="$1" body
+    body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
+    { grep -o '"lifecycle_state":"[^"]*"\|"provider_id":"[^"]*"' <<< "${body}" || true; } \
+        | sed 's/^"[a-z_]*":"\(.*\)"$/\1/' | paste - - | awk 'NF == 2 { print $2, $1 }'
+}
+
+# Poll until every provider is available (RUNNING or RECOVERING) or the health
+# timeout elapses, then report how many are running (#344). A shortfall is a
+# warning, like the run-registry check: it does not set HEALTH_FAILED. This
+# counts providers, not devices, which would need provider-specific knowledge.
+_check_provider_liveness() {
+    local base_url="$1" elapsed=0 out states="" answered=0 total=0 running=0
+    while true; do
+        if out=$(_provider_states "${base_url}"); then
+            answered=1
+            states="${out}"
+            total=$(grep -c . <<< "${states}" || true)
+            running=$(awk '$2 == "RUNNING" || $2 == "RECOVERING" { n++ } END { print n + 0 }' <<< "${states}")
+            [[ ${running} -eq ${total} ]] && break
+        fi
+        [[ ${elapsed} -ge ${HEALTH_TIMEOUT} ]] && break
+        sleep ${HEALTH_INTERVAL}
+        elapsed=$((elapsed + HEALTH_INTERVAL))
+    done
+
+    if [[ ${answered} -eq 0 ]]; then
+        log_warn "health: providers unknown (GET /v0/providers/health did not answer)"
+        return
+    fi
+    if [[ ${running} -eq ${total} ]]; then
+        log_ok "health: providers: ${running} of ${total} running"
+        return
+    fi
+    log_warn "health: providers: ${running} of ${total} running"
+    local id state
+    while read -r id state; do
+        [[ "${state}" == "RUNNING" || "${state}" == "RECOVERING" ]] && continue
+        log_warn "health: provider ${id}: ${state}"
+    done <<< "${states}"
+    log_info "  sudo journalctl -u anolis-runtime --no-pager -n 50"
+}
+
 phase_health() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "health: skipped (services not started)"
@@ -1587,6 +1702,7 @@ phase_health() {
                 log_warn "health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded"
                 log_info "  sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'"
             fi
+            _check_provider_liveness "http://localhost:${port}"
             return
         fi
         sleep ${HEALTH_INTERVAL}
@@ -1626,7 +1742,19 @@ phase_summary() {
         if [[ "${ARCH}" != "x86_64" ]]; then
             grafana_host="$(hostname 2>/dev/null || echo localhost).local"
         fi
-        log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
+        if [[ ${_OBS_GRAFANA_BIND_APPLIED} -eq 0 ]]; then
+            log_info "Grafana bind unchanged: the observability step did not finish (see the warnings above)"
+        elif [[ ${GRAFANA_NETWORK} -eq 1 ]]; then
+            log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
+        else
+            if [[ ${_OBS_GRAFANA_WAS_NETWORK} -eq 1 ]]; then
+                log_info "Grafana:   now bound to 127.0.0.1 — no longer on the network (re-run with --with-grafana-network to open it)"
+            fi
+            log_info "Grafana:   127.0.0.1:3000 on this machine (admin password: ${OBSERVABILITY_ENV_FILE})"
+            local tunnel_host="${grafana_host}"
+            [[ "${tunnel_host}" == "localhost" ]] && tunnel_host="<host>"
+            log_info "  from another machine: ssh -L 3000:127.0.0.1:3000 ${SUDO_USER:-<user>}@${tunnel_host}, then http://localhost:3000"
+        fi
         log_info "InfluxDB:  ${INFLUX_HOST} (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
     fi
 
@@ -1665,6 +1793,11 @@ phase_summary() {
 # if the package layout ever changes, and only what exists is reported.
 #
 # ANOLIS_DATA_ROOT_PREFIX exists so this is testable without touching real paths.
+# True when install.sh provisioned observability on this host.
+_obs_provisioned() {
+    [[ -d "${GRAFANA_DROPIN_DIR}" || -f /etc/apt/sources.list.d/influxdata.list ]]
+}
+
 _observability_data_dirs() {
     local prefix="${ANOLIS_DATA_ROOT_PREFIX:-}"
     local candidate
@@ -1826,10 +1959,10 @@ do_uninstall() {
     # Observability (#162): stop what we enabled and remove what we
     # provisioned. The apt packages and the DATA are deliberately kept — an
     # uninstall must not silently destroy recorded telemetry.
-    if [[ -d "${GRAFANA_DROPIN_DIR}" || -f /etc/apt/sources.list.d/influxdata.list ]]; then
+    if _obs_provisioned; then
         systemctl disable --now grafana-server 2>/dev/null || true
         systemctl disable --now influxdb 2>/dev/null || true
-        rm -rf "${GRAFANA_DROPIN_DIR}"
+        rm -rf "${GRAFANA_DROPIN_DIR}" "${INFLUX_DROPIN_DIR}"
         rm -f /etc/grafana/provisioning/datasources/influxdb.yml
         rm -f /etc/grafana/provisioning/dashboards/default.yml
         rm -rf /var/lib/grafana/dashboards

@@ -76,6 +76,7 @@ install cannot bring a machine up already actuating.
 | --- | --- |
 | `--with-telemetry-export` | Installs `anolis-telemetry-export.service`, inert until secrets are provided. Online only. |
 | `--with-observability` | Installs InfluxDB 2.x and Grafana as native apt packages with their own units, 30-day bucket retention and scoped tokens. Online only. |
+| `--with-grafana-network` | With `--with-observability`, opens Grafana (:3000) to the network. Without it Grafana binds `127.0.0.1` and the summary prints the ssh tunnel to reach it; InfluxDB always binds `127.0.0.1`. See [Observability](../security.md#observability) in the security notes. |
 
 Two things about observability that surprise people. Its services **start
 immediately** — `--no-start` gates only the runtime. And if the vendor apt repos
@@ -130,14 +131,20 @@ curl -s http://127.0.0.1:8080/v0/providers/health | jq
 There is one unit. Providers are **forked child processes** of the runtime, so
 there is no `anolis-provider-*` service to check.
 
-The install's own health check confirms two things: `/v0/runtime/status`
-answers, and `/v0/runs` answers 200. The second matters because the run registry
+The install's own health check confirms that `/v0/runtime/status` answers and
+that `/v0/runs` answers 200, then reports provider liveness. The second matters because the run registry
 fails soft — if its data directory cannot be created, the runtime logs one
 warning at boot and then serves 503 on every run endpoint for as long as it
 runs, while status stays green. The unit starts the runtime in `<prefix>` so the
 default `anolis-data/` directory resolves somewhere the service user can write;
 an install that warns `run registry NOT available` is one where that did not
 hold.
+
+For providers it reads `/v0/providers/health` until every provider is
+`RUNNING` or `RECOVERING` or the health timeout elapses, then logs
+`providers: N of M running` and one warning per provider that is not running,
+with its id and lifecycle state. Like the run registry, a shortfall is a
+warning and does not fail the install. It counts providers, not devices.
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is
