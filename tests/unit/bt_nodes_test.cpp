@@ -327,3 +327,28 @@ TEST_F(BTNodesTest, BuildArgsJsonNodeBuildsInt64Args) {
     EXPECT_NE(args_json.find("\"motor1_pwm\":35"), std::string::npos);
     EXPECT_NE(args_json.find("\"motor2_pwm\":0"), std::string::npos);
 }
+
+TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    EXPECT_NO_THROW(factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal"));
+    EXPECT_NO_THROW(factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice"));
+    EXPECT_NO_THROW(factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality"));
+
+    const auto expect_ports = [](const BT::PortsList& ports, std::initializer_list<const char*> keys) {
+        for (const char* key : keys) {
+            EXPECT_TRUE(ports.find(key) != ports.end()) << "missing port: " << key;
+        }
+    };
+    expect_ports(anolis::automation::ReadSignalNode::providedPorts(), {"device_handle", "signal_id"});
+    expect_ports(anolis::automation::CallDeviceNode::providedPorts(),
+                 {"device_handle", "function_name", "args", "reason"});
+    expect_ports(anolis::automation::CheckQualityNode::providedPorts(), {"device_handle", "signal_id"});
+    expect_ports(anolis::automation::GetParameterNode::providedPorts(), {"param", "value"});
+    expect_ports(anolis::automation::GetParameterBoolNode::providedPorts(), {"param", "value"});
+    expect_ports(anolis::automation::GetParameterInt64Node::providedPorts(), {"param", "value"});
+    expect_ports(anolis::automation::CheckBoolNode::providedPorts(), {"value", "expected"});
+    expect_ports(anolis::automation::PeriodicPulseWindowNode::providedPorts(), {"enabled", "active"});
+    expect_ports(anolis::automation::EmitOnChangeOrIntervalNode::providedPorts(), {"key", "emit"});
+    expect_ports(anolis::automation::BuildArgsJsonNode::providedPorts(), {"arg1_name", "json"});
+}
