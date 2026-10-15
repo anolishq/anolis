@@ -211,3 +211,37 @@ _summary_stubs() {
     [[ "${output}" == *"no longer on the network"* ]]
     [[ "${output}" == *"ssh -L 3000:127.0.0.1:3000"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# #349: drop the InfluxDB datasource's debug JSON from the journal
+# ---------------------------------------------------------------------------
+
+@test "349: the Grafana drop-in discards debug-level JSON lines from the journal" {
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    local line pattern
+    line=$(grep -x 'LogFilterPatterns=~.*' <<<"${output}")
+    pattern="${line#LogFilterPatterns=~}"
+    # The pattern matches the measured datasource line and nothing else here.
+    grep -qE "${pattern}" <<<'{"@level":"debug","@message":"Received a query request","logger":"tsdb.influxdb","numQueries":1}'
+    if grep -qE "${pattern}" <<<'{"@level":"error","@message":"influx proxy creation failed","logger":"tsdb.influxdb"}'; then return 1; fi
+    if grep -qE "${pattern}" <<<'logger=context level=warn msg="Request Completed"'; then return 1; fi
+    # No quotes or backslashes for systemd's unit-file unquoting to change.
+    [[ "${pattern}" != *'"'* && "${pattern}" != *'\'* ]]
+}
+
+@test "349: the drop-in comment names the datasource logger, not request logging" {
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"logs requests at level=info"* ]]
+    [[ "${output}" == *"tsdb.influxdb"* ]]
+}
+
+@test "349: systemd older than 253 is reported as unable to filter" {
+    systemctl() { [[ "$1" == "--version" ]] && printf 'systemd 252 (252.39-1~deb12u1)\n+PAM +AUDIT\n'; }
+    run _warn_if_no_log_filter
+    [[ "${output}" == *"systemd 252"* ]]
+    systemctl() { [[ "$1" == "--version" ]] && printf 'systemd 257 (257.13-1~deb13u1)\n'; }
+    run _warn_if_no_log_filter
+    [ -z "${output}" ]
+}
