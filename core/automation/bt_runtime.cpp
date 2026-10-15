@@ -384,6 +384,9 @@ AutomationHealth BTRuntime::get_health() const {
 }
 
 AutomationStatusView BTRuntime::status() const {
+    // Read before taking our locks so ModeManager's lock never nests inside them.
+    const bool in_auto = mode_manager_.current_mode() == RuntimeMode::AUTO;
+
     // One coherent snapshot. Lock order: def_mutex_ then health_mutex_.
     std::lock_guard<std::mutex> def_lock(def_mutex_);
     std::lock_guard<std::mutex> health_lock(health_mutex_);
@@ -395,10 +398,13 @@ AutomationStatusView BTRuntime::status() const {
 
     // Neutral mapping of the BT status (the failure-vs-fault refinement that
     // splits an exception from an ordinary FAILURE lands in Phase 1 #114).
-    if (!tree_loaded_ || !running_) {
-        view.status = AutomationStatus::Idle;
-    } else if (error_count_ > 0 && last_tick_status_ == BT::NodeStatus::FAILURE) {
+    const bool loaded_and_running = tree_loaded_ && running_;
+    if (loaded_and_running && error_count_ > 0 && last_tick_status_ == BT::NodeStatus::FAILURE) {
         view.status = AutomationStatus::Failed;
+    } else if (!loaded_and_running || !in_auto) {
+        // Outside AUTO the tick thread stays alive but skips every tick, so the
+        // tree is loaded and not advancing (#270). A failure above still wins.
+        view.status = AutomationStatus::Idle;
     } else if (ticks_since_progress_ > 10) {
         view.status = AutomationStatus::Blocked;
     } else {

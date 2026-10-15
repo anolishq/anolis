@@ -221,6 +221,15 @@ class AutomationTester:
         result = self.set_mode("AUTO")
         assert result.get("mode") == "AUTO", f"Failed MANUAL->AUTO after recovery: {result}"
 
+    def test_execution_status_idle_outside_auto(self) -> None:
+        # The tick thread runs in every mode but only ticks in AUTO (#270).
+        for mode in ("MANUAL", "IDLE", "FAULT"):
+            self.set_mode(mode)
+            self._wait_for_mode(mode)
+            body = cast(Dict[str, Any], requests.get(f"{self.base_url}/v0/automation/status", timeout=2).json())
+            assert body.get("execution_status") == "idle", f"{mode}: expected idle, got {body}"
+            assert body.get("execution_reason") == "mode_gate", f"{mode}: expected mode_gate, got {body}"
+
     def test_invalid_mode_string(self) -> None:
         result = self.set_mode("INVALID")
         status = cast(Dict[str, Any], result.get("status", {}))
@@ -344,6 +353,7 @@ AUTOMATION_CHECKS: List[AutomationCheck] = [
     ("invalid_transition_fault_to_auto", AutomationTester.test_invalid_transition_fault_to_auto),
     ("recovery_path_fault_to_manual_to_auto", AutomationTester.test_recovery_path_fault_to_manual_to_auto),
     ("invalid_mode_string", AutomationTester.test_invalid_mode_string),
+    ("execution_status_idle_outside_auto", AutomationTester.test_execution_status_idle_outside_auto),
     ("get_parameters", AutomationTester.test_get_parameters),
     ("update_parameter_valid", AutomationTester.test_update_parameter_valid),
     ("update_parameter_out_of_range", AutomationTester.test_update_parameter_out_of_range),
