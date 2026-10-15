@@ -261,6 +261,15 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
 
     EstopResult result = run_ladder();
 
+    // A skipped zero-rung call never reaches the CallRouter, so this is the
+    // only place it is reported. Same shape as the re-assert path's warning.
+    for (const auto &action : result.actions) {
+        if (!action.success) {
+            LOG_WARN("[SafeState] E-stop did not drive " << action.device_handle << "/" << action.function << ": "
+                                                         << action.error);
+        }
+    }
+
     // On an automation machine, also drive FAULT: any->FAULT is always valid and
     // cannot be vetoed, so it stops the behavior tree and routes the operator to
     // the FAULT->MANUAL recovery path. Actuating FAULT-entry hooks are refused by

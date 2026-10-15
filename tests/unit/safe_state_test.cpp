@@ -3,7 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "control/call_router.hpp"
@@ -270,6 +272,24 @@ TEST_F(SafeStateTest, ZeroRungNeverSendsBoolArgument) {
     EXPECT_EQ(result.actions[0].function, "set_output");
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("cannot zero"));
+}
+
+// A skipped call never reaches execute_call, so nothing else logs it. The
+// e-stop must say at WARN which function it did not drive, and why.
+TEST_F(SafeStateTest, TriggerWarnsForEachActionNotDriven) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_BOOL);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // The logger writes to std::cerr; capture it in memory.
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    controller->trigger("test");
+    std::cerr.rdbuf(previous);
+    const std::string log = captured.str();
+
+    EXPECT_THAT(log, HasSubstr("[WARN]  [SafeState] E-stop did not drive sim0/heater/set_output: cannot zero "
+                               "required non-numeric argument 'pwm'"));
 }
 
 //=============================================================================
