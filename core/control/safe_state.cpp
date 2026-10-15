@@ -19,7 +19,9 @@ int64_t now_epoch_ms() {
 }
 
 // A zero/neutral Value of the given type for rung-3 zeroing. Non-numeric types
-// (string/bytes) return nullopt: we refuse to invent a "zero" for them.
+// (bool/string/bytes) return nullopt: we refuse to invent a "zero" for them.
+// A bool has no knowable safe pole -- false disables an enable flag but
+// releases a brake flag -- so a function that needs one is reported, not sent.
 std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovider::v1::ValueType type) {
     anolis::deviceprovider::v1::Value value;
     value.set_type(type);
@@ -32,9 +34,6 @@ std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovid
             return value;
         case anolis::deviceprovider::v1::VALUE_TYPE_UINT64:
             value.set_uint64_value(0);
-            return value;
-        case anolis::deviceprovider::v1::VALUE_TYPE_BOOL:
-            value.set_bool_value(false);
             return value;
         default:
             return std::nullopt;
@@ -261,6 +260,15 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
     LOG_WARN("[SafeState] E-stop engaged" << (reason.empty() ? "" : (": " + reason)));
 
     EstopResult result = run_ladder();
+
+    // A skipped zero-rung call never reaches the CallRouter, so this is the
+    // only place it is reported. Same shape as the re-assert path's warning.
+    for (const auto &action : result.actions) {
+        if (!action.success) {
+            LOG_WARN("[SafeState] E-stop did not drive " << action.device_handle << "/" << action.function << ": "
+                                                         << action.error);
+        }
+    }
 
     // On an automation machine, also drive FAULT: any->FAULT is always valid and
     // cannot be vetoed, so it stops the behavior tree and routes the operator to

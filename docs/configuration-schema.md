@@ -182,7 +182,10 @@ independently of `automation`, so a pure-manual machine can declare one.
 2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
    only when they cover every actuating output (fail closed).
 3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
-   outputs when neither hooks nor full-coverage setpoints apply.
+   outputs when neither hooks nor full-coverage setpoints apply. Only
+   numeric required arguments are zeroed. A function with a required boolean,
+   string or bytes argument is not called and is reported as not driven:
+   the runtime cannot know which boolean value is safe.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
