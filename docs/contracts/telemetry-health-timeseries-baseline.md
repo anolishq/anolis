@@ -70,8 +70,9 @@ so they cannot drift.
    - identity strings: `startup_firmware`, `startup_product_code`,
      `firmware_version` — non-empty, truncated to 128 bytes, omitted when
      absent or empty. Note these three are not in the SDK's reserved-key
-     vocabulary yet, unlike the counters above; their reservation is open
-     as `anolishq/anolis-provider-sdk#38`.
+     vocabulary yet, unlike the counters above. `anolishq/anolis-provider-sdk#38`
+     reserves `firmware_version`; `startup_firmware` and
+     `startup_product_code` are unreserved, with no decision on them yet.
 7. Every provider-supplied string is escaped for line protocol — **tag values
    as well as string fields**, since `provider_id`, `device_id` and `signal_id`
    are provider-chosen and unvalidated. In field values `"` and `\` are

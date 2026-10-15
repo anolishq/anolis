@@ -104,9 +104,10 @@ inline constexpr std::array<const char *, 4> device_bool_keys = {
 // timeseries it needs to be attributable from.
 //
 // Unlike the counter allowlists above, these keys are NOT in the SDK's reserved
-// vocabulary (anolis-provider-sdk docs/metrics.md). The reservation of
-// firmware_version is open as anolishq/anolis-provider-sdk#38, which settles
-// what this list holds. It should move into metrics.md rather than grow here.
+// vocabulary (anolis-provider-sdk docs/metrics.md). anolishq/anolis-provider-sdk#38
+// reserves firmware_version; startup_firmware and startup_product_code are
+// unreserved, with no decision on them yet. The list should move into
+// metrics.md rather than grow here.
 //
 // Note what is deliberately absent: identity a provider publishes as
 // descriptor *tags*, not metrics. Descriptor tags are by design never written
