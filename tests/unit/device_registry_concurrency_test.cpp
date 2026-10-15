@@ -149,6 +149,46 @@ TEST_F(DeviceRegistryConcurrencyTest, DiscoverProviderReplaceFailureKeepsPreviou
 }
 
 // ============================================================================
+// Capability Ingestion Tests
+// ============================================================================
+
+TEST_F(DeviceRegistryConcurrencyTest, DiscoverProviderKeepsSignalUnitAndDescription) {
+    auto mock = std::make_shared<StrictMock<MockProviderHandle>>();
+    EXPECT_CALL(*mock, list_devices(_)).WillOnce(Invoke([](std::vector<Device> &devices) {
+        Device dev;
+        dev.set_device_id("sensor0");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock, describe_device("sensor0", _))
+        .WillOnce(Invoke([](const std::string &, DescribeDeviceResponse &response) {
+            response.mutable_device()->set_device_id("sensor0");
+            auto *caps = response.mutable_capabilities();
+
+            auto *described = caps->add_signals();
+            described->set_signal_id("temp");
+            described->set_value_type(deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            described->set_unit("C");
+            described->set_description("Process temperature");
+
+            auto *bare = caps->add_signals();
+            bare->set_signal_id("count");
+            bare->set_value_type(deviceprovider::v1::VALUE_TYPE_INT64);
+            return true;
+        }));
+
+    ASSERT_TRUE(registry->discover_provider("sim0", *mock));
+    auto device = registry->get_device_copy("sim0", "sensor0");
+    ASSERT_TRUE(device.has_value());
+
+    const auto &signals = device->capabilities.signals_by_id;
+    EXPECT_EQ(signals.at("temp").unit, "C");
+    EXPECT_EQ(signals.at("temp").description, "Process temperature");
+    EXPECT_TRUE(signals.at("count").unit.empty());
+    EXPECT_TRUE(signals.at("count").description.empty());
+}
+
+// ============================================================================
 // Concurrency Tests
 // ============================================================================
 

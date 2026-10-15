@@ -265,24 +265,6 @@ if(ANOLIS_ENABLE_AUTOMATION)
         OpenSSL::Crypto
     )
     anolis_apply_warnings(anolis_automation)
-
-    # Automation sanity test (lightweight, no gtest)
-    add_executable(bt_nodes_sanity
-        automation/bt_nodes_sanity.cpp
-    )
-
-    if ((CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang") AND (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24"))
-        target_link_libraries(bt_nodes_sanity PRIVATE
-            $<LINK_GROUP:RESCAN,anolis_automation,anolis_control>
-            BT::behaviortree_cpp
-        )
-    else()
-        target_link_libraries(bt_nodes_sanity PRIVATE
-            anolis_automation
-            BT::behaviortree_cpp
-        )
-    endif()
-    anolis_apply_warnings(bt_nodes_sanity)
 endif()
 
 # HTTP server library
@@ -331,6 +313,7 @@ add_library(anolis_runtime STATIC
     runtime/runtime.cpp
     runtime/actuation_gate.cpp
     runtime/ownership_validation.cpp
+    runtime/poll_hint_check.cpp
 )
 
 target_include_directories(anolis_runtime PUBLIC

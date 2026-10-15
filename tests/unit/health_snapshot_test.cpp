@@ -268,6 +268,53 @@ TEST_F(HealthSnapshotCollectorTest, FreshFaultSignalDrivesFault) {
     EXPECT_EQ(d->stale_signal_count, 0u);
 }
 
+// #325: a signal the machine leaves unused (an empty input channel reads FAULT on
+// a correctly built rig) is left out of the rollup, so its device stays OK.
+TEST_F(HealthSnapshotCollectorTest, ExcludedFaultSignalLeavesDeviceOk) {
+    RegisterDevices(2);
+    auto poll_time = PollWithQuality(adpp::SignalValue_Quality_QUALITY_FAULT);
+    health::StalenessPolicy policy{500, 0, 0};
+    policy.excluded_signals["sim0/dev0"] = {"temp"};
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, policy,
+                                                 poll_time + std::chrono::milliseconds(100));
+
+    const auto *excluded = find_dev(snap, "dev0");
+    ASSERT_NE(excluded, nullptr);
+    EXPECT_EQ(excluded->health, "OK");
+    EXPECT_EQ(excluded->fault_signal_count, 0u);
+
+    // The exclusion is per device: the same signal on dev1 still counts.
+    const auto *other = find_dev(snap, "dev1");
+    ASSERT_NE(other, nullptr);
+    EXPECT_EQ(other->health, "FAULT");
+
+    // Still read and served: the cache keeps the excluded signal.
+    const auto state = state_cache->get_device_state("sim0/dev0");
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->signals.count("temp"), 1u);
+}
+
+// #325: an exclusion that matches nothing is reported, so a typo is visible
+// instead of silently leaving the device FAULT.
+TEST_F(HealthSnapshotCollectorTest, UnmatchedExclusionsAreReported) {
+    RegisterDevices(1);  // sim0/dev0 with signal "temp"
+    const std::map<std::string, std::set<std::string>> excluded = {
+        {"sim0/dev0", {"temp", "tmep"}},
+        {"sim0/dev-0", {"temp"}},
+    };
+
+    const auto lines = health::unmatched_excluded_signals(excluded, *registry);
+
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[0].find("'sim0/dev-0'"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[0].find("no registered device"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[1].find("'tmep'"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find("sim0/dev0"), std::string::npos) << lines[1];
+
+    // A fully matched list reports nothing.
+    EXPECT_TRUE(health::unmatched_excluded_signals({{"sim0/dev0", {"temp"}}}, *registry).empty());
+}
+
 TEST_F(HealthSnapshotCollectorTest, DegradedQualityDrivesStale) {
     RegisterDevices(1);
     for (auto q : {adpp::SignalValue_Quality_QUALITY_STALE, adpp::SignalValue_Quality_QUALITY_UNKNOWN}) {
@@ -389,4 +436,86 @@ TEST_F(HealthSnapshotCollectorTest, DescriptorIdentitySurvivesIntoTheSnapshot) {
     ASSERT_TRUE(found->descriptor_tags.contains("module_version"));
     EXPECT_EQ(found->descriptor_tags.at("module_version"), "1.0.0");
     EXPECT_EQ(found->descriptor_tags.at("crumbs_version"), "1205");
+}
+
+// ---------------------------------------------------------------------------
+// actuating_devices_with_watchdog_disarmed — startup preflight (#297).
+// Keys on the SDK-reserved `watchdog_armed` health metric only.
+// ---------------------------------------------------------------------------
+
+class WatchdogPreflightTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        mock_provider = std::make_shared<NiceMock<MockProviderHandle>>();
+        mock_provider->_id = "sim0";
+        ON_CALL(*mock_provider, provider_id()).WillByDefault(ReturnRef(mock_provider->_id));
+        ON_CALL(*mock_provider, is_available()).WillByDefault(Return(true));
+        provider_registry->add_provider("sim0", mock_provider);
+
+        // drive: ACTUATE function. sensor: READ only. Both report the key.
+        ON_CALL(*mock_provider, list_devices(_)).WillByDefault(Invoke([](std::vector<Device> &devices) {
+            for (const char *id : {"drive", "sensor"}) {
+                Device dev;
+                dev.set_device_id(id);
+                devices.push_back(dev);
+            }
+            return true;
+        }));
+        ON_CALL(*mock_provider, describe_device(_, _))
+            .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+                response.mutable_device()->set_device_id(id);
+                auto *fn = response.mutable_capabilities()->add_functions();
+                fn->set_name(id == "drive" ? "set_output" : "identify");
+                fn->set_function_id(1);
+                fn->mutable_policy()->set_category(
+                    id == "drive" ? anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE
+                                  : anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+                return true;
+            }));
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    // Each provider-reported device health gets the given watchdog_armed value;
+    // nullopt omits the key.
+    void ReportWatchdogArmed(std::optional<std::string> armed) {
+        ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([armed](GetHealthResponse &response) {
+            for (const char *id : {"drive", "sensor"}) {
+                auto *dh = response.add_devices();
+                dh->set_device_id(id);
+                dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_OK);
+                if (armed.has_value()) {
+                    (*dh->mutable_metrics())["watchdog_armed"] = *armed;
+                }
+            }
+            return true;
+        }));
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::shared_ptr<NiceMock<MockProviderHandle>> mock_provider;
+};
+
+TEST_F(WatchdogPreflightTest, ReportsActuatingDeviceWithWatchdogDisarmed) {
+    ReportWatchdogArmed("false");
+    const auto devices = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    ASSERT_EQ(devices.size(), 1u);  // the READ-only device is not an actuator
+    EXPECT_EQ(devices[0], "sim0/drive");
+}
+
+TEST_F(WatchdogPreflightTest, AbsentKeyIsSilent) {
+    ReportWatchdogArmed(std::nullopt);
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
+
+TEST_F(WatchdogPreflightTest, ArmedWatchdogIsSilent) {
+    ReportWatchdogArmed("true");
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
+
+TEST_F(WatchdogPreflightTest, NoReportedHealthIsSilent) {
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
 }

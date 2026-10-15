@@ -736,7 +736,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["health"], "health", error)) {
                 return false;
             }
-            warn_unknown_keys(yaml["health"], "health", {"staleness"});
+            warn_unknown_keys(yaml["health"], "health", {"staleness", "excluded_signals"});
             if (yaml["health"]["staleness"]) {
                 if (!ensure_mapping(yaml["health"]["staleness"], "health.staleness", error)) {
                     return false;
@@ -747,6 +747,56 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 }
                 if (yaml["health"]["staleness"]["stale_after_ms"]) {
                     config.health.staleness.stale_after_ms = yaml["health"]["staleness"]["stale_after_ms"].as<int>();
+                }
+            }
+            if (yaml["health"]["excluded_signals"]) {
+                const auto &excluded = yaml["health"]["excluded_signals"];
+                if (!ensure_sequence(excluded, "health.excluded_signals", error)) {
+                    return false;
+                }
+                for (size_t i = 0; i < excluded.size(); ++i) {
+                    const std::string entry_path = std::format("health.excluded_signals[{}]", i);
+                    const auto &entry = excluded[i];
+                    if (!ensure_mapping(entry, entry_path, error)) {
+                        return false;
+                    }
+                    warn_unknown_keys(entry, entry_path, {"device_handle", "signals"});
+                    if (!entry["device_handle"] || !entry["device_handle"].IsScalar()) {
+                        error = entry_path + ".device_handle is required";
+                        return false;
+                    }
+                    const auto handle = entry["device_handle"].as<std::string>();
+                    const auto slash = handle.find('/');
+                    if (slash == std::string::npos || slash == 0 || slash + 1 == handle.size() ||
+                        handle.find('/', slash + 1) != std::string::npos) {
+                        error =
+                            std::format("{}.device_handle must be provider_id/device_id, got '{}'", entry_path, handle);
+                        return false;
+                    }
+                    if (config.health.excluded_signals.count(handle) > 0) {
+                        error = std::format("{}.device_handle '{}' is listed more than once", entry_path, handle);
+                        return false;
+                    }
+                    if (!entry["signals"]) {
+                        error = entry_path + ".signals is required";
+                        return false;
+                    }
+                    if (!ensure_sequence(entry["signals"], entry_path + ".signals", error)) {
+                        return false;
+                    }
+                    if (entry["signals"].size() == 0) {
+                        error = entry_path + ".signals must list at least one signal";
+                        return false;
+                    }
+                    auto &signals = config.health.excluded_signals[handle];
+                    for (const auto &signal : entry["signals"]) {
+                        const auto signal_id = signal.as<std::string>();
+                        if (signal_id.empty()) {
+                            error = entry_path + ".signals must not contain an empty signal id";
+                            return false;
+                        }
+                        signals.insert(signal_id);
+                    }
                 }
             }
         }

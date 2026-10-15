@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <unordered_map>
 
 #include "../provider/i_provider_handle.hpp"
@@ -35,8 +36,9 @@ std::string derive_lifecycle_state(bool is_available,
 }
 
 // Bounds on provider-declared descriptor identity. Generous next to what any
-// real provider emits (bread declares 13 short tags) and small enough that a
-// misbehaving one cannot inflate a health response or a telemetry batch.
+// real provider emits (the largest current provider declares 13 short tags)
+// and small enough that a misbehaving one cannot inflate a health response or
+// a telemetry batch.
 constexpr size_t kMaxIdentityLen = 128;
 constexpr size_t kMaxDescriptorTags = 32;
 
@@ -94,6 +96,34 @@ StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t d
 
 int64_t effective_signal_stale_after_ms(uint32_t declared_ms, int64_t liveness_stale_ms) {
     return std::max(static_cast<int64_t>(declared_ms), liveness_stale_ms);
+}
+
+std::vector<std::string> unmatched_excluded_signals(
+    const std::map<std::string, std::set<std::string>> &excluded_signals, const registry::DeviceRegistry &registry) {
+    std::map<std::string, const registry::RegisteredDevice *> by_handle;
+    const auto devices = registry.get_all_devices();
+    for (const auto &device : devices) {
+        by_handle[device.get_handle()] = &device;
+    }
+
+    std::vector<std::string> lines;
+    for (const auto &[handle, signals] : excluded_signals) {
+        const auto it = by_handle.find(handle);
+        if (it == by_handle.end()) {
+            lines.push_back(std::format(
+                "health.excluded_signals: no registered device '{}'; its exclusions have no effect", handle));
+            continue;
+        }
+        const auto &declared = it->second->capabilities.signals_by_id;
+        for (const auto &signal_id : signals) {
+            if (declared.find(signal_id) == declared.end()) {
+                lines.push_back(
+                    std::format("health.excluded_signals: {} declares no signal '{}'; the exclusion has no effect",
+                                handle, signal_id));
+            }
+        }
+    }
+    return lines;
 }
 
 std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
@@ -181,7 +211,14 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
                 // provider is unavailable) and, when available, escalate the
                 // device health: FAULT beats liveness STALE/WARNING/OK; a
                 // freshness-stale signal escalates OK/WARNING to STALE.
+                const auto excluded_it = staleness_policy.excluded_signals.find(device_handle);
                 for (const auto &[signal_id, cached] : device_state->signals) {
+                    // Signals the machine leaves unused (#325): still read and
+                    // served, but not evidence about the device.
+                    if (excluded_it != staleness_policy.excluded_signals.end() &&
+                        excluded_it->second.count(signal_id) > 0) {
+                        continue;
+                    }
                     const auto spec_it = device.capabilities.signals_by_id.find(signal_id);
                     const uint32_t declared =
                         spec_it != device.capabilities.signals_by_id.end() ? spec_it->second.stale_after_ms : 0;
@@ -292,6 +329,35 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
     }
 
     return result;
+}
+
+std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                  const registry::DeviceRegistry &device_registry) {
+    std::vector<std::string> out;
+    for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
+        adpp::GetHealthResponse reported;
+        if (!provider->is_available() || !provider->get_health(reported)) {
+            continue;
+        }
+        for (const auto &dh : reported.devices()) {
+            const auto armed = dh.metrics().find("watchdog_armed");
+            if (armed == dh.metrics().end() || armed->second != "false") {
+                continue;  // absent means unknown, not disarmed
+            }
+            const auto device = device_registry.get_device_copy(provider_id, dh.device_id());
+            if (!device.has_value()) {
+                continue;
+            }
+            const auto &functions = device->capabilities.functions_by_id;
+            const bool actuates = std::any_of(functions.begin(), functions.end(), [](const auto &entry) {
+                return entry.second.category == adpp::FunctionPolicy_Category_CATEGORY_ACTUATE;
+            });
+            if (actuates) {
+                out.push_back(provider_id + "/" + dh.device_id());
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace health

@@ -101,9 +101,9 @@ healthy but serialized bus does not false-flap:
 - `stale_after_ms = max(8 x polling.interval_ms x device_count, 5000)`
 
 At the default `interval_ms: 500` with a single device this is exactly `2000` /
-`5000` (unchanged from prior releases). A multi-device serialized bus (e.g. an EZO
-chain where a full poll cycle exceeds 2s) gets proportionally looser bounds and
-stops flapping. Supply absolute overrides only when the heuristic does not fit:
+`5000` (unchanged from prior releases). A multi-device serialized bus (e.g. a
+chain of slow sensors where a full poll cycle exceeds 2s) gets proportionally
+looser bounds and stops flapping. Supply absolute overrides only when the heuristic does not fit:
 
 ```yaml
 health:
@@ -125,6 +125,31 @@ adds `STALE` only for a genuinely stuck/old cached sample (signal age far exceed
 poll age). Per-device precedence is `UNAVAILABLE > FAULT > STALE > WARNING > OK`, and
 the `stale_signal_count` / `fault_signal_count` fields on `/v0/providers/health`
 explain the result.
+
+### Signals left out of device health
+
+A device type has a fixed signal set, but a machine may not use all of it. An
+output the machine leaves disabled can read `QUALITY_UNKNOWN`, and an input
+channel with nothing connected can read `QUALITY_FAULT`, on a correctly built
+rig. Both would mark the device `STALE` or `FAULT`. List such signals per device
+under `health.excluded_signals`:
+
+```yaml
+health:
+  excluded_signals:
+    - device_handle: sim0/tempctl0   # provider_id/device_id
+      signals: [relay2_state]
+```
+
+Excluded signals are still polled, served by `/v0/state` and sent to telemetry.
+Only the device health string and its `stale_signal_count` /
+`fault_signal_count` skip them. Each `device_handle` may appear once, and needs
+at least one signal. Device health is display-only: nothing in the runtime acts
+on it, so an exclusion changes what is reported, not what the runtime does.
+
+After provider discovery the runtime logs a warning for each `device_handle`
+that names no registered device, and for each signal id the device does not
+declare, since such an entry excludes nothing.
 
 ### Compatibility behavior
 

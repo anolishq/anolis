@@ -392,14 +392,25 @@ _record_prev_meta() {
     rm -f "${meta}/runtime-version" "${meta}/manifest.json"
     mkdir -p "${meta}" || { log_warn "backup: cannot create ${meta}; --rollback will not name the version"; return 0; }
 
-    if [[ -f "${PREFIX}/manifest.json" ]]; then
-        cp "${PREFIX}/manifest.json" "${meta}/manifest.json" || true
-    fi
     ver=$(timeout 10 "${PREFIX}/bin/anolis-runtime" --version 2>/dev/null | head -n1) || ver=""
     if [[ -n "${ver}" ]]; then
         printf '%s\n' "${ver}" > "${meta}/runtime-version"
     else
         log_warn "backup: could not read the runtime version; --rollback will not name it"
+    fi
+
+    # Record manifest.json only when it describes the runtime being saved. A
+    # rollback of an older backup can leave a newer install's manifest in
+    # place, and recording that would have the next rollback restore it.
+    if [[ -f "${PREFIX}/manifest.json" ]]; then
+        local measured="" listed
+        measured=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "${ver}" | head -n1) || measured=""
+        listed=$(_manifest_version "${PREFIX}/manifest.json")
+        if [[ -n "${measured}" && "${listed}" == "${measured}" ]]; then
+            cp "${PREFIX}/manifest.json" "${meta}/manifest.json" || true
+        else
+            log_warn "backup: ${PREFIX}/manifest.json lists version ${listed:-unknown} but the saved runtime is ${measured:-unknown}; not recording it"
+        fi
     fi
 }
 
@@ -825,6 +836,12 @@ phase_manifest() {
 # Read fields from install.sh's OWN manifest.json (the writer uses
 # json.dump(indent=2), so keys are on their own two-space-indented lines) — these
 # are NOT general JSON parsers. Empty output on a missing field or legacy bundle.
+_manifest_version() {
+    # Top-level "version": "..." (indent 2), the runtime version the bundle
+    # was assembled at.
+    sed -n 's/^  "version": *"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n1
+}
+
 _manifest_prefix() {
     # Top-level "prefix": "..." (indent 2). [^"]* keeps it robust to trailing
     # commas and portable across sed implementations.
@@ -1083,15 +1100,31 @@ emit_grafana_dropin() {
 # The '-' prefix: a missing env file leaves Grafana up (datasource degraded)
 # instead of hard-failing the unit — the already-set-up-influx path can
 # legitimately lack the file until the operator writes it.
-# GF_LOG_LEVEL=warn: Grafana logs requests at level=info, so an open
-# dashboard's auto-refresh can flood the journal and evict runtime logs.
+# GF_LOG_LEVEL=warn: Grafana's own log (stdout) at warn and above.
+# LogFilterPatterns: the InfluxDB datasource (loggers tsdb.influxdb and
+# tsdb.influx_flux) logs every query at debug as JSON on stderr through the
+# plugin SDK's logger, which GF_LOG_LEVEL and [log] filters do not reach. A
+# dashboard on 5 s refresh wrote ~3000 such lines per 10 min and could evict
+# runtime logs (#349). The pattern drops debug JSON lines only, so errors and
+# Grafana's own log still reach the journal. Needs systemd 253 or newer.
 # GF_SERVER_HTTP_ADDR: 127.0.0.1 unless install.sh ran with
 # --with-grafana-network, which binds 0.0.0.0 (Grafana's empty default).
 [Service]
 EnvironmentFile=-${GRAFANA_ENV_FILE}
 Environment=GF_LOG_LEVEL=warn
 Environment=GF_SERVER_HTTP_ADDR=$([[ ${GRAFANA_NETWORK} -eq 1 ]] && echo 0.0.0.0 || echo 127.0.0.1)
+LogFilterPatterns=~.@level.:.debug.
 EOF
+}
+
+# LogFilterPatterns= arrived in systemd 253; older systemd ignores the key, and
+# the datasource's debug output then still reaches the journal (#349).
+_warn_if_no_log_filter() {
+    local ver
+    ver=$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')
+    if [[ "${ver}" =~ ^[0-9]+$ ]] && [[ ${ver} -lt 253 ]]; then
+        log_warn "observability: systemd ${ver} cannot filter Grafana's datasource debug output (needs 253); an open dashboard will fill the journal"
+    fi
 }
 
 # True when an existing Grafana drop-in opened Grafana to the network, so a
@@ -1327,6 +1360,7 @@ _obs_provision_grafana() {
         _OBS_GRAFANA_WAS_NETWORK=1
     fi
     emit_grafana_dropin > "${GRAFANA_DROPIN_DIR}/anolis.conf" || return 1
+    _warn_if_no_log_filter
     systemctl daemon-reload
     return 0
 }
@@ -1985,6 +2019,19 @@ do_rollback() {
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
     log_ok "restored binaries from .prev/"
 
+    # manifest.json is the operator's record of what is installed, and the next
+    # backup copies it into .prev/meta, so it must follow the binaries (#345).
+    if [[ -f "${PREFIX}/.prev/meta/manifest.json" ]]; then
+        if cp "${PREFIX}/.prev/meta/manifest.json" "${PREFIX}/manifest.json"; then
+            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/manifest.json" 2>/dev/null || true
+            log_ok "restored manifest.json from .prev/"
+        else
+            log_warn "rollback: could not restore manifest.json from .prev/meta/; ${PREFIX}/manifest.json still describes the newer install"
+        fi
+    elif [[ -f "${PREFIX}/manifest.json" ]]; then
+        log_warn "rollback: no manifest saved with this backup; ${PREFIX}/manifest.json still describes the newer install"
+    fi
+
     if command -v systemctl >/dev/null 2>&1 \
         && [[ -f "${SYSTEMD_DIR}/anolis-runtime.service" ]]; then
         systemctl restart anolis-runtime.service \
@@ -2405,7 +2452,7 @@ main() {
     # Handle rollback early
     if [[ ${ROLLBACK} -eq 1 ]]; then
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            log_info "[dry-run] would roll back binaries from ${PREFIX}/.prev"
+            log_info "[dry-run] would roll back binaries and the saved manifest.json from ${PREFIX}/.prev"
             _print_rollback_target
             exit 0
         fi

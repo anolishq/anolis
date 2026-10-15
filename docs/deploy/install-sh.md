@@ -97,7 +97,10 @@ at the repo root on the trade-offs first.
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
 | `--uninstall` | See the warning below. |
 
-`--rollback` restores **binaries only**; config is left alone. The backup is taken
+`--rollback` restores **binaries only**, plus the `manifest.json` saved with
+them so the manifest describes what is installed; config is left alone. A
+backup taken by an older `install.sh` saved no manifest, and rollback warns
+that `manifest.json` still describes the newer install. The backup is taken
 on each install that actually changes the binaries — an install of a byte-identical
 `bin/` deliberately does not overwrite the backup, so `--rollback` still reaches
 the last *different* install.

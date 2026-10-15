@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://anolishq.github.io/schemas/anolis/telemetry/telemetry-health-timeseries.schema.v1.json",
   "title": "Anolis Health Timeseries Contract v1",
-  "description": "Logical row contracts for the anolis_provider_health and anolis_device_health measurements ingested by the runtime health snapshot task. Metric fields are parsed from the provider metrics map using the reserved-key vocabulary (anolis-provider-sdk docs/metrics.md plus bread watchdog keys); unknown or unparseable keys are never written.",
+  "description": "Logical row contracts for the anolis_provider_health and anolis_device_health measurements ingested by the runtime health snapshot task. Metric fields are parsed from the provider metrics map using the reserved-key vocabulary (anolis-provider-sdk docs/metrics.md, watchdog keys included); unknown or unparseable keys are never written.",
   "oneOf": [
     {
       "type": "object",

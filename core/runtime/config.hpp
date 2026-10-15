@@ -7,6 +7,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,10 @@ struct HealthStalenessConfig {
 /** @brief Device/provider health surface policy. */
 struct HealthConfig {
     HealthStalenessConfig staleness;
+    // `health.excluded_signals` (#325): per device handle (provider_id/device_id),
+    // signals left out of the device health rollup. Which signals a machine uses
+    // is a fact about the machine, not the provider.
+    std::map<std::string, std::set<std::string>> excluded_signals;
 };
 
 /**
@@ -110,8 +115,8 @@ struct TelemetryConfig {
     size_t max_retry_buffer_size = 1000;  // Max events to buffer on write failure
 
     // Health snapshot ingestion cadence (#203). Each snapshot is a live ADPP
-    // GetHealth round-trip per provider (bread: a GET_WATCHDOG bus query per
-    // armed device). 0 disables ingestion.
+    // GetHealth round-trip per provider (a provider may answer with a live
+    // device query per device). 0 disables ingestion.
     int health_interval_ms = 15000;
 };
 
