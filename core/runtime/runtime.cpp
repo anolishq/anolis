@@ -804,9 +804,15 @@ void Runtime::run() {
             if (!provider->is_available()) {
                 // Provider crashed or unavailable
 
-                // Check if circuit breaker is open
+                // Circuit open: no restarts from the budget, but one half-open
+                // probe per interval (#326), so an outage that outlasts the
+                // budget does not keep the provider down until a runtime restart.
                 if (supervisor_->is_circuit_open(id)) {
-                    continue;  // Circuit open, no more attempts
+                    if (supervisor_->should_probe(id)) {
+                        LOG_INFO("[Runtime] Circuit open; probing provider: " << id);
+                        supervisor_->record_probe_result(id, restart_provider(id, provider_config));
+                    }
+                    continue;
                 }
 
                 // The main loop runs every 100ms, so outage accounting is split
@@ -959,6 +965,14 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     LOG_INFO("[Runtime] Restarting provider: " << provider_id);
     LOG_DEBUG("[Runtime]   Command: " << provider_config.command);
+
+    // Stop the old process before starting its replacement (#326). A provider
+    // can be unavailable and still running -- wedged on a hung bus -- and
+    // starting a second one beside it would put two processes on one bus. The
+    // stopped handle stays registered, so a failed restart is retried as before.
+    if (auto old_provider = provider_registry_.get_provider(provider_id)) {
+        old_provider->stop();
+    }
 
     // Replacement is a two-phase operation: bring up and inspect the new
     // provider off to the side first, then publish the new device inventory and
