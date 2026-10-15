@@ -1633,15 +1633,19 @@ _run_registry_available() {
 }
 
 # Print "<provider_id> <lifecycle_state>" for each provider in
-# GET /v0/providers/health; exit non-zero when the endpoint does not answer.
-# The runtime serialises objects with sorted keys, so each provider's
-# lifecycle_state comes right before its provider_id, and device entries
-# carry neither key.
+# GET /v0/providers/health; exit non-zero when the endpoint does not answer or
+# the body is not JSON. Each provider entry is read by key: a device's
+# provider-declared descriptor_tags can hold any key, provider_id too (#363).
 _provider_states() {
     local base_url="$1" body
     body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
-    { grep -o '"lifecycle_state":"[^"]*"\|"provider_id":"[^"]*"' <<< "${body}" || true; } \
-        | sed 's/^"[a-z_]*":"\(.*\)"$/\1/' | paste - - | awk 'NF == 2 { print $2, $1 }'
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.providers[] | "\(.provider_id) \(.lifecycle_state)"' <<< "${body}" 2>/dev/null
+    else
+        python3 -c 'import json, sys
+for p in json.load(sys.stdin)["providers"]:
+    print(p["provider_id"], p["lifecycle_state"])' <<< "${body}" 2>/dev/null
+    fi
 }
 
 # Poll until every provider is available (RUNNING or RECOVERING) or the health

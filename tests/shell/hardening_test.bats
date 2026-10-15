@@ -253,3 +253,42 @@ _stub_health_endpoints() {
     [[ "${output}" == *"GET /v0/providers/health did not answer"* ]]
     [ "${HEALTH_FAILED}" -eq 0 ]
 }
+
+# #363: a device whose provider-declared descriptor_tags hold a provider_id key
+# must not shift which state is reported for which provider.
+_providers_body_with_tag() {
+    printf '{"providers":[{"devices":[{"descriptor_tags":{"provider_id":"tag0"},"device_id":"d0","health":"OK"}],"lifecycle_state":"%s","provider_id":"alpha"},{"devices":[],"lifecycle_state":"%s","provider_id":"beta"}],"status":{"code":"OK","message":"ok"}}' "$@"
+}
+
+_assert_each_provider_own_state() {
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 1 of 2 running"* ]]
+    [[ "${output}" == *"provider beta: CIRCUIT_OPEN"* ]]
+    [[ "${output}" != *"tag0"* ]]
+    [[ "${output}" != *"provider alpha:"* ]]
+}
+
+@test "363: provider states are read by key, not token order (jq)" {
+    command -v jq >/dev/null || skip "jq not installed"
+    _stub_health_endpoints
+    _providers_body_with_tag RUNNING CIRCUIT_OPEN > "${PROVIDERS_BODY_FILE}"
+    _assert_each_provider_own_state
+}
+
+@test "363: provider states are read by key, not token order (python3, no jq)" {
+    _stub_health_endpoints
+    _providers_body_with_tag RUNNING CIRCUIT_OPEN > "${PROVIDERS_BODY_FILE}"
+    # A PATH that holds what phase_health runs, but no jq.
+    local bin="${BATS_TEST_TMPDIR}/nojq-bin" tool
+    mkdir -p "${bin}"
+    for tool in python3 grep sed head awk cat wc; do
+        ln -s "$(command -v "${tool}")" "${bin}/${tool}"
+    done
+    # In a subshell, so bats' own cleanup keeps its PATH.
+    (
+        PATH="${bin}"
+        [ -z "$(command -v jq)" ]
+        _assert_each_provider_own_state
+    )
+}
