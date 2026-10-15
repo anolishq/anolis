@@ -240,6 +240,16 @@ class AutomationTester:
         names = [entry.get("name") for entry in cast(List[Dict[str, Any]], body.get("parameters", []))]
         assert "temp_setpoint" in names, f"Expected temp_setpoint in parameters, got {names}"
 
+        # Nothing has been set yet, so every parameter is at its config default (#273).
+        sources = {entry.get("name"): entry.get("source") for entry in cast(List[Dict[str, Any]], body["parameters"])}
+        assert set(sources.values()) == {"default"}, f"Expected every source to be default, got {sources}"
+
+        # The startup log names each parameter at its default.
+        capture = self.fixture.get_output_capture()
+        output = capture.get_all_output() if capture else ""
+        for name in sources:
+            assert f"Parameter '{name}' at config default" in output, f"Startup log does not list {name}"
+
     def test_update_parameter_valid(self) -> None:
         try:
             resp = requests.post(
@@ -255,6 +265,11 @@ class AutomationTester:
         body = cast(Dict[str, Any], resp.json())
         value = body.get("parameter", {}).get("value")
         assert value == 30.0, f"Expected updated value 30.0, got {value}"
+
+        listed = requests.get(f"{self.base_url}/v0/parameters", timeout=2).json()["parameters"]
+        sources = {entry["name"]: entry.get("source") for entry in listed}
+        assert sources.get("temp_setpoint") == "operator", f"Expected temp_setpoint source operator, got {sources}"
+        assert sources.get("motor_duty_cycle") == "default", f"An unset parameter changed source: {sources}"
 
     def test_update_parameter_out_of_range(self) -> None:
         try:
