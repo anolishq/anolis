@@ -745,8 +745,10 @@ components:
             Count of ACTUATE functions the active rung cannot drive. For hooks
             and setpoints, a function is covered only by a call that targets
             it and passes the same dispatch check as the startup preflight; for
-            zero, only if the zero rung can build its call. Every ACTUATE
-            function counts when software_safe_state is "none".
+            zero, only if the zero rung can build its call and that call
+            passes the same check. Every ACTUATE function counts when
+            software_safe_state is "none". Covered means a call drives the
+            function, not that the value it sends is safe.
     EstopAction:
       type: object
       additionalProperties: false
