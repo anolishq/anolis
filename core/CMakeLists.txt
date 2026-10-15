@@ -303,6 +303,7 @@ add_library(anolis_runtime STATIC
     runtime/runtime.cpp
     runtime/actuation_gate.cpp
     runtime/ownership_validation.cpp
+    runtime/poll_hint_check.cpp
     runtime/signal_handler.cpp
 )
 
