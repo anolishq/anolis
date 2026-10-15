@@ -77,6 +77,8 @@ RUNTIME_VARIANT=""
 HEALTH_FAILED=0
 # Continue past providers' unmet host requirements (--allow-unmet-host).
 ALLOW_UNMET_HOST=0
+# Install an older runtime over a newer one (--allow-downgrade).
+ALLOW_DOWNGRADE=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -146,6 +148,10 @@ Common:
                          requirements (e.g. before the host-prep reboot). The
                          provider then starts up not ready; once the host is
                          fixed, restart the service (or reboot) to pick it up.
+  --allow-downgrade      Install even when the bundle's runtime is older than
+                         the installed one. Without it, the install is refused
+                         before anything changes; --rollback is the way back
+                         to the previous install.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -186,6 +192,7 @@ parse_args() {
                 shift ;;
             --no-start)  NO_START=1; shift ;;
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
+            --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -310,6 +317,52 @@ phase_verify() {
         die "Checksum verification failed — bundle may be corrupted"
     fi
     log_ok "verify: all checksums pass"
+}
+
+# =============================================================================
+# Version check: refuse to downgrade a newer runtime (#366)
+# =============================================================================
+
+# X.Y.Z from a runtime's --version, empty when the binary will not run or
+# reports no version. Measures the binary: an installed manifest.json can be
+# stale (#345).
+_runtime_binary_version() {
+    [[ -x "$1" ]] || return 0
+    { timeout 10 "$1" --version 2>/dev/null || true; } \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true
+}
+
+# Compare the bundle's runtime with the installed one before anything changes.
+# Older is refused unless --allow-downgrade; same or newer carries on. Under
+# --dry-run the verdict is reported and nothing is refused.
+phase_version_check() {
+    local installed incoming
+    if [[ ! -f "${PREFIX}/bin/anolis-runtime" ]]; then
+        log_skip "version: no installed runtime"
+        return 0
+    fi
+    installed=$(_runtime_binary_version "${PREFIX}/bin/anolis-runtime")
+    incoming=$(_runtime_binary_version "${BUNDLE_DIR}/bin/anolis-runtime")
+    [[ -n "${incoming}" ]] || incoming=$(_manifest_version "${BUNDLE_DIR}/manifest.json") || true
+    if [[ -z "${installed}" || -z "${incoming}" ]]; then
+        log_warn "version: cannot compare (installed ${installed:-unknown}, bundle ${incoming:-unknown}); continuing"
+        return 0
+    fi
+
+    if [[ "${incoming}" == "${installed}" ]]; then
+        log_ok "version: ${incoming}, same as installed"
+    elif [[ "$(printf '%s\n%s\n' "${incoming}" "${installed}" | sort -V | head -n1)" == "${installed}" ]]; then
+        log_ok "version: upgrade ${installed} -> ${incoming}"
+    elif [[ ${ALLOW_DOWNGRADE} -eq 1 ]]; then
+        log_warn "version: downgrading the runtime from ${installed} to ${incoming} (--allow-downgrade)"
+    elif [[ ${DRY_RUN} -eq 1 ]]; then
+        log_warn "version: would refuse to downgrade the runtime from ${installed} to ${incoming} (pass --allow-downgrade to install it)"
+    else
+        log_err "version: the bundle's runtime ${incoming} is older than the installed ${installed}"
+        log_info "Nothing was changed. To return to the previous install, run --rollback."
+        log_info "To install ${incoming} over ${installed} anyway, re-run with --allow-downgrade."
+        die "refusing to downgrade the runtime"
+    fi
 }
 
 # =============================================================================
@@ -2475,6 +2528,18 @@ main() {
             dry_run_phase "use local bundle ${LOCAL_PATH:-<required: --project or --local>}"
         fi
         dry_run_phase "verify checksums"
+        if [[ -z "${PROJECT_DIR}" && ( -d "${LOCAL_PATH}" || -f "${LOCAL_PATH}" ) ]]; then
+            # Reading a local bundle changes nothing on the host.
+            BUNDLE_DIR="${LOCAL_PATH}"
+            if [[ -f "${LOCAL_PATH}" ]]; then
+                BUNDLE_DIR=$(mktemp -d)
+                trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+                tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
+            fi
+            phase_version_check
+        else
+            dry_run_phase "compare the bundle's runtime version with the installed one (refuse an older one without --allow-downgrade)"
+        fi
         dry_run_phase "create system user ${ANOLIS_USER}"
         dry_run_phase "create directories at ${PREFIX}"
         dry_run_phase "backup existing binaries"
@@ -2500,6 +2565,7 @@ main() {
     phase_prepare_bundle
     phase_verify
     preflight_variant_selection
+    phase_version_check
     phase_system_user
     phase_directories
     phase_backup
