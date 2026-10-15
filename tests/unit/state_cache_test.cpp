@@ -4,7 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <csignal>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -14,6 +17,7 @@
 #include "provider/i_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
+#include "runtime/signal_handler.hpp"
 
 using namespace anolis;
 using namespace testing;
@@ -476,4 +480,67 @@ TEST_F(StateCacheReachabilityTest, DeviceDarkAcrossProviderRestartStillLatches) 
     state_cache->poll_once(*provider_registry);
     ASSERT_EQ(events.size(), 2U);
     EXPECT_TRUE(events[1].reachable);
+}
+
+//=============================================================================
+// Read failures during shutdown (#350)
+//
+// On a stop, the providers get the signal at the same time as the runtime and
+// exit under the poll loop. Those failed reads are the shutdown, not a device
+// fault: no ERROR line and no loss edge. Before shutdown, the same failure is
+// still both.
+//=============================================================================
+
+namespace {
+
+std::string poll_once_capturing_log(state::StateCache &cache, provider::ProviderRegistry &providers) {
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    cache.poll_once(providers);
+    std::cerr.rdbuf(old);
+    return captured.str();
+}
+
+}  // namespace
+
+class StateCacheShutdownTest : public StateCacheReachabilityTest {
+protected:
+    void SetUp() override {
+        StateCacheReachabilityTest::SetUp();
+        runtime::SignalHandler::install();
+    }
+
+    // install() clears the latch, so later tests start with no shutdown pending.
+    void TearDown() override { runtime::SignalHandler::install(); }
+
+    static void request_shutdown() {
+        // raise() is synchronous: the handler has set the latch when it returns.
+        std::raise(SIGTERM);
+        ASSERT_TRUE(runtime::SignalHandler::is_shutdown_requested());
+    }
+};
+
+TEST_F(StateCacheShutdownTest, ReadFailureBeforeShutdownLogsErrorAndReportsLoss) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    const std::string log = poll_once_capturing_log(*state_cache, *provider_registry);
+
+    EXPECT_NE(log.find("[ERROR] [StateCache] ReadSignals failed for dev1"), std::string::npos) << log;
+    ASSERT_EQ(events.size(), 1U);
+    EXPECT_FALSE(events[0].reachable);
+}
+
+TEST_F(StateCacheShutdownTest, ReadFailureAfterShutdownIsNotAnErrorOrALoss) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+    request_shutdown();
+
+    const std::string log = poll_once_capturing_log(*state_cache, *provider_registry);
+
+    EXPECT_EQ(log.find("[ERROR]"), std::string::npos) << log;
+    EXPECT_TRUE(events.empty()) << "a read failure during shutdown must not report a device loss";
+    auto state = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(state != nullptr);
+    EXPECT_FALSE(state->provider_available) << "the failed read still invalidates the cached snapshot";
 }

@@ -16,6 +16,7 @@
 
 #include "events/event_emitter.hpp"
 #include "logging/logger.hpp"
+#include "runtime/signal_handler.hpp"
 
 namespace anolis {
 namespace state {
@@ -386,7 +387,17 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
     anolis::deviceprovider::v1::ReadSignalsResponse response;
     anolis::deviceprovider::v1::Status_Code failure_status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
     if (!provider.read_signals(device_id, signal_ids, response, failure_status)) {
-        LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
+        // On a stop, the providers are signalled together with the runtime
+        // (systemd's default KillMode=control-group) and exit under this loop.
+        // A failed read then is the shutdown, not a device fault: it is not
+        // an ERROR and not a device loss (#350).
+        const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
+        if (shutting_down) {
+            LOG_DEBUG("[StateCache] ReadSignals failed for " << device_id
+                                                             << " during shutdown: " << provider.last_error());
+        } else {
+            LOG_ERROR("[StateCache] ReadSignals failed for " << device_id << ": " << provider.last_error());
+        }
 
         // In-band or out-of-band? An in-band failure means the PROVIDER
         // answered and reported that the DEVICE did not -- the session stays
@@ -416,7 +427,7 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
             if (it != device_states_.end()) {
                 it->second.provider_available = false;
                 it->second.signals.clear();
-                if (!provider_lost && !it->second.loss_reported && device_reachability_sink_) {
+                if (!shutting_down && !provider_lost && !it->second.loss_reported && device_reachability_sink_) {
                     it->second.loss_reported = true;
                     report_loss = true;
                 }
