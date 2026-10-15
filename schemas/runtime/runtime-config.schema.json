@@ -403,7 +403,7 @@
                 "description": "Signal ids on that device to leave out of its health rollup."
               }
             },
-            "additionalProperties": false
+            "additionalProperties": true
           }
         }
       },
