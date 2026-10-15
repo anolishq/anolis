@@ -57,6 +57,9 @@ public:
         return session_healthy_.load(std::memory_order_acquire) && process_.is_running();
     }
 
+    /** @brief Close the session and shut the process down; waits for any in-flight request. */
+    void stop() override;
+
     /** @brief Issue the ADPP `Hello` handshake. */
     bool hello(anolis::deviceprovider::v1::HelloResponse &response) override;
     /** @brief Issue `WaitReady` using the configured ready timeout. */

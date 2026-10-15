@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Callable, List, NoReturn, Optional, Tuple
 
+import psutil
+
 from tests.support.api_helpers import (
     assert_http_available,
     assert_provider_available,
@@ -849,6 +851,187 @@ class SupervisionTester:
         finally:
             self.stop_runtime()
 
+    def _live_provider_children(self) -> List[psutil.Process]:
+        """Provider processes the runtime has spawned and not yet reaped (zombies excluded)."""
+        assert self.fixture is not None
+        pid = self.fixture.get_pid()
+        assert pid is not None, "runtime has no pid"
+        live = []
+        for child in psutil.Process(pid).children():
+            try:
+                if child.status() != psutil.STATUS_ZOMBIE:
+                    live.append(child)
+            except psutil.NoSuchProcess:
+                pass
+        return live
+
+    def test_restart_stops_wedged_process_first(self) -> None:
+        """A wedged provider is stopped before its replacement starts (#326).
+
+        SIGSTOP leaves the process alive while every request to it times out,
+        which is what a provider stuck on a hung bus looks like to the runtime.
+        """
+        print("\n[TEST] Restart Stops Wedged Process First")
+        config_dict = self.create_config(crash_after=0.0, max_attempts=3, backoff_ms=[100, 200, 300])
+        args = config_dict["providers"][0]["args"]
+        config_dict["providers"][0]["args"] = args[: args.index("--crash-after")]
+
+        try:
+            self.start_runtime(config_dict)
+            if not assert_provider_available(self.base_url, "provider-sim", timeout=10.0):
+                self._fail_with_output("wedged_restart", "Provider not available at startup")
+
+            children = self._live_provider_children()
+            if len(children) != 1:
+                self._fail_with_output("wedged_restart", f"Expected one provider process, got {len(children)}")
+            wedged = children[0]
+            wedged.suspend()
+
+            max_live = 1
+            recovered = False
+            deadline = time.time() + 30.0
+            while time.time() < deadline:
+                live = self._live_provider_children()
+                max_live = max(max_live, len(live))
+                entry = get_provider_health_entry(self.base_url, "provider-sim", timeout=1.0)
+                if entry is not None and entry.get("state") == "AVAILABLE" and wedged.pid not in [c.pid for c in live]:
+                    recovered = True
+                    break
+                time.sleep(0.05)
+
+            if max_live > 1:
+                self._fail_with_output(
+                    "wedged_restart",
+                    f"{max_live} provider processes alive at once; the wedged one was not stopped first",
+                )
+            if not recovered:
+                self._fail_with_output("wedged_restart", "Provider did not recover after the wedged process")
+        finally:
+            self.stop_runtime()
+
+    def test_circuit_open_half_open_probe(self) -> None:
+        """An open circuit is probed every 60 s and closes when a probe succeeds (#326).
+
+        The first launch crashes, the second fails to start, which spends a
+        budget of one attempt and opens the circuit. Every later launch is
+        healthy, so the first probe must bring the provider back without a
+        runtime restart.
+        """
+        print("\n[TEST] Circuit Half-Open Probe")
+        probe_interval_s = 60.0
+
+        with tempfile.TemporaryDirectory(prefix="anolis-supervision-") as tmp:
+            temp_dir = Path(tmp)
+            counter_path = temp_dir / "attempt_counter.txt"
+            wrapper_path = self._write_wrapper_script(
+                temp_dir,
+                "probe_provider_wrapper.py",
+                """
+                import pathlib
+                import subprocess
+                import sys
+
+                counter_path = pathlib.Path(sys.argv[1])
+                provider_exe = sys.argv[2]
+                provider_config = sys.argv[3]
+
+                try:
+                    attempt = int(counter_path.read_text(encoding="utf-8").strip())
+                except Exception:
+                    attempt = 0
+                attempt += 1
+                counter_path.write_text(str(attempt), encoding="utf-8")
+
+                if attempt == 2:
+                    sys.exit(42)
+
+                args = [provider_exe, "--config", provider_config]
+                if attempt == 1:
+                    args += ["--crash-after", "2.0"]
+
+                proc = subprocess.Popen(args, stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=sys.stderr)
+                proc.wait()
+                sys.exit(proc.returncode)
+                """,
+            )
+
+            def launches() -> int:
+                try:
+                    return int(counter_path.read_text(encoding="utf-8").strip())
+                except Exception:
+                    return 0
+
+            config_dict = {
+                "http": {"enabled": True, "bind": "127.0.0.1", "port": self.port},
+                "providers": [
+                    {
+                        "id": "provider-sim",
+                        "command": sys.executable,
+                        "args": [
+                            str(wrapper_path).replace("\\", "/"),
+                            str(counter_path).replace("\\", "/"),
+                            str(self.provider_sim_path).replace("\\", "/"),
+                            self._default_provider_fixture_config(),
+                        ],
+                        "timeout_ms": 1500,
+                        "restart_policy": {
+                            "enabled": True,
+                            "max_attempts": 1,
+                            "backoff_ms": [100],
+                            "timeout_ms": 5000,
+                            "success_reset_ms": 500,
+                        },
+                    }
+                ],
+                "polling": {"interval_ms": 200},
+                "logging": {"level": "info"},
+            }
+
+            try:
+                self.start_runtime(config_dict)
+                if not assert_provider_available(self.base_url, "provider-sim", timeout=10.0):
+                    self._fail_with_output("half_open_probe", "Provider not available at startup")
+
+                opened, open_snaps = self._wait_for_snapshot_predicate(
+                    lambda s: s["present"] and s["circuit_open"] is True, timeout=15.0, interval=0.05
+                )
+                if not opened:
+                    self._fail_with_output("half_open_probe", "Circuit did not open", health_snapshots=open_snaps)
+                opened_at = time.time()
+
+                # No probe before the interval: the circuit stays open and nothing relaunches.
+                time.sleep(5.0)
+                entry = get_provider_health_entry(self.base_url, "provider-sim", timeout=1.0)
+                if entry is None or entry["supervision"]["circuit_open"] is not True or launches() != 2:
+                    self._fail_with_output(
+                        "half_open_probe", f"Expected an open circuit and 2 launches before the probe, got {launches()}"
+                    )
+
+                recovered, rec_snaps = self._wait_for_snapshot_predicate(
+                    lambda s: (
+                        s["present"]
+                        and s["state"] == "AVAILABLE"
+                        and s["circuit_open"] is False
+                        and (s["device_count"] or 0) > 0
+                    ),
+                    timeout=probe_interval_s + 20.0,
+                    interval=0.25,
+                )
+                if not recovered:
+                    self._fail_with_output(
+                        "half_open_probe",
+                        "Provider did not recover within one probe interval of the circuit opening",
+                        health_snapshots=rec_snaps,
+                    )
+                waited = time.time() - opened_at
+                if launches() != 3:
+                    self._fail_with_output("half_open_probe", f"Expected exactly one probe launch, got {launches()}")
+                if waited < probe_interval_s - 5.0:
+                    self._fail_with_output("half_open_probe", f"Probe fired after {waited:.1f}s, before the interval")
+                print(f"  [INFO] half_open_probe: recovered {waited:.1f}s after the circuit opened")
+            finally:
+                self.stop_runtime()
+
 
 SupervisionCheck = Tuple[str, Callable[[SupervisionTester], None]]
 
@@ -860,4 +1043,6 @@ SUPERVISION_CHECKS: List[SupervisionCheck] = [
     ("restart_timeout_enforced", SupervisionTester.test_restart_timeout_enforced),
     ("startup_timeout_enforced", SupervisionTester.test_startup_timeout_enforced),
     ("device_rediscovery", SupervisionTester.test_device_rediscovery),
+    ("wedged_restart", SupervisionTester.test_restart_stops_wedged_process_first),
+    ("half_open_probe", SupervisionTester.test_circuit_open_half_open_probe),
 ]
