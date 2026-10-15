@@ -390,3 +390,85 @@ TEST_F(HealthSnapshotCollectorTest, DescriptorIdentitySurvivesIntoTheSnapshot) {
     EXPECT_EQ(found->descriptor_tags.at("module_version"), "1.0.0");
     EXPECT_EQ(found->descriptor_tags.at("crumbs_version"), "1205");
 }
+
+// ---------------------------------------------------------------------------
+// actuating_devices_with_watchdog_disarmed — startup preflight (#297).
+// Keys on the SDK-reserved `watchdog_armed` health metric only.
+// ---------------------------------------------------------------------------
+
+class WatchdogPreflightTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        mock_provider = std::make_shared<NiceMock<MockProviderHandle>>();
+        mock_provider->_id = "sim0";
+        ON_CALL(*mock_provider, provider_id()).WillByDefault(ReturnRef(mock_provider->_id));
+        ON_CALL(*mock_provider, is_available()).WillByDefault(Return(true));
+        provider_registry->add_provider("sim0", mock_provider);
+
+        // drive: ACTUATE function. sensor: READ only. Both report the key.
+        ON_CALL(*mock_provider, list_devices(_)).WillByDefault(Invoke([](std::vector<Device> &devices) {
+            for (const char *id : {"drive", "sensor"}) {
+                Device dev;
+                dev.set_device_id(id);
+                devices.push_back(dev);
+            }
+            return true;
+        }));
+        ON_CALL(*mock_provider, describe_device(_, _))
+            .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+                response.mutable_device()->set_device_id(id);
+                auto *fn = response.mutable_capabilities()->add_functions();
+                fn->set_name(id == "drive" ? "set_output" : "identify");
+                fn->set_function_id(1);
+                fn->mutable_policy()->set_category(
+                    id == "drive" ? anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE
+                                  : anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+                return true;
+            }));
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    // Each provider-reported device health gets the given watchdog_armed value;
+    // nullopt omits the key.
+    void ReportWatchdogArmed(std::optional<std::string> armed) {
+        ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([armed](GetHealthResponse &response) {
+            for (const char *id : {"drive", "sensor"}) {
+                auto *dh = response.add_devices();
+                dh->set_device_id(id);
+                dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_OK);
+                if (armed.has_value()) {
+                    (*dh->mutable_metrics())["watchdog_armed"] = *armed;
+                }
+            }
+            return true;
+        }));
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::shared_ptr<NiceMock<MockProviderHandle>> mock_provider;
+};
+
+TEST_F(WatchdogPreflightTest, ReportsActuatingDeviceWithWatchdogDisarmed) {
+    ReportWatchdogArmed("false");
+    const auto devices = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    ASSERT_EQ(devices.size(), 1u);  // the READ-only device is not an actuator
+    EXPECT_EQ(devices[0], "sim0/drive");
+}
+
+TEST_F(WatchdogPreflightTest, AbsentKeyIsSilent) {
+    ReportWatchdogArmed(std::nullopt);
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
+
+TEST_F(WatchdogPreflightTest, ArmedWatchdogIsSilent) {
+    ReportWatchdogArmed("true");
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
+
+TEST_F(WatchdogPreflightTest, NoReportedHealthIsSilent) {
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
