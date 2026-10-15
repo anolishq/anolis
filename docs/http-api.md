@@ -109,7 +109,12 @@ Notes:
    actuating). Read-only calls are unaffected.
 3. Latch and planned safe-state are surfaced under `estop` in
    `GET /v0/runtime/status`.
-4. This is a software stop, not a substitute for the hardware emergency stop.
+4. What `safety.on_startup` did at startup is surfaced under
+   `startup_safe_state` in `GET /v0/runtime/status`: `on_startup`, `ran`,
+   `software_safe_state`, `safe_state_achieved` (the same verdict) and
+   `failed_actions` (same shape as the `/v0/estop` actions). `ran` is
+   `false` for `leave` and when no safe state is declared.
+5. This is a software stop, not a substitute for the hardware emergency stop.
 
 ### Device-loss latch
 

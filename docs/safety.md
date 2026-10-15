@@ -184,9 +184,20 @@ the runtime does about that:
 | `leave` | Leaves outputs as they were and logs that it did. |
 
 With `safe_state` and no software safe state declared (`software_safe_state:
-"none"`), there is nothing to run and the log says so. Set `leave` only on a
-machine where a restart must not interrupt a running process, such as a
-culture that must keep its heater on.
+"none"`), there is nothing to run and the log says so. A run whose verdict is
+not achieved is logged at ERROR, with one ERROR line per call that failed; the
+runtime still starts and does not latch. `GET /v0/runtime/status` reports the
+outcome in `startup_safe_state` (`on_startup`, `ran`, `software_safe_state`,
+`safe_state_achieved`, `failed_actions`); `ran` is `false` for `leave` and for
+no declared safe state. Set `leave` only on a machine where a restart must not
+interrupt a running process, such as a culture that must keep its heater on.
+
+`safety.on_startup` acts at runtime startup only. A supervised provider
+restart (a provider crash, then the runtime starting it again) runs nothing:
+the runtime does not run the safe state, and provider loss is not reported as
+device loss, so the device-loss latch does not engage and nothing is
+re-asserted when the devices come back. Outputs stay as the devices and the
+restarted provider leave them.
 
 ## Standard Startup Sequence
 
