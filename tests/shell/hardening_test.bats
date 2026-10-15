@@ -161,3 +161,95 @@ _make_bundle() {
     run _run_registry_available "http://localhost:8080"
     [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# #344: phase_health reports provider liveness from GET /v0/providers/health
+# ---------------------------------------------------------------------------
+
+# Two providers, as the runtime serialises them (nlohmann::json sorts keys, so
+# a provider's devices precede its lifecycle_state and provider_id).
+_providers_body() {
+    printf '{"providers":[{"degraded":false,"device_count":1,"devices":[{"device_id":"d0","health":"OK"}],"lifecycle_state":"%s","provider_id":"alpha","state":"%s"},{"degraded":false,"device_count":0,"devices":[],"lifecycle_state":"%s","provider_id":"beta","state":"%s"}],"status":{"code":"OK","message":"ok"}}' "$@"
+}
+
+# curl answers by URL: runtime status, the run registry's HTTP code, and the
+# provider health body in ${PROVIDERS_BODY_FILE}. sleep is a no-op so the
+# health timeout elapses at once.
+_stub_health_endpoints() {
+    NO_START=0
+    PROVIDERS_BODY_FILE="${BATS_TEST_TMPDIR}/providers.json"
+    _runtime_port() { echo 8080; }
+    sleep() { :; }
+    curl() {
+        local url="${*: -1}"
+        case "${url}" in
+            */v0/runtime/status) printf '{"version":"0.1.45"}' ;;
+            */v0/runs) printf '200' ;;
+            */v0/providers/health) cat "${PROVIDERS_BODY_FILE}" ;;
+            *) return 7 ;;
+        esac
+    }
+    export -f curl sleep _runtime_port
+}
+
+@test "344: phase_health reports every provider running" {
+    _stub_health_endpoints
+    _providers_body RUNNING AVAILABLE RECOVERING AVAILABLE > "${PROVIDERS_BODY_FILE}"
+
+    HEALTH_FAILED=0
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 2 of 2 running"* ]]
+    [[ "${output}" != *"⚠"* ]]
+    [ "${HEALTH_FAILED}" -eq 0 ]
+}
+
+@test "344: phase_health names a provider that is not running, and does not fail the install" {
+    _stub_health_endpoints
+    _providers_body RUNNING AVAILABLE CIRCUIT_OPEN UNAVAILABLE > "${PROVIDERS_BODY_FILE}"
+
+    HEALTH_FAILED=0
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 1 of 2 running"* ]]
+    [[ "${output}" == *"provider beta: CIRCUIT_OPEN"* ]]
+    [[ "${output}" != *"provider alpha:"* ]]
+    [ "${HEALTH_FAILED}" -eq 0 ]
+}
+
+@test "344: phase_health waits for a provider that comes up during the timeout" {
+    _stub_health_endpoints
+    _providers_body RUNNING AVAILABLE RESTARTING UNAVAILABLE > "${PROVIDERS_BODY_FILE}"
+    # The second sleep brings beta up.
+    SLEEPS="${BATS_TEST_TMPDIR}/sleeps"
+    sleep() {
+        echo x >> "${SLEEPS}"
+        if [[ $(wc -l < "${SLEEPS}") -ge 2 ]]; then
+            _providers_body RUNNING AVAILABLE RUNNING AVAILABLE > "${PROVIDERS_BODY_FILE}"
+        fi
+    }
+
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 2 of 2 running"* ]]
+    [[ "${output}" != *"provider beta:"* ]]
+}
+
+@test "344: phase_health warns when the provider health endpoint does not answer" {
+    _stub_health_endpoints
+    rm -f "${PROVIDERS_BODY_FILE}"
+    curl() {
+        local url="${*: -1}"
+        case "${url}" in
+            */v0/runtime/status) printf '{"version":"0.1.45"}' ;;
+            */v0/runs) printf '200' ;;
+            *) return 22 ;;
+        esac
+    }
+
+    HEALTH_FAILED=0
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"GET /v0/providers/health did not answer"* ]]
+    [ "${HEALTH_FAILED}" -eq 0 ]
+}

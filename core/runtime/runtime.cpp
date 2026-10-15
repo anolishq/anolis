@@ -24,6 +24,7 @@
 #include "health/health_snapshot.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
+#include "poll_hint_check.hpp"
 #include "provider/provider_handle.hpp"  // Required for instantiation
 #include "provider/provider_supervisor.hpp"
 #include "runtime/actuation_gate.hpp"
@@ -212,6 +213,12 @@ bool Runtime::init_providers(std::string &error) {
     }
 
     LOG_INFO("[Runtime] Ownership validation passed");
+
+    // Once, at startup: a restarted provider republishing its hints is not news.
+    for (const auto &line : poll_hint_mismatches(all_devices, config_.polling.interval_ms)) {
+        LOG_WARN("[Runtime] " << line);
+    }
+
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
     return true;
@@ -407,6 +414,11 @@ bool Runtime::init_automation(std::string &error) {
             if (!parameter_manager_->define(param_config.name, param_config.type, param_config.default_value,
                                             param_config.min, param_config.max, allowed)) {
                 LOG_WARN("[Runtime] Failed to define parameter: " << param_config.name);
+            } else {
+                // Operator changes are not persisted (#273), so a value set before
+                // a restart is back at its default here. Say so where it shows.
+                LOG_INFO("[Runtime] Parameter '" << param_config.name << "' at config default "
+                                                 << automation::parameter_value_to_string(param_config.default_value));
             }
         }
 
