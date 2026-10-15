@@ -225,6 +225,15 @@ bool Runtime::init_providers(std::string &error) {
 
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
+
+    // The firmware command watchdog is what stops a device when the runtime or
+    // its provider is lost (#297). Keyed on the SDK-reserved watchdog_armed
+    // metric; a device that does not report it makes no claim and stays quiet.
+    for (const auto &handle : health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_)) {
+        LOG_WARN("[Runtime] preflight: " << handle
+                                         << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
+                                            "watchdog will not stop it if the runtime or its provider is lost");
+    }
     return true;
 }
 
@@ -315,6 +324,15 @@ void Runtime::preflight_declared_calls() const {
         };
         check_group(config_.automation.mode_transition_hooks.before_transition, "before_transition");
         check_group(config_.automation.mode_transition_hooks.after_transition, "after_transition");
+
+        // The refuse-hookless gate admits AUTO on a hook's from/to filters, so
+        // one AUTO->FAULT hook satisfies it for every output, driven or not
+        // (#246). Name the ones it leaves alone. A warning, not a refusal: an
+        // output can be left alone on purpose.
+        for (const auto &function : fault_hook_uncovered_functions(*registry_, *call_router_, config_.automation)) {
+            LOG_WARN("[Runtime] preflight: no dispatchable AUTO->FAULT hook call drives "
+                     << function << "; a fault in AUTO leaves it as it was");
+        }
     }
 
     // Stated unconditionally: "no software safe state" and "preflight did not run"
@@ -956,12 +974,15 @@ void Runtime::reissue_safe_state_for(const std::string &device_handle) {
     if (issued > 0) {
         LOG_WARN("[Runtime] " << device_handle << " returned while latched; re-asserted " << issued << " "
                               << control::safe_state_kind_to_string(result.kind)
-                              << " safe-state call(s). It stays latched until MANUAL -> AUTO.");
+                              << " safe-state call(s), safe_state_achieved="
+                              << (result.safe_state_achieved ? "true" : "false")
+                              << ". It stays latched until MANUAL -> AUTO.");
     } else {
         LOG_WARN("[Runtime] " << device_handle << " returned while latched, but the planned safe state ("
                               << control::safe_state_kind_to_string(result.kind)
-                              << ") drives nothing on it -- if it did not reboot it may still be running its last "
-                                 "command.");
+                              << ") drives nothing on it, safe_state_achieved="
+                              << (result.safe_state_achieved ? "true" : "false")
+                              << " -- if it did not reboot it may still be running its last command.");
     }
 }
 

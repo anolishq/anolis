@@ -193,5 +193,22 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
     state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
 
+/**
+ * @brief Devices with an ACTUATE function whose provider reports the
+ *        SDK-reserved `watchdog_armed` health metric as "false" (#297).
+ *
+ * The firmware command watchdog is the backstop when the runtime or a provider
+ * is lost. A disarmed one on a device that can actuate is worth a startup
+ * warning. Absence of the key is "unknown" by the SDK contract
+ * (anolis-provider-sdk docs/metrics.md), so only the exact value "false"
+ * counts. A provider reports the key only for a configured watchdog it read
+ * live, so a watchdog that was never configured is silent here too. One
+ * live GetHealth round-trip per available provider. Report-only.
+ *
+ * @return device handles, "provider/device".
+ */
+std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                  const registry::DeviceRegistry &device_registry);
+
 }  // namespace health
 }  // namespace anolis

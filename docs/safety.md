@@ -59,6 +59,14 @@ orientation, not a compliance claim about any one layer.
 | Firmware command watchdog (bus goes quiet) | removed at the output stage | firmware | yes |
 | `POST /v0/estop` / `safety.safe_state` ladder | **maintained** — commands only | provider + runtime | yes |
 
+At startup the runtime warns about each device that has ACTUATE functions
+and whose provider reports the SDK health metric `watchdog_armed` as
+`false`. A provider reports that key only when the device has a command
+watchdog that is configured and was read live; a device without one, a
+watchdog that was never configured, and a failed read all leave the key
+out, and the runtime says nothing about them. No warning is therefore not
+evidence that a watchdog is armed.
+
 Authority matters: every layer above can fail, so a stop is only as reliable as
 the lowest layer that can enforce it alone. The runtime is the weakest layer in
 this table, which is why it must never be the sole stop path on a machine that

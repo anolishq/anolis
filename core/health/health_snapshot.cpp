@@ -331,5 +331,34 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
     return result;
 }
 
+std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                  const registry::DeviceRegistry &device_registry) {
+    std::vector<std::string> out;
+    for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
+        adpp::GetHealthResponse reported;
+        if (!provider->is_available() || !provider->get_health(reported)) {
+            continue;
+        }
+        for (const auto &dh : reported.devices()) {
+            const auto armed = dh.metrics().find("watchdog_armed");
+            if (armed == dh.metrics().end() || armed->second != "false") {
+                continue;  // absent means unknown, not disarmed
+            }
+            const auto device = device_registry.get_device_copy(provider_id, dh.device_id());
+            if (!device.has_value()) {
+                continue;
+            }
+            const auto &functions = device->capabilities.functions_by_id;
+            const bool actuates = std::any_of(functions.begin(), functions.end(), [](const auto &entry) {
+                return entry.second.category == adpp::FunctionPolicy_Category_CATEGORY_ACTUATE;
+            });
+            if (actuates) {
+                out.push_back(provider_id + "/" + dh.device_id());
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace health
 }  // namespace anolis

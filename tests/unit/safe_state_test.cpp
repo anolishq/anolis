@@ -3,7 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "control/call_router.hpp"
@@ -49,7 +51,8 @@ protected:
     // Register an actuating "set_output" (CATEGORY_ACTUATE) with a required double
     // "pwm" arg. `arg_type` lets a test force a non-numeric required arg.
     void RegisterActuator(
-        anolis::deviceprovider::v1::ValueType arg_type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE) {
+        anolis::deviceprovider::v1::ValueType arg_type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE,
+        std::optional<double> min_double = std::nullopt) {
         EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
             Device dev;
             dev.set_device_id("heater");
@@ -58,7 +61,7 @@ protected:
         }));
 
         EXPECT_CALL(*mock_provider, describe_device("heater", _))
-            .WillOnce(Invoke([arg_type](const std::string&, DescribeDeviceResponse& response) {
+            .WillOnce(Invoke([arg_type, min_double](const std::string&, DescribeDeviceResponse& response) {
                 response.mutable_device()->set_device_id("heater");
                 auto* caps = response.mutable_capabilities();
                 auto* fn = caps->add_functions();
@@ -70,6 +73,9 @@ protected:
                 arg->set_name("pwm");
                 arg->set_type(arg_type);
                 arg->set_required(true);
+                if (min_double.has_value()) {
+                    arg->set_min_double(*min_double);
+                }
                 return true;
             }));
 
@@ -115,6 +121,71 @@ TEST_F(SafeStateTest, HooksRungRunsDeclaredHooks) {
     EXPECT_EQ(result.kind, control::SafeStateKind::Hooks);
     ASSERT_EQ(result.actions.size(), 1u);
     EXPECT_TRUE(result.actions[0].success);
+}
+
+// One verdict for the whole rung (#256): a single failed call means the safe
+// state was not achieved, even though the other calls landed.
+TEST_F(SafeStateTest, OneFailedRungCallMeansSafeStateNotAchieved) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("bus timeout"));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    const auto result = controller->trigger("test");
+    ASSERT_EQ(result.actions.size(), 2u);
+    EXPECT_TRUE(result.actions[0].success);
+    EXPECT_FALSE(result.actions[1].success);
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+TEST_F(SafeStateTest, AllRungCallsSucceedingMeansSafeStateAchieved) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    EXPECT_TRUE(controller->trigger("test").safe_state_achieved);
+}
+
+TEST_F(SafeStateTest, NoRungMeansSafeStateNotAchieved) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::None);
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// A rung that issues nothing has achieved nothing: the zero rung on an
+// inventory with no ACTUATE function sends no call.
+TEST_F(SafeStateTest, RungThatIssuesNoCallMeansSafeStateNotAchieved) {
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// The verdict is logged at WARN when the safe state was not achieved.
+TEST_F(SafeStateTest, UnachievedVerdictIsLoggedAtWarn) {
+    RegisterActuator();
+    auto controller = make_controller();
+
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    controller->trigger("test");
+    std::cerr.rdbuf(previous);
+
+    EXPECT_THAT(captured.str(),
+                HasSubstr("[WARN]  [SafeState] E-stop ladder=none actions=0 safe_state_achieved=false"));
 }
 
 TEST_F(SafeStateTest, SetpointsApplyOnlyWithFullCoverage) {
@@ -166,6 +237,88 @@ TEST_F(SafeStateTest, ZeroRungRefusesNonNumericRequiredArg) {
     ASSERT_EQ(result.actions.size(), 1u);
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("cannot zero"));
+}
+
+//=============================================================================
+// uncovered_actuating_functions: dispatchable coverage of the active rung (#253)
+//=============================================================================
+
+// A hooks safe state that drives every actuating function has no gap. The
+// count used to look at setpoints only, so this read 1.
+TEST_F(SafeStateTest, HooksCoveringEveryActuatorCountZeroUncovered) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Hooks);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+}
+
+// A hook that names the function but cannot pass validate_call (here: its
+// required argument is missing) does not cover it.
+TEST_F(SafeStateTest, UndispatchableHookDoesNotCover) {
+    RegisterActuator();
+    auto call = make_call("sim0/heater", "set_output");
+    call.args.clear();
+    safety.safe_state.hooks.push_back(call);
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, HookOnAnotherFunctionDoesNotCover) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "some_other_fn"));
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, SetpointsCoveringEveryActuatorCountZeroUncovered) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 0u);
+}
+
+// The zero rung covers a function only when it can build the call.
+TEST_F(SafeStateTest, ZeroRungCoversNumericActuator) {
+    RegisterActuator();
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 0u);
+}
+
+TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorItCannotBuild) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+// Rung 3 builds pwm=0, but the provider declares min 1: the e-stop call
+// fails validation, so the function is not covered.
+TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorWhoseMinExcludesZero) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 1.0);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+}
+
+TEST_F(SafeStateTest, UncoveredHelperNamesTheFunction) {
+    RegisterActuator();
+    const auto uncovered = control::uncovered_actuating_functions(*registry, *call_router, {});
+    ASSERT_EQ(uncovered.size(), 1u);
+    EXPECT_EQ(uncovered[0], "sim0/heater/set_output");
+
+    EXPECT_TRUE(
+        control::uncovered_actuating_functions(*registry, *call_router, {make_call("sim0/heater", "set_output")})
+            .empty());
 }
 
 TEST_F(SafeStateTest, ClearReleasesLatch) {
@@ -253,6 +406,41 @@ TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
     ASSERT_EQ(result.actions.size(), 1u);
     EXPECT_FALSE(result.actions[0].success);
     EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
+}
+
+// The safe pole of a boolean is unknown: false releases a brake as readily as
+// it disables a drive. Rung 3 must report the function as not driven rather
+// than send a guessed bool (#255).
+TEST_F(SafeStateTest, ZeroRungNeverSendsBoolArgument) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_BOOL);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // StrictMock: any call() would fail this test.
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_EQ(result.actions[0].function, "set_output");
+    EXPECT_FALSE(result.actions[0].success);
+    EXPECT_THAT(result.actions[0].error, HasSubstr("cannot zero"));
+}
+
+// A skipped call never reaches execute_call, so nothing else logs it. The
+// e-stop must say at WARN which function it did not drive, and why.
+TEST_F(SafeStateTest, TriggerWarnsForEachActionNotDriven) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_BOOL);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // The logger writes to std::cerr; capture it in memory.
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    controller->trigger("test");
+    std::cerr.rdbuf(previous);
+    const std::string log = captured.str();
+
+    EXPECT_THAT(log, HasSubstr("[WARN]  [SafeState] E-stop did not drive sim0/heater/set_output: cannot zero "
+                               "required non-numeric argument 'pwm'"));
 }
 
 //=============================================================================
