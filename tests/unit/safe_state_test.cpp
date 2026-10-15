@@ -255,6 +255,23 @@ TEST_F(SafeStateTest, ZeroRungRefusesActuatorWithNoRequiredArg) {
     EXPECT_THAT(result.actions[0].error, HasSubstr("no numeric required argument"));
 }
 
+// The safe pole of a boolean is unknown: false releases a brake as readily as
+// it disables a drive. Rung 3 must report the function as not driven rather
+// than send a guessed bool (#255).
+TEST_F(SafeStateTest, ZeroRungNeverSendsBoolArgument) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_BOOL);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    // StrictMock: any call() would fail this test.
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_EQ(result.actions[0].function, "set_output");
+    EXPECT_FALSE(result.actions[0].success);
+    EXPECT_THAT(result.actions[0].error, HasSubstr("cannot zero"));
+}
+
 //=============================================================================
 // reassert_for: per-device re-issue on a lost device's return (#285)
 //=============================================================================

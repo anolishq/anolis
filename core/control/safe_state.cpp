@@ -19,7 +19,9 @@ int64_t now_epoch_ms() {
 }
 
 // A zero/neutral Value of the given type for rung-3 zeroing. Non-numeric types
-// (string/bytes) return nullopt: we refuse to invent a "zero" for them.
+// (bool/string/bytes) return nullopt: we refuse to invent a "zero" for them.
+// A bool has no knowable safe pole -- false disables an enable flag but
+// releases a brake flag -- so a function that needs one is reported, not sent.
 std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovider::v1::ValueType type) {
     anolis::deviceprovider::v1::Value value;
     value.set_type(type);
@@ -32,9 +34,6 @@ std::optional<anolis::deviceprovider::v1::Value> zero_value(anolis::deviceprovid
             return value;
         case anolis::deviceprovider::v1::VALUE_TYPE_UINT64:
             value.set_uint64_value(0);
-            return value;
-        case anolis::deviceprovider::v1::VALUE_TYPE_BOOL:
-            value.set_bool_value(false);
             return value;
         default:
             return std::nullopt;
