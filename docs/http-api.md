@@ -94,7 +94,11 @@ Notes:
    setpoints, only when they cover every actuating output -> zero, only when
    `safety.safe_state.zero_is_safe` is set -> otherwise an honest
    `software_safe_state: "none"`) and works whether or not automation is
-   enabled. On an automation machine it also drives `FAULT`.
+   enabled. On an automation machine it also drives `FAULT`. The response
+   carries `safe_state_achieved`: `true` only when the rung issued at least
+   one call and every call succeeded, `false` when any call failed or no rung
+   applies. The same verdict is logged when a returning device's safe state
+   is re-asserted.
 2. While latched, actuating `POST /v0/call` requests are refused with `409`
    (fail-closed: a function without an explicit read-only category counts as
    actuating). Read-only calls are unaffected.

@@ -931,12 +931,15 @@ void Runtime::reissue_safe_state_for(const std::string &device_handle) {
     if (issued > 0) {
         LOG_WARN("[Runtime] " << device_handle << " returned while latched; re-asserted " << issued << " "
                               << control::safe_state_kind_to_string(result.kind)
-                              << " safe-state call(s). It stays latched until MANUAL -> AUTO.");
+                              << " safe-state call(s), safe_state_achieved="
+                              << (result.safe_state_achieved ? "true" : "false")
+                              << ". It stays latched until MANUAL -> AUTO.");
     } else {
         LOG_WARN("[Runtime] " << device_handle << " returned while latched, but the planned safe state ("
                               << control::safe_state_kind_to_string(result.kind)
-                              << ") drives nothing on it -- if it did not reboot it may still be running its last "
-                                 "command.");
+                              << ") drives nothing on it, safe_state_achieved="
+                              << (result.safe_state_achieved ? "true" : "false")
+                              << " -- if it did not reboot it may still be running its last command.");
     }
 }
 

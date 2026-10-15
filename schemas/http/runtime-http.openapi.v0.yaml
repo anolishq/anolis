@@ -770,6 +770,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EstopAction'
+        safe_state_achieved:
+          type: boolean
+          description: >-
+            True only when a rung ran, issued at least one call, and every
+            call succeeded. False when any call of the active rung failed, and
+            when software_safe_state is "none". The per-call outcomes are in
+            actions.
         warning:
           type: string
           description: Present when software_safe_state is "none".
