@@ -24,6 +24,8 @@ namespace registry {
 struct SignalSpec {
     std::string signal_id;
     std::string label;
+    std::string unit;         // Provider-declared unit; empty = undeclared
+    std::string description;  // Provider-declared description; empty = undeclared
     anolis::deviceprovider::v1::ValueType type;
     bool readable;
     bool writable;
