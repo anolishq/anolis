@@ -67,6 +67,12 @@ Control-operation guardrails in current runtime:
 
 Parameters are declared in runtime YAML and mutable via HTTP.
 
+Values set over HTTP are not persisted. Every start begins at the config
+defaults, and the startup log lists each parameter with its default value.
+`GET /v0/parameters` reports `source: default` until a `POST` changes a value,
+then `source: operator`. The runtime always starts in `IDLE`, so a value that
+reverted on restart takes effect only once an operator re-enters `AUTO`.
+
 Example:
 
 ```yaml

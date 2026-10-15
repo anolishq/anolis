@@ -101,9 +101,9 @@ healthy but serialized bus does not false-flap:
 - `stale_after_ms = max(8 x polling.interval_ms x device_count, 5000)`
 
 At the default `interval_ms: 500` with a single device this is exactly `2000` /
-`5000` (unchanged from prior releases). A multi-device serialized bus (e.g. an EZO
-chain where a full poll cycle exceeds 2s) gets proportionally looser bounds and
-stops flapping. Supply absolute overrides only when the heuristic does not fit:
+`5000` (unchanged from prior releases). A multi-device serialized bus (e.g. a
+chain of slow sensors where a full poll cycle exceeds 2s) gets proportionally
+looser bounds and stops flapping. Supply absolute overrides only when the heuristic does not fit:
 
 ```yaml
 health:

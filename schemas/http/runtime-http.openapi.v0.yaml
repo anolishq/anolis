@@ -913,6 +913,12 @@ components:
           $ref: '#/components/schemas/ValueType'
         label:
           type: string
+        unit:
+          type: string
+          description: Provider-declared unit. Omitted when the provider declares none.
+        description:
+          type: string
+          description: Provider-declared description. Omitted when the provider declares none.
     DeviceCapabilities:
       type: object
       additionalProperties: false
@@ -1097,6 +1103,13 @@ components:
           type: array
           items:
             type: string
+        source:
+          type: string
+          enum: [default, operator]
+          description: >-
+            "default" while the value is the config default; "operator" once a
+            POST /v0/parameters has changed it. Values are not persisted, so
+            every parameter is back to "default" after a runtime restart.
       additionalProperties: false
     ParametersResponse:
       type: object
@@ -1327,7 +1340,10 @@ components:
           type: string
           enum: [idle, running, blocked, failed, completed, unknown]
           description: >-
-            Engine-neutral execution status. "blocked" means "not advancing"
+            Engine-neutral execution status. "idle" is reported whenever the
+            runtime mode is not AUTO (execution_reason "mode_gate"), because
+            automation only advances in AUTO; "failed" takes precedence over
+            it. "blocked" means "not advancing"
             (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
             necessarily benign waiting). "completed" is emitted ONLY when the
             engine declares a terminal completed state (a behaviour tree may
@@ -1465,8 +1481,8 @@ components:
           description: >-
             Provider-declared descriptor tags, passed through verbatim — the
             runtime interprets no key here. Carries whatever identity the
-            provider chose to publish (e.g. bread emits module_version and
-            crumbs_version). Empty for devices the registry does not carry.
+            provider chose to publish (e.g. a firmware or transport version).
+            Empty for devices the registry does not carry.
             Bounded on ingest: at most 32 entries, keys longer than 128 bytes
             dropped, values truncated to 128 bytes on a UTF-8 character
             boundary.

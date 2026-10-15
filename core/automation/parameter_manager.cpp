@@ -119,6 +119,7 @@ bool ParameterManager::set(const std::string &name, const ParameterValue &value,
 
         // Update value
         it->second.value = value;
+        it->second.set_by_operator = true;
         callbacks_copy = callbacks_;
 
         LOG_INFO("[ParameterManager] Parameter '" << name << "' updated");
