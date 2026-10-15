@@ -913,6 +913,12 @@ components:
           $ref: '#/components/schemas/ValueType'
         label:
           type: string
+        unit:
+          type: string
+          description: Provider-declared unit. Omitted when the provider declares none.
+        description:
+          type: string
+          description: Provider-declared description. Omitted when the provider declares none.
     DeviceCapabilities:
       type: object
       additionalProperties: false

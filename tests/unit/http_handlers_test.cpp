@@ -25,6 +25,7 @@
 
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
+#include "http/json.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
@@ -396,6 +397,68 @@ TEST_F(HttpHandlersTest, GetDeviceCapabilitiesPreservesUint64ArgRange) {
     EXPECT_TRUE(counter["max"].is_number_unsigned());
     EXPECT_EQ((std::numeric_limits<uint64_t>::max() / 2) + 1, counter["min"].get<uint64_t>());
     EXPECT_EQ(std::numeric_limits<uint64_t>::max(), counter["max"].get<uint64_t>());
+}
+
+TEST(SignalSpecEncoding, EmitsUnitAndDescriptionWhenDeclared) {
+    registry::SignalSpec spec;
+    spec.signal_id = "temp";
+    spec.label = "Temperature";
+    spec.type = anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE;
+    spec.unit = "C";
+    spec.description = "Process temperature";
+
+    const auto json = encode_signal_spec(spec);
+
+    ASSERT_TRUE(json.contains("unit"));
+    EXPECT_EQ("C", json["unit"]);
+    ASSERT_TRUE(json.contains("description"));
+    EXPECT_EQ("Process temperature", json["description"]);
+}
+
+TEST(SignalSpecEncoding, OmitsEmptyUnitAndDescription) {
+    registry::SignalSpec spec;
+    spec.signal_id = "count";
+    spec.label = "Count";
+    spec.type = anolis::deviceprovider::v1::VALUE_TYPE_INT64;
+
+    const auto json = encode_signal_spec(spec);
+
+    EXPECT_FALSE(json.contains("unit"));
+    EXPECT_FALSE(json.contains("description"));
+    EXPECT_EQ("count", json["signal_id"]);
+    EXPECT_EQ("int64", json["value_type"]);
+    EXPECT_EQ("Count", json["label"]);
+}
+
+TEST_F(HttpHandlersTest, GetDeviceCapabilitiesCarriesSignalUnitAndDescription) {
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("test_device");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device("test_device", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("test_device");
+            auto* signal = response.mutable_capabilities()->add_signals();
+            signal->set_signal_id("temp");
+            signal->set_name("Temperature");
+            signal->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            signal->set_unit("C");
+            signal->set_description("Process temperature");
+            return true;
+        }));
+    registry->discover_provider("test_provider", *mock_provider);
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    const auto json = nlohmann::json::parse(res->body);
+    const auto& signals = json["capabilities"]["signals"];
+    ASSERT_EQ(1, signals.size());
+    EXPECT_EQ("C", signals[0]["unit"]);
+    EXPECT_EQ("Process temperature", signals[0]["description"]);
 }
 
 //=============================================================================
