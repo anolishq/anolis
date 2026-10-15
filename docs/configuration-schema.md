@@ -187,6 +187,12 @@ independently of `automation`, so a pure-manual machine can declare one.
    string or bytes argument is not called and is reported as not driven:
    the runtime cannot know which boolean value is safe.
 
+`safety.on_startup` (`safe_state` or `leave`, default `safe_state`) - what
+happens to outputs at startup. `safe_state` runs `safety.safe_state` once,
+after provider discovery and before the HTTP server opens, with the same
+ladder and verdict as `POST /v0/estop` but without engaging the latch.
+`leave` leaves outputs as they were. Any other value fails config load.
+
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
 `device_handle` and a function selector. When none of the three apply, the

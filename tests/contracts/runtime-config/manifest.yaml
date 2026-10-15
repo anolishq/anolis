@@ -28,6 +28,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/09-health-staleness.yaml
     expect: valid
     note: health.staleness absolute overrides for device-liveness thresholds (#220)
+  - file: tests/contracts/runtime-config/valid/10-safety-on-startup-leave.yaml
+    expect: valid
+    note: safety.on_startup leave opts out of the startup safe state (#362)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -50,6 +53,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/07-negative-health-staleness.yaml
     expect: invalid/schema
     note: health.staleness.stale_after_ms must be >= 0
+  - file: tests/contracts/runtime-config/invalid/schema/08-safety-on-startup-unknown.yaml
+    expect: invalid/schema
+    note: safety.on_startup must be safe_state or leave
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime

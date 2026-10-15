@@ -175,10 +175,19 @@ struct SafeStateConfig {
 };
 
 /**
+ * @brief What `safety.on_startup` does to outputs at startup (#362).
+ *
+ * `SafeState` runs `safety.safe_state` once, after provider discovery and
+ * before the HTTP server opens. `Leave` leaves outputs as they were.
+ */
+enum class StartupOutputs { SafeState, Leave };
+
+/**
  * @brief Settings from the top-level `safety` YAML section.
  */
 struct SafetyConfig {
     SafeStateConfig safe_state;
+    StartupOutputs on_startup = StartupOutputs::SafeState;
 };
 
 /**

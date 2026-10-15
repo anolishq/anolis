@@ -280,6 +280,8 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device) {
 
 EstopResult SafeStateController::reassert_for(const std::string &device_handle) { return run_ladder(&device_handle); }
 
+EstopResult SafeStateController::drive_safe_state() { return run_ladder(); }
+
 EstopResult SafeStateController::trigger(const std::string &reason) {
     // The mutex is held across the whole ladder so a trigger is atomic with
     // respect to clear() and concurrent triggers. Consequence: capability()

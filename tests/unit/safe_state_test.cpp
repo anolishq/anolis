@@ -491,3 +491,20 @@ TEST_F(SafeStateTest, ReassertForIssuesNothingForOtherDevices) {
     EXPECT_EQ(result.kind, control::SafeStateKind::Hooks);
     EXPECT_TRUE(result.actions.empty());
 }
+
+// The startup run (#362) is the e-stop ladder and verdict without the e-stop:
+// no latch, no FAULT.
+TEST_F(SafeStateTest, DriveSafeStateRunsTheLadderWithoutLatching) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->drive_safe_state();
+    EXPECT_EQ(result.kind, control::SafeStateKind::Hooks);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_TRUE(result.safe_state_achieved);
+    EXPECT_FALSE(result.fault_requested);
+    EXPECT_FALSE(controller->is_engaged());
+}

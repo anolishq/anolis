@@ -1,0 +1,6 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+safety:
+  on_startup: zero

@@ -860,7 +860,19 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["safety"], "safety", error)) {
                 return false;
             }
-            warn_unknown_keys(yaml["safety"], "safety", {"safe_state"});
+            warn_unknown_keys(yaml["safety"], "safety", {"safe_state", "on_startup"});
+
+            if (yaml["safety"]["on_startup"]) {
+                const auto on_startup = yaml["safety"]["on_startup"].as<std::string>();
+                if (on_startup == "safe_state") {
+                    config.safety.on_startup = StartupOutputs::SafeState;
+                } else if (on_startup == "leave") {
+                    config.safety.on_startup = StartupOutputs::Leave;
+                } else {
+                    error = "safety.on_startup must be safe_state or leave, got '" + on_startup + "'";
+                    return false;
+                }
+            }
 
             if (yaml["safety"]["safe_state"]) {
                 const auto &safe_state_node = yaml["safety"]["safe_state"];

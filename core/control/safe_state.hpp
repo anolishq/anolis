@@ -140,6 +140,15 @@ public:
      */
     EstopResult reassert_for(const std::string &device_handle);
 
+    /**
+     * @brief Run the planned rung once across every device (#362).
+     *
+     * The same ladder and verdict as `trigger()`, without engaging the latch
+     * or driving FAULT. Used by `safety.on_startup: safe_state` before the
+     * HTTP server opens, so nothing else is calling in yet.
+     */
+    EstopResult drive_safe_state();
+
 private:
     // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
     std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;
