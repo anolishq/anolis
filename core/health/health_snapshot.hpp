@@ -42,7 +42,7 @@ namespace health {
  *
  * The device `health` liveness tiers were historically a hardcoded 2s/5s wall
  * clock on time-since-last-successful-poll. A healthy but *serialized* bus
- * (e.g. EZO pH ~900ms + DO ~600-900ms => ~1.5-1.8s/cycle at N=2) structurally
+ * (e.g. ~900ms + ~600-900ms per read => ~1.5-1.8s/cycle at N=2) structurally
  * exceeds a 2s wall clock and flapped STALE (observed live). The bound is now
  * derived from the poll cadence and the provider's device count so it scales
  * with the real cycle cost, with absolute overrides for odd buses.
@@ -159,8 +159,8 @@ struct ProviderHealthSnapshot {
 /**
  * @brief Collect the full health view across all providers.
  *
- * Performs a live ADPP GetHealth round-trip per available provider (bread
- * answers with a live GET_WATCHDOG bus query per armed device), so callers
+ * Performs a live ADPP GetHealth round-trip per available provider (a
+ * provider may answer with a live device query per device), so callers
  * choose the cadence deliberately.
  *
  * @param supervisor may be nullptr when supervision is disabled.

@@ -301,6 +301,51 @@ TEST(BTRuntimeTest, TickExceptionDrivesFaultAndStopsTicking) {
     EXPECT_EQ(ticks_at_fault, runtime.get_health().total_ticks)
         << "the tick loop kept running after FAULT; the exception would repeat indefinitely";
 
+    // A failure outranks the mode gate (#270): FAULT is not AUTO, but the
+    // engine's own failure is the cause and must stay visible.
+    EXPECT_EQ(AutomationStatus::Failed, runtime.status().status);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// #270: the tick thread runs in every mode but only ticks in AUTO, so outside
+// AUTO the tree is loaded but not advancing -- Idle, not Running.
+TEST(BTRuntimeTest, ExecutionStatusIsIdleOutsideAuto) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-mode-gate", kSimpleTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+
+    std::string err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "MANUAL";
+
+    // In AUTO the same tree advances, so the gate is what makes the difference.
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (runtime.get_health().total_ticks == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_GT(runtime.get_health().total_ticks, 0);
+    EXPECT_EQ(AutomationStatus::Running, runtime.status().status) << "AUTO";
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "MANUAL";
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::IDLE, err)) << err;
+    EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "IDLE";
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::FAULT, err)) << err;
+    EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "FAULT";
+
     runtime.stop();
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);

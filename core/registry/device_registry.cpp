@@ -202,6 +202,8 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
         SignalSpec spec;
         spec.signal_id = signal.signal_id();
         spec.label = signal.name();
+        spec.unit = signal.unit();
+        spec.description = signal.description();
         spec.type = signal.value_type();
         spec.readable = true;                           // All signals readable in v0
         spec.writable = false;                          // No writable signals in v0
