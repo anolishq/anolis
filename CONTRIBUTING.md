@@ -87,6 +87,28 @@ python -m pytest tests/integration/test_integration.py -m "not stress and not sl
 python -m pytest tests/scenarios/test_scenarios.py -m "not stress and not slow"
 ```
 
+The Python suites (`just test-py`, and `just test` after the C++ tests) need an
+`anolis-provider-sim` binary at the version pinned as `provider_sim` in
+`.ci/dependency-pins.yml`. A clone of this repository does not include one.
+Download it from that tag's release on
+[anolis-provider-sim](https://github.com/anolishq/anolis-provider-sim/releases),
+or build it in a sibling checkout, `../anolis-provider-sim`, where the suite
+finds it without an argument:
+
+```bash
+git clone --branch <provider_sim ref> https://github.com/anolishq/anolis-provider-sim ../anolis-provider-sim
+cd ../anolis-provider-sim
+cmake --preset ci-linux-release
+cmake --build --preset ci-linux-release
+```
+
+To use a binary somewhere else, pass its path to either recipe:
+`just test-py /path/to/anolis-provider-sim` or
+`just test /path/to/anolis-provider-sim`. A relative path is taken from the
+directory you run `just` in.
+Without a sim, `just test-py` stops before pytest starts and says how to get
+one; the suite is never skipped.
+
 ## Code Guidelines
 
 ### C++ Style

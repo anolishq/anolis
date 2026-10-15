@@ -221,7 +221,7 @@ TEST(ProviderSupervisorTest, NextRestartInMsIsNulloptWhenCircuitOpen) {
     auto snap = sup.get_snapshot("prov");
     ASSERT_TRUE(snap.has_value());
     EXPECT_TRUE(snap->circuit_open);
-    // circuit_open → no further restart ever: null to distinguish from healthy null
+    // circuit_open → no backoff restart; only the half-open probe (#326) remains
     EXPECT_FALSE(snap->next_restart_in_ms.has_value());
 }
 
@@ -360,4 +360,46 @@ TEST(ProviderSupervisorTest, RecordCrashWithShortBackoffVectorUsesLastEntryAsBac
     // After fix: clamped to last entry (9999ms)
     // Before fix: get_backoff_ms returns 0 (its own guard path) — FAILS
     EXPECT_EQ(9999, sup.get_backoff_ms("prov"));
+}
+
+// ---------------------------------------------------------------------------
+// Half-open probe of an open circuit (#326)
+// ---------------------------------------------------------------------------
+
+TEST(ProviderSupervisorTest, OpenCircuitIsProbedOncePerInterval) {
+    ProviderSupervisor sup(std::chrono::milliseconds(50));
+    sup.register_provider("prov", make_enabled_policy(1, {1}));
+    sup.record_crash("prov");
+    EXPECT_FALSE(sup.should_probe("prov")) << "a closed circuit uses backoff restarts, not probes";
+    sup.record_crash("prov");
+    ASSERT_TRUE(sup.is_circuit_open("prov"));
+
+    EXPECT_FALSE(sup.should_probe("prov")) << "probed before the interval elapsed";
+    EXPECT_FALSE(sup.should_restart("prov"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    EXPECT_TRUE(sup.should_probe("prov"));
+
+    // A failed probe keeps the circuit open and waits a full interval again.
+    sup.record_probe_result("prov", false);
+    EXPECT_TRUE(sup.is_circuit_open("prov"));
+    EXPECT_FALSE(sup.should_probe("prov"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    EXPECT_TRUE(sup.should_probe("prov"));
+
+    // A successful probe closes the circuit but keeps the streak, so a crash
+    // straight after it re-opens the circuit instead of spending a new budget.
+    sup.record_probe_result("prov", true);
+    EXPECT_FALSE(sup.is_circuit_open("prov"));
+    EXPECT_FALSE(sup.should_probe("prov"));
+    EXPECT_FALSE(sup.record_crash("prov"));
+    EXPECT_TRUE(sup.is_circuit_open("prov"));
+}
+
+TEST(ProviderSupervisorTest, DisabledPolicyIsNeverProbed) {
+    ProviderSupervisor sup(std::chrono::milliseconds(1));
+    sup.register_provider("prov", make_disabled_policy());
+    sup.record_crash("prov");
+    ASSERT_TRUE(sup.is_circuit_open("prov"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(sup.should_probe("prov"));
 }
