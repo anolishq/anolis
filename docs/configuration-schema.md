@@ -119,7 +119,7 @@ Compatibility aliases (deprecated but accepted):
 
 ## `health`
 
-Purpose: device-health liveness staleness policy.
+Purpose: device-health liveness staleness policy and signal exclusions.
 
 Fields:
 
@@ -132,6 +132,16 @@ Fields:
 When both overrides are positive, `stale_after_ms` must be `> warn_after_ms`. The
 derivation keeps the historic `2000`/`5000` behavior at one device @ 500ms while
 letting a serialized multi-device bus loosen proportionally instead of false-flapping.
+
+2. `excluded_signals` array (optional, default empty). Each entry:
+   - `device_handle` (string, required): `provider_id/device_id`. Listed at most
+     once.
+   - `signals` (array of non-empty strings, required, at least one): signal ids
+     left out of that device's health rollup. They are still polled, served and
+     sent to telemetry.
+
+   A handle or signal id that matches nothing after discovery is logged as a
+   warning at startup.
 
 ## `logging`
 
@@ -182,7 +192,10 @@ independently of `automation`, so a pure-manual machine can declare one.
 2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
    only when they cover every actuating output (fail closed).
 3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
-   outputs when neither hooks nor full-coverage setpoints apply.
+   outputs when neither hooks nor full-coverage setpoints apply. Only
+   numeric required arguments are zeroed. A function with a required boolean,
+   string or bytes argument is not called and is reported as not driven:
+   the runtime cannot know which boolean value is safe.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires

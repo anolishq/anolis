@@ -1,0 +1,14 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+logging:
+  level: info
+
+health:
+  excluded_signals:
+    - device_handle: dev0
+      signals: [output2_state]
