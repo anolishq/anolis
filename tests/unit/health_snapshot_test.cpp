@@ -294,6 +294,27 @@ TEST_F(HealthSnapshotCollectorTest, ExcludedFaultSignalLeavesDeviceOk) {
     EXPECT_EQ(state->signals.count("temp"), 1u);
 }
 
+// #325: an exclusion that matches nothing is reported, so a typo is visible
+// instead of silently leaving the device FAULT.
+TEST_F(HealthSnapshotCollectorTest, UnmatchedExclusionsAreReported) {
+    RegisterDevices(1);  // sim0/dev0 with signal "temp"
+    const std::map<std::string, std::set<std::string>> excluded = {
+        {"sim0/dev0", {"temp", "tmep"}},
+        {"sim0/dev-0", {"temp"}},
+    };
+
+    const auto lines = health::unmatched_excluded_signals(excluded, *registry);
+
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_NE(lines[0].find("'sim0/dev-0'"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[0].find("no registered device"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[1].find("'tmep'"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find("sim0/dev0"), std::string::npos) << lines[1];
+
+    // A fully matched list reports nothing.
+    EXPECT_TRUE(health::unmatched_excluded_signals({{"sim0/dev0", {"temp"}}}, *registry).empty());
+}
+
 TEST_F(HealthSnapshotCollectorTest, DegradedQualityDrivesStale) {
     RegisterDevices(1);
     for (auto q : {adpp::SignalValue_Quality_QUALITY_STALE, adpp::SignalValue_Quality_QUALITY_UNKNOWN}) {

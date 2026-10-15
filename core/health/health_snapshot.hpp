@@ -178,6 +178,16 @@ struct ProviderHealthSnapshot {
  * @param staleness_policy cadence-derived liveness bounds (#220).
  * @param now current time; defaulted, overridable for deterministic tests.
  */
+/**
+ * @brief Entries of `health.excluded_signals` that match nothing in the registry (#325).
+ *
+ * One line per device handle that is not registered, and one per signal id the
+ * registered device does not declare. A typo otherwise excludes nothing and the
+ * device keeps reading FAULT or STALE with no hint why. The caller logs them.
+ */
+std::vector<std::string> unmatched_excluded_signals(
+    const std::map<std::string, std::set<std::string>> &excluded_signals, const registry::DeviceRegistry &registry);
+
 std::vector<ProviderHealthSnapshot> collect_providers_health(
     provider::ProviderRegistry &provider_registry, registry::DeviceRegistry &device_registry,
     state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,

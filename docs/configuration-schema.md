@@ -140,6 +140,9 @@ letting a serialized multi-device bus loosen proportionally instead of false-fla
      left out of that device's health rollup. They are still polled, served and
      sent to telemetry.
 
+   A handle or signal id that matches nothing after discovery is logged as a
+   warning at startup.
+
 ## `logging`
 
 Purpose: runtime log verbosity.

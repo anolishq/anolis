@@ -212,6 +212,10 @@ bool Runtime::init_providers(std::string &error) {
     }
 
     LOG_INFO("[Runtime] Ownership validation passed");
+
+    for (const auto &line : health::unmatched_excluded_signals(config_.health.excluded_signals, *registry_)) {
+        LOG_WARN("[Runtime] " << line);
+    }
     LOG_INFO("[Runtime] All providers started");
     preflight_declared_calls();
     return true;

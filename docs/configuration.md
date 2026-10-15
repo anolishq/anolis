@@ -147,6 +147,10 @@ Only the device health string and its `stale_signal_count` /
 at least one signal. Device health is display-only: nothing in the runtime acts
 on it, so an exclusion changes what is reported, not what the runtime does.
 
+After provider discovery the runtime logs a warning for each `device_handle`
+that names no registered device, and for each signal id the device does not
+declare, since such an entry excludes nothing.
+
 ### Compatibility behavior
 
 1. Unknown keys are warn-and-ignore for forward compatibility.

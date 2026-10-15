@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <unordered_map>
 
 #include "../provider/i_provider_handle.hpp"
@@ -94,6 +95,34 @@ StalenessBounds resolve_staleness_bounds(const StalenessPolicy &policy, size_t d
 
 int64_t effective_signal_stale_after_ms(uint32_t declared_ms, int64_t liveness_stale_ms) {
     return std::max(static_cast<int64_t>(declared_ms), liveness_stale_ms);
+}
+
+std::vector<std::string> unmatched_excluded_signals(
+    const std::map<std::string, std::set<std::string>> &excluded_signals, const registry::DeviceRegistry &registry) {
+    std::map<std::string, const registry::RegisteredDevice *> by_handle;
+    const auto devices = registry.get_all_devices();
+    for (const auto &device : devices) {
+        by_handle[device.get_handle()] = &device;
+    }
+
+    std::vector<std::string> lines;
+    for (const auto &[handle, signals] : excluded_signals) {
+        const auto it = by_handle.find(handle);
+        if (it == by_handle.end()) {
+            lines.push_back(std::format(
+                "health.excluded_signals: no registered device '{}'; its exclusions have no effect", handle));
+            continue;
+        }
+        const auto &declared = it->second->capabilities.signals_by_id;
+        for (const auto &signal_id : signals) {
+            if (declared.find(signal_id) == declared.end()) {
+                lines.push_back(
+                    std::format("health.excluded_signals: {} declares no signal '{}'; the exclusion has no effect",
+                                handle, signal_id));
+            }
+        }
+    }
+    return lines;
 }
 
 std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
