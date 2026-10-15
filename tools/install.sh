@@ -1634,17 +1634,28 @@ _run_registry_available() {
 
 # Print "<provider_id> <lifecycle_state>" for each provider in
 # GET /v0/providers/health; exit non-zero when the endpoint does not answer or
-# the body is not JSON. Each provider entry is read by key: a device's
-# provider-declared descriptor_tags can hold any key, provider_id too (#363).
+# the body is empty, is not JSON, or has no providers list. Each provider entry
+# is read by key: a device's provider-declared descriptor_tags can hold any
+# key, provider_id too (#363). An entry with no provider_id is skipped; one
+# with no lifecycle_state is reported as UNKNOWN. jq and python3 agree on all
+# of this; the caller checks that one of them is present.
 _provider_states() {
     local base_url="$1" body
     body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
+    [[ -n "${body//[[:space:]]/}" ]] || return 1
     if command -v jq >/dev/null 2>&1; then
-        jq -r '.providers[] | "\(.provider_id) \(.lifecycle_state)"' <<< "${body}" 2>/dev/null
+        jq -r '.providers | if type == "array" then .[] else error end
+            | select(type == "object")
+            | "\(.provider_id // empty) \(.lifecycle_state // "UNKNOWN")"' <<< "${body}" 2>/dev/null
     else
         python3 -c 'import json, sys
-for p in json.load(sys.stdin)["providers"]:
-    print(p["provider_id"], p["lifecycle_state"])' <<< "${body}" 2>/dev/null
+providers = json.load(sys.stdin)["providers"]
+if not isinstance(providers, list):
+    sys.exit(1)
+for p in providers:
+    if isinstance(p, dict) and p.get("provider_id") is not None:
+        state = p.get("lifecycle_state")
+        print(p["provider_id"], "UNKNOWN" if state is None else state)' <<< "${body}" 2>/dev/null
     fi
 }
 
@@ -1654,6 +1665,13 @@ for p in json.load(sys.stdin)["providers"]:
 # counts providers, not devices, which would need provider-specific knowledge.
 _check_provider_liveness() {
     local base_url="$1" elapsed=0 out states="" answered=0 total=0 running=0
+    # python3 is optional for an offline --local install. Without a parser,
+    # polling would only end in "did not answer" after the full timeout; say
+    # why instead, at once.
+    if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+        log_warn "health: providers not checked (no JSON parser: install jq or python3)"
+        return
+    fi
     while true; do
         if out=$(_provider_states "${base_url}"); then
             answered=1

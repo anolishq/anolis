@@ -261,6 +261,7 @@ _providers_body_with_tag() {
 }
 
 _assert_each_provider_own_state() {
+    _providers_body_with_tag RUNNING CIRCUIT_OPEN > "${PROVIDERS_BODY_FILE}"
     phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
     run cat "${BATS_TEST_TMPDIR}/out"
     [[ "${output}" == *"providers: 1 of 2 running"* ]]
@@ -269,26 +270,83 @@ _assert_each_provider_own_state() {
     [[ "${output}" != *"provider alpha:"* ]]
 }
 
-@test "363: provider states are read by key, not token order (jq)" {
-    command -v jq >/dev/null || skip "jq not installed"
-    _stub_health_endpoints
-    _providers_body_with_tag RUNNING CIRCUIT_OPEN > "${PROVIDERS_BODY_FILE}"
-    _assert_each_provider_own_state
+# An empty 200 body is no answer, not zero providers.
+_assert_empty_body_unknown() {
+    : > "${PROVIDERS_BODY_FILE}"
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers unknown"* ]]
+    [[ "${output}" != *"of 0 running"* ]]
 }
 
-@test "363: provider states are read by key, not token order (python3, no jq)" {
+# An entry with no lifecycle_state counts as a provider that is not running;
+# an entry that is not an object, or has no provider_id, is skipped.
+_assert_missing_state_unknown() {
+    printf '{"providers":[{"lifecycle_state":"RUNNING","provider_id":"alpha"},"junk",null,{"lifecycle_state":"RUNNING"},{"provider_id":"beta"}]}' > "${PROVIDERS_BODY_FILE}"
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 1 of 2 running"* ]]
+    [[ "${output}" == *"provider beta: UNKNOWN"* ]]
+    [[ "${output}" != *"null"* ]]
+}
+
+# Run <assertion> with jq (the host's PATH), with python3 and no jq, or with
+# neither. The narrowed PATH applies in a subshell, so bats' own cleanup keeps
+# its PATH.
+_with_parser() {  # <jq|python3|none> <assertion>
+    local parser="$1" assertion="$2" bin="${BATS_TEST_TMPDIR}/bin-$1" tool
     _stub_health_endpoints
-    _providers_body_with_tag RUNNING CIRCUIT_OPEN > "${PROVIDERS_BODY_FILE}"
-    # A PATH that holds what phase_health runs, but no jq.
-    local bin="${BATS_TEST_TMPDIR}/nojq-bin" tool
+    if [[ "${parser}" == jq ]]; then
+        command -v jq >/dev/null || skip "jq not installed"
+        "${assertion}"
+        return
+    fi
     mkdir -p "${bin}"
-    for tool in python3 grep sed head awk cat wc; do
+    local tools=(grep sed head awk cat wc)
+    [[ "${parser}" == python3 ]] && tools+=(python3)
+    for tool in "${tools[@]}"; do
         ln -s "$(command -v "${tool}")" "${bin}/${tool}"
     done
-    # In a subshell, so bats' own cleanup keeps its PATH.
     (
         PATH="${bin}"
         [ -z "$(command -v jq)" ]
-        _assert_each_provider_own_state
+        "${assertion}"
     )
+}
+
+@test "363: provider states are read by key, not token order (jq)" {
+    _with_parser jq _assert_each_provider_own_state
+}
+
+@test "363: provider states are read by key, not token order (python3, no jq)" {
+    _with_parser python3 _assert_each_provider_own_state
+}
+
+@test "363: an empty providers/health body is reported as unknown (jq)" {
+    _with_parser jq _assert_empty_body_unknown
+}
+
+@test "363: an empty providers/health body is reported as unknown (python3, no jq)" {
+    _with_parser python3 _assert_empty_body_unknown
+}
+
+@test "363: a provider with no lifecycle_state is reported as UNKNOWN (jq)" {
+    _with_parser jq _assert_missing_state_unknown
+}
+
+@test "363: a provider with no lifecycle_state is reported as UNKNOWN (python3, no jq)" {
+    _with_parser python3 _assert_missing_state_unknown
+}
+
+@test "363: with neither jq nor python3, providers are not checked and not polled" {
+    SLEEPS="${BATS_TEST_TMPDIR}/sleeps"
+    _assert_no_parser() {
+        sleep() { echo x >> "${SLEEPS}"; }
+        phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+        run cat "${BATS_TEST_TMPDIR}/out"
+        [[ "${output}" == *"providers not checked (no JSON parser: install jq or python3)"* ]]
+        [[ "${output}" != *"did not answer"* ]]
+        [ ! -e "${SLEEPS}" ]
+    }
+    _with_parser none _assert_no_parser
 }
