@@ -130,6 +130,11 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
         loaded_def_bytes_ = std::move(bytes);
         version_ = version;
         tree_loaded_ = true;
+
+        // A new definition starts a new run: a failure of the previous one
+        // must not outlive it (#378).
+        std::lock_guard<std::mutex> health_lock(health_mutex_);
+        reset_run_status_locked();
     }
 
     outcome.ok = true;
@@ -224,13 +229,26 @@ void BTRuntime::tick_loop() {
 
     LOG_INFO("[BTRuntime] Tick loop started (period: " << tick_period.count() << "ms)");
 
+    // Whether the previous iteration saw AUTO, so the loop can tell when AUTO
+    // is entered and start a new run (#378).
+    bool was_auto = false;
+
     while (running_) {
         // Check if we're in AUTO mode
         if (mode_manager_.current_mode() != RuntimeMode::AUTO) {
             // Not in AUTO mode, skip tick
+            was_auto = false;
             std::this_thread::sleep_until(next_tick);
             next_tick += tick_period;
             continue;
+        }
+
+        if (!was_auto) {
+            // Entering AUTO starts a new run, so a failure of the previous run
+            // no longer describes this one.
+            std::lock_guard<std::mutex> lock(health_mutex_);
+            reset_run_status_locked();
+            was_auto = true;
         }
 
         // Execute single BT tick
@@ -305,6 +323,11 @@ void BTRuntime::tick_loop() {
             std::string mode_error;
             const bool set_ok = mode_manager_.set_mode(RuntimeMode::FAULT, mode_error);
             const auto mode_after = mode_manager_.current_mode();
+            // The run this exception failed has ended once the mode left AUTO,
+            // even if the operator re-enters AUTO before the next iteration.
+            if (mode_after != RuntimeMode::AUTO) {
+                was_auto = false;
+            }
 
             // What matters for safety is only whether we are out of AUTO, so
             // report on that rather than on the call's return value. Any -> FAULT
@@ -333,6 +356,11 @@ void BTRuntime::tick_loop() {
     }
 
     LOG_INFO("[BTRuntime] Tick loop exiting");
+}
+
+void BTRuntime::reset_run_status_locked() {
+    last_tick_status_ = BT::NodeStatus::IDLE;
+    error_count_ = 0;
 }
 
 void BTRuntime::populate_blackboard(BT::Tree &tree) {

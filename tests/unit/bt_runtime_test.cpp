@@ -310,6 +310,121 @@ TEST(BTRuntimeTest, TickExceptionDrivesFaultAndStopsTicking) {
     std::filesystem::remove(tree_path, ec);
 }
 
+namespace {
+
+// Waits until `done` holds or five seconds pass, rather than sleeping a fixed period.
+template <typename Pred>
+bool wait_for(Pred done) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!done() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+}
+
+// Throws on tick while the "explode" parameter is true. Otherwise it returns an
+// ordinary FAILURE while "pass" is false and SUCCESS once it is true, so one
+// loaded tree can fail a run and then run normally in the next. The control
+// nodes are reactive because a tick exception leaves a plain Sequence or
+// Fallback parked on the throwing child, and the next tick would resume there.
+constexpr char kConditionalThrowTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <ReactiveSequence>
+      <GetParameterBool param="explode" value="{explode}"/>
+      <GetParameterBool param="pass" value="{pass}"/>
+      <ReactiveFallback>
+        <CheckBool value="{explode}" expected="false"/>
+        <SetBlackboard output_key="anolis.bt_service_context" value="not-a-service-context"/>
+      </ReactiveFallback>
+      <CheckBool value="{pass}"/>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>
+)";
+
+}  // namespace
+
+// #378: a failure belongs to the run it happened in. Loading a good tree after
+// recovering from FAULT starts a new run, so the status must not stay failed.
+TEST(BTRuntimeTest, LoadAfterFailureClearsFailedStatus) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto bad_path = write_tree_file("anolis-bt-recover-bad", kThrowingTreeXml);
+    const auto good_path = write_tree_file("anolis-bt-recover-good", kSimpleTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{bad_path.string()}).ok);
+
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+    ASSERT_EQ(AutomationStatus::Failed, runtime.status().status);
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{good_path.string()}).ok);
+    EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "MANUAL, after loading a good tree";
+
+    const auto ticks_before = runtime.get_health().total_ticks;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return runtime.get_health().total_ticks > ticks_before; }));
+    EXPECT_EQ(AutomationStatus::Running, runtime.status().status) << "AUTO, after loading a good tree";
+    EXPECT_EQ(0U, runtime.get_health().error_count);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(bad_path, ec);
+    std::filesystem::remove(good_path, ec);
+}
+
+// #378: entering AUTO starts a new run even without a new definition. Once
+// the condition that made the tree throw has cleared, an ordinary FAILURE in
+// the new run is "blocked", not the previous run's "failed".
+TEST(BTRuntimeTest, EnteringAutoAfterFailureClearsFailedStatus) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("explode", ParameterType::BOOL, true));
+    ASSERT_TRUE(parameter_manager.define("pass", ParameterType::BOOL, false));
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-reenter", kConditionalThrowTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+    ASSERT_EQ(AutomationStatus::Failed, runtime.status().status);
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    EXPECT_EQ(AutomationStatus::Failed, runtime.status().status) << "MANUAL keeps the failure visible";
+    ASSERT_TRUE(parameter_manager.set("explode", false, err)) << err;
+
+    // Past the >10-tick stall threshold, every tick an ordinary FAILURE.
+    const auto ticks_before = runtime.get_health().total_ticks;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return runtime.get_health().total_ticks > ticks_before + 11; }));
+    EXPECT_EQ(RuntimeMode::AUTO, mode_manager.current_mode());
+    EXPECT_EQ(AutomationStatus::Blocked, runtime.status().status) << "AUTO, ordinary FAILURE in the new run";
+    EXPECT_EQ(0U, runtime.get_health().error_count);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
 // #270: the tick thread runs in every mode but only ticks in AUTO, so outside
 // AUTO the tree is loaded but not advancing -- Idle, not Running.
 TEST(BTRuntimeTest, ExecutionStatusIsIdleOutsideAuto) {
