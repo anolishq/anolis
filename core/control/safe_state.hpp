@@ -83,6 +83,9 @@ struct CallOutcome {
 struct EstopResult {
     SafeStateKind kind = SafeStateKind::None;
     std::vector<CallOutcome> actions;
+    // True only when a rung ran, issued at least one call, and every call
+    // succeeded. One failed call makes the whole rung not achieved (#256).
+    bool safe_state_achieved = false;
     bool fault_requested = false;  // automation machine: FAULT drive attempted
     bool fault_ok = false;
 };

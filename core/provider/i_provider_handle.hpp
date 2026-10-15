@@ -47,6 +47,14 @@ public:
     virtual bool is_available() const = 0;
 
     /**
+     * @brief Stop the provider process and mark the session unavailable.
+     *
+     * Idempotent. Used before a restart so a wedged process is gone before its
+     * replacement starts (#326).
+     */
+    virtual void stop() = 0;
+
+    /**
      * @brief Execute the ADPP `Hello` handshake.
      */
     virtual bool hello(anolis::deviceprovider::v1::HelloResponse &response) = 0;

@@ -6,13 +6,13 @@ examples:
     note: nominal provider health row with startup diagnostics
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/02-device-full-metrics.json
     expect: valid
-    note: device row with io counters and watchdog state (bread vocabulary)
+    note: device row with io counters and watchdog state (SDK-reserved keys)
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/03-device-minimal-never-polled.json
     expect: valid
     note: never-polled missing device omits staleness_ms by design
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/04-device-ezo-protocol-counters.json
     expect: valid
-    note: device row with ezo protocol-level sample/call counters
+    note: device row with protocol-level sample/call counters
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/05-extra-field-forward-compatible.json
     expect: valid
     note: additive metadata in fields should stay forward-compatible
@@ -24,7 +24,7 @@ examples:
     note: device row carries the provider-declared type_version (device type schema version, not necessarily firmware)
   - file: tests/contracts/telemetry-health-timeseries/examples/valid/08-device-identity-strings.json
     expect: valid
-    note: allowlisted identity strings (startup_firmware as ezo emits it, firmware_version as bread#126 proposes) reach the timeseries alongside counters
+    note: allowlisted identity strings (startup_firmware, firmware_version) reach the timeseries alongside counters
 
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/01-wrong-measurement.json
     expect: invalid

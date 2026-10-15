@@ -198,8 +198,19 @@ nlohmann::json encode_device_info(const registry::RegisteredDevice &device) {
 }
 
 nlohmann::json encode_signal_spec(const registry::SignalSpec &spec) {
-    // Note: unit is not currently in SignalSpec, would need to extend if needed
-    return {{"signal_id", spec.signal_id}, {"value_type", value_type_to_string(spec.type)}, {"label", spec.label}};
+    nlohmann::json json = {
+        {"signal_id", spec.signal_id}, {"value_type", value_type_to_string(spec.type)}, {"label", spec.label}};
+
+    // Unit and description are optional provider metadata; omit them when
+    // empty, as encode_function_spec does for ArgSpec.
+    if (!spec.unit.empty()) {
+        json["unit"] = spec.unit;
+    }
+    if (!spec.description.empty()) {
+        json["description"] = spec.description;
+    }
+
+    return json;
 }
 
 nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {

@@ -221,6 +221,15 @@ class AutomationTester:
         result = self.set_mode("AUTO")
         assert result.get("mode") == "AUTO", f"Failed MANUAL->AUTO after recovery: {result}"
 
+    def test_execution_status_idle_outside_auto(self) -> None:
+        # The tick thread runs in every mode but only ticks in AUTO (#270).
+        for mode in ("MANUAL", "IDLE", "FAULT"):
+            self.set_mode(mode)
+            self._wait_for_mode(mode)
+            body = cast(Dict[str, Any], requests.get(f"{self.base_url}/v0/automation/status", timeout=2).json())
+            assert body.get("execution_status") == "idle", f"{mode}: expected idle, got {body}"
+            assert body.get("execution_reason") == "mode_gate", f"{mode}: expected mode_gate, got {body}"
+
     def test_invalid_mode_string(self) -> None:
         result = self.set_mode("INVALID")
         status = cast(Dict[str, Any], result.get("status", {}))
@@ -240,6 +249,16 @@ class AutomationTester:
         names = [entry.get("name") for entry in cast(List[Dict[str, Any]], body.get("parameters", []))]
         assert "temp_setpoint" in names, f"Expected temp_setpoint in parameters, got {names}"
 
+        # Nothing has been set yet, so every parameter is at its config default (#273).
+        sources = {entry.get("name"): entry.get("source") for entry in cast(List[Dict[str, Any]], body["parameters"])}
+        assert set(sources.values()) == {"default"}, f"Expected every source to be default, got {sources}"
+
+        # The startup log names each parameter at its default.
+        capture = self.fixture.get_output_capture()
+        output = capture.get_all_output() if capture else ""
+        for name in sources:
+            assert f"Parameter '{name}' at config default" in output, f"Startup log does not list {name}"
+
     def test_update_parameter_valid(self) -> None:
         try:
             resp = requests.post(
@@ -255,6 +274,11 @@ class AutomationTester:
         body = cast(Dict[str, Any], resp.json())
         value = body.get("parameter", {}).get("value")
         assert value == 30.0, f"Expected updated value 30.0, got {value}"
+
+        listed = requests.get(f"{self.base_url}/v0/parameters", timeout=2).json()["parameters"]
+        sources = {entry["name"]: entry.get("source") for entry in listed}
+        assert sources.get("temp_setpoint") == "operator", f"Expected temp_setpoint source operator, got {sources}"
+        assert sources.get("motor_duty_cycle") == "default", f"An unset parameter changed source: {sources}"
 
     def test_update_parameter_out_of_range(self) -> None:
         try:
@@ -329,6 +353,7 @@ AUTOMATION_CHECKS: List[AutomationCheck] = [
     ("invalid_transition_fault_to_auto", AutomationTester.test_invalid_transition_fault_to_auto),
     ("recovery_path_fault_to_manual_to_auto", AutomationTester.test_recovery_path_fault_to_manual_to_auto),
     ("invalid_mode_string", AutomationTester.test_invalid_mode_string),
+    ("execution_status_idle_outside_auto", AutomationTester.test_execution_status_idle_outside_auto),
     ("get_parameters", AutomationTester.test_get_parameters),
     ("update_parameter_valid", AutomationTester.test_update_parameter_valid),
     ("update_parameter_out_of_range", AutomationTester.test_update_parameter_out_of_range),

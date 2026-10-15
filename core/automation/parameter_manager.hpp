@@ -25,6 +25,9 @@ struct ParameterDef {
     std::optional<double> max;                               // For numeric types
     std::optional<std::vector<std::string>> allowed_values;  // For string enums
 
+    // False until an operator set changes the value; served as `source`.
+    bool set_by_operator = false;
+
     /**
      * @brief Validate a new value against constraints
      *
@@ -54,7 +57,8 @@ using ParameterChangeCallback =
  * - Range/enum constraints loaded from YAML
  * - Thread-safe parameter access and updates
  * - Change notification callbacks for telemetry
- * - Optional persistence back to YAML (disabled by default)
+ * - No persistence: every start begins at the config defaults, and an
+ *   operator change lasts until the runtime restarts
  *
  * Architecture constraints:
  * - Parameters are READ-ONLY from BT perspective (accessed via blackboard)

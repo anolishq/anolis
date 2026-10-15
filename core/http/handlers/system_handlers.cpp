@@ -210,7 +210,8 @@ void HttpServer::handle_post_estop(const httplib::Request &req, httplib::Respons
     nlohmann::json response = {{"status", make_status(StatusCode::OK)},
                                {"latched", true},
                                {"software_safe_state", control::safe_state_kind_to_string(result.kind)},
-                               {"actions", actions}};
+                               {"actions", actions},
+                               {"safe_state_achieved", result.safe_state_achieved}};
     if (result.kind == control::SafeStateKind::None) {
         response["warning"] = "No software safe-state declared; the hardware e-stop is the only safe-state path";
     }
@@ -275,6 +276,8 @@ void HttpServer::handle_get_parameters(const httplib::Request &, httplib::Respon
         if (def.allowed_values.has_value() && !def.allowed_values.value().empty()) {
             param_json["allowed_values"] = def.allowed_values.value();
         }
+
+        param_json["source"] = def.set_by_operator ? "operator" : "default";
 
         parameters_json.push_back(param_json);
     }

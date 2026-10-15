@@ -302,9 +302,10 @@ bool CallRouter::coerce_arguments(const registry::FunctionSpec& spec,
                 break;
 
             // Integer -> double. Without this the fix is asymmetric on a single
-            // physical device: bread RLHT takes a uint64 duty and double
-            // setpoints, so `duty1_pct: 0` would work while `setpoint1_c: 0` did
-            // not. Writing a plain 0 is the obvious way to express a safe value.
+            // physical device: a device whose duty is uint64 and whose
+            // setpoints are double would accept `duty1_pct: 0` but not
+            // `setpoint1_c: 0`. Writing a plain 0 is the obvious way to express
+            // a safe value.
             case ValueType::VALUE_TYPE_DOUBLE:
                 if (arg_value.has_int64_value()) {
                     const int64_t raw = arg_value.int64_value();
