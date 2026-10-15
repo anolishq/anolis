@@ -50,12 +50,26 @@ enum class SafeStateKind { None, Hooks, Setpoints, Zero };
  * weaker answer to this question is precisely how a machine gets reported as
  * safe while its e-stop does nothing (#251, #258).
  *
- * @param uncovered_out optional count of actuating outputs no setpoint covers.
+ * How many functions the active rung cannot drive is a separate question,
+ * answered by `EstopCapability::uncovered_actuating_functions`.
  */
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety,
-                                      size_t *uncovered_out = nullptr);
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety);
 
 const char *safe_state_kind_to_string(SafeStateKind kind);
+
+/**
+ * @brief ACTUATE functions that no call in `calls` drives with a dispatchable
+ *        request, as "<device_handle>/<function_name>".
+ *
+ * A function is covered when a call targets it (same device; id and name, where
+ * given, agree) AND that call passes `CallRouter::validate_call` -- the same
+ * dry run the startup preflight uses. Naming a function is not enough: a call
+ * that cannot dispatch drives nothing (#253). Covered means driven, not driven
+ * to a safe value: a hook that sets a duty to 100 covers that function.
+ */
+std::vector<std::string> uncovered_actuating_functions(const registry::DeviceRegistry &registry,
+                                                       const CallRouter &call_router,
+                                                       const std::vector<runtime::ModeTransitionCallConfig> &calls);
 
 /** @brief Per-call outcome recorded while running the ladder. */
 struct CallOutcome {
@@ -81,7 +95,7 @@ struct EstopCapability {
     bool latched = false;
     SafeStateKind software_safe_state = SafeStateKind::None;  // what a trigger WOULD do now
     std::optional<int64_t> latched_at_epoch_ms;
-    size_t uncovered_actuating_functions = 0;  // actuating outputs with no declared setpoint
+    size_t uncovered_actuating_functions = 0;  // ACTUATE functions the active rung cannot drive
 };
 
 /**
@@ -129,9 +143,10 @@ public:
 private:
     // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
     std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;
-    // Which rung would run now; if uncovered_out is set, reports how many
-    // actuating outputs lack a declared setpoint.
-    SafeStateKind planned_kind(size_t *uncovered_out) const;
+    // Which rung would run now.
+    SafeStateKind planned_kind() const;
+    // ACTUATE functions the rung `kind` cannot drive (all of them for None).
+    size_t uncovered_count(SafeStateKind kind) const;
     // Runs the planned rung. With `only_device` set, only calls whose target is
     // that handle are issued.
     EstopResult run_ladder(const std::string *only_device = nullptr);
