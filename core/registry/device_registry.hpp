@@ -24,11 +24,14 @@ namespace registry {
 struct SignalSpec {
     std::string signal_id;
     std::string label;
+    std::string unit;         // Provider-declared unit; empty = undeclared
+    std::string description;  // Provider-declared description; empty = undeclared
     anolis::deviceprovider::v1::ValueType type;
     bool readable;
     bool writable;
     bool is_default;              // Included in the default periodic poll plan
     uint32_t stale_after_ms = 0;  // Provider-declared freshness bound; 0 = unset => inherit liveness bound (#220)
+    double poll_hint_hz = 0.0;    // Provider's advisory poll rate; 0 = unset. Reported, never honoured (#269)
 };
 
 /**

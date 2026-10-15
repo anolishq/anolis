@@ -100,6 +100,7 @@ class EstopTester:
         assert engaged["status_code"] == 200, engaged
         assert engaged["body"]["latched"] is True, engaged
         assert engaged["body"]["software_safe_state"] == "zero", engaged
+        assert isinstance(engaged["body"]["safe_state_achieved"], bool), engaged
 
         # Status reflects the latch.
         assert self.http_get("/v0/runtime/status")["body"]["estop"]["latched"] is True

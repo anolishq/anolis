@@ -10,7 +10,15 @@
       {
         "signal_id": "motor1_duty",
         "value_type": "double",
-        "label": "Motor 1 Duty"
+        "label": "Motor 1 Duty",
+        "description": "PWM duty 0..1"
+      },
+      {
+        "signal_id": "motor1_speed",
+        "value_type": "double",
+        "label": "Motor 1 Speed",
+        "unit": "rpm",
+        "description": "Estimated speed"
       }
     ],
     "functions": [
