@@ -108,8 +108,8 @@ Fields:
 3. `health_interval_ms` (int, default 15000, `0` disables): cadence of
    provider/device health snapshot ingestion into InfluxDB
    (`anolis_provider_health` / `anolis_device_health`). Each snapshot performs
-   a live provider GetHealth round-trip (bread: a GET_WATCHDOG bus query per
-   armed device), so raise/lower deliberately.
+   a live provider GetHealth round-trip (a provider may answer with a live
+   device query per device), so raise/lower deliberately.
 
 Compatibility aliases (deprecated but accepted):
 

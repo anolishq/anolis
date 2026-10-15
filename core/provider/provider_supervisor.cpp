@@ -99,8 +99,10 @@ bool ProviderSupervisor::record_crash(const std::string &provider_id) {
 
     if (state.attempt_count > policy.max_attempts) {
         state.circuit_open = true;
+        state.next_restart_time = std::chrono::steady_clock::now() + probe_interval_;
         LOG_ERROR("[Supervisor] Provider '" << provider_id << "' crashed (circuit breaker open, exceeded "
-                                            << policy.max_attempts << " restart attempts)");
+                                            << policy.max_attempts << " restart attempts; probing every "
+                                            << probe_interval_.count() << "ms)");
         return false;
     }
 
@@ -130,6 +132,44 @@ bool ProviderSupervisor::is_circuit_open(const std::string &provider_id) const {
     }
 
     return state_it->second.circuit_open;
+}
+
+bool ProviderSupervisor::should_probe(const std::string &provider_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto policy_it = policies_.find(provider_id);
+    auto state_it = states_.find(provider_id);
+
+    if (policy_it == policies_.end() || state_it == states_.end()) {
+        return false;
+    }
+
+    // A disabled policy also opens the circuit on its first crash (record_crash);
+    // probing it would restart a provider its config says not to restart.
+    if (!policy_it->second.enabled || !state_it->second.circuit_open) {
+        return false;
+    }
+
+    return std::chrono::steady_clock::now() >= state_it->second.next_restart_time;
+}
+
+void ProviderSupervisor::record_probe_result(const std::string &provider_id, bool restarted) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto state_it = states_.find(provider_id);
+
+    if (state_it == states_.end()) {
+        return;
+    }
+
+    auto &state = state_it->second;
+    if (restarted) {
+        state.circuit_open = false;
+        state.crash_detected = false;
+        LOG_INFO("[Supervisor] Provider '" << provider_id << "' probe restart succeeded; circuit closed");
+    } else {
+        state.next_restart_time = std::chrono::steady_clock::now() + probe_interval_;
+        LOG_WARN("[Supervisor] Provider '" << provider_id << "' probe restart failed; next probe in "
+                                           << probe_interval_.count() << "ms");
+    }
 }
 
 int ProviderSupervisor::get_attempt_count(const std::string &provider_id) const {

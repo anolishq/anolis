@@ -59,7 +59,8 @@ check-py:
     uv run mypy .
 
 # Build + test both lanes.
-test: test-cpp test-py
+[doc("Build + test both lanes (`just test /path/to/anolis-provider-sim` names the sim).")]
+test provider="": test-cpp (test-py provider)
 
 # Build and run the C++ test suite.
 test-cpp:
@@ -72,5 +73,41 @@ test-cpp:
 # routes — so an unpinned run can test the wrong binary. The explicit test paths
 # (matching pyproject testpaths) are needed so pytest discovers tests/conftest.py
 # and registers --runtime before parsing it.
-test-py:
-    uv run pytest tests/integration tests/scenarios --runtime build/{{preset}}/core/anolis-runtime
+#
+# The suite also needs an anolis-provider-sim binary. `provider` names one
+# (`just test-py /path/to/anolis-provider-sim`);
+# without it the harness looks beside this clone. The recipe checks it resolves
+# before pytest starts, and never fetches it or skips the suite without it.
+[doc("Run the Python suite (`just test-py /path/to/anolis-provider-sim` names the sim).")]
+test-py provider="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    provider={{quote(provider)}}
+    # A relative path is the caller's, not the justfile directory's.
+    if [[ -n "${provider}" && "${provider}" != /* ]]; then
+        provider={{quote(invocation_directory())}}/"${provider}"
+    fi
+    # Exit 3 means the harness's own resolver found no sim; any other failure
+    # is reported as itself.
+    rc=0
+    sim=$(uv run python -c 'import sys
+    from tests.conftest import _resolve_provider
+    try:
+        print(_resolve_provider(sys.argv[1] or None))
+    except RuntimeError:
+        sys.exit(3)' "${provider}") || rc=$?
+    if [[ ${rc} -ne 0 && ${rc} -ne 3 ]]; then
+        exit "${rc}"
+    fi
+    if [[ ${rc} -eq 3 ]]; then
+        ref=$(awk '/provider_sim:/{f=1; next} f && /ref:/{print $2; exit}' .ci/dependency-pins.yml)
+        echo "error: no anolis-provider-sim binary found${provider:+ at ${provider}}." >&2
+        echo "The suite needs anolis-provider-sim ${ref}, the version pinned in .ci/dependency-pins.yml." >&2
+        echo "Download it from https://github.com/anolishq/anolis-provider-sim/releases/tag/${ref}," >&2
+        echo "or build it beside this clone, where the suite finds it without an argument:" >&2
+        echo "  git clone --branch ${ref} https://github.com/anolishq/anolis-provider-sim ../anolis-provider-sim" >&2
+        echo "  cd ../anolis-provider-sim && cmake --preset ci-linux-release && cmake --build --preset ci-linux-release" >&2
+        echo "Then run: just test-py /path/to/anolis-provider-sim" >&2
+        exit 1
+    fi
+    uv run pytest tests/integration tests/scenarios --runtime build/{{preset}}/core/anolis-runtime --provider "${sim}"

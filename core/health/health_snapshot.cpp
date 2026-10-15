@@ -36,8 +36,9 @@ std::string derive_lifecycle_state(bool is_available,
 }
 
 // Bounds on provider-declared descriptor identity. Generous next to what any
-// real provider emits (bread declares 13 short tags) and small enough that a
-// misbehaving one cannot inflate a health response or a telemetry batch.
+// real provider emits (the largest current provider declares 13 short tags)
+// and small enough that a misbehaving one cannot inflate a health response or
+// a telemetry batch.
 constexpr size_t kMaxIdentityLen = 128;
 constexpr size_t kMaxDescriptorTags = 32;
 

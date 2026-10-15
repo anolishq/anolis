@@ -9,8 +9,8 @@
  * `anolis_provider_health` / `anolis_device_health` line protocol.
  *
  * Cadence is a real cost decision, not a free parameter: each snapshot is a
- * live ADPP GetHealth round-trip per provider, and bread answers that with a
- * live GET_WATCHDOG bus transaction per armed device.
+ * live ADPP GetHealth round-trip per provider, and a provider may answer that
+ * with a live device query per device.
  */
 
 #include <condition_variable>
