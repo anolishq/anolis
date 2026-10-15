@@ -70,9 +70,8 @@ so they cannot drift.
    - identity strings: `startup_firmware`, `startup_product_code`,
      `firmware_version` — non-empty, truncated to 128 bytes, omitted when
      absent or empty. Note these three are not in the SDK's reserved-key
-     vocabulary yet, unlike the counters above; the first two are what
-     `anolis-provider-ezo` emits today and the third is the key
-     `anolis-provider-bread#126` proposes.
+     vocabulary yet, unlike the counters above; their reservation is open
+     as `anolishq/anolis-provider-sdk#38`.
 7. Every provider-supplied string is escaped for line protocol — **tag values
    as well as string fields**, since `provider_id`, `device_id` and `signal_id`
    are provider-chosen and unvalidated. In field values `"` and `\` are
@@ -89,7 +88,7 @@ keys are written, parsed strictly to their declared type (base-10 integers;
 exactly `true`/`false` booleans). Unknown keys and unparseable values are
 skipped, never stringly dumped — schema and series cardinality stay honest.
 The allowlist follows the reserved-key vocabulary in
-`anolis-provider-sdk docs/metrics.md` plus the bread watchdog keys. The
+`anolis-provider-sdk docs/metrics.md`, watchdog keys included. The
 counter semantics (cumulative, monotonic per provider-process lifetime,
 magnitudes not comparable across providers) are defined there.
 
@@ -106,9 +105,9 @@ snapshot.
 ### Cadence
 
 Controlled by `telemetry.health_interval_ms` (default 15000, `0` disables).
-Each snapshot is a live ADPP GetHealth round-trip per provider — bread
-answers with a live GET_WATCHDOG bus transaction per armed device — so the
-cadence is a deliberate cost decision, not a free parameter.
+Each snapshot is a live ADPP GetHealth round-trip per provider — a provider
+may answer with a live device query per device — so the cadence is a
+deliberate cost decision, not a free parameter.
 
 ## Compatibility Rule
 

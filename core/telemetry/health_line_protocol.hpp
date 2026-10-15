@@ -23,8 +23,8 @@
  * keys in the allowlists below are written, parsed strictly to their declared
  * type; unknown keys and unparseable values are skipped so schema and series
  * cardinality stay honest. The counter allowlists follow the reserved-key
- * vocabulary in anolis-provider-sdk docs/metrics.md plus the bread watchdog
- * keys. The identity-string allowlist does NOT — those keys are not reserved
+ * vocabulary in anolis-provider-sdk docs/metrics.md, watchdog keys included.
+ * The identity-string allowlist does NOT — those keys are not reserved
  * upstream yet; see the note on device_string_keys.
  */
 
@@ -76,7 +76,7 @@ inline bool parse_metric_bool(const std::string &s, bool &out) {
 
 namespace health_keys {
 
-// Device-level integer counters (SDK metrics.md vocabulary + bread watchdog).
+// Device-level integer counters (SDK metrics.md vocabulary).
 inline constexpr std::array<const char *, 9> device_int_keys = {
     "io_ok",
     "io_failed",
@@ -100,19 +100,18 @@ inline constexpr std::array<const char *, 4> device_bool_keys = {
 // Device-level identity strings. Distinct from the counters above: these are
 // low-churn descriptive values, and the runtime had no string category at all,
 // so a provider reporting its firmware through health metrics had it dropped on
-// the floor — ezo's startup_firmware reached the HTTP surface and never the
-// timeseries it needs to be attributable from
-// (anolishq/anolis-provider-bread#126).
+// the floor: a startup_firmware value reached the HTTP surface and never the
+// timeseries it needs to be attributable from.
 //
 // Unlike the counter allowlists above, these keys are NOT in the SDK's reserved
-// vocabulary (anolis-provider-sdk docs/metrics.md). Two of them are what ezo
-// already emits; firmware_version is the key bread#126 proposes for itself.
-// This list should move into metrics.md rather than grow here.
+// vocabulary (anolis-provider-sdk docs/metrics.md). The reservation of
+// firmware_version is open as anolishq/anolis-provider-sdk#38, which settles
+// what this list holds. It should move into metrics.md rather than grow here.
 //
-// Note what is deliberately absent: bread publishes module_version and
-// crumbs_version as descriptor *tags*, not metrics, and descriptor tags are by
-// design never written to line protocol. Allowlisting them here would be dead
-// code that reads as coverage.
+// Note what is deliberately absent: identity a provider publishes as
+// descriptor *tags*, not metrics. Descriptor tags are by design never written
+// to line protocol. Allowlisting them here would be dead code that reads as
+// coverage.
 inline constexpr std::array<const char *, 3> device_string_keys = {
     "startup_firmware",
     "startup_product_code",
