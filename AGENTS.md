@@ -29,8 +29,10 @@ C++20 control runtime for the Anolis system.
 
 ## Repo-specific gotchas
 
-- **C++20**, and use **`std::format`** for diagnostics/log messages (not
-  iostreams or printf-style formatting).
+- **C++20**. Log with the **`LOG_*` stream macros** (`LOG_WARN("..." << x)`);
+  build non-log strings with **`std::format`**. Use `std::cout`/`std::cerr`
+  only in the logger's sink (`core/logging/logger.cpp`) and in `main.cpp`'s
+  command-line output; no printf-style formatting.
 - **Test-only clang-tidy relaxations** live in `tests/.clang-tidy` — it disables
   gtest test-noise such as `bugprone-unchecked-optional-access` (false positives
   against gtest macros). Don't "fix" test code to satisfy a check that the test
