@@ -184,7 +184,7 @@ _setup_backup_dirs() {
     _setup_backup_dirs
     printf '#!/bin/sh\necho "anolis-runtime 0.1.39"\n' > "${PREFIX}/bin/anolis-runtime"
     chmod +x "${PREFIX}/bin/anolis-runtime"
-    printf '{"version": "0.1.39"}\n' > "${PREFIX}/manifest.json"
+    printf '{\n  "version": "0.1.39"\n}\n' > "${PREFIX}/manifest.json"
     printf 'runtime-v3\n' > "${BUNDLE_DIR}/bin/anolis-runtime"
 
     run phase_backup
@@ -273,4 +273,47 @@ _install_version() {
     [ "$("${PREFIX}/bin/anolis-runtime")" = "anolis-runtime 0.1.43" ]
     [[ "${output}" == *"manifest.json still describes the newer install"* ]]
     grep -q '"version": "0.1.44"' "${PREFIX}/manifest.json"
+}
+
+@test "phase_backup does not record a manifest that disagrees with the saved runtime (#345)" {
+    _setup_install_cycle
+    _install_version 0.1.43
+    _install_version 0.1.44
+    # A rollback of a backup with no saved manifest leaves the 0.1.44 manifest
+    # beside the restored 0.1.43 runtime.
+    rm -rf "${PREFIX}/.prev/meta"
+    do_rollback
+    grep -q '"version": "0.1.44"' "${PREFIX}/manifest.json"
+
+    # The next upgrade backs up the 0.1.43 runtime. The stale manifest must
+    # not be recorded as its manifest.
+    run _install_version 0.1.44
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"not recording it"* ]]
+    [ "$(cat "${PREFIX}/.prev/meta/runtime-version")" = "anolis-runtime 0.1.43" ]
+    if [[ -e "${PREFIX}/.prev/meta/manifest.json" ]]; then
+        grep -q '"version": "0.1.43"' "${PREFIX}/.prev/meta/manifest.json"
+    fi
+
+    # So the following rollback restores no stale manifest with a check mark.
+    run do_rollback
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"restored manifest.json"* ]]
+}
+
+@test "--rollback warns, and still finishes, when the saved manifest cannot be copied (#345)" {
+    if [ "$EUID" -eq 0 ]; then
+        skip "root reads a mode-000 file"
+    fi
+    _setup_install_cycle
+    _install_version 0.1.43
+    _install_version 0.1.44
+    chmod 000 "${PREFIX}/.prev/meta/manifest.json"
+
+    run do_rollback
+    chmod 644 "${PREFIX}/.prev/meta/manifest.json"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"could not restore manifest.json"* ]]
+    [[ "${output}" == *"rollback complete"* ]]
+    [ "$("${PREFIX}/bin/anolis-runtime")" = "anolis-runtime 0.1.43" ]
 }
