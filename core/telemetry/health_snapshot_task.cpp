@@ -24,7 +24,7 @@ HealthSnapshotTask::HealthSnapshotTask(int interval_ms, std::string runtime_name
       state_cache_(state_cache),
       supervisor_(supervisor),
       sink_(sink),
-      staleness_policy_(staleness_policy) {}
+      staleness_policy_(std::move(staleness_policy)) {}
 
 HealthSnapshotTask::~HealthSnapshotTask() { stop(); }
 
