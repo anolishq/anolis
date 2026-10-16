@@ -98,7 +98,8 @@ to a safe value:
 > This hook is **not** the software stop's safe state. `POST /v0/estop` runs
 > `safety.safe_state`, which this gate does not check — declare both. A machine
 > with the hook and no `safety.safe_state` passes the gate while its software stop
-> has no safe state of its own: the stop runs this hook on its way into FAULT and
+> has no safe state of its own: the stop runs this hook on its way into FAULT
+> (except in IDLE, where the IDLE gate refuses `before_transition` calls) and
 > reports `safe_state_achieved: false`. Once `safety.safe_state` declares a rung,
 > the stop's latch refuses this hook and the rung alone drives the outputs.
 

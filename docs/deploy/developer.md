@@ -94,8 +94,9 @@ Read [safety.md](../safety.md). Two things developers get wrong most often:
 safe state of its own.** The gate asks for a `-> FAULT` mode-transition hook;
 `POST /v0/estop` runs `safety.safe_state`. They are separate declarations, and
 declaring only the first leaves the stop's ladder driving nothing: it runs the
-hook you did declare, when it matches the mode the stop was pressed in, and
-reports `safe_state_achieved: false`.
+hook you did declare, when it matches the mode the stop was pressed in (in
+IDLE, only an `after_transition` hook runs), and reports
+`safe_state_achieved: false`.
 
 **The software stop is not an emergency stop.** It commands devices that stay
 powered, and it cannot run if the runtime, a provider or the bus has failed —

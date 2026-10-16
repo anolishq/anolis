@@ -248,7 +248,9 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 > is a separate declaration the gate never checks. Declaring only the hook
 > leaves the software stop's ladder driving nothing. With no rung to run, the
 > stop's own entry into FAULT runs the `-> FAULT` hooks that match the mode it
-> was pressed in, and reports `safe_state_achieved: false`: the runtime cannot
+> was pressed in — in IDLE only the `after_transition` ones, because the IDLE
+> gate refuses `before_transition` calls — and reports
+> `safe_state_achieved: false`: the runtime cannot
 > tell whether those hooks make the machine safe. When the ladder does run a
 > rung (hooks, setpoints or zero), the latch refuses those hooks and the ladder
 > alone drives the outputs. The refusal message says so when the ladder would

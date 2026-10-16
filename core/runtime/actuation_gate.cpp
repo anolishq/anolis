@@ -110,7 +110,8 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     if (control::planned_safe_state_kind(registry, safety) == control::SafeStateKind::None) {
         msg << ". Note: that hook satisfies this gate but is NOT the e-stop's safe state — POST /v0/estop runs "
                "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would run "
-               "only the -> FAULT hooks that match the mode it is pressed in and report safe_state_achieved=false. "
+               "only the -> FAULT hooks that match the mode it is pressed in (in IDLE, only after_transition "
+               "hooks: the IDLE gate refuses before_transition calls) and report safe_state_achieved=false. "
                "Declare safety.safe_state (setpoints count only if they cover every actuating output)";
     }
 

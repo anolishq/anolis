@@ -357,7 +357,8 @@ void Runtime::preflight_declared_calls() const {
             LOG_WARN(
                 "[Runtime] preflight: this machine declares '-> FAULT' mode-transition hooks but no "
                 "safety.safe_state. POST /v0/estop reads only safety.safe_state, so its ladder will drive NOTHING; "
-                "it runs only the '-> FAULT' hooks that match the mode it is pressed in, and reports "
+                "it runs only the '-> FAULT' hooks that match the mode it is pressed in (in IDLE, only "
+                "after_transition hooks: the IDLE gate refuses before_transition calls), and reports "
                 "safe_state_achieved=false. Declare safety.safe_state to give the e-stop a safe state of its own.");
         } else {
             LOG_WARN(
