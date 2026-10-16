@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
+from tests.integration.automation_suite import AutomationTester
 from tests.support.runtime_fixture import RuntimeFixture
 
 
@@ -256,6 +257,154 @@ STARTUP_CHECKS: List[StartupCheck] = [
     ("no_safe_state", None, None, check_startup_no_safe_state),
     ("leave", "leave", "set_relay_ch1", check_startup_leave),
     ("order", None, "set_relay_ch1", check_startup_safe_state_order),
+]
+
+
+class FaultHookEstopTester(AutomationTester):
+    """An automation machine whose only `-> FAULT` hook closes relay 1 (#251).
+
+    The sim's relays power on open, so the hook's effect shows in GET
+    /v0/state. `safe_state` None declares no safety.safe_state, so the
+    ladder plans rung none. A `hook_function` the sim does not have makes
+    the hook fail.
+    """
+
+    def __init__(
+        self,
+        runtime_path: Path,
+        provider_path: Path,
+        port: int,
+        safe_state: Optional[Dict[str, Any]],
+        hook_function: str = "set_relay_ch1",
+    ):
+        super().__init__(runtime_path, provider_path, port=port)
+        config = self.fixture.config_dict
+        assert config is not None
+        config["automation"]["mode_transition_hooks"] = {
+            "before_transition": [
+                {
+                    "to": "FAULT",
+                    "fail_on_error": False,
+                    "calls": [
+                        {
+                            "device_handle": "sim0/relayio0",
+                            "function_name": hook_function,
+                            "args": {"enabled": True},
+                        }
+                    ],
+                }
+            ]
+        }
+        if safe_state is not None:
+            config["safety"] = {"safe_state": safe_state, "on_startup": "leave"}
+
+    def relay_ch1_closed(self) -> bool:
+        resp = requests.get(f"{self.base_url}/v0/state/sim0/relayio0", timeout=5)
+        assert resp.status_code == 200, resp.text
+        signal = next(s for s in resp.json()["values"] if s["signal_id"] == "relay_ch1_state")
+        return bool(signal["value"]["bool"])
+
+    def runtime_log(self) -> str:
+        capture = self.fixture.get_output_capture()
+        assert capture is not None
+        return capture.get_all_output()
+
+    def estop(self) -> Dict[str, Any]:
+        resp = requests.post(f"{self.base_url}/v0/estop", json={}, timeout=10)
+        assert resp.status_code == 200, resp.text
+        body: Dict[str, Any] = resp.json()
+        return body
+
+
+def check_estop_runs_fault_hooks_without_a_rung(tester: FaultHookEstopTester) -> None:
+    """Rung none: the e-stop's FAULT entry runs the -> FAULT hook."""
+    tester.set_mode("MANUAL")
+    tester._wait_for_mode("MANUAL")
+    assert tester.relay_ch1_closed() is False
+
+    body = tester.estop()
+    assert body["software_safe_state"] == "none", body
+    assert body["actions"] == [], body
+    assert body["safe_state_achieved"] is False, body
+    assert body["latched"] is True, body
+    assert body["fault_engaged"] is True, body
+    tester._wait_for_mode("FAULT")
+
+    deadline = time.time() + 3.0
+    while not tester.relay_ch1_closed():
+        assert time.time() < deadline, "the -> FAULT hook did not run on the e-stop (relay 1 still open)"
+        time.sleep(0.1)
+    assert requests.get(f"{tester.base_url}/v0/runtime/status", timeout=5).json()["estop"]["latched"] is True
+    assert "Before-transition hook (MANUAL -> FAULT): sim0/relayio0 set_relay_ch1 OK" in tester.runtime_log()
+
+
+def check_estop_refuses_fault_hooks_under_a_rung(tester: FaultHookEstopTester) -> None:
+    """Any other rung: the ladder stays the only authority, the hook is refused."""
+    tester.set_mode("MANUAL")
+    tester._wait_for_mode("MANUAL")
+
+    body = tester.estop()
+    assert body["software_safe_state"] == "hooks", body
+    assert body["safe_state_achieved"] is True, body
+    tester._wait_for_mode("FAULT")
+
+    time.sleep(1.5)  # three poll intervals
+    assert tester.relay_ch1_closed() is False, "the -> FAULT hook ran through the latch under rung hooks"
+    log = tester.runtime_log()
+    assert "Before-transition hook failed (MANUAL -> FAULT): sim0/relayio0 set_relay_ch1" in log, log[-2000:]
+    assert "Actuation latched by e-stop" in log
+
+
+def check_estop_reports_fault_hook_not_driven(tester: FaultHookEstopTester) -> None:
+    """Rung none: a -> FAULT hook that fails is logged like a ladder action not driven."""
+    tester.set_mode("MANUAL")
+    tester._wait_for_mode("MANUAL")
+
+    body = tester.estop()
+    assert body["software_safe_state"] == "none", body
+    assert body["safe_state_achieved"] is False, body
+    log = tester.runtime_log()
+    assert "[WARN]  [SafeState] E-stop did not drive sim0/relayio0/no_such_function: " in log, log[-2000:]
+
+
+def check_ordinary_fault_entry_runs_fault_hooks(tester: FaultHookEstopTester) -> None:
+    """No e-stop: entering FAULT runs the hook, as it always has."""
+    tester.set_mode("MANUAL")
+    tester._wait_for_mode("MANUAL")
+    tester.set_mode("FAULT")
+    tester._wait_for_mode("FAULT")
+
+    deadline = time.time() + 3.0
+    while not tester.relay_ch1_closed():
+        assert time.time() < deadline, "the -> FAULT hook did not run on an ordinary FAULT entry"
+        time.sleep(0.1)
+
+
+# A safety.safe_state whose hook drives a different device than the -> FAULT
+# hook, so what each one did stays distinguishable.
+_MOTOR_SAFE_STATE: Dict[str, Any] = {
+    "hooks": [
+        {
+            "device_handle": "sim0/motorctl0",
+            "function_name": "set_motor_duty",
+            "args": {"motor_index": 1, "duty": 0.0},
+        }
+    ]
+}
+
+# (id, safety.safe_state or None, hook function, check)
+FaultHookCheck = Tuple[str, Optional[Dict[str, Any]], str, Callable[[FaultHookEstopTester], None]]
+
+FAULT_HOOK_CHECKS: List[FaultHookCheck] = [
+    ("estop_runs_fault_hooks_without_a_rung", None, "set_relay_ch1", check_estop_runs_fault_hooks_without_a_rung),
+    ("estop_reports_fault_hook_not_driven", None, "no_such_function", check_estop_reports_fault_hook_not_driven),
+    (
+        "estop_refuses_fault_hooks_under_a_rung",
+        _MOTOR_SAFE_STATE,
+        "set_relay_ch1",
+        check_estop_refuses_fault_hooks_under_a_rung,
+    ),
+    ("ordinary_fault_entry_runs_fault_hooks", None, "set_relay_ch1", check_ordinary_fault_entry_runs_fault_hooks),
 ]
 
 

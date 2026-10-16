@@ -7,9 +7,11 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
+#include "control/provider_value_bridge.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
@@ -551,4 +553,118 @@ TEST_F(SafeStateTest, StartupReportIsNotRunBeforeDriveOrWithNoSafeState) {
     EXPECT_FALSE(report.ran);
     EXPECT_EQ(report.kind, control::SafeStateKind::None);
     EXPECT_FALSE(report.safe_state_achieved);
+}
+
+//=============================================================================
+// -> FAULT mode-transition hooks on the e-stop's FAULT entry (#251)
+//=============================================================================
+
+// An automation machine wired as Runtime wires it: the controller is the
+// router's latch and drives FAULT through the mode manager, and a `to: FAULT`
+// before-transition hook drives heater/set_output. The hook is issued the way
+// Runtime issues one, tagged as a FAULT-entry hook when the target is FAULT.
+class EstopFaultHookTest : public SafeStateTest {
+protected:
+    void Wire(control::SafeStateController& controller) {
+        call_router->set_mode_manager(&mode, "BLOCK");
+        call_router->set_actuation_latch(&controller);
+        controller.set_mode_manager(&mode);
+        mode.on_before_mode_change([this](automation::RuntimeMode, automation::RuntimeMode next, std::string&) {
+            control::CallRequest request;
+            request.device_handle = "sim0/heater";
+            request.function_name = "set_output";
+            request.is_automated = true;
+            request.fault_entry_hook = next == automation::RuntimeMode::FAULT;
+            request.args["pwm"] = control::to_provider_value(automation::ParameterValue{0.0});
+            hook_results.push_back(call_router->execute_call(request, *provider_registry));
+            return true;
+        });
+    }
+
+    // Engage the e-stop and expect the ladder's own single call to heater:
+    // a second call would be the FAULT hook getting through the latch.
+    void TriggerUnderRungAndExpectHookRefused(control::SafeStateKind expected_kind) {
+        auto controller = make_controller();
+        Wire(*controller);
+        EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+        const auto result = controller->trigger("test");
+        EXPECT_EQ(result.kind, expected_kind);
+        EXPECT_TRUE(result.safe_state_achieved);
+        EXPECT_TRUE(result.fault_ok);
+        ASSERT_EQ(hook_results.size(), 1u);
+        EXPECT_FALSE(hook_results[0].success);
+        EXPECT_THAT(hook_results[0].error_message, HasSubstr("Actuation latched by e-stop"));
+    }
+
+    automation::ModeManager mode{automation::RuntimeMode::MANUAL};
+    std::vector<control::CallResult> hook_results;
+};
+
+TEST_F(EstopFaultHookTest, RungNoneRunsTheFaultEntryHooks) {
+    RegisterActuator();
+    auto controller = make_controller();
+    Wire(*controller);
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::None);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_FALSE(result.safe_state_achieved) << "the ladder ran nothing";
+    EXPECT_TRUE(result.fault_ok);
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+    EXPECT_TRUE(controller->is_engaged());
+    ASSERT_EQ(hook_results.size(), 1u);
+    EXPECT_TRUE(hook_results[0].success) << hook_results[0].error_message;
+    EXPECT_FALSE(controller->admits_fault_entry_hooks()) << "the admission must not outlive the FAULT entry";
+}
+
+TEST_F(EstopFaultHookTest, RungHooksStillRefusesTheFaultEntryHooks) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    TriggerUnderRungAndExpectHookRefused(control::SafeStateKind::Hooks);
+}
+
+TEST_F(EstopFaultHookTest, RungSetpointsStillRefusesTheFaultEntryHooks) {
+    RegisterActuator();
+    safety.safe_state.setpoints.push_back(make_call("sim0/heater", "set_output"));
+    TriggerUnderRungAndExpectHookRefused(control::SafeStateKind::Setpoints);
+}
+
+TEST_F(EstopFaultHookTest, RungZeroStillRefusesTheFaultEntryHooks) {
+    RegisterActuator();
+    safety.safe_state.zero_is_safe = true;
+    TriggerUnderRungAndExpectHookRefused(control::SafeStateKind::Zero);
+}
+
+// The admission belongs to the e-stop's own FAULT entry. A later entry into
+// FAULT while the latch is still engaged is refused, as before.
+TEST_F(EstopFaultHookTest, LaterFaultEntryWhileLatchedStillRefusesHooks) {
+    RegisterActuator();
+    auto controller = make_controller();
+    Wire(*controller);
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    controller->trigger("test");
+    std::string err;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::FAULT, err)) << err;
+
+    ASSERT_EQ(hook_results.size(), 3u);  // e-stop's FAULT entry, FAULT->MANUAL, MANUAL->FAULT
+    EXPECT_TRUE(hook_results[0].success) << hook_results[0].error_message;
+    EXPECT_FALSE(hook_results[2].success);
+    EXPECT_THAT(hook_results[2].error_message, HasSubstr("Actuation latched by e-stop"));
+}
+
+// No e-stop: an ordinary entry into FAULT runs the hook, as it always has.
+TEST_F(EstopFaultHookTest, OrdinaryFaultEntryRunsTheHooks) {
+    RegisterActuator();
+    auto controller = make_controller();
+    Wire(*controller);
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    std::string err;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::FAULT, err)) << err;
+    ASSERT_EQ(hook_results.size(), 1u);
+    EXPECT_TRUE(hook_results[0].success) << hook_results[0].error_message;
 }
