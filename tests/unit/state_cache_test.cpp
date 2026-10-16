@@ -11,8 +11,10 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
+#include "events/event_emitter.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/i_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
@@ -543,4 +545,269 @@ TEST_F(StateCacheShutdownTest, ReadFailureAfterShutdownIsNotAnErrorOrALoss) {
     auto state = state_cache->get_device_state("sim0/dev1");
     ASSERT_TRUE(state != nullptr);
     EXPECT_FALSE(state->provider_available) << "the failed read still invalidates the cached snapshot";
+}
+
+//=============================================================================
+// device_availability events (#300)
+//
+// The event mirrors provider_available: one `available: false` on the first
+// loss from either path (a failed read, or the provider found unavailable or
+// missing by the poll loop, which is what a supervised restart looks like),
+// one `available: true` on the first successful read after it. Nothing on
+// the first poll, nothing per repeated failure, and no loss event once
+// shutdown is requested -- so never a `true` without a `false` before it.
+//=============================================================================
+
+class StateCacheAvailabilityEventTest : public StateCacheShutdownTest {
+protected:
+    void SetUp() override {
+        StateCacheShutdownTest::SetUp();
+        emitter = std::make_shared<events::EventEmitter>(100, 4);
+        subscription = emitter->subscribe();
+        ASSERT_TRUE(subscription != nullptr);
+        state_cache->set_event_emitter(emitter);
+    }
+
+    // Every device_availability event emitted so far, in order.
+    std::vector<events::DeviceAvailabilityEvent> availability() {
+        while (auto event = subscription->try_pop()) {
+            all_events.push_back(*event);
+            if (const auto *a = std::get_if<events::DeviceAvailabilityEvent>(&*event)) {
+                seen.push_back(*a);
+            }
+        }
+        return seen;
+    }
+
+    std::shared_ptr<events::EventEmitter> emitter;
+    std::unique_ptr<events::Subscription> subscription;
+    std::vector<events::DeviceAvailabilityEvent> seen;
+    std::vector<events::Event> all_events;  // every event, in emission order
+};
+
+// A subscriber learns the device is back before it sees the values of the
+// read that brought it back, so a value never arrives for a device the
+// subscriber still believes is unavailable.
+TEST_F(StateCacheAvailabilityEventTest, RecoveryPrecedesTheReadsStateUpdate) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+    availability();
+
+    ASSERT_EQ(all_events.size(), 3U);
+    const auto *loss = std::get_if<events::DeviceAvailabilityEvent>(&all_events[0]);
+    const auto *recovery = std::get_if<events::DeviceAvailabilityEvent>(&all_events[1]);
+    const auto *value = std::get_if<events::StateUpdateEvent>(&all_events[2]);
+    ASSERT_TRUE(loss != nullptr && !loss->available);
+    ASSERT_TRUE(recovery != nullptr) << "available:true must come before the read's state_update";
+    EXPECT_TRUE(recovery->available);
+    ASSERT_TRUE(value != nullptr);
+    EXPECT_EQ(value->signal_id, "temp");
+}
+
+TEST_F(StateCacheAvailabilityEventTest, FailedReadEmitsOneLossAndOneRecovery) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read())
+        .WillOnce(good_read());
+
+    for (int i = 0; i < 5; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+
+    const auto events_seen = availability();
+    ASSERT_EQ(events_seen.size(), 2U);
+    EXPECT_EQ(events_seen[0].provider_id, "sim0");
+    EXPECT_EQ(events_seen[0].device_id, "dev1");
+    EXPECT_FALSE(events_seen[0].available);
+    EXPECT_GT(events_seen[0].timestamp_ms, 0);
+    EXPECT_EQ(events_seen[1].device_id, "dev1");
+    EXPECT_TRUE(events_seen[1].available);
+}
+
+TEST_F(StateCacheAvailabilityEventTest, NoEventWhileHealthy) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).Times(3).WillRepeatedly(good_read());
+
+    for (int i = 0; i < 3; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+
+    EXPECT_TRUE(availability().empty()) << "the first successful poll is not a recovery";
+}
+
+// A crashed provider's handle stays registered and reports unavailable until
+// the supervisor replaces it. That path never reads, so the loss must come
+// from mark_provider_devices_unavailable, or the restart's recovery event
+// would arrive with no loss before it.
+TEST_F(StateCacheAvailabilityEventTest, SupervisedRestartEmitsLossThenRecovery) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillOnce(good_read()).WillOnce(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    ASSERT_TRUE(availability().empty());
+
+    available = false;
+    for (int i = 0; i < 3; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+    auto events_seen = availability();
+    ASSERT_EQ(events_seen.size(), 1U) << "one loss for the outage, not one per poll";
+    EXPECT_EQ(events_seen[0].device_id, "dev1");
+    EXPECT_FALSE(events_seen[0].available);
+
+    available = true;
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    events_seen = availability();
+    ASSERT_EQ(events_seen.size(), 2U);
+    EXPECT_TRUE(events_seen[1].available);
+}
+
+TEST_F(StateCacheAvailabilityEventTest, MissingProviderEmitsLoss) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillOnce(good_read());
+    state_cache->poll_once(*provider_registry);
+
+    ASSERT_TRUE(provider_registry->remove_provider("sim0"));
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+
+    const auto events_seen = availability();
+    ASSERT_EQ(events_seen.size(), 1U);
+    EXPECT_FALSE(events_seen[0].available);
+}
+
+// An out-of-band read failure is provider loss: no sink call, but the device
+// is unavailable all the same, and the event follows provider_available.
+TEST_F(StateCacheAvailabilityEventTest, OutOfBandReadFailureEmitsLoss) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([&available](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                                      anolis::deviceprovider::v1::Status_Code &status) {
+            available = false;
+            status = anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+            return false;
+        }));
+
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+
+    const auto events_seen = availability();
+    ASSERT_EQ(events_seen.size(), 1U);
+    EXPECT_FALSE(events_seen[0].available);
+    EXPECT_TRUE(events.empty()) << "provider loss still does not reach the reachability sink";
+}
+
+TEST_F(StateCacheAvailabilityEventTest, NoLossEventAfterShutdownAndNoLoneRecovery) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+    request_shutdown();
+
+    poll_once_capturing_log(*state_cache, *provider_registry);
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_TRUE(availability().empty()) << "no loss after shutdown, so no recovery to report either";
+}
+
+TEST_F(StateCacheAvailabilityEventTest, NoLossEventWhenProviderGoesDownDuringShutdown) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillOnce(good_read());
+    state_cache->poll_once(*provider_registry);
+    request_shutdown();
+
+    ASSERT_TRUE(provider_registry->remove_provider("sim0"));
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_TRUE(availability().empty());
+}
+
+// The poll thread and a control call's post-call refresh (poll_device_now)
+// can read the same device at once. The availability edges must reach
+// subscribers in the order the cache made them, or a subscriber is left
+// believing the opposite of what the cache says. No reachability sink here:
+// it runs outside the lock by design (#285) and would race a test vector.
+namespace {
+thread_local bool t_fail_reads = false;
+}  // namespace
+
+class StateCacheAvailabilityOrderTest : public StateCacheTest {
+protected:
+    void SetUp() override {
+        StateCacheTest::SetUp();
+        RegisterMockDevice();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        ASSERT_TRUE(state_cache->initialize());
+        emitter = std::make_shared<events::EventEmitter>(100, 4);
+        subscription = emitter->subscribe(events::EventFilter::all(), 100000);
+        ASSERT_TRUE(subscription != nullptr);
+        state_cache->set_event_emitter(emitter);
+        EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("read failed"));
+    }
+
+    std::shared_ptr<events::EventEmitter> emitter;
+    std::unique_ptr<events::Subscription> subscription;
+};
+
+TEST_F(StateCacheAvailabilityOrderTest, EdgesStayOrderedAcrossThreads) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillRepeatedly(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                                  anolis::deviceprovider::v1::Status_Code &status) {
+            if (t_fail_reads) {
+                status = anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
+                return false;
+            }
+            auto *v = response.add_values();
+            v->set_signal_id("temp");
+            v->mutable_value()->set_double_value(25.5);
+            v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+            status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+            return true;
+        }));
+
+    constexpr int kIterations = 2000;
+    std::ostringstream discarded;  // one ERROR line per failed read
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    std::thread failing([this] {
+        t_fail_reads = true;
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    std::thread succeeding([this] {
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    failing.join();
+    succeeding.join();
+    std::cerr.rdbuf(old);
+
+    std::vector<bool> edges;
+    while (auto event = subscription->try_pop()) {
+        if (const auto *a = std::get_if<events::DeviceAvailabilityEvent>(&*event)) {
+            edges.push_back(a->available);
+        }
+    }
+    ASSERT_EQ(subscription->dropped_count(), 0U);
+    ASSERT_FALSE(edges.empty()) << "the two threads never interleaved";
+
+    // Alternating from false: the first index that breaks it, or -1.
+    long first_bad = -1;
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (edges[i] != (i % 2 == 1)) {
+            first_bad = static_cast<long>(i);
+            break;
+        }
+    }
+    EXPECT_EQ(first_bad, -1) << "out-of-order availability edge among " << edges.size();
+    EXPECT_EQ(edges.back(), state_cache->get_device_state("sim0/dev1")->provider_available)
+        << "the last edge a subscriber saw contradicts the cache";
 }

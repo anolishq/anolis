@@ -74,6 +74,12 @@ struct DeviceState {
     // sink call): deriving the edges from that flag would swallow the loss
     // edge of a device that is dark across a provider restart (#285).
     bool loss_reported = false;
+    // True from the `device_availability` event with `available: false` until
+    // the one with `available: true` (#300). Follows `provider_available` on
+    // both loss paths, except that no loss is emitted once shutdown is
+    // requested; recovery is emitted only while this is set, so a subscriber
+    // never sees a `true` with no `false` before it.
+    bool unavailable_emitted = false;
 };
 
 /**
@@ -259,6 +265,10 @@ private:
     void emit_state_update(const std::string &provider_id, const std::string &device_id, const std::string &signal_id,
                            const anolis::deviceprovider::v1::Value &value,
                            anolis::deviceprovider::v1::SignalValue_Quality quality);
+
+    // Helper: Emit device availability event. Call WITH `mutex_` held, so the
+    // edges reach subscribers in the order they were decided.
+    void emit_device_availability(const std::string &provider_id, const std::string &device_id, bool available);
 };
 
 }  // namespace state
