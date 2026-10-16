@@ -18,6 +18,15 @@ public:
 
     /** @brief True while a software e-stop is latched (actuation blocked). */
     virtual bool is_engaged() const = 0;
+
+    /**
+     * @brief True while the e-stop's own FAULT entry may run `-> FAULT` hooks.
+     *
+     * CallRouter lets a request marked `fault_entry_hook` through the engaged
+     * latch only while this holds. It holds only on the thread running the
+     * e-stop's FAULT entry, and only when the ladder planned no rung (#251).
+     */
+    virtual bool admits_fault_entry_hooks() const { return false; }
 };
 
 }  // namespace control

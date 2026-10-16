@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+#include "automation/mode_manager.hpp"
+#include "control/call_router.hpp"
+
 namespace anolis {
 
 namespace registry {
@@ -34,6 +37,17 @@ namespace runtime {
 
 struct AutomationConfig;
 struct SafetyConfig;
+struct ModeTransitionCallConfig;
+
+/**
+ * @brief The request a mode-transition hook issues for `call` on a transition
+ *        into `next`.
+ *
+ * Marked automated, and tagged `fault_entry_hook` when `next` is FAULT, which
+ * is what lets the e-stop's own FAULT entry run it under rung none (#251).
+ * Both the before- and after-transition hooks build their calls here.
+ */
+control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode next);
 
 /**
  * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.

@@ -246,9 +246,15 @@ Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
 > **Satisfying this gate does not give you a software stop.** The gate asks
 > only for the autonomous path; `POST /v0/estop` runs `safety.safe_state`, which
 > is a separate declaration the gate never checks. Declaring only the hook
-> leaves the software stop driving nothing *and* — because the latch engages before
-> FAULT is entered — suppresses the hook that any other route into FAULT would
-> have run. The refusal message says so when the ladder would drive nothing.
+> leaves the software stop's ladder driving nothing. With no rung to run, the
+> stop's own entry into FAULT runs the `-> FAULT` hooks that match the mode it
+> was pressed in — in IDLE only the `after_transition` ones, because the IDLE
+> gate refuses `before_transition` calls — and reports
+> `safe_state_achieved: false`: the runtime cannot
+> tell whether those hooks make the machine safe. When the ladder does run a
+> rung (hooks, setpoints or zero), the latch refuses those hooks and the ladder
+> alone drives the outputs. The refusal message says so when the ladder would
+> drive nothing.
 
 ### AUTO -> MANUAL
 
@@ -296,7 +302,9 @@ is the thing that has failed.
 Per principle 5, the software stop does not replace the hardware emergency stop
 or interlocks. A machine that declares no software safe-state
 (`safety.safe_state`) reports `software_safe_state: "none"` and still latches,
-but performs no safe-state actuation at all.
+but its ladder performs no safe-state actuation at all. On an automation machine
+the stop's entry into FAULT still runs the matching `-> FAULT` mode-transition
+hooks; the stop does not count them as a safe state.
 
 ## Common Risks and Mitigations
 
