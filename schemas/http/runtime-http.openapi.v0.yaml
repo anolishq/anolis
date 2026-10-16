@@ -741,7 +741,14 @@ components:
           description: Epoch milliseconds when the latch engaged, or null if not latched.
         uncovered_actuating_functions:
           type: integer
-          description: Count of actuating outputs with no declared safe setpoint.
+          description: >-
+            Count of ACTUATE functions the active rung cannot drive. For hooks
+            and setpoints, a function is covered only by a call that targets
+            it and passes the same dispatch check as the startup preflight; for
+            zero, only if the zero rung can build its call and that call
+            passes the same check. Every ACTUATE function counts when
+            software_safe_state is "none". Covered means a call drives the
+            function, not that the value it sends is safe.
     EstopAction:
       type: object
       additionalProperties: false
@@ -770,6 +777,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EstopAction'
+        safe_state_achieved:
+          type: boolean
+          description: >-
+            True only when a rung ran, issued at least one call, and every
+            call succeeded. False when any call of the active rung failed,
+            when the rung issued no call, and when software_safe_state is
+            "none". It covers only the calls the rung issued: under hooks it
+            can be true while actuating functions no hook drives remain. A
+            call succeeds when its provider reports it OK, which confirms the
+            command was accepted, not that the device was seen in the
+            commanded state. The per-call outcomes are in actions.
         warning:
           type: string
           description: Present when software_safe_state is "none".

@@ -11,5 +11,6 @@
       "function": "set_motor",
       "success": true
     }
-  ]
+  ],
+  "safe_state_achieved": true
 }

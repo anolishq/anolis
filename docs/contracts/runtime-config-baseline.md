@@ -65,6 +65,8 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
    - logging level in `debug|info|warn|error`
    - `health.staleness.warn_after_ms`/`stale_after_ms` are `>= 0` (`0` = derive
      from cadence); when both are positive, `stale_after_ms > warn_after_ms`
+   - `health.excluded_signals` entries name a `provider_id/device_id` handle at
+     most once, with at least one non-empty signal id
 6. Automation:
    - behavior tree path required when enabled
    - `tick_rate_hz` bounded
