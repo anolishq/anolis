@@ -79,6 +79,8 @@ HEALTH_FAILED=0
 ALLOW_UNMET_HOST=0
 # Install an older runtime over a newer one (--allow-downgrade).
 ALLOW_DOWNGRADE=0
+# Keep the host's own name instead of renaming it (--keep-hostname).
+KEEP_HOSTNAME=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -152,6 +154,10 @@ Common:
                          the installed one. Without it, the install is refused
                          before anything changes; --rollback is the way back
                          to the previous install.
+  --keep-hostname        Keep this host's name. By default an arm64 host with
+                         a device-tree serial is renamed anolis-<last 8 of
+                         serial>; with this flag the printed URL, mDNS and
+                         telemetry host tags use the existing name.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -193,6 +199,7 @@ parse_args() {
             --no-start)  NO_START=1; shift ;;
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
             --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+            --keep-hostname) KEEP_HOSTNAME=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -265,6 +272,8 @@ phase_prepare_bundle() {
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
 
+        [[ -f "${BUNDLE_DIR}/manifest.json" ]] \
+            || die "prepare: not an anolis bundle: ${LOCAL_PATH} has no manifest.json"
         _adopt_bundle_prefix
 
         log_ok "prepare: using local bundle"
@@ -1696,29 +1705,30 @@ _run_registry_available() {
 }
 
 # Print "<provider_id> <lifecycle_state>" for each provider in
-# GET /v0/providers/health; exit non-zero when the endpoint does not answer or
-# the body is empty, is not JSON, or has no providers list. Each provider entry
-# is read by key: a device's provider-declared descriptor_tags can hold any
-# key, provider_id too (#363). An entry with no provider_id is skipped; one
-# with no lifecycle_state is reported as UNKNOWN. jq and python3 agree on all
-# of this; the caller checks that one of them is present.
+# GET /v0/providers/health. Return 1 when the endpoint does not answer, and 2
+# when it answers with a body that is empty, is not JSON, or has no providers
+# list. Each provider entry is read by key: a device's provider-declared
+# descriptor_tags can hold any key, provider_id too (#363). An entry with no
+# provider_id, or an empty one (#388), is skipped; one with no lifecycle_state
+# is reported as UNKNOWN. jq and python3 agree on all of this; the caller
+# checks that one of them is present.
 _provider_states() {
     local base_url="$1" body
     body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
-    [[ -n "${body//[[:space:]]/}" ]] || return 1
+    [[ -n "${body//[[:space:]]/}" ]] || return 2
     if command -v jq >/dev/null 2>&1; then
         jq -r '.providers | if type == "array" then .[] else error end
-            | select(type == "object")
-            | "\(.provider_id // empty) \(.lifecycle_state // "UNKNOWN")"' <<< "${body}" 2>/dev/null
+            | select(type == "object") | select((.provider_id // "") != "")
+            | "\(.provider_id) \(.lifecycle_state // "UNKNOWN")"' <<< "${body}" 2>/dev/null || return 2
     else
         python3 -c 'import json, sys
 providers = json.load(sys.stdin)["providers"]
 if not isinstance(providers, list):
     sys.exit(1)
 for p in providers:
-    if isinstance(p, dict) and p.get("provider_id") is not None:
+    if isinstance(p, dict) and p.get("provider_id"):
         state = p.get("lifecycle_state")
-        print(p["provider_id"], "UNKNOWN" if state is None else state)' <<< "${body}" 2>/dev/null
+        print(p["provider_id"], "UNKNOWN" if state is None else state)' <<< "${body}" 2>/dev/null || return 2
     fi
 }
 
@@ -1727,7 +1737,7 @@ for p in providers:
 # warning, like the run-registry check: it does not set HEALTH_FAILED. This
 # counts providers, not devices, which would need provider-specific knowledge.
 _check_provider_liveness() {
-    local base_url="$1" elapsed=0 out states="" answered=0 total=0 running=0
+    local base_url="$1" elapsed=0 out states="" answered=0 unreadable=0 total=0 running=0
     # python3 is optional for an offline --local install. Without a parser,
     # polling would only end in "did not answer" after the full timeout; say
     # why instead, at once.
@@ -1742,12 +1752,19 @@ _check_provider_liveness() {
             total=$(grep -c . <<< "${states}" || true)
             running=$(awk '$2 == "RUNNING" || $2 == "RECOVERING" { n++ } END { print n + 0 }' <<< "${states}")
             [[ ${running} -eq ${total} ]] && break
+        else
+            # 2: the runtime answered, but the body could not be read.
+            [[ $? -eq 2 ]] && unreadable=1 || unreadable=0
         fi
         [[ ${elapsed} -ge ${HEALTH_TIMEOUT} ]] && break
         sleep ${HEALTH_INTERVAL}
         elapsed=$((elapsed + HEALTH_INTERVAL))
     done
 
+    if [[ ${answered} -eq 0 && ${unreadable} -eq 1 ]]; then
+        log_warn "health: providers unknown (GET /v0/providers/health answered, but the body was unreadable)"
+        return
+    fi
     if [[ ${answered} -eq 0 ]]; then
         log_warn "health: providers unknown (GET /v0/providers/health did not answer)"
         return
@@ -2591,7 +2608,11 @@ main() {
         dry_run_phase "install systemd units"
         [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] && dry_run_phase "provision telemetry-export service (venv + config + unit; inert until secrets)"
         [[ ${WITH_OBSERVABILITY} -eq 1 ]] && dry_run_phase "provision observability stack (influxdb2 + grafana via vendor apt; retention ${OBSERVABILITY_RETENTION}; scoped tokens; services start regardless of --no-start)"
-        dry_run_phase "set hostname"
+        if [[ ${KEEP_HOSTNAME} -eq 1 ]]; then
+            dry_run_phase "keep hostname $(hostname) (--keep-hostname)"
+        else
+            dry_run_phase "set hostname"
+        fi
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "start services"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "health check"
         echo ""
@@ -2617,7 +2638,11 @@ main() {
     phase_systemd
     phase_telemetry_export
     phase_observability
-    phase_hostname
+    if [[ ${KEEP_HOSTNAME} -eq 1 ]]; then
+        log_skip "hostname: keeping $(hostname) (--keep-hostname)"
+    else
+        phase_hostname
+    fi
     phase_start
     phase_health
     phase_summary
