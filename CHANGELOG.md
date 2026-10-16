@@ -13,6 +13,166 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.45] - 2026-10-16
+
+Upgrade notes for operators:
+
+- **Grafana and InfluxDB now bind to loopback.** After an upgrade with
+  `--with-observability`, Grafana (:3000) is no longer reachable from the
+  LAN. Pass `--with-grafana-network` on every observability run to keep LAN
+  access, or reach it through the ssh tunnel the install summary prints.
+  InfluxDB (:8086) always binds `127.0.0.1`.
+- **The runtime drives its safe state at boot.** `safety.on_startup`
+  defaults to `safe_state`: on every runtime start, the declared
+  `safety.safe_state` runs once before automation and the HTTP server
+  start, so an output left on (a heater in open loop) is stopped. Set
+  `safety.on_startup: leave` where a restart must not interrupt a running
+  process.
+- `install.sh` now refuses to install an older runtime over a newer one;
+  pass `--allow-downgrade` to do it on purpose.
+- Grafana is restarted on every `--with-observability` run (#340), so its
+  settings take effect without a manual restart.
+
+The OpenAPI contract changes are additive (new optional properties).
+anolis-workbench vendors this OpenAPI file and needs a repin to pick them
+up.
+
+### Added
+
+- **Breaking: `safety.on_startup` (`safe_state` | `leave`, default
+  `safe_state`)** (#362, #392). The runtime started in IDLE, which refuses
+  new control calls but does not stop an output that is already on.
+  `safe_state` runs the `POST /v0/estop` ladder once, after provider
+  discovery and the first state poll and before automation and the HTTP
+  server start, without engaging the latch or driving FAULT. The rung, call
+  count and `safe_state_achieved` are logged, at ERROR (with one line per
+  failed call) when the safe state is not achieved; the runtime still
+  starts. `leave` changes nothing and logs a WARN. `GET /v0/runtime/status`
+  gains an additive `startup_safe_state` object (`on_startup`, `ran`,
+  `software_safe_state`, `safe_state_achieved`, `failed_actions`). Any
+  other value fails config load. A supervised provider restart runs
+  nothing, as before; `docs/safety.md` now says so.
+- **`POST /v0/estop` reports `safe_state_achieved`** (#256, #368): `true`
+  only when a rung ran, issued at least one call, and every call
+  succeeded. The e-stop summary log line is at WARN when it is `false`, and
+  the per-device re-assert log lines carry it too. It covers only the calls
+  the rung issued, and a successful call means the provider accepted the
+  command.
+- **`health.excluded_signals`** (#325, #377) leaves listed signals of a
+  device (`device_handle: provider_id/device_id`, `signals: [...]`) out of
+  that device's health rollup, so an unused output or an empty input
+  channel no longer marks it STALE or FAULT. Excluded signals are still
+  polled, served and sent to telemetry. Malformed entries fail the load;
+  a handle or signal id that matches nothing is logged as a WARN after
+  discovery.
+- **Signal `unit` and `description` in capabilities** (#352, #365).
+  `GET /v0/devices/{provider_id}/{device_id}/capabilities` now carries the
+  unit and description a provider declares on each signal, omitting either
+  when empty. The OpenAPI `SignalSpec` gains both as optional properties.
+  InfluxDB tags are unchanged.
+- **`install.sh` reports provider liveness** (#344, #355). After the
+  runtime answers, the health phase polls `GET /v0/providers/health` until
+  every provider is RUNNING or RECOVERING, or the health timeout elapses,
+  and logs `providers: N of M running` with one warning per provider that
+  is not. A shortfall is a warning, not an install failure. The response is
+  parsed as JSON with `jq`, or `python3` when `jq` is absent; with neither,
+  the check warns that providers were not checked (#363, #383).
+- **`install.sh --with-grafana-network`** (#351, #359) opens Grafana, and
+  only Grafana, to the network. See Changed.
+- **`install.sh --allow-downgrade`** (#366, #382). See Changed.
+- `GET /v0/parameters` carries a `source` field, `default` until a POST
+  changes the value and `operator` after, and startup logs each parameter
+  at its config default (#273, #374). Operator changes are still not
+  persisted across a restart.
+- Startup warnings, all report-only:
+  - a device whose signal `poll_hint_hz` is more than 2x away from
+    `polling.interval_ms` (#269, #375); the hint stays advisory;
+  - each ACTUATE function no dispatchable `AUTO -> FAULT` hook call drives
+    (#246, #370); the refuse-hookless gate's verdict is unchanged;
+  - each device with ACTUATE functions whose provider reports
+    `watchdog_armed=false` (#297, #371). An absent key is silent, so no
+    warning is not evidence of an armed watchdog.
+
+### Changed
+
+- **Breaking: `install.sh --with-observability` binds Grafana and InfluxDB
+  to `127.0.0.1`** (#351, #359). Both used to listen on every interface,
+  and Grafana serves dashboards to anonymous viewers. InfluxDB always binds
+  `127.0.0.1:8086` through a new systemd drop-in and is restarted on every
+  observability run. Grafana binds `127.0.0.1` unless
+  `--with-grafana-network` is given; the drop-in is rewritten on each run,
+  so a re-run without the flag puts it back on loopback. The summary prints
+  the ssh tunnel by default, or the network address with the flag.
+  `docs/security.md` gains an Observability section. The separate-host
+  compose stack is unchanged.
+- **Breaking: `install.sh` refuses to downgrade the runtime** (#366,
+  #382). When the bundle's runtime is older than the installed
+  `bin/anolis-runtime --version` (compared as X.Y.Z, so `0.1.44-rc1` equals
+  `0.1.44`), the install stops with nothing changed and points to
+  `--rollback` and `--allow-downgrade`. If either version cannot be read,
+  it warns and carries on. `--dry-run --local` reports the comparison. Only
+  this release's `install.sh` and later carry the check; an older one
+  still installs over a newer runtime.
+- **Breaking: the zero rung never sends a guessed boolean** (#255, #367).
+  With `zero_is_safe: true`, an ACTUATE function with a required boolean
+  argument was called with `false`, which can release a brake. It is now
+  skipped and reported as not driven. Numeric arguments are zeroed as
+  before. The e-stop now logs one WARN per action it did not drive.
+- `estop.uncovered_actuating_functions` in `GET /v0/runtime/status` counts
+  what the active rung can actually drive (#253, #369): a function is
+  covered only by a call of that rung that targets it and passes the
+  dispatch dry run. A machine whose hooks drive every output no longer
+  reports a gap, and an undispatchable call no longer counts as coverage.
+  What the e-stop runs is unchanged.
+- Automation `error_count`, in the health view and engine diagnostics, is
+  per run: it is cleared on a definition load and on entering AUTO (#378,
+  #386).
+- `just test` and `just test-py` take an optional anolis-provider-sim path
+  and fail before pytest starts, with download and build instructions,
+  when none resolves (#346, #356).
+- Docs: the build is C++20 with GCC 13+, Clang 17+ or Visual Studio 2026
+  (CMake 4.2+ on Windows) (#338, #341); the vcpkg baseline is the lock
+  (#361); core, docs and contracts describe providers in protocol and SDK
+  terms (#348, #358); `AGENTS.md` states the logging rule (#347, #357).
+
+### Fixed
+
+- **An open provider circuit is probed every 60 s** (#326, #376). Once the
+  restart budget was spent, nothing closed the circuit and the provider
+  stayed down until the runtime restarted. A successful probe closes it; a
+  provider whose restart policy is disabled is never probed. A restart now
+  stops the old process before starting the new one, so a wedged provider
+  no longer runs beside its replacement, and `restart_policy.timeout_ms`
+  is counted from when the old process has stopped, so it bounds the new
+  process coming up (#379, #391).
+- `GET /v0/automation/status` reports `execution_status` `idle` outside
+  AUTO instead of `running` (#270, #373), and `failed` no longer outlives
+  its run: it is cleared by loading a definition or entering AUTO again
+  (#378, #386).
+- A clean stop no longer logs `[ERROR] [StateCache] ReadSignals failed`
+  for each provider systemd signalled with the runtime (#350, #381). Once
+  shutdown is requested, a failed read logs at DEBUG and reports no device
+  loss.
+- **`install.sh --rollback` restores `manifest.json`** (#345, #354) from
+  `.prev/meta/`, so it no longer describes the newer install after a
+  rollback. A backup records the manifest only when its version matches
+  the binary being saved.
+- `install.sh --with-observability` restarts `grafana-server` on every
+  run (#340, #343), so a changed drop-in, env file or datasource takes
+  effect without a manual restart.
+- Grafana's InfluxDB datasource debug lines no longer flood the journal
+  while a dashboard is open (#349, #360). The Grafana drop-in sets
+  `LogFilterPatterns=~.@level.:.debug.`; on systemd older than 253, which
+  ignores the key, `install.sh` warns instead.
+- `install.sh --uninstall` refuses an empty, relative, top-level, `$HOME`
+  or symlinked `--prefix` before anything is stopped (#339, #342).
+
+### Removed
+
+- `core/automation/bt_nodes_sanity.cpp` and its executable target, which
+  no test or CI job ran; its port checks moved into
+  `BTNodesTest.NodesRegisterAndDeclareTheirPorts` (#347, #357).
+
 ## [0.1.44] - 2026-10-13
 
 ### Added
