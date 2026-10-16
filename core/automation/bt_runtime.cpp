@@ -218,7 +218,16 @@ BT::NodeStatus BTRuntime::tick() {
     }
 
     populate_blackboard(*tree);
-    return tree->tickOnce();
+    try {
+        return tree->tickOnce();
+    } catch (...) {
+        // A throwing tick leaves non-reactive control nodes parked on the
+        // child that threw, so the next tick would resume there and rethrow
+        // even once the cause has cleared. Halt so it starts from the root
+        // (#387).
+        tree->haltTree();
+        throw;
+    }
 }
 
 void BTRuntime::tick_loop() {
@@ -361,6 +370,8 @@ void BTRuntime::tick_loop() {
 void BTRuntime::reset_run_status_locked() {
     last_tick_status_ = BT::NodeStatus::IDLE;
     error_count_ = 0;
+    ticks_since_progress_ = 0;
+    last_error_.clear();
 }
 
 void BTRuntime::populate_blackboard(BT::Tree &tree) {

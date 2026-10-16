@@ -215,9 +215,10 @@ private:
     void populate_blackboard(BT::Tree& tree);
 
     /**
-     * Clear the tick status and error count that make status() report
-     * `failed`, so a failure belongs to the run it happened in. Called on
-     * load() and on entering AUTO. Caller holds health_mutex_.
+     * Clear the tick status, error count, stall count and last error that
+     * make status() report `failed` or `blocked`, so they belong to the run
+     * they happened in. Called on load() and on entering AUTO. Caller holds
+     * health_mutex_.
      */
     void reset_run_status_locked();
 
