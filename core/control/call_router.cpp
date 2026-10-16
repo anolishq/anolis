@@ -112,9 +112,12 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
 
     // Refuse actuating calls while the e-stop latch is engaged. Fail closed:
     // an unclassified function is treated as actuating. Safe-state actions and
-    // read-only/config functions are unaffected.
+    // read-only/config functions are unaffected, and so is a FAULT-entry hook
+    // while the latch admits one (the e-stop's own FAULT entry under rung
+    // none, #251).
     if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
-        registry::is_actuating(*func_spec)) {
+        registry::is_actuating(*func_spec) &&
+        !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks())) {
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
@@ -165,7 +168,8 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // call waited for the lock; without this check an in-flight actuating call
     // would land after the safe state was applied. Safe-state calls are exempt.
     if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
-        registry::is_actuating(*func_spec)) {
+        registry::is_actuating(*func_spec) &&
+        !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks())) {
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
