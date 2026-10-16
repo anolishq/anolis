@@ -19,6 +19,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       cpp: ${{ steps.cppfilter.outputs.cpp }}
+      docs: ${{ steps.docsfilter.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -51,6 +52,23 @@ jobs:
               - '**/*.hpp'
               - '**/*.hxx'
               - '.clang-tidy'
+      # The files the docs-check workflow lints, so the docs gate skips (and ok
+      # stays green) on PRs that touch none of them.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: docsfilter
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - '*.md'
+              - '.markdownlint.jsonc'
+              - '.github/workflows/ci.yml'
+
+  docs:
+    name: Docs
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true'
+    uses: anolishq/.github/.github/workflows/docs-check.yml@260e6a2c364562a14e1f35a118dbea6e0ada9041 # v2
 
   format-check:
     name: C++ Formatting (clang-format)
@@ -418,6 +436,7 @@ jobs:
       - anolis-provider-compat
       - clang-tidy
       - version-sync
+      - docs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

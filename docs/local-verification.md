@@ -71,8 +71,8 @@ including negative cases (400, 404, 503).
 
 ## Docs link check
 
-Dead links in `docs/` and root markdown files are checked by the `docs.yml`
-workflow via `lycheeverse/lychee-action` (offline mode). No local tooling needed.
+Dead links in `docs/` and root markdown files are checked by the `docs` job
+in `ci.yml` via `lycheeverse/lychee-action` (offline mode). No local tooling needed.
 
 ## Focused C++ tests
 
