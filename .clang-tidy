@@ -10,7 +10,10 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -performance-enum-size
 # Note: consider re-enabling specific readability checks once bugprone/perf are clean.
-WarningsAsErrors: ""
+# Every enabled check is an error, so a finding fails `just lint` rather than
+# printing beside a zero exit (#372). A check that has to stay noisy is
+# disabled in Checks above, with its reason, not demoted here.
+WarningsAsErrors: "*"
 # Limit diagnostics to repository source roots only.
 # This intentionally excludes generated files under build/core (e.g., protocol.pb.cc/.h).
 HeaderFilterRegex: ".*/anolis/(core|tests)/.*"
