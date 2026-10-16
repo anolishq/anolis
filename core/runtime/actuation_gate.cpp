@@ -38,6 +38,24 @@ bool has_fault_safe_state_hook(const AutomationConfig &automation) {
            std::any_of(hooks.after_transition.begin(), hooks.after_transition.end(), hook_covers_auto_to_fault);
 }
 
+std::vector<std::string> fault_hook_uncovered_functions(const registry::DeviceRegistry &registry,
+                                                        const control::CallRouter &call_router,
+                                                        const AutomationConfig &automation) {
+    if (!automation.enabled || !has_fault_safe_state_hook(automation)) {
+        return {};
+    }
+    std::vector<ModeTransitionCallConfig> calls;
+    for (const auto *group :
+         {&automation.mode_transition_hooks.before_transition, &automation.mode_transition_hooks.after_transition}) {
+        for (const auto &hook : *group) {
+            if (hook_covers_auto_to_fault(hook)) {
+                calls.insert(calls.end(), hook.calls.begin(), hook.calls.end());
+            }
+        }
+    }
+    return control::uncovered_actuating_functions(registry, call_router, calls);
+}
+
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
                                              const AutomationConfig &automation, const SafetyConfig &safety) {
     HooklessAutoGate result;

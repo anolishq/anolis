@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -48,9 +49,19 @@ namespace health {
  * with the real cycle cost, with absolute overrides for odd buses.
  */
 struct StalenessPolicy {
+    StalenessPolicy() = default;
+    // A constructor rather than aggregate init, so the three-int form callers
+    // use does not leave excluded_signals as a "missing initializer".
+    StalenessPolicy(int poll_interval, int warn_after, int stale_after)
+        : poll_interval_ms(poll_interval), warn_after_ms(warn_after), stale_after_ms(stale_after) {}
+
     int poll_interval_ms = 500;  // background poll period (runtime `polling.interval_ms`)
     int warn_after_ms = 0;       // explicit override; 0 => derive from cadence
     int stale_after_ms = 0;      // explicit override; 0 => derive from cadence
+    // Signals left out of the device health rollup, by `provider_id/device_id`
+    // (#325, runtime `health.excluded_signals`). They are still polled, served
+    // and sent to telemetry; only the health string and its counts skip them.
+    std::map<std::string, std::set<std::string>> excluded_signals;
 };
 
 /** @brief Resolved WARNING/STALE liveness thresholds for one provider. */
@@ -157,6 +168,16 @@ struct ProviderHealthSnapshot {
 };
 
 /**
+ * @brief Entries of `health.excluded_signals` that match nothing in the registry (#325).
+ *
+ * One line per device handle that is not registered, and one per signal id the
+ * registered device does not declare. A typo otherwise excludes nothing and the
+ * device keeps reading FAULT or STALE with no hint why. The caller logs them.
+ */
+std::vector<std::string> unmatched_excluded_signals(
+    const std::map<std::string, std::set<std::string>> &excluded_signals, const registry::DeviceRegistry &registry);
+
+/**
  * @brief Collect the full health view across all providers.
  *
  * Performs a live ADPP GetHealth round-trip per available provider (a
@@ -171,6 +192,23 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
     provider::ProviderRegistry &provider_registry, registry::DeviceRegistry &device_registry,
     state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
+
+/**
+ * @brief Devices with an ACTUATE function whose provider reports the
+ *        SDK-reserved `watchdog_armed` health metric as "false" (#297).
+ *
+ * The firmware command watchdog is the backstop when the runtime or a provider
+ * is lost. A disarmed one on a device that can actuate is worth a startup
+ * warning. Absence of the key is "unknown" by the SDK contract
+ * (anolis-provider-sdk docs/metrics.md), so only the exact value "false"
+ * counts. A provider reports the key only for a configured watchdog it read
+ * live, so a watchdog that was never configured is silent here too. One
+ * live GetHealth round-trip per available provider. Report-only.
+ *
+ * @return device handles, "provider/device".
+ */
+std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                  const registry::DeviceRegistry &device_registry);
 
 }  // namespace health
 }  // namespace anolis

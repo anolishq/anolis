@@ -210,7 +210,8 @@ void HttpServer::handle_post_estop(const httplib::Request &req, httplib::Respons
     nlohmann::json response = {{"status", make_status(StatusCode::OK)},
                                {"latched", true},
                                {"software_safe_state", control::safe_state_kind_to_string(result.kind)},
-                               {"actions", actions}};
+                               {"actions", actions},
+                               {"safe_state_achieved", result.safe_state_achieved}};
     if (result.kind == control::SafeStateKind::None) {
         response["warning"] = "No software safe-state declared; the hardware e-stop is the only safe-state path";
     }

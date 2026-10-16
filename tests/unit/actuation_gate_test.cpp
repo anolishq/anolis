@@ -7,10 +7,12 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/call_router.hpp"
 #include "control/safe_state.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
+#include "state/state_cache.hpp"
 
 using namespace anolis;
 using namespace testing;
@@ -365,4 +367,86 @@ TEST_F(ActuationGateTest, SetpointsCoveringEverythingSuppressTheNote) {
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, automation, safety);
     ASSERT_TRUE(gate.refused);
     EXPECT_THAT(gate.message, Not(HasSubstr("safety.safe_state")));
+}
+
+// --- #246: startup warning for actuating outputs no FAULT hook drives -------
+
+// Register "dev0" with two ACTUATE functions, set_output and set_other, neither
+// taking arguments, so any call that names one passes validate_call.
+class FaultHookCoverageTest : public ActuationGateTest {
+protected:
+    void RegisterTwoActuators() {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("dev0");
+            devices.push_back(dev);
+            return true;
+        }));
+        EXPECT_CALL(*mock_provider, describe_device("dev0", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("dev0");
+                auto* caps = response.mutable_capabilities();
+                for (const auto& [id, name] : {std::pair<uint32_t, const char*>{1, "set_output"}, {2, "set_other"}}) {
+                    auto* fn = caps->add_functions();
+                    fn->set_name(name);
+                    fn->set_function_id(id);
+                    fn->mutable_policy()->set_category(
+                        anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+                }
+                return true;
+            }));
+        registry->discover_provider("sim0", *mock_provider);
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+    }
+
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+};
+
+// The reference shape: the FAULT hook drives one output and leaves the other.
+// The gate still passes; the warning names the one left alone.
+TEST_F(FaultHookCoverageTest, HookThatSkipsAnOutputIsReportedAndGateVerdictIsUnchanged) {
+    RegisterTwoActuators();
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());  // set_output only
+
+    EXPECT_FALSE(runtime::evaluate_hookless_auto_gate(*registry, automation, safety).refused);
+
+    const auto uncovered = runtime::fault_hook_uncovered_functions(*registry, *call_router, automation);
+    ASSERT_EQ(uncovered.size(), 1u);
+    EXPECT_EQ(uncovered[0], "sim0/dev0/set_other");
+}
+
+// A hook on another transition does not count toward AUTO -> FAULT coverage.
+TEST_F(FaultHookCoverageTest, NonFaultHookDoesNotCover) {
+    RegisterTwoActuators();
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
+    auto manual_hook = make_hook("MANUAL", "AUTO");
+    manual_hook.calls[0].function_name = "set_other";
+    automation.mode_transition_hooks.after_transition.push_back(manual_hook);
+
+    const auto uncovered = runtime::fault_hook_uncovered_functions(*registry, *call_router, automation);
+    ASSERT_EQ(uncovered.size(), 1u);
+    EXPECT_EQ(uncovered[0], "sim0/dev0/set_other");
+}
+
+TEST_F(FaultHookCoverageTest, HooksCoveringEveryOutputReportNothing) {
+    RegisterTwoActuators();
+    automation.enabled = true;
+    auto hook = make_fault_hook();
+    auto other = hook.calls[0];
+    other.function_name = "set_other";
+    hook.calls.push_back(other);
+    automation.mode_transition_hooks.after_transition.push_back(hook);
+
+    EXPECT_TRUE(runtime::fault_hook_uncovered_functions(*registry, *call_router, automation).empty());
+}
+
+TEST_F(FaultHookCoverageTest, NothingReportedWhenAutomationDisabled) {
+    RegisterTwoActuators();
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
+
+    EXPECT_TRUE(runtime::fault_hook_uncovered_functions(*registry, *call_router, automation).empty());
 }
