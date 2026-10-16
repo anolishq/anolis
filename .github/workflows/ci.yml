@@ -60,8 +60,8 @@ jobs:
           filters: |
             docs:
               - 'docs/**'
-              - 'README.md'
-              - 'CONTRIBUTING.md'
+              - '*.md'
+              - '.markdownlint.jsonc'
               - '.github/workflows/ci.yml'
 
   docs:
