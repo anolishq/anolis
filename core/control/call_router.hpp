@@ -48,6 +48,11 @@ struct CallRequest {
     // actuation latch so the safe-state ladder can still drive actuators while
     // the latch blocks every other actuating call. Never set from an HTTP call.
     bool safe_state = false;
+    // True for a mode-transition hook call on an entry into FAULT. Passes the
+    // e-stop latch only when the latch admits it (see
+    // IActuationLatch::admits_fault_entry_hooks); every other gate still
+    // applies. Never set from an HTTP call.
+    bool fault_entry_hook = false;
 };
 
 /**
@@ -98,7 +103,8 @@ public:
      * @brief Attach the e-stop actuation latch consulted before actuating calls.
      *
      * While the latch is engaged, actuating calls (fail-closed on unclassified
-     * functions) are refused unless the request carries `safe_state`.
+     * functions) are refused unless the request carries `safe_state`, or
+     * carries `fault_entry_hook` while the latch admits FAULT-entry hooks.
      */
     void set_actuation_latch(const IActuationLatch *latch);
 

@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -123,8 +124,16 @@ public:
 
     // IActuationLatch
     bool is_engaged() const override;
+    bool admits_fault_entry_hooks() const override;
 
-    /** @brief Engage the latch, run the safe-state ladder, and (if automation) drive FAULT. */
+    /**
+     * @brief Engage the latch, run the safe-state ladder, and (if automation) drive FAULT.
+     *
+     * When the ladder planned no rung, the `-> FAULT` mode-transition hooks
+     * fired by that FAULT entry are let through the latch: nothing else drives
+     * those actuators (#251). Under any other rung they are refused, as is
+     * every hook on any later entry into FAULT.
+     */
     EstopResult trigger(const std::string &reason);
 
     /** @brief Release the latch. Does NOT change the runtime mode. */
@@ -182,6 +191,8 @@ private:
     automation::ModeManager *mode_manager_ = nullptr;  // optional
 
     std::atomic<bool> latched_{false};
+    // The thread running trigger()'s FAULT entry under rung none; empty otherwise.
+    std::atomic<std::thread::id> fault_entry_hook_thread_{};
     mutable std::mutex mutex_;               // serialize trigger()/clear(); guard metadata
     std::optional<int64_t> latched_at_ms_;   // guarded by mutex_
     StartupSafeStateReport startup_report_;  // guarded by mutex_

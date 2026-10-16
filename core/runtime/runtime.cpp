@@ -257,8 +257,9 @@ void Runtime::preflight_declared_calls() const {
     // IDLE/AUTO mode gating and the e-stop actuation latch all live in
     // `execute_call`. So a call can pass here and still be refused when it fires:
     // notably an `after_transition` hook into IDLE (blocked by the IDLE gate) or
-    // a `*->FAULT` hook during an e-stop (refused by the latch, deliberately --
-    // see safe_state.cpp). Passing preflight means "dispatchable", not "will run".
+    // a `*->FAULT` hook during an e-stop whose ladder plans a rung (refused by
+    // the latch, deliberately -- see safe_state.cpp). Passing preflight means
+    // "dispatchable", not "will run".
     //
     // Reports, never refuses. A machine whose safe state is partly undispatchable
     // is still far better up than down, and the operator needs the runtime alive
@@ -348,17 +349,17 @@ void Runtime::preflight_declared_calls() const {
     if (active_rung == "none") {
         // The sharp case (#251): the machine DOES declare a fault safe-state --
         // it had to, or the refuse-hookless gate would not have permitted AUTO --
-        // but declared it in the section the e-stop does not read. Pressing e-stop
-        // is then worse than not pressing it: the latch engages before FAULT is
-        // entered, so it suppresses the very hooks that reaching FAULT by any
-        // other route would have run. Say that, not just "nothing is declared".
+        // but declared it in the section the e-stop does not read. With no rung
+        // the e-stop lets its FAULT entry run those hooks, but the runtime cannot
+        // know they make this machine safe, so it reports
+        // safe_state_achieved=false. Say that, not just "nothing is declared".
         if (config_.automation.enabled && has_fault_safe_state_hook(config_.automation)) {
             LOG_WARN(
                 "[Runtime] preflight: this machine declares '-> FAULT' mode-transition hooks but no "
-                "safety.safe_state. POST /v0/estop reads only safety.safe_state, so it will drive NOTHING -- and "
-                "because it latches actuation before entering FAULT, it also SUPPRESSES those hooks. Reaching FAULT "
-                "any other way (a fault condition, POST /v0/mode {\"mode\":\"FAULT\"}) runs them; the e-stop does "
-                "not. Declare safety.safe_state to give the e-stop a safe state of its own.");
+                "safety.safe_state. POST /v0/estop reads only safety.safe_state, so its ladder will drive NOTHING; "
+                "it runs only the '-> FAULT' hooks that match the mode it is pressed in (in IDLE, only "
+                "after_transition hooks: the IDLE gate refuses before_transition calls), and reports "
+                "safe_state_achieved=false. Declare safety.safe_state to give the e-stop a safe state of its own.");
         } else {
             LOG_WARN(
                 "[Runtime] preflight: no software safe-state is declared; POST /v0/estop will latch without driving "
@@ -381,10 +382,6 @@ void Runtime::preflight_declared_calls() const {
 
 bool Runtime::init_automation(std::string &error) {
 #if ANOLIS_ENABLE_AUTOMATION
-    auto parameter_value_to_provider_value = [](const automation::ParameterValue &input) {
-        return control::to_provider_value(input);
-    };
-
     auto hook_mode_matches = [](const std::string &filter, automation::RuntimeMode actual) {
         if (filter.empty() || filter == "*") {
             return true;
@@ -476,63 +473,68 @@ bool Runtime::init_automation(std::string &error) {
         });
     }
 
+    // A FAULT-entry hook the e-stop let through under rung none (#251) is the
+    // only thing driving its actuator, so a failure is reported in the same
+    // shape as a ladder action the e-stop did not drive.
+    auto warn_estop_hook_not_driven = [this](const control::CallRequest &request, const ModeTransitionCallConfig &call,
+                                             const control::CallResult &result) {
+        if (request.fault_entry_hook && safe_state_controller_ != nullptr &&
+            safe_state_controller_->admits_fault_entry_hooks()) {
+            LOG_WARN("[SafeState] E-stop did not drive "
+                     << call.device_handle << "/"
+                     << (call.function_name.empty() ? std::to_string(call.function_id) : call.function_name) << ": "
+                     << result.error_message);
+        }
+    };
+
     // Register transition hooks when configured.
     if (mode_manager_ != nullptr) {
         const auto before_hooks = config_.automation.mode_transition_hooks.before_transition;
         const auto after_hooks = config_.automation.mode_transition_hooks.after_transition;
 
         if (!before_hooks.empty()) {
-            mode_manager_->on_before_mode_change(
-                [this, before_hooks, hook_mode_matches, parameter_value_to_provider_value](
-                    automation::RuntimeMode prev, automation::RuntimeMode next, std::string &hook_error) {
-                    for (const auto &hook : before_hooks) {
-                        if (!hook_mode_matches(hook.from, prev) || !hook_mode_matches(hook.to, next)) {
-                            continue;
-                        }
+            mode_manager_->on_before_mode_change([this, before_hooks, hook_mode_matches, warn_estop_hook_not_driven](
+                                                     automation::RuntimeMode prev, automation::RuntimeMode next,
+                                                     std::string &hook_error) {
+                for (const auto &hook : before_hooks) {
+                    if (!hook_mode_matches(hook.from, prev) || !hook_mode_matches(hook.to, next)) {
+                        continue;
+                    }
 
-                        for (const auto &call : hook.calls) {
-                            control::CallRequest request;
-                            request.device_handle = call.device_handle;
-                            request.function_id = call.function_id;
-                            request.function_name = call.function_name;
-                            request.is_automated = true;
-
-                            for (const auto &[arg_name, arg_value] : call.args) {
-                                request.args[arg_name] = parameter_value_to_provider_value(arg_value);
+                    for (const auto &call : hook.calls) {
+                        const auto request = mode_hook_request(call, next);
+                        const auto result = call_router_->execute_call(request, provider_registry_);
+                        if (!result.success) {
+                            warn_estop_hook_not_driven(request, call, result);
+                            std::stringstream hook_msg;
+                            hook_msg << "Before-transition hook failed (" << automation::mode_to_string(prev) << " -> "
+                                     << automation::mode_to_string(next) << "): " << call.device_handle << " "
+                                     << (call.function_name.empty() ? std::to_string(call.function_id)
+                                                                    : call.function_name)
+                                     << " - " << result.error_message;
+                            if (hook.fail_on_error) {
+                                hook_error = hook_msg.str();
+                                return false;
                             }
-
-                            const auto result = call_router_->execute_call(request, provider_registry_);
-                            if (!result.success) {
-                                std::stringstream hook_msg;
-                                hook_msg << "Before-transition hook failed (" << automation::mode_to_string(prev)
-                                         << " -> " << automation::mode_to_string(next) << "): " << call.device_handle
-                                         << " "
-                                         << (call.function_name.empty() ? std::to_string(call.function_id)
-                                                                        : call.function_name)
-                                         << " - " << result.error_message;
-                                if (hook.fail_on_error) {
-                                    hook_error = hook_msg.str();
-                                    return false;
-                                }
-                                LOG_WARN("[Runtime] " << hook_msg.str());
-                            } else {
-                                // Safe-state hooks are load-bearing during operator sessions:
-                                // success must leave evidence, not just failures (#188).
-                                LOG_INFO("[Runtime] Before-transition hook ("
-                                         << automation::mode_to_string(prev) << " -> "
-                                         << automation::mode_to_string(next) << "): " << call.device_handle << " "
-                                         << (call.function_name.empty() ? std::to_string(call.function_id)
-                                                                        : call.function_name)
-                                         << " OK");
-                            }
+                            LOG_WARN("[Runtime] " << hook_msg.str());
+                        } else {
+                            // Safe-state hooks are load-bearing during operator sessions:
+                            // success must leave evidence, not just failures (#188).
+                            LOG_INFO(
+                                "[Runtime] Before-transition hook ("
+                                << automation::mode_to_string(prev) << " -> " << automation::mode_to_string(next)
+                                << "): " << call.device_handle << " "
+                                << (call.function_name.empty() ? std::to_string(call.function_id) : call.function_name)
+                                << " OK");
                         }
                     }
-                    return true;
-                });
+                }
+                return true;
+            });
         }
 
         if (!after_hooks.empty()) {
-            mode_manager_->on_mode_change([this, after_hooks, hook_mode_matches, parameter_value_to_provider_value](
+            mode_manager_->on_mode_change([this, after_hooks, hook_mode_matches, warn_estop_hook_not_driven](
                                               automation::RuntimeMode prev, automation::RuntimeMode next) {
                 for (const auto &hook : after_hooks) {
                     if (!hook_mode_matches(hook.from, prev) || !hook_mode_matches(hook.to, next)) {
@@ -540,18 +542,10 @@ bool Runtime::init_automation(std::string &error) {
                     }
 
                     for (const auto &call : hook.calls) {
-                        control::CallRequest request;
-                        request.device_handle = call.device_handle;
-                        request.function_id = call.function_id;
-                        request.function_name = call.function_name;
-                        request.is_automated = true;
-
-                        for (const auto &[arg_name, arg_value] : call.args) {
-                            request.args[arg_name] = parameter_value_to_provider_value(arg_value);
-                        }
-
+                        const auto request = mode_hook_request(call, next);
                         const auto result = call_router_->execute_call(request, provider_registry_);
                         if (!result.success) {
+                            warn_estop_hook_not_driven(request, call, result);
                             std::stringstream hook_msg;
                             hook_msg << "After-transition hook failed (" << automation::mode_to_string(prev) << " -> "
                                      << automation::mode_to_string(next) << "): " << call.device_handle << " "
