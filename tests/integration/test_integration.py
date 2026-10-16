@@ -21,7 +21,14 @@ from tests.integration.automation_suite import (
 )
 from tests.integration.concurrency_stress_suite import StressTestRunner
 from tests.integration.core_suite import CORE_CHECKS, CoreFeatureTester
-from tests.integration.estop_suite import ESTOP_CHECKS, STARTUP_CHECKS, EstopTester, StartupSafeStateTester
+from tests.integration.estop_suite import (
+    ESTOP_CHECKS,
+    FAULT_HOOK_CHECKS,
+    STARTUP_CHECKS,
+    EstopTester,
+    FaultHookEstopTester,
+    StartupSafeStateTester,
+)
 from tests.integration.http_suite import HTTP_CHECKS, HttpGatewayTester
 from tests.integration.provider_supervision_suite import SUPERVISION_CHECKS, SupervisionTester
 
@@ -114,6 +121,29 @@ def test_startup_safe_state(
     tester = StartupSafeStateTester(
         runtime_exe, provider_exe, port=unique_port, on_startup=on_startup, hook_function=hook_function
     )
+    try:
+        tester.start_runtime()
+        check_fn(tester)
+    finally:
+        tester.cleanup()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("_check_name", "tester_kwargs", "check_fn"),
+    FAULT_HOOK_CHECKS,
+    ids=[name for name, _, _ in FAULT_HOOK_CHECKS],
+)
+def test_estop_fault_hooks(
+    runtime_exe: Path,
+    provider_exe: Path,
+    unique_port: int,
+    _check_name: str,
+    tester_kwargs: dict,
+    check_fn,
+) -> None:
+    tester = FaultHookEstopTester(runtime_exe, provider_exe, port=unique_port, **tester_kwargs)
     try:
         tester.start_runtime()
         check_fn(tester)

@@ -254,8 +254,8 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenAutomationDisabled) {
 
 // --- #251: the predicate is now shared, so it must stay one predicate --------
 // The gate admits AUTO on the strength of a fault safe-state hook; the startup
-// preflight uses the SAME question to warn that such a machine's e-stop will
-// drive nothing and suppress those very hooks. Two copies of this drifting apart
+// preflight uses the SAME question to warn that such a machine's e-stop has
+// no safe state of its own beyond those very hooks. Two copies of this drifting apart
 // is how a machine gets gated as safe while its e-stop does nothing, so pin the
 // shapes the gate accepts.
 
@@ -298,8 +298,8 @@ TEST_F(ActuationGateTest, FaultHookPredicateIsFalseWithNoHooks) {
 
 TEST_F(ActuationGateTest, RefusalNamesSafeStateWhenNoneIsDeclared) {
     // Following this message to the letter satisfies the gate and leaves a
-    // machine whose e-stop drives nothing — and whose latch then suppresses the
-    // very hooks the operator just added (#251). The message has to say so.
+    // machine whose e-stop ladder drives nothing, leaving only the hooks the
+    // operator just added (#251). The message has to say so.
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
 
