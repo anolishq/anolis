@@ -131,22 +131,19 @@ def test_startup_safe_state(
 @pytest.mark.integration
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize(
-    ("_check_name", "safe_state", "hook_function", "check_fn"),
+    ("_check_name", "tester_kwargs", "check_fn"),
     FAULT_HOOK_CHECKS,
-    ids=[name for name, _, _, _ in FAULT_HOOK_CHECKS],
+    ids=[name for name, _, _ in FAULT_HOOK_CHECKS],
 )
 def test_estop_fault_hooks(
     runtime_exe: Path,
     provider_exe: Path,
     unique_port: int,
     _check_name: str,
-    safe_state: dict | None,
-    hook_function: str,
+    tester_kwargs: dict,
     check_fn,
 ) -> None:
-    tester = FaultHookEstopTester(
-        runtime_exe, provider_exe, port=unique_port, safe_state=safe_state, hook_function=hook_function
-    )
+    tester = FaultHookEstopTester(runtime_exe, provider_exe, port=unique_port, **tester_kwargs)
     try:
         tester.start_runtime()
         check_fn(tester)

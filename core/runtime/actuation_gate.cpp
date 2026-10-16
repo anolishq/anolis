@@ -5,6 +5,7 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/provider_value_bridge.hpp"
 #include "control/safe_state.hpp"
 #include "logging/logger.hpp"
 #include "registry/device_registry.hpp"
@@ -29,6 +30,19 @@ bool hook_covers_auto_to_fault(const ModeTransitionHookConfig &hook) {
 }
 
 }  // namespace
+
+control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode next) {
+    control::CallRequest request;
+    request.device_handle = call.device_handle;
+    request.function_id = call.function_id;
+    request.function_name = call.function_name;
+    request.is_automated = true;
+    request.fault_entry_hook = next == automation::RuntimeMode::FAULT;
+    for (const auto &[arg_name, arg_value] : call.args) {
+        request.args[arg_name] = control::to_provider_value(arg_value);
+    }
+    return request;
+}
 
 // The gate is satisfied only by a declared hook that fires on `AUTO -> FAULT` and
 // drives a safe state there (#232).
