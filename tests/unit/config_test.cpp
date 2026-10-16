@@ -4,8 +4,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace anolis::runtime;
@@ -1423,6 +1426,69 @@ health:
     std::string error;
 
     EXPECT_FALSE(load_config(config_path, config, error));
+}
+
+// --- Health signal exclusions (#325) ------------------------------------------
+
+TEST_F(ConfigTest, HealthExcludedSignalsLoad) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+
+health:
+  excluded_signals:
+    - device_handle: test/dev0
+      signals: [output2_state, input3_value]
+    - device_handle: test/dev1
+      signals: [input1_value]
+)";
+    std::string config_path = create_config_file("health_excluded.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    ASSERT_EQ(config.health.excluded_signals.size(), 2u);
+    EXPECT_EQ(config.health.excluded_signals.at("test/dev0"), (std::set<std::string>{"output2_state", "input3_value"}));
+    EXPECT_EQ(config.health.excluded_signals.at("test/dev1"), (std::set<std::string>{"input1_value"}));
+}
+
+TEST_F(ConfigTest, HealthExcludedSignalsDefaultEmpty) {
+    std::string config_content = R"(
+runtime:
+providers:
+  - id: test
+    command: /path/to/provider
+)";
+    std::string config_path = create_config_file("health_excluded_default.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_TRUE(config.health.excluded_signals.empty());
+}
+
+TEST_F(ConfigTest, HealthExcludedSignalsRejectMalformedEntries) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"bare device id", "    - device_handle: dev0\n      signals: [a]\n"},
+        {"empty provider", "    - device_handle: /dev0\n      signals: [a]\n"},
+        {"extra segment", "    - device_handle: test/dev0/x\n      signals: [a]\n"},
+        {"missing signals", "    - device_handle: test/dev0\n"},
+        {"empty signals", "    - device_handle: test/dev0\n      signals: []\n"},
+        {"empty signal id", "    - device_handle: test/dev0\n      signals: [\"\"]\n"},
+        {"duplicate device",
+         "    - device_handle: test/dev0\n      signals: [a]\n    - device_handle: test/dev0\n      signals: [b]\n"},
+    };
+    for (const auto& [name, entries] : cases) {
+        const std::string config_content =
+            "providers:\n  - id: test\n    command: /path/to/provider\nhealth:\n  excluded_signals:\n" + entries;
+        std::string config_path = create_config_file("health_excluded_bad.yaml", config_content);
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_FALSE(load_config(config_path, config, error)) << name;
+        EXPECT_NE(error.find("health.excluded_signals"), std::string::npos) << name << ": " << error;
+    }
 }
 
 TEST_F(ConfigTest, HealthStalenessStaleNotGreaterThanWarnRejected) {

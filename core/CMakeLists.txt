@@ -169,6 +169,15 @@ target_link_libraries(anolis_telemetry PUBLIC
 )
 anolis_apply_warnings(anolis_telemetry)
 
+# Shutdown latch, read by the runtime main loop and by the poll loop (#350)
+add_library(anolis_signal STATIC
+    runtime/signal_handler.cpp
+)
+target_include_directories(anolis_signal PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+anolis_apply_warnings(anolis_signal)
+
 # State cache library
 add_library(anolis_state STATIC
     state/state_cache.cpp
@@ -183,6 +192,7 @@ target_link_libraries(anolis_state PUBLIC
     anolis_provider
     anolis_registry
     anolis_events
+    anolis_signal
     protobuf::libprotobuf
 )
 anolis_apply_warnings(anolis_state)
@@ -304,7 +314,6 @@ add_library(anolis_runtime STATIC
     runtime/actuation_gate.cpp
     runtime/ownership_validation.cpp
     runtime/poll_hint_check.cpp
-    runtime/signal_handler.cpp
 )
 
 target_include_directories(anolis_runtime PUBLIC

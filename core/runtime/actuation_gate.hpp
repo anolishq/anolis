@@ -26,6 +26,10 @@ namespace automation {
 class ModeManager;
 }
 
+namespace control {
+class CallRouter;
+}
+
 namespace runtime {
 
 struct AutomationConfig;
@@ -40,6 +44,23 @@ struct SafetyConfig;
  * machine ends up gated as safe while its e-stop drives nothing (#251).
  */
 bool has_fault_safe_state_hook(const AutomationConfig &automation);
+
+/**
+ * @brief ACTUATE functions that no dispatchable `AUTO -> FAULT` hook call
+ *        drives, as "provider/device/function" (#246).
+ *
+ * The gate admits AUTO on a hook's `from`/`to` filters alone, so a hook that
+ * drives some outputs satisfies it for all of them. This lists the rest, using
+ * the safe-state ladder's coverage rule (`control::uncovered_actuating_functions`:
+ * a call covers a function only if it targets it and passes
+ * `CallRouter::validate_call`). Report-only: the gate's verdict does not use it.
+ *
+ * Empty when automation is disabled or no hook fires on `AUTO -> FAULT`; the
+ * gate then refuses AUTO itself and names every actuating output.
+ */
+std::vector<std::string> fault_hook_uncovered_functions(const registry::DeviceRegistry &registry,
+                                                        const control::CallRouter &call_router,
+                                                        const AutomationConfig &automation);
 
 /** @brief Outcome of the refuse-hookless evaluation. */
 struct HooklessAutoGate {
