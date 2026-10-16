@@ -82,6 +82,3 @@ ctest --test-dir build/dev-release --output-on-failure -R "ConfigTest|RuntimeOwn
 
 Covers runtime YAML parsing, restart-policy validation, automation config
 handling, and ownership-claim invariants.
-
-1. probe one
-3. probe two
