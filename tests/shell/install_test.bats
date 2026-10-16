@@ -307,3 +307,29 @@ JSON
     [ "$status" -eq 0 ]
     [[ "${output}" == *"predates prefix recording"* ]]
 }
+
+# #385: a bundle with no manifest.json stopped the install with status 2
+# and no message, when _manifest_prefix's sed failed under set -e. The
+# phase runs in a child bash so it keeps install.sh's set -euo pipefail,
+# which bats' run turns off.
+_prepare_local() {
+    run bash -c "ANOLIS_INSTALL_SH_NO_MAIN=1 source '${INSTALL_SH}'
+        PROJECT_DIR=''; LOCAL_PATH='$1'
+        phase_prepare_bundle"
+}
+
+@test "#385 --local on a directory without manifest.json says it is not a bundle" {
+    mkdir -p "${BATS_TEST_TMPDIR}/b"
+    _prepare_local "${BATS_TEST_TMPDIR}/b"
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"not an anolis bundle: ${BATS_TEST_TMPDIR}/b has no manifest.json"* ]]
+}
+
+@test "#385 --local on a tarball without manifest.json says it is not a bundle" {
+    mkdir -p "${BATS_TEST_TMPDIR}/src/b"
+    touch "${BATS_TEST_TMPDIR}/src/b/README"
+    tar -czf "${BATS_TEST_TMPDIR}/b.tar.gz" -C "${BATS_TEST_TMPDIR}/src" b
+    _prepare_local "${BATS_TEST_TMPDIR}/b.tar.gz"
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"not an anolis bundle: ${BATS_TEST_TMPDIR}/b.tar.gz has no manifest.json"* ]]
+}

@@ -265,6 +265,8 @@ phase_prepare_bundle() {
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
         fi
 
+        [[ -f "${BUNDLE_DIR}/manifest.json" ]] \
+            || die "prepare: not an anolis bundle: ${LOCAL_PATH} has no manifest.json"
         _adopt_bundle_prefix
 
         log_ok "prepare: using local bundle"
