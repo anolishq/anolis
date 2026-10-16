@@ -325,8 +325,7 @@ bool wait_for(Pred done) {
 // Throws on tick while the "explode" parameter is true. Otherwise it returns an
 // ordinary FAILURE while "pass" is false and SUCCESS once it is true, so one
 // loaded tree can fail a run and then run normally in the next. The control
-// nodes are reactive because a tick exception leaves a plain Sequence or
-// Fallback parked on the throwing child, and the next tick would resume there.
+// nodes are reactive so every tick re-reads both parameters.
 constexpr char kConditionalThrowTreeXml[] = R"(<?xml version="1.0"?>
 <root BTCPP_format="4">
   <BehaviorTree ID="MainTree">
@@ -460,6 +459,113 @@ TEST(BTRuntimeTest, ExecutionStatusIsIdleOutsideAuto) {
     EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "IDLE";
     ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::FAULT, err)) << err;
     EXPECT_EQ(AutomationStatus::Idle, runtime.status().status) << "FAULT";
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+namespace {
+
+// Like kConditionalThrowTreeXml, but with plain (non-reactive) control nodes,
+// which resume at the child that was RUNNING. A tick that throws in the
+// Fallback must not leave the Sequence parked on it (#387).
+constexpr char kPlainSequenceThrowTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <GetParameterBool param="explode" value="{explode}"/>
+      <Fallback>
+        <CheckBool value="{explode}" expected="false"/>
+        <SetBlackboard output_key="anolis.bt_service_context" value="not-a-service-context"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+</root>
+)";
+
+}  // namespace
+
+// #387: a tick exception halts the tree, so the next AUTO entry ticks from the
+// root. Without the halt the Sequence resumes at the Fallback, skips the
+// re-read of "explode", and throws again although the cause has cleared.
+TEST(BTRuntimeTest, AutoReentryAfterTickExceptionTicksFromRoot) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("explode", ParameterType::BOOL, true));
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-plain-reenter", kPlainSequenceThrowTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(parameter_manager.set("explode", false, err)) << err;
+
+    const auto ticks_before = runtime.get_health().total_ticks;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] {
+        return runtime.get_health().total_ticks > ticks_before + 2 || mode_manager.current_mode() != RuntimeMode::AUTO;
+    }));
+    EXPECT_EQ(RuntimeMode::AUTO, mode_manager.current_mode())
+        << "re-entering AUTO rethrew: " << runtime.status().last_error;
+    EXPECT_EQ(0U, runtime.get_health().error_count);
+    EXPECT_EQ(AutomationStatus::Running, runtime.status().status);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// #387: entering AUTO starts a new run, so the previous run's stall count and
+// last error do not carry into it. The first run stalls (every tick an
+// ordinary FAILURE) and then throws; the second only fails ordinarily.
+TEST(BTRuntimeTest, EnteringAutoClearsStallCountAndLastError) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("explode", ParameterType::BOOL, false));
+    ASSERT_TRUE(parameter_manager.define("pass", ParameterType::BOOL, false));
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-bt-run-reset", kConditionalThrowTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Blocked; }));
+    ASSERT_TRUE(parameter_manager.set("explode", true, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+    ASSERT_GT(runtime.get_health().ticks_since_progress, 10U);
+    ASSERT_FALSE(runtime.status().last_error.empty());
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(parameter_manager.set("explode", false, err)) << err;
+
+    const auto ticks_before = runtime.get_health().total_ticks;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return runtime.get_health().total_ticks > ticks_before; }));
+
+    // One snapshot: every tick of the new run is a FAILURE, so the stall count
+    // equals the ticks this run has made, and nothing from the first.
+    const auto health = runtime.get_health();
+    EXPECT_EQ(health.total_ticks - ticks_before, health.ticks_since_progress);
+    EXPECT_EQ("", health.last_error);
+    EXPECT_EQ("", runtime.status().last_error);
 
     runtime.stop();
     std::error_code ec;
