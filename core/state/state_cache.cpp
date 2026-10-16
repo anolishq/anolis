@@ -3,8 +3,10 @@
  * @brief Implementation of polling, outage tracking, and change-driven cache updates.
  *
  * The cache favors short lock hold times: poll plans are copied before I/O,
- * provider outages are tracked per provider, and emitted events are collected
- * under lock but published after the critical section ends.
+ * provider outages are tracked per provider, and state_update events are
+ * collected under lock but published after the critical section ends.
+ * device_availability edges are the exception: they are published under the
+ * lock, so concurrent polls cannot reorder them (see emit_device_availability).
  */
 
 #include "state_cache.hpp"
@@ -126,6 +128,7 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
     struct Carried {
         bool provider_available;
         bool loss_reported;
+        bool unavailable_emitted;
     };
     std::unordered_map<std::string, Carried> carried;
     {
@@ -133,7 +136,8 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
         for (auto it = device_states_.begin(); it != device_states_.end();) {
             // Check if device_handle starts with "provider_id/"
             if (it->first.find(provider_id + "/") == 0) {
-                carried[it->first] = {it->second.provider_available, it->second.loss_reported};
+                carried[it->first] = {it->second.provider_available, it->second.loss_reported,
+                                      it->second.unavailable_emitted};
                 it = device_states_.erase(it);
             } else {
                 ++it;
@@ -176,6 +180,7 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             const auto prior = carried.find(state.device_handle);
             state.provider_available = prior == carried.end() ? true : prior->second.provider_available;
             state.loss_reported = prior == carried.end() ? false : prior->second.loss_reported;
+            state.unavailable_emitted = prior == carried.end() ? false : prior->second.unavailable_emitted;
             state.last_poll_time = std::chrono::system_clock::now();
 
             {
@@ -259,6 +264,8 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
         const auto &provider_configs = provider_entry.second;
 
         auto mark_provider_devices_unavailable = [&]() {
+            // Providers exiting under a stop are the shutdown, not a loss (#350).
+            const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 for (const auto *cfg : provider_configs) {
@@ -266,6 +273,10 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
                     auto state_it = device_states_.find(handle);
                     if (state_it != device_states_.end()) {
                         state_it->second.provider_available = false;
+                        if (!shutting_down && !state_it->second.unavailable_emitted) {
+                            state_it->second.unavailable_emitted = true;
+                            emit_device_availability(cfg->provider_id, cfg->device_id, false);
+                        }
                     }
                 }
             }
@@ -427,6 +438,10 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
             if (it != device_states_.end()) {
                 it->second.provider_available = false;
                 it->second.signals.clear();
+                if (!shutting_down && !it->second.unavailable_emitted) {
+                    it->second.unavailable_emitted = true;
+                    emit_device_availability(provider_id, device_id, false);
+                }
                 if (!shutting_down && !provider_lost && !it->second.loss_reported && device_reachability_sink_) {
                     it->second.loss_reported = true;
                     report_loss = true;
@@ -474,6 +489,11 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         auto &state = it->second;
         state.last_poll_time = std::chrono::system_clock::now();
         state.provider_available = true;
+        if (state.unavailable_emitted) {
+            state.unavailable_emitted = false;
+            // Before this read's state_update events, which go out below.
+            emit_device_availability(provider_id, device_id, true);
+        }
         if (state.loss_reported) {
             state.loss_reported = false;
             report_return = true;
@@ -623,6 +643,32 @@ void StateCache::emit_state_update(const std::string &provider_id, const std::st
     // Create and emit event (event_id assigned by emitter)
     auto event = events::StateUpdateEvent::create(0,  // event_id assigned by emitter
                                                   provider_id, device_id, signal_id, typed_val, event_quality);
+
+    event_emitter_->emit(event);
+}
+
+// Called WITH `mutex_` held, unlike the other emits. The edge is decided under
+// the lock, and the poll thread and a post-call poll_device_now() can decide
+// opposite edges for the same device back to back; emitting after unlocking
+// let the second reach subscribers first, leaving them with the opposite of
+// the cache (#300). Lock order is StateCache::mutex_ -> EventEmitter::mutex_
+// -> SubscriberQueue::mutex_, as the documented hierarchy allows: emit() only
+// assigns an id, matches filters and does a non-blocking drop-oldest push,
+// and runs no subscriber code, so nothing in it re-enters this class.
+void StateCache::emit_device_availability(const std::string &provider_id, const std::string &device_id,
+                                          bool available) {
+    if (!event_emitter_) {
+        return;
+    }
+
+    events::DeviceAvailabilityEvent event;
+    event.event_id = 0;  // assigned by emitter
+    event.provider_id = provider_id;
+    event.device_id = device_id;
+    event.available = available;
+    event.timestamp_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
 
     event_emitter_->emit(event);
 }

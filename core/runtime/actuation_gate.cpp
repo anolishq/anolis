@@ -5,6 +5,7 @@
 #include <string>
 
 #include "automation/mode_manager.hpp"
+#include "control/provider_value_bridge.hpp"
 #include "control/safe_state.hpp"
 #include "logging/logger.hpp"
 #include "registry/device_registry.hpp"
@@ -29,6 +30,19 @@ bool hook_covers_auto_to_fault(const ModeTransitionHookConfig &hook) {
 }
 
 }  // namespace
+
+control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode next) {
+    control::CallRequest request;
+    request.device_handle = call.device_handle;
+    request.function_id = call.function_id;
+    request.function_name = call.function_name;
+    request.is_automated = true;
+    request.fault_entry_hook = next == automation::RuntimeMode::FAULT;
+    for (const auto &[arg_name, arg_value] : call.args) {
+        request.args[arg_name] = control::to_provider_value(arg_value);
+    }
+    return request;
+}
 
 // The gate is satisfied only by a declared hook that fires on `AUTO -> FAULT` and
 // drives a safe state there (#232).
@@ -101,16 +115,18 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     // A machine declares its safe state twice over, for two different triggers,
     // and this gate only ever asks for one of them. An operator who follows the
     // sentence above to the letter satisfies the gate and still has a machine
-    // whose e-stop drives nothing — and worse, whose latch then SUPPRESSES the
-    // very hooks they just added (#251). Say so here, where they are reading,
-    // rather than leaving it to a startup warning they have already scrolled
-    // past. Text only: the verdict does not depend on safety.safe_state,
-    // because the ladder fires on operator request, never autonomously.
+    // whose e-stop ladder drives nothing: it runs only the hooks they just
+    // added, which nothing checked as a safe state (#251). Say so here, where
+    // they are reading, rather than leaving it to a startup warning they have
+    // already scrolled past. Text only: the verdict does not depend on
+    // safety.safe_state, because the ladder fires on operator request, never
+    // autonomously.
     if (control::planned_safe_state_kind(registry, safety) == control::SafeStateKind::None) {
-        msg << ". Note: that hook satisfies this gate but is NOT what POST /v0/estop runs — the e-stop runs "
-               "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would "
-               "latch without stopping anything. Declare safety.safe_state (setpoints count only if they cover "
-               "every actuating output)";
+        msg << ". Note: that hook satisfies this gate but is NOT the e-stop's safe state — POST /v0/estop runs "
+               "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would run "
+               "only the -> FAULT hooks that match the mode it is pressed in (in IDLE, only after_transition "
+               "hooks: the IDLE gate refuses before_transition calls) and report safe_state_achieved=false. "
+               "Declare safety.safe_state (setpoints count only if they cover every actuating output)";
     }
 
     result.message = msg.str();

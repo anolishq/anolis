@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <thread>
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
@@ -164,6 +165,10 @@ SafeStateController::SafeStateController(const registry::DeviceRegistry &registr
 void SafeStateController::set_mode_manager(automation::ModeManager *mode_manager) { mode_manager_ = mode_manager; }
 
 bool SafeStateController::is_engaged() const { return latched_.load(std::memory_order_acquire); }
+
+bool SafeStateController::admits_fault_entry_hooks() const {
+    return fault_entry_hook_thread_.load(std::memory_order_acquire) == std::this_thread::get_id();
+}
 
 std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController::actuating_functions() const {
     return actuating_functions_for(registry_);
@@ -329,11 +334,33 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
 
     // On an automation machine, also drive FAULT: any->FAULT is always valid and
     // cannot be vetoed, so it stops the behavior tree and routes the operator to
-    // the FAULT->MANUAL recovery path. Actuating FAULT-entry hooks are refused by
-    // the latch (the ladder above is the single safe-state authority).
+    // the FAULT->MANUAL recovery path. Under a rung, actuating FAULT-entry hooks
+    // are refused by the latch: the ladder above is the single safe-state
+    // authority. Under rung none nothing else drives those actuators, so this
+    // FAULT entry's hooks are let through -- on this thread, for this set_mode
+    // only (#251). safe_state_achieved stays false: the ladder ran nothing.
     if (mode_manager_ != nullptr) {
         result.fault_requested = true;
         std::string err;
+        const bool admit_hooks = result.kind == SafeStateKind::None;
+        if (admit_hooks) {
+            LOG_WARN(
+                "[SafeState] E-stop ladder planned no safe state; running the -> FAULT mode-transition hooks "
+                "this FAULT entry fires");
+        }
+        // Withdrawn however set_mode returns, so the admission never outlives it.
+        struct HookAdmission {
+            std::atomic<std::thread::id> &thread;
+            HookAdmission(std::atomic<std::thread::id> &slot, bool admit) : thread(slot) {
+                if (admit) {
+                    thread.store(std::this_thread::get_id(), std::memory_order_release);
+                }
+            }
+            HookAdmission(const HookAdmission &) = delete;
+            HookAdmission &operator=(const HookAdmission &) = delete;
+            ~HookAdmission() { thread.store(std::thread::id{}, std::memory_order_release); }
+        };
+        const HookAdmission admission(fault_entry_hook_thread_, admit_hooks);
         result.fault_ok = mode_manager_->set_mode(automation::RuntimeMode::FAULT, err);
         if (!result.fault_ok) {
             LOG_WARN("[SafeState] Could not drive FAULT on e-stop: " << err);

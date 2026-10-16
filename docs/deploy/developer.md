@@ -51,7 +51,7 @@ two of them matter here — the `mode_transition_hooks` half runs only when
 fails to start. It also validates *dispatchability*, not that a call will run:
 runtime gating such as the actuation latch is deliberately not simulated, which is
 exactly why a declared `-> FAULT` hook can pass preflight and still be refused
-during a software stop.
+during a software stop whose ladder runs a rung.
 
 ## Iterating against a rig
 
@@ -90,10 +90,13 @@ resolve, without touching a Pi.
 
 Read [safety.md](../safety.md). Two things developers get wrong most often:
 
-**A machine can satisfy the AUTO gate and still have a software stop that drives
-nothing.** The gate asks for a `-> FAULT` mode-transition hook; `POST /v0/estop`
-runs `safety.safe_state`. They are separate declarations, and declaring only the
-first leaves the stop inert — while its latch suppresses the hook you did declare.
+**A machine can satisfy the AUTO gate and still have a software stop with no
+safe state of its own.** The gate asks for a `-> FAULT` mode-transition hook;
+`POST /v0/estop` runs `safety.safe_state`. They are separate declarations, and
+declaring only the first leaves the stop's ladder driving nothing: it runs the
+hook you did declare, when it matches the mode the stop was pressed in (in
+IDLE, only an `after_transition` hook runs), and reports
+`safe_state_achieved: false`.
 
 **The software stop is not an emergency stop.** It commands devices that stay
 powered, and it cannot run if the runtime, a provider or the bus has failed —
