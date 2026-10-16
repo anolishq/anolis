@@ -909,6 +909,59 @@ class SupervisionTester:
         finally:
             self.stop_runtime()
 
+    def test_restart_timeout_excludes_old_stop(self) -> None:
+        """Stopping a wedged provider does not count against restart timeout_ms (#379).
+
+        The wedged process ignores stdin EOF, so stopping it takes the full
+        shutdown_timeout_ms (3000 ms) before it is killed. That is longer than
+        the restart timeout (1500 ms), and with a budget of one attempt a
+        timed-out restart opens the circuit for the 60 s probe interval.
+        """
+        print("\n[TEST] Restart Timeout Excludes Old Stop")
+        config_dict = self.create_config(crash_after=0.0, max_attempts=1, backoff_ms=[100])
+        provider = config_dict["providers"][0]
+        provider["args"] = provider["args"][: provider["args"].index("--crash-after")]
+        provider["restart_policy"]["timeout_ms"] = 1500
+        config_dict["runtime"] = {"shutdown_timeout_ms": 3000}
+
+        try:
+            self.start_runtime(config_dict)
+            if not assert_provider_available(self.base_url, "provider-sim", timeout=10.0):
+                self._fail_with_output("restart_timeout_excludes_stop", "Provider not available at startup")
+
+            children = self._live_provider_children()
+            if len(children) != 1:
+                self._fail_with_output(
+                    "restart_timeout_excludes_stop", f"Expected one provider process, got {len(children)}"
+                )
+            wedged = children[0]
+            wedged.suspend()
+
+            # Down-detection plus a 3.5 s stop plus a fast start fits well inside
+            # 20 s; the 60 s probe after an opened circuit does not.
+            recovered, snaps = self._wait_for_snapshot_predicate(
+                lambda s: (
+                    s["present"]
+                    and s["state"] == "AVAILABLE"
+                    and (s["device_count"] or 0) > 0
+                    and wedged.pid not in [c.pid for c in self._live_provider_children()]
+                ),
+                timeout=20.0,
+                interval=0.1,
+            )
+            if not recovered:
+                self._fail_with_output(
+                    "restart_timeout_excludes_stop",
+                    "Provider did not recover; the old process's stop time counted against restart timeout_ms",
+                    health_snapshots=snaps,
+                )
+            if any(s["present"] and s["circuit_open"] is True for s in snaps):
+                self._fail_with_output(
+                    "restart_timeout_excludes_stop", "Circuit opened during the restart", health_snapshots=snaps
+                )
+        finally:
+            self.stop_runtime()
+
     def test_circuit_open_half_open_probe(self) -> None:
         """An open circuit is probed every 60 s and closes when a probe succeeds (#326).
 
@@ -1044,5 +1097,6 @@ SUPERVISION_CHECKS: List[SupervisionCheck] = [
     ("startup_timeout_enforced", SupervisionTester.test_startup_timeout_enforced),
     ("device_rediscovery", SupervisionTester.test_device_rediscovery),
     ("wedged_restart", SupervisionTester.test_restart_stops_wedged_process_first),
+    ("restart_timeout_excludes_stop", SupervisionTester.test_restart_timeout_excludes_old_stop),
     ("half_open_probe", SupervisionTester.test_circuit_open_half_open_probe),
 ]

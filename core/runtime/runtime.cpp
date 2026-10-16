@@ -1025,8 +1025,6 @@ void Runtime::apply_startup_outputs() {
 }
 
 bool Runtime::restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config) {
-    // Start timeout clock (timeout starts after backoff completes, when restart attempt begins)
-    auto restart_start_time = std::chrono::steady_clock::now();
     int timeout_ms = provider_config.restart_policy.timeout_ms;
 
     LOG_INFO("[Runtime] Restarting provider: " << provider_id);
@@ -1039,6 +1037,10 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     if (auto old_provider = provider_registry_.get_provider(provider_id)) {
         old_provider->stop();
     }
+
+    // Start the timeout clock only now: timeout_ms bounds the new process coming
+    // up, not the old one going down, which can take shutdown_timeout_ms (#379).
+    auto restart_start_time = std::chrono::steady_clock::now();
 
     // Replacement is a two-phase operation: bring up and inspect the new
     // provider off to the side first, then publish the new device inventory and
