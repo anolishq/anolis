@@ -199,3 +199,42 @@ so once the host is fixed, restart the service (or reboot, which host prep may
 ask for anyway). A binary that cannot
 run always stops the install. A provider that gives no answer (one that predates
 `--check-host`) is reported and skipped.
+
+## What a provider release must provide
+
+`install.sh` holds no list of providers. For each entry under
+`components.providers` in `machine-profile.yaml` it downloads a release asset
+from the `repo` that entry names, and the asset's name and layout are the whole
+contract. A provider from any organisation installs the same way as one from
+anolishq: `repo` may be any `owner/repo` on GitHub.
+
+For an entry with key `<kind>`, `repo` and `version`:
+
+| requirement | detail |
+| --- | --- |
+| a GitHub release tagged `v<version>` | `version` is written without the `v`, e.g. `version: 0.4.1` downloads tag `v0.4.1`. |
+| an asset named `anolis-provider-<kind>-<version>-linux-<arch>.tar.gz` | `<arch>` is `arm64` or `x86_64`: the names `install.sh` derives from the host (it maps `aarch64` to `arm64`) and the values `--arch` documents. Name the asset `arm64`, not `aarch64` or `amd64`. Publish one asset per architecture you support. |
+| the archive holds `bin/anolis-provider-<kind>` | at the archive root, with no top-level directory. It is the only file `install.sh` copies out. |
+| `<kind>` uses `a-z`, `0-9` and `-` only | the runtime configs refer to the binary as `<prefix>/bin/anolis-provider-<kind>`, and staging refuses a config whose provider command does not resolve to a pinned kind. |
+| `--version` exits `0` | the host preflight runs it as the service user, and a binary that cannot run stops the install. |
+| `--check-host <config>` | recommended. Its result is printed and unmet requirements stop the install (see [Host requirements](#host-requirements)). A provider that gives no answer is reported and skipped. |
+
+The flags are those of the
+[executable profile](https://github.com/anolishq/anolis-protocol/blob/main/docs/profiles/anolis-executable-profile-v1.md),
+which is the contract for the binary itself.
+
+What is **not** required:
+
+- Nothing else in the archive. Other files are ignored.
+- No checksum or manifest file. `install.sh` does not read the release's
+  `SHA256SUMS` or `manifest.json`; it computes the bundle's own
+  `checksums.sha256` after downloading.
+- No naming by the runtime. The runtime starts whatever `command` a runtime
+  config names; the asset pattern is `install.sh`'s alone.
+- No config-schema asset. `install.sh` never fetches one. A composer that
+  validates provider config does: the convention is a raw JSON asset
+  `anolis-provider-<kind>-<version>-config-schema.json` holding the
+  `--config-schema` envelope (executable profile §2), and a
+  `anolis-provider-<kind>-<version>-config-schema-manifest.json` sidecar
+  recording its sha256. Publish both if your provider's config is to be
+  edited in a composer.
