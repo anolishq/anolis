@@ -135,6 +135,9 @@ up.
   (#361); core, docs and contracts describe providers in protocol and SDK
   terms (#348, #358); `AGENTS.md` states the logging rule (#347, #357).
 
+- The separate-host observability compose stack pins `grafana/grafana`
+  13.2.4 (#308).
+
 ### Fixed
 
 - **An open provider circuit is probed every 60 s** (#326, #376). Once the
