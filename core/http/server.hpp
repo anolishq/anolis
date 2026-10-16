@@ -146,6 +146,9 @@ public:
 
     /**
      * @brief Get the port server is listening on
+     *
+     * With a configured port of 0 this is the port the OS assigned, valid
+     * once start() has returned true.
      */
     int get_port() const { return port_; }
 

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -18,8 +19,13 @@ protected:
     fs::path temp_dir;
 
     void SetUp() override {
-        // Create temporary test directory
-        temp_dir = fs::temp_directory_path() / "anolis_config_test";
+        // A directory per test: ctest runs tests as parallel processes, and a
+        // shared name lets one test's TearDown remove another's files.
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        temp_dir =
+            fs::temp_directory_path() /
+            ("anolis_config_test-" + std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) +
+             "-" + std::to_string(nonce));
         fs::create_directories(temp_dir);
     }
 
