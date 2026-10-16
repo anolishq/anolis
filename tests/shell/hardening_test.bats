@@ -338,6 +338,46 @@ _with_parser() {  # <jq|python3|none> <assertion>
     _with_parser python3 _assert_missing_state_unknown
 }
 
+# #388: an entry with an empty provider_id is skipped like one with none,
+# so it neither counts nor shifts the id and state fields.
+_assert_empty_id_skipped() {
+    printf '{"providers":[{"lifecycle_state":"RUNNING","provider_id":"alpha"},{"lifecycle_state":"CIRCUIT_OPEN","provider_id":""}]}' > "${PROVIDERS_BODY_FILE}"
+    phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+    run cat "${BATS_TEST_TMPDIR}/out"
+    [[ "${output}" == *"providers: 1 of 1 running"* ]]
+    [[ "${output}" != *"CIRCUIT_OPEN"* ]]
+}
+
+# #388: a body that is empty or not JSON came from a runtime that answered,
+# so it is not reported as one that did not answer.
+_assert_unreadable_body() {
+    local body
+    for body in '' '{"providers":[' 'not json'; do
+        printf '%s' "${body}" > "${PROVIDERS_BODY_FILE}"
+        phase_health > "${BATS_TEST_TMPDIR}/out" 2>&1
+        run cat "${BATS_TEST_TMPDIR}/out"
+        [[ "${output}" == *"providers unknown (GET /v0/providers/health answered, but the body was unreadable)"* ]] \
+            || { echo "body '${body}': ${output}" >&2; return 1; }
+        [[ "${output}" != *"did not answer"* ]] || return 1
+    done
+}
+
+@test "388: a provider with an empty provider_id is skipped (jq)" {
+    _with_parser jq _assert_empty_id_skipped
+}
+
+@test "388: a provider with an empty provider_id is skipped (python3, no jq)" {
+    _with_parser python3 _assert_empty_id_skipped
+}
+
+@test "388: an unreadable providers/health body is not reported as no answer (jq)" {
+    _with_parser jq _assert_unreadable_body
+}
+
+@test "388: an unreadable providers/health body is not reported as no answer (python3, no jq)" {
+    _with_parser python3 _assert_unreadable_body
+}
+
 @test "363: with neither jq nor python3, providers are not checked and not polled" {
     SLEEPS="${BATS_TEST_TMPDIR}/sleeps"
     _assert_no_parser() {
