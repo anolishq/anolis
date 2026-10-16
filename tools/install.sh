@@ -79,6 +79,8 @@ HEALTH_FAILED=0
 ALLOW_UNMET_HOST=0
 # Install an older runtime over a newer one (--allow-downgrade).
 ALLOW_DOWNGRADE=0
+# Keep the host's own name instead of renaming it (--keep-hostname).
+KEEP_HOSTNAME=0
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -152,6 +154,10 @@ Common:
                          the installed one. Without it, the install is refused
                          before anything changes; --rollback is the way back
                          to the previous install.
+  --keep-hostname        Keep this host's name. By default an arm64 host with
+                         a device-tree serial is renamed anolis-<last 8 of
+                         serial>; with this flag the printed URL, mDNS and
+                         telemetry host tags use the existing name.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -193,6 +199,7 @@ parse_args() {
             --no-start)  NO_START=1; shift ;;
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
             --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+            --keep-hostname) KEEP_HOSTNAME=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -2601,7 +2608,11 @@ main() {
         dry_run_phase "install systemd units"
         [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] && dry_run_phase "provision telemetry-export service (venv + config + unit; inert until secrets)"
         [[ ${WITH_OBSERVABILITY} -eq 1 ]] && dry_run_phase "provision observability stack (influxdb2 + grafana via vendor apt; retention ${OBSERVABILITY_RETENTION}; scoped tokens; services start regardless of --no-start)"
-        dry_run_phase "set hostname"
+        if [[ ${KEEP_HOSTNAME} -eq 1 ]]; then
+            dry_run_phase "keep hostname $(hostname) (--keep-hostname)"
+        else
+            dry_run_phase "set hostname"
+        fi
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "start services"
         [[ ${NO_START} -eq 0 ]] && dry_run_phase "health check"
         echo ""
@@ -2627,7 +2638,11 @@ main() {
     phase_systemd
     phase_telemetry_export
     phase_observability
-    phase_hostname
+    if [[ ${KEEP_HOSTNAME} -eq 1 ]]; then
+        log_skip "hostname: keeping $(hostname) (--keep-hostname)"
+    else
+        phase_hostname
+    fi
     phase_start
     phase_health
     phase_summary
