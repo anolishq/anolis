@@ -158,8 +158,24 @@ Current event names:
 3. `device_availability`
 4. `mode_change`
 5. `parameter_change`
-6. `bt_error`
+6. `automation_fault`
 7. `provider_health_change`
+
+`device_availability` carries `provider_id`, `device_id`, `available` and
+`timestamp_ms`. It reports edges, not state:
+
+- `available: false` when a device becomes unreachable: a read of it fails,
+  or its provider is found unavailable or missing (a crashed provider awaiting
+  its supervised restart).
+- `available: true` on the first successful read after that, sent before
+  that read's `state_update` events.
+- One event per transition. Repeated failed polls send nothing more.
+- Nothing at startup or on the first poll: a device starts out available.
+- No loss is sent once the runtime is shutting down, so a stop does not
+  report its providers exiting as device losses.
+- No replay. A subscriber that connects during an outage sees only the
+  `available: true`. For the current state, read `GET /v0/state`, where an
+  unavailable device has `quality: "UNAVAILABLE"`.
 
 ## Typed Value Encoding
 
