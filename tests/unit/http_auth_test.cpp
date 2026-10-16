@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -168,7 +169,8 @@ TEST(HttpTls, NeitherIsValid) {
 TEST(HttpAuthRedaction, AuthTokenNotLogged) {
     namespace fs = std::filesystem;
     const std::string kToken = "SUPERSECRET_TOKEN_DO_NOT_LOG_4d9f";
-    fs::path dir = fs::temp_directory_path() / "anolis_http_auth_redaction_test";
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    fs::path dir = fs::temp_directory_path() / ("anolis_http_auth_redaction_test-" + std::to_string(nonce));
     fs::create_directories(dir);
     fs::path cfg = dir / "runtime.yaml";
     {

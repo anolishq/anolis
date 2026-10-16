@@ -202,12 +202,14 @@ bool HttpServer::start(std::string &error) {
     // Record server start time for uptime reporting
     start_time_ = std::chrono::steady_clock::now();
 
-    // Bind first (bind_to_port returns the actual port used, or -1 on error)
-    if (!server_->bind_to_port(config_.bind.c_str(), config_.port)) {
+    // Bind first. Port 0 asks the OS for a free port; record the one it chose.
+    const int bound_port = config_.port == 0 ? server_->bind_to_any_port(config_.bind)
+                                             : (server_->bind_to_port(config_.bind, config_.port) ? config_.port : -1);
+    if (bound_port < 0) {
         error = "Failed to bind to " + config_.bind + ":" + std::to_string(config_.port);
         return false;
     }
-    port_ = config_.port;
+    port_ = bound_port;
 
     // Start server thread
     running_.store(true);
@@ -217,7 +219,7 @@ bool HttpServer::start(std::string &error) {
         LOG_INFO("[HTTP] Server thread exiting");
     });
 
-    LOG_INFO("[HTTP] Server listening on " << config_.bind << ":" << config_.port);
+    LOG_INFO("[HTTP] Server listening on " << config_.bind << ":" << port_);
     return true;
 }
 

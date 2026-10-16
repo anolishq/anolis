@@ -73,7 +73,8 @@ using ReadSignalsResponse = anolis::deviceprovider::v1::ReadSignalsResponse;
  * @brief Test fixture for HTTP handler tests
  *
  * Creates a real HttpServer with mocked provider dependencies.
- * Uses a dedicated test port (9999) to avoid conflicts.
+ * Binds port 0 and connects to the port the OS assigned, so parallel
+ * test processes never collide on a port.
  */
 class HttpHandlersTest : public Test {
 protected:
@@ -99,7 +100,7 @@ protected:
         runtime::HttpConfig http_config;
         http_config.enabled = true;
         http_config.bind = "127.0.0.1";
-        http_config.port = 9999;                   // Fixed test port
+        http_config.port = 0;                      // OS-assigned port
         http_config.cors_allowed_origins = {"*"};  // Allow CORS for testing
 
         // Create HTTP server
@@ -114,7 +115,7 @@ protected:
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         // Create HTTP client
-        client = std::make_unique<httplib::Client>("http://127.0.0.1:9999");
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
         client->set_connection_timeout(1, 0);  // 1 second timeout
     }
 
@@ -268,6 +269,15 @@ protected:
 //=============================================================================
 // Device Handler Tests
 //=============================================================================
+
+// #393: a configured port of 0 binds a port the OS assigns, and get_port()
+// reports that port rather than the configured 0.
+TEST_F(HttpHandlersTest, PortZeroReportsTheAssignedPort) {
+    EXPECT_GT(server->get_port(), 0);
+    auto res = client->Get("/v0/devices");
+    ASSERT_TRUE(res) << "Request failed";
+    EXPECT_EQ(res->status, 200);
+}
 
 TEST_F(HttpHandlersTest, GetDevicesEmpty) {
     auto res = client->Get("/v0/devices");
@@ -921,7 +931,7 @@ protected:
         runtime::HttpConfig http_config;
         http_config.enabled = true;
         http_config.bind = "127.0.0.1";
-        http_config.port = 9998;  // Distinct port from HttpHandlersTest (9999)
+        http_config.port = 0;  // OS-assigned port
         http_config.cors_allowed_origins = {"*"};
 
         HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
@@ -932,7 +942,7 @@ protected:
         ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        client = std::make_unique<httplib::Client>("http://127.0.0.1:9998");
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
         client->set_connection_timeout(1, 0);
     }
 
@@ -1501,7 +1511,7 @@ protected:
         runtime::HttpConfig http_config;
         http_config.enabled = true;
         http_config.bind = "127.0.0.1";
-        http_config.port = 9997;  // Distinct from 9999 / 9998
+        http_config.port = 0;  // OS-assigned port
         http_config.cors_allowed_origins = {"*"};
 
         HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
@@ -1512,7 +1522,7 @@ protected:
         ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        client = std::make_unique<httplib::Client>("http://127.0.0.1:9997");
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
         client->set_connection_timeout(1, 0);
     }
 
