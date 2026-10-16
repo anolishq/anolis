@@ -4,7 +4,10 @@ This guide defines safe operating procedures for Anolis-managed hardware systems
 
 ## Core Principles
 
-1. Safe startup: runtime always starts in `IDLE`.
+1. Startup: the runtime starts in `IDLE`, which blocks new control calls and
+   does not by itself change any output. What happens to outputs depends on
+   `safety.on_startup` (see Outputs at startup below): by default the runtime
+   runs `safety.safe_state` once before it accepts requests.
 2. Explicit control: mode transitions require operator action (`POST /v0/mode`).
 3. Controlled automation: in `AUTO`, manual calls are policy-gated (`BLOCK` or `OVERRIDE`).
 4. Visibility first: read-only diagnostics remain available across modes.
@@ -136,7 +139,7 @@ Design work on this model is tracked in anolishq/anolis#283.
 
 | Runtime Mode | Automation Loop | Control Operations (`POST /v0/call`) | Notes                                                         |
 | ------------ | --------------- | ------------------------------------ | ------------------------------------------------------------- |
-| `IDLE`       | Stopped         | Blocked                              | Safe startup/standby mode                                     |
+| `IDLE`       | Stopped         | Blocked                              | Startup/standby mode; outputs are not changed by the mode     |
 | `MANUAL`     | Stopped         | Allowed                              | Operator-driven commissioning/control                         |
 | `AUTO`       | Running         | Manual calls policy-gated            | Automation calls continue normally                            |
 | `FAULT`      | Stopped         | Allowed                              | Recovery/diagnostic mode; transition restrictions still apply |
@@ -168,9 +171,38 @@ In both cases the declared `*->FAULT` mode hooks run, and recovery is the ordina
 log and `GET /v0/automation/status` (`execution_reason: terminal_failure` indicates the
 engine faulted rather than an operator changing mode).
 
+## Outputs at startup
+
+`IDLE` refuses new control calls; it does not stop an output that was already
+on. A restarted runtime finds the devices as the last runtime left them, so a
+heater that was on in open loop is still on. `safety.on_startup` decides what
+the runtime does about that:
+
+| `safety.on_startup` | At startup |
+| ------------------- | ---------- |
+| `safe_state` (default) | Runs `safety.safe_state` once, after provider discovery and before the HTTP server opens. Same ladder and verdict as `POST /v0/estop`, without engaging the e-stop latch or changing mode. The log records the rung, the number of calls and `safe_state_achieved`. |
+| `leave` | Leaves outputs as they were and logs that it did. |
+
+With `safe_state` and no software safe state declared (`software_safe_state:
+"none"`), there is nothing to run and the log says so. A run whose verdict is
+not achieved is logged at ERROR, with one ERROR line per call that failed; the
+runtime still starts and does not latch. `GET /v0/runtime/status` reports the
+outcome in `startup_safe_state` (`on_startup`, `ran`, `software_safe_state`,
+`safe_state_achieved`, `failed_actions`); `ran` is `false` for `leave` and for
+no declared safe state. Set `leave` only on a machine where a restart must not
+interrupt a running process, such as a culture that must keep its heater on.
+
+`safety.on_startup` acts at runtime startup only. A supervised provider
+restart (a provider crash, then the runtime starting it again) runs nothing:
+the runtime does not run the safe state, and provider loss is not reported as
+device loss, so the device-loss latch does not engage and nothing is
+re-asserted when the devices come back. Outputs stay as the devices and the
+restarted provider leave them.
+
 ## Standard Startup Sequence
 
-1. Start runtime (enters `IDLE`).
+1. Start runtime (enters `IDLE`; with the default `safety.on_startup` it runs
+   the safe state before the HTTP server opens).
 2. Verify provider/device availability and safe initial states.
 3. Transition to `MANUAL`.
 4. Run manual verification/calibration checks.

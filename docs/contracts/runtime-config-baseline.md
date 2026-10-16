@@ -72,6 +72,8 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
    - `tick_rate_hz` bounded
    - parameter type/default consistency
    - mode-transition-hook structure and enum validation
+7. Safety:
+   - `safety.on_startup` in `safe_state|leave` (default `safe_state`)
 
 ## Validation Gates
 

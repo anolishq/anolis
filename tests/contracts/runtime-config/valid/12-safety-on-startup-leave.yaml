@@ -1,0 +1,14 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+safety:
+  on_startup: leave
+  safe_state:
+    zero_is_safe: true
+
+logging:
+  level: info

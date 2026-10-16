@@ -72,6 +72,24 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
             estop["latched_at_epoch_ms"] = nullptr;
         }
         response["estop"] = estop;
+
+        // What safety.on_startup did when this runtime started (#362).
+        const auto startup = safe_state_->startup_report();
+        nlohmann::json failed_actions = nlohmann::json::array();
+        for (const auto &action : startup.failed_actions) {
+            nlohmann::json entry = {
+                {"device_handle", action.device_handle}, {"function", action.function}, {"success", action.success}};
+            if (!action.error.empty()) {
+                entry["error"] = action.error;
+            }
+            failed_actions.push_back(entry);
+        }
+        response["startup_safe_state"] = {
+            {"on_startup", startup.on_startup == runtime::StartupOutputs::Leave ? "leave" : "safe_state"},
+            {"ran", startup.ran},
+            {"software_safe_state", control::safe_state_kind_to_string(startup.kind)},
+            {"safe_state_achieved", startup.safe_state_achieved},
+            {"failed_actions", failed_actions}};
     }
 
     // Devices blocked from autonomous actuation after going unreachable (#285).

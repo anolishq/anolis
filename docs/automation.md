@@ -34,7 +34,7 @@ Automation is a consumer of kernel services, not a replacement for them.
 
 | Mode | Automation | Manual Calls | Control Behavior |
 | --- | --- | --- | --- |
-| `IDLE` | Stopped | Blocked | Safe startup |
+| `IDLE` | Stopped | Blocked | Startup mode; outputs set by `safety.on_startup` |
 | `MANUAL` | Stopped | Allowed | Operator control |
 | `AUTO` | Running | Policy-gated | Automated control |
 | `FAULT` | Stopped | Allowed | Manual recovery state |

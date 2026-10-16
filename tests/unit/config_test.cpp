@@ -180,6 +180,47 @@ another_unknown: 123
     EXPECT_EQ(config.providers.size(), 1);
 }
 
+// safety.on_startup (#362): absent means safe_state; leave is the explicit opt-out.
+TEST_F(ConfigTest, SafetyOnStartupDefaultsToSafeState) {
+    std::string config_path = create_config_file("on_startup_default.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+)");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.safety.on_startup, StartupOutputs::SafeState);
+}
+
+TEST_F(ConfigTest, SafetyOnStartupLeaveParses) {
+    std::string config_path = create_config_file("on_startup_leave.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+safety:
+  on_startup: leave
+)");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.safety.on_startup, StartupOutputs::Leave);
+}
+
+TEST_F(ConfigTest, SafetyOnStartupRejectsUnknownValue) {
+    std::string config_path = create_config_file("on_startup_bad.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+safety:
+  on_startup: zero
+)");
+    RuntimeConfig config;
+    std::string error;
+    EXPECT_FALSE(load_config(config_path, config, error));
+    EXPECT_NE(error.find("safety.on_startup"), std::string::npos) << error;
+}
+
 TEST_F(ConfigTest, MissingProvidersSection) {
     std::string config_content = R"(
 runtime:

@@ -34,6 +34,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/11-health-excluded-signals-extra-key.yaml
     expect: valid
     note: an unknown key in a health.excluded_signals entry is warn-and-ignore
+  - file: tests/contracts/runtime-config/valid/12-safety-on-startup-leave.yaml
+    expect: valid
+    note: safety.on_startup leave opts out of the startup safe state (#362)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -59,6 +62,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/08-health-excluded-signals-bad-handle.yaml
     expect: invalid/schema
     note: health.excluded_signals device_handle must be provider_id/device_id
+  - file: tests/contracts/runtime-config/invalid/schema/09-safety-on-startup-unknown.yaml
+    expect: invalid/schema
+    note: safety.on_startup must be safe_state or leave
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime

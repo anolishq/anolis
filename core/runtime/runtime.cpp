@@ -85,6 +85,11 @@ bool Runtime::initialize(std::string &error) {
         return false;
     }
 
+    apply_startup_outputs();
+    if (!check_startup_deadline("safety.on_startup")) {
+        return false;
+    }
+
     if (!init_automation(error)) {
         return false;
     }
@@ -983,6 +988,39 @@ void Runtime::reissue_safe_state_for(const std::string &device_handle) {
                               << ") drives nothing on it, safe_state_achieved="
                               << (result.safe_state_achieved ? "true" : "false")
                               << " -- if it did not reboot it may still be running its last command.");
+    }
+}
+
+void Runtime::apply_startup_outputs() {
+    // IDLE refuses new control calls but does not stop an output that is already
+    // on, and a restarted runtime finds the devices as the last one left them.
+    if (config_.safety.on_startup == StartupOutputs::Leave) {
+        LOG_WARN("[Runtime] safety.on_startup=leave: outputs were left as they were");
+        return;
+    }
+
+    const auto result = safe_state_controller_->drive_safe_state();
+    if (result.kind == control::SafeStateKind::None) {
+        LOG_WARN("[Runtime] safety.on_startup=safe_state: no software safe state is declared, nothing to run");
+        return;
+    }
+
+    // A rung that ran and failed leaves outputs in an unknown state: ERROR.
+    // The runtime still starts; GET /v0/runtime/status reports it (#362).
+    for (const auto &action : result.actions) {
+        if (!action.success) {
+            LOG_ERROR("[Runtime] safety.on_startup=safe_state did not drive "
+                      << action.device_handle << "/" << action.function << ": " << action.error);
+        }
+    }
+    if (result.safe_state_achieved) {
+        LOG_INFO("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
+                                                                   << " actions=" << result.actions.size()
+                                                                   << " safe_state_achieved=true");
+    } else {
+        LOG_ERROR("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
+                                                                    << " actions=" << result.actions.size()
+                                                                    << " safe_state_achieved=false");
     }
 }
 

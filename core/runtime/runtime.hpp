@@ -132,6 +132,13 @@ private:
     /** @brief Re-assert a returning latched device's declared safe state, in any mode. */
     void reissue_safe_state_for(const std::string &device_handle);
 
+    /**
+     * @brief Apply `safety.on_startup` (#362): run the safe state once, or log
+     *        that outputs were left as they were. Runs after provider discovery
+     *        and before the HTTP server opens.
+     */
+    void apply_startup_outputs();
+
     RuntimeConfig config_;
 
     provider::ProviderRegistry provider_registry_;

@@ -68,6 +68,10 @@ automation:
 1. Startup mode is always `IDLE` (not YAML-configurable).
 2. Mode changes happen at runtime via `POST /v0/mode`.
 3. `IDLE` blocks control operations; `AUTO` applies manual-call gating policy.
+   `IDLE` does not change outputs. At startup, `safety.on_startup` does:
+   `safe_state` (default) runs `safety.safe_state` once after provider
+   discovery and before the HTTP server opens; `leave` leaves outputs as
+   they were. See [safety.md](safety.md#outputs-at-startup).
 4. `FAULT` is a recovery mode with constrained transitions (`FAULT -> MANUAL` only).
 5. See [automation.md](automation.md) for full mode semantics.
 

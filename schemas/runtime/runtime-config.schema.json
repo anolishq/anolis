@@ -795,6 +795,15 @@
       "properties": {
         "safe_state": {
           "$ref": "#/$defs/safe_state"
+        },
+        "on_startup": {
+          "type": "string",
+          "enum": [
+            "safe_state",
+            "leave"
+          ],
+          "default": "safe_state",
+          "description": "What happens to outputs at startup. safe_state runs safety.safe_state once, after provider discovery and before the HTTP server opens. leave leaves outputs as they were."
         }
       },
       "additionalProperties": true
