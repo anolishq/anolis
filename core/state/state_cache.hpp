@@ -266,7 +266,8 @@ private:
                            const anolis::deviceprovider::v1::Value &value,
                            anolis::deviceprovider::v1::SignalValue_Quality quality);
 
-    // Helper: Emit device availability event. Call outside `mutex_`.
+    // Helper: Emit device availability event. Call WITH `mutex_` held, so the
+    // edges reach subscribers in the order they were decided.
     void emit_device_availability(const std::string &provider_id, const std::string &device_id, bool available);
 };
 

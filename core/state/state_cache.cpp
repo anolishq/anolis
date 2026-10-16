@@ -3,8 +3,10 @@
  * @brief Implementation of polling, outage tracking, and change-driven cache updates.
  *
  * The cache favors short lock hold times: poll plans are copied before I/O,
- * provider outages are tracked per provider, and emitted events are collected
- * under lock but published after the critical section ends.
+ * provider outages are tracked per provider, and state_update events are
+ * collected under lock but published after the critical section ends.
+ * device_availability edges are the exception: they are published under the
+ * lock, so concurrent polls cannot reorder them (see emit_device_availability).
  */
 
 #include "state_cache.hpp"
@@ -264,7 +266,6 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
         auto mark_provider_devices_unavailable = [&]() {
             // Providers exiting under a stop are the shutdown, not a loss (#350).
             const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
-            std::vector<const PollConfig *> newly_unavailable;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 for (const auto *cfg : provider_configs) {
@@ -274,13 +275,10 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
                         state_it->second.provider_available = false;
                         if (!shutting_down && !state_it->second.unavailable_emitted) {
                             state_it->second.unavailable_emitted = true;
-                            newly_unavailable.push_back(cfg);
+                            emit_device_availability(cfg->provider_id, cfg->device_id, false);
                         }
                     }
                 }
-            }
-            for (const auto *cfg : newly_unavailable) {
-                emit_device_availability(cfg->provider_id, cfg->device_id, false);
             }
         };
 
@@ -434,7 +432,6 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
         // call. A board that is dark when its provider dies must still latch
         // on the first in-band failure after the provider comes back.
         bool report_loss = false;
-        bool emit_unavailable = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = device_states_.find(device_handle);
@@ -443,17 +440,13 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
                 it->second.signals.clear();
                 if (!shutting_down && !it->second.unavailable_emitted) {
                     it->second.unavailable_emitted = true;
-                    emit_unavailable = true;
+                    emit_device_availability(provider_id, device_id, false);
                 }
                 if (!shutting_down && !provider_lost && !it->second.loss_reported && device_reachability_sink_) {
                     it->second.loss_reported = true;
                     report_loss = true;
                 }
             }
-        }
-
-        if (emit_unavailable) {
-            emit_device_availability(provider_id, device_id, false);
         }
 
         // Dispatched OUTSIDE the lock (#285): the consumer's handler issues
@@ -484,7 +477,6 @@ void StateCache::update_device_state(const std::string &device_handle, const std
     };
     std::vector<PendingEvent> pending_events;
     bool report_return = false;
-    bool emit_available = false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -499,7 +491,8 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         state.provider_available = true;
         if (state.unavailable_emitted) {
             state.unavailable_emitted = false;
-            emit_available = true;
+            // Before this read's state_update events, which go out below.
+            emit_device_availability(provider_id, device_id, true);
         }
         if (state.loss_reported) {
             state.loss_reported = false;
@@ -544,9 +537,6 @@ void StateCache::update_device_state(const std::string &device_handle, const std
     }  // Release mutex before emitting events
 
     // Emit events outside critical section
-    if (emit_available) {
-        emit_device_availability(provider_id, device_id, true);
-    }
     for (const auto &pending : pending_events) {
         emit_state_update(provider_id, device_id, pending.signal_id, pending.value, pending.quality);
     }
@@ -657,6 +647,14 @@ void StateCache::emit_state_update(const std::string &provider_id, const std::st
     event_emitter_->emit(event);
 }
 
+// Called WITH `mutex_` held, unlike the other emits. The edge is decided under
+// the lock, and the poll thread and a post-call poll_device_now() can decide
+// opposite edges for the same device back to back; emitting after unlocking
+// let the second reach subscribers first, leaving them with the opposite of
+// the cache (#300). Lock order is StateCache::mutex_ -> EventEmitter::mutex_
+// -> SubscriberQueue::mutex_, as the documented hierarchy allows: emit() only
+// assigns an id, matches filters and does a non-blocking drop-oldest push,
+// and runs no subscriber code, so nothing in it re-enters this class.
 void StateCache::emit_device_availability(const std::string &provider_id, const std::string &device_id,
                                           bool available) {
     if (!event_emitter_) {

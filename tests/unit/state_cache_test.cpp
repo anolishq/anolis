@@ -571,6 +571,7 @@ protected:
     // Every device_availability event emitted so far, in order.
     std::vector<events::DeviceAvailabilityEvent> availability() {
         while (auto event = subscription->try_pop()) {
+            all_events.push_back(*event);
             if (const auto *a = std::get_if<events::DeviceAvailabilityEvent>(&*event)) {
                 seen.push_back(*a);
             }
@@ -581,7 +582,31 @@ protected:
     std::shared_ptr<events::EventEmitter> emitter;
     std::unique_ptr<events::Subscription> subscription;
     std::vector<events::DeviceAvailabilityEvent> seen;
+    std::vector<events::Event> all_events;  // every event, in emission order
 };
+
+// A subscriber learns the device is back before it sees the values of the
+// read that brought it back, so a value never arrives for a device the
+// subscriber still believes is unavailable.
+TEST_F(StateCacheAvailabilityEventTest, RecoveryPrecedesTheReadsStateUpdate) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+    availability();
+
+    ASSERT_EQ(all_events.size(), 3U);
+    const auto *loss = std::get_if<events::DeviceAvailabilityEvent>(&all_events[0]);
+    const auto *recovery = std::get_if<events::DeviceAvailabilityEvent>(&all_events[1]);
+    const auto *value = std::get_if<events::StateUpdateEvent>(&all_events[2]);
+    ASSERT_TRUE(loss != nullptr && !loss->available);
+    ASSERT_TRUE(recovery != nullptr) << "available:true must come before the read's state_update";
+    EXPECT_TRUE(recovery->available);
+    ASSERT_TRUE(value != nullptr);
+    EXPECT_EQ(value->signal_id, "temp");
+}
 
 TEST_F(StateCacheAvailabilityEventTest, FailedReadEmitsOneLossAndOneRecovery) {
     EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
@@ -702,4 +727,87 @@ TEST_F(StateCacheAvailabilityEventTest, NoLossEventWhenProviderGoesDownDuringShu
     state_cache->poll_once(*provider_registry);
 
     EXPECT_TRUE(availability().empty());
+}
+
+// The poll thread and a control call's post-call refresh (poll_device_now)
+// can read the same device at once. The availability edges must reach
+// subscribers in the order the cache made them, or a subscriber is left
+// believing the opposite of what the cache says. No reachability sink here:
+// it runs outside the lock by design (#285) and would race a test vector.
+namespace {
+thread_local bool t_fail_reads = false;
+}  // namespace
+
+class StateCacheAvailabilityOrderTest : public StateCacheTest {
+protected:
+    void SetUp() override {
+        StateCacheTest::SetUp();
+        RegisterMockDevice();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        ASSERT_TRUE(state_cache->initialize());
+        emitter = std::make_shared<events::EventEmitter>(100, 4);
+        subscription = emitter->subscribe(events::EventFilter::all(), 100000);
+        ASSERT_TRUE(subscription != nullptr);
+        state_cache->set_event_emitter(emitter);
+        EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("read failed"));
+    }
+
+    std::shared_ptr<events::EventEmitter> emitter;
+    std::unique_ptr<events::Subscription> subscription;
+};
+
+TEST_F(StateCacheAvailabilityOrderTest, EdgesStayOrderedAcrossThreads) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillRepeatedly(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &response,
+                                  anolis::deviceprovider::v1::Status_Code &status) {
+            if (t_fail_reads) {
+                status = anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
+                return false;
+            }
+            auto *v = response.add_values();
+            v->set_signal_id("temp");
+            v->mutable_value()->set_double_value(25.5);
+            v->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+            status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+            return true;
+        }));
+
+    constexpr int kIterations = 2000;
+    std::ostringstream discarded;  // one ERROR line per failed read
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    std::thread failing([this] {
+        t_fail_reads = true;
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    std::thread succeeding([this] {
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    failing.join();
+    succeeding.join();
+    std::cerr.rdbuf(old);
+
+    std::vector<bool> edges;
+    while (auto event = subscription->try_pop()) {
+        if (const auto *a = std::get_if<events::DeviceAvailabilityEvent>(&*event)) {
+            edges.push_back(a->available);
+        }
+    }
+    ASSERT_EQ(subscription->dropped_count(), 0U);
+    ASSERT_FALSE(edges.empty()) << "the two threads never interleaved";
+
+    // Alternating from false: the first index that breaks it, or -1.
+    long first_bad = -1;
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (edges[i] != (i % 2 == 1)) {
+            first_bad = static_cast<long>(i);
+            break;
+        }
+    }
+    EXPECT_EQ(first_bad, -1) << "out-of-order availability edge among " << edges.size();
+    EXPECT_EQ(edges.back(), state_cache->get_device_state("sim0/dev1")->provider_available)
+        << "the last edge a subscriber saw contradicts the cache";
 }
