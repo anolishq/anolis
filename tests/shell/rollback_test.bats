@@ -301,11 +301,31 @@ _install_version() {
     [[ "${output}" != *"restored manifest.json"* ]]
 }
 
+# As _setup_install_cycle, but SYSTEMD_DIR (readonly in install.sh) points at
+# a temp dir holding a runtime unit, so do_rollback takes its restart branch.
+# systemctl and phase_health also print to stdout, so their order against the
+# rollback's own messages shows in ${output}.
+_setup_install_cycle_with_unit() {
+    export ANOLIS_INSTALL_SH_NO_MAIN=1
+    local unit_dir="${BATS_TEST_TMPDIR}/systemd"
+    mkdir -p "${unit_dir}"
+    : > "${unit_dir}/anolis-runtime.service"
+    source <(sed "s|^readonly SYSTEMD_DIR=.*|readonly SYSTEMD_DIR=\"${unit_dir}\"|" "${INSTALL_SH}")
+    set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
+    [ "${SYSTEMD_DIR}" = "${unit_dir}" ]
+
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    STUB_LOG="${BATS_TEST_TMPDIR}/stub.log"
+    chown() { echo "chown $*" >> "${STUB_LOG}"; }
+    systemctl() { echo "systemctl $*" >> "${STUB_LOG}"; echo "[stub] systemctl $*"; }
+    phase_health() { echo "[stub] phase_health"; }
+}
+
 @test "--rollback warns, and still finishes, when the saved manifest cannot be copied (#345)" {
     if [ "$EUID" -eq 0 ]; then
         skip "root reads a mode-000 file"
     fi
-    _setup_install_cycle
+    _setup_install_cycle_with_unit
     _install_version 0.1.43
     _install_version 0.1.44
     chmod 000 "${PREFIX}/.prev/meta/manifest.json"
@@ -316,4 +336,7 @@ _install_version() {
     [[ "${output}" == *"could not restore manifest.json"* ]]
     [[ "${output}" == *"rollback complete"* ]]
     [ "$("${PREFIX}/bin/anolis-runtime")" = "anolis-runtime 0.1.43" ]
+    # The failed copy does not skip the restart (#364).
+    grep -qxF "systemctl restart anolis-runtime.service" "${STUB_LOG}"
+    [[ "${output}" == *"could not restore manifest.json"*"[stub] systemctl restart anolis-runtime.service"*"rollback complete"* ]]
 }

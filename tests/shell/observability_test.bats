@@ -262,6 +262,23 @@ _summary_stubs() {
     [[ "${output}" != *"127.0.0.1:3000 on this machine"* ]]
 }
 
+@test "364: a failed grafana restart reports Grafana's bind as unchanged" {
+    _stub_obs_host
+    # The drop-in is written, but grafana-server does not restart with it.
+    systemctl() {
+        printf '%s\n' "systemctl $*" >>"${CALLS}"
+        [[ "$*" != "restart grafana-server" ]]
+    }
+    phase_observability > /dev/null 2>&1
+    grep -qxF "systemctl restart grafana-server" "${CALLS}"
+    _summary_stubs
+    GRAFANA_NETWORK=0
+    run phase_summary
+    [[ "${output}" == *"Grafana bind unchanged"* ]]
+    [[ "${output}" != *"ssh -L 3000"* ]]
+    [[ "${output}" != *"127.0.0.1:3000 on this machine"* ]]
+}
+
 @test "351: a run that restarts grafana reports the bind it applied" {
     _stub_obs_host
     phase_observability > /dev/null 2>&1
