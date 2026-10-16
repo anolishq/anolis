@@ -16,14 +16,17 @@ Tests:
 
 """
 
+import json
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from pathlib import Path
-from typing import Callable, List, NoReturn, Optional, Tuple
+from typing import Callable, Dict, List, NoReturn, Optional, Tuple
 
 import psutil
+import requests
 
 from tests.support.api_helpers import (
     assert_http_available,
@@ -851,6 +854,84 @@ class SupervisionTester:
         finally:
             self.stop_runtime()
 
+    def test_restart_emits_device_availability_pairs(self) -> None:
+        """A provider restart yields available:false then available:true per device (#300).
+
+        Never a lone true: each device's device_availability events on the SSE
+        stream alternate, starting with false.
+        """
+        print("\n[TEST] Device Availability Across Restart")
+
+        config_dict = self.create_config(crash_after=3.0, max_attempts=3, backoff_ms=[500, 1000, 2000])
+        seen: List[Tuple[str, bool]] = []
+        connected = threading.Event()
+        stop = threading.Event()
+
+        def collect() -> None:
+            try:
+                with requests.get(
+                    f"{self.base_url}/v0/events?provider_id=provider-sim",
+                    stream=True,
+                    timeout=(2, 5),
+                    headers={"Accept": "text/event-stream"},
+                ) as resp:
+                    connected.set()
+                    event_name = ""
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if stop.is_set():
+                            return
+                        if line.startswith("event: "):
+                            event_name = line[len("event: ") :]
+                        elif line.startswith("data: ") and event_name == "device_availability":
+                            data = json.loads(line[len("data: ") :])
+                            seen.append((data["device_id"], data["available"]))
+            except requests.exceptions.RequestException:
+                return
+
+        def by_device() -> Dict[str, List[bool]]:
+            grouped: Dict[str, List[bool]] = {}
+            for device_id, available in list(seen):
+                grouped.setdefault(device_id, []).append(available)
+            return grouped
+
+        try:
+            self.start_runtime(config_dict)
+            if not assert_provider_available(self.base_url, "provider-sim", timeout=10.0):
+                self._fail_with_output("device_availability", "Provider not available at startup")
+
+            collector = threading.Thread(target=collect, daemon=True)
+            collector.start()
+            if not connected.wait(timeout=5.0):
+                self._fail_with_output("device_availability", "SSE stream did not connect")
+
+            # Done once every device that went unavailable has come back.
+            deadline = time.time() + 20.0
+            while time.time() < deadline:
+                grouped = by_device()
+                if grouped and all(True in edges for edges in grouped.values()):
+                    break
+                time.sleep(0.1)
+            stop.set()
+
+            grouped = by_device()
+            if not grouped:
+                self._fail_with_output("device_availability", "No device_availability event across a restart")
+            for device_id, edges in grouped.items():
+                expected = [i % 2 == 1 for i in range(len(edges))]
+                if edges != expected:
+                    self._fail_with_output(
+                        "device_availability",
+                        f"{device_id}: availability edges {edges}, expected false/true alternating from false",
+                    )
+                if True not in edges:
+                    self._fail_with_output("device_availability", f"{device_id}: no recovery after restart: {edges}")
+
+            print(f"  [INFO] device_availability: {dict(grouped)}")
+
+        finally:
+            stop.set()
+            self.stop_runtime()
+
     def _live_provider_children(self) -> List[psutil.Process]:
         """Provider processes the runtime has spawned and not yet reaped (zombies excluded)."""
         assert self.fixture is not None
@@ -1096,6 +1177,7 @@ SUPERVISION_CHECKS: List[SupervisionCheck] = [
     ("restart_timeout_enforced", SupervisionTester.test_restart_timeout_enforced),
     ("startup_timeout_enforced", SupervisionTester.test_startup_timeout_enforced),
     ("device_rediscovery", SupervisionTester.test_device_rediscovery),
+    ("device_availability", SupervisionTester.test_restart_emits_device_availability_pairs),
     ("wedged_restart", SupervisionTester.test_restart_stops_wedged_process_first),
     ("restart_timeout_excludes_stop", SupervisionTester.test_restart_timeout_excludes_old_stop),
     ("half_open_probe", SupervisionTester.test_circuit_open_half_open_probe),
