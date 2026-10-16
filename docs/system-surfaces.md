@@ -66,6 +66,9 @@ follow sim's `src/devices/` structure (the de-facto template — its README says
 directly; shared executable conventions (`--config`, `--version`,
 `--check-config`) come from the executable profile, which is an org
 convention distinct from (and waivable independently of) ADPP conformance.
+For `install.sh` to deploy it, a provider release also follows the
+packaging rules in
+[What a provider release must provide](deploy/install-sh.md#what-a-provider-release-must-provide).
 
 ## Device protocols
 
