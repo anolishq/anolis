@@ -159,7 +159,9 @@ Current event names:
 4. `mode_change`
 5. `parameter_change`
 6. `automation_fault`
-7. `provider_health_change`
+7. `device_removed`
+
+Provider health is not streamed. Read `GET /v0/providers/health` for it.
 
 `device_availability` carries `provider_id`, `device_id`, `available` and
 `timestamp_ms`. It reports edges, not state:
@@ -176,6 +178,13 @@ Current event names:
 - No replay. A subscriber that connects during an outage sees only the
   `available: true`. For the current state, read `GET /v0/state`, where an
   unavailable device has `quality: "UNAVAILABLE"`.
+
+`device_removed` carries `provider_id`, `device_id` and `timestamp_ms`. It is
+sent when a provider restart republishes an inventory without a device the
+runtime was tracking, whether that device was available or not. The device has
+no state after it and no `device_availability` follows, including for a device
+last reported `available: false`. The `provider_id` and `device_id` filters
+apply to it.
 
 ## Typed Value Encoding
 
