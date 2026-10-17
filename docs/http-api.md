@@ -159,8 +159,9 @@ Current event names:
 4. `mode_change`
 5. `parameter_change`
 6. `automation_fault`
-7. `provider_health_change`
-8. `device_removed`
+7. `device_removed`
+
+Provider health is not streamed. Read `GET /v0/providers/health` for it.
 
 `device_availability` carries `provider_id`, `device_id`, `available` and
 `timestamp_ms`. It reports edges, not state:

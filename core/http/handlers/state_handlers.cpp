@@ -310,14 +310,6 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 result += "data: " + fault.dump() + "\n\n";
 
                 data_written_inline = true;
-
-            } else if constexpr (std::is_same_v<T, events::ProviderHealthChangeEvent>) {
-                result = "event: provider_health_change\n";
-                result += "id: " + std::to_string(e.event_id) + "\n";
-
-                data["provider_id"] = e.provider_id;
-                data["state"] = e.state;
-                data["timestamp_ms"] = e.timestamp_ms;
             }
 
             if (!data_written_inline) {

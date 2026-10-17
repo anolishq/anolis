@@ -242,24 +242,12 @@ struct AutomationFaultEvent {
 };
 
 /**
- * @brief Provider health change event
- *
- * Emitted when a provider's availability state changes.
- */
-struct ProviderHealthChangeEvent {
-    uint64_t event_id;
-    std::string provider_id;
-    std::string state;  // "AVAILABLE" or "UNAVAILABLE"
-    int64_t timestamp_ms;
-};
-
-/**
  * @brief Union of all event types
  *
  * Subscribers receive Event variants and can dispatch on type.
  */
 using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
-                           ParameterChangeEvent, AutomationFaultEvent, ProviderHealthChangeEvent, DeviceRemovedEvent>;
+                           ParameterChangeEvent, AutomationFaultEvent, DeviceRemovedEvent>;
 
 /**
  * @brief Get event ID from any event type
