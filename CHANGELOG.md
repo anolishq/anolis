@@ -13,6 +13,75 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-10-17
+
+Upgrade notes for operators:
+
+- **An e-stop with no software safe state now runs the `-> FAULT`
+  hooks.** On a machine with no `safety.safe_state`, `POST /v0/estop`
+  used to leave every output as it was, because the latch refused the
+  FAULT-entry hooks. Those hooks now run on the e-stop's own entry into
+  FAULT, so outputs they drive will move when the stop is pressed (#251,
+  #401). With any safe-state rung declared, nothing changes.
+- **`install.sh` checks release tarballs against the release's
+  `SHA256SUMS`** (#408). A hash mismatch stops the install. A failure to
+  fetch `SHA256SUMS` other than a 404 (a dropped connection, DNS, a
+  timeout, a 5xx) also stops it, where it used to continue. A release
+  with no `SHA256SUMS`, or with no line for the tarball, still installs
+  with a warning.
+
+No OpenAPI, config schema or provider protocol change.
+
+### Added
+
+- **`install.sh --keep-hostname`** (#327, #396) skips the host rename to
+  `anolis-<serial>` and leaves `/etc/hosts` alone. The default is
+  unchanged.
+- **`device_availability` events** (#300, #399). `GET /v0/events`
+  documented the event but nothing emitted it. The state cache now emits
+  `available: false` when a read fails or a provider goes unavailable,
+  and `available: true` on the first successful read after a loss.
+
+### Changed
+
+- **`POST /v0/estop` with rung `none` runs the FAULT-entry hooks**
+  (#251, #401). See the upgrade notes. `safe_state_achieved` stays
+  `false` and `actions` stays `[]`, since the ladder itself ran nothing.
+  In IDLE, `before_transition` hooks are still refused by the IDLE gate
+  and `after_transition` hooks run.
+- **`install.sh` verifies downloaded tarballs** (#408): the runtime and
+  provider tarballs (#415) and the observability tarball (#416) against
+  the release's `SHA256SUMS`, failing closed on any fetch failure but a
+  404 (#417). A failed observability check leaves the installed
+  dashboards as they were and the install goes on.
+- `install.sh --arch` accepts `aarch64` as `arm64` and rejects anything
+  but `arm64` and `x86_64` before downloading (#407, #413).
+
+### Fixed
+
+- `GET /v0/providers/health` reads a provider's availability and the
+  clock after `get_health()` returns, so a provider lost while the call
+  waited is reported `UNAVAILABLE`, not `AVAILABLE` with its devices
+  `OK` (part of #411, #414). The endpoint can still wait behind a stuck
+  provider call.
+- A tick exception halts the behaviour tree, so FAULT -> MANUAL -> AUTO
+  no longer rethrows at the child that threw, and a new run starts with
+  a clean stall count and last error (part of #387, #405).
+- `install.sh --local` on a bundle with no `manifest.json` names the
+  path and exits 1, instead of exiting 2 with no message (#385, #397).
+- The health phase skips providers with an empty id, and tells an
+  endpoint that did not answer from one that answered with an unreadable
+  body (#388, #398).
+- HTTP unit tests bind port 0, so `ctest -j` no longer collides on ports
+  (#393, #404).
+
+### Docs and CI
+
+- What a provider release must provide for `install.sh` (part of #242,
+  #406); the pinned clang-tidy 18.1.8 in CONTRIBUTING (#410, #412).
+- The docs check gates `ok` (#390, #394); every enabled clang-tidy
+  check is an error (#372, #409).
+
 ## [0.1.45] - 2026-10-16
 
 Upgrade notes for operators:
