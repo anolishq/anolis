@@ -125,3 +125,32 @@ _provision() {
     [[ "$output" == *"no SHA256SUMS fetched for anolishq/anolis v9.9.9; ${ASSET} is not verified"* ]]
     [ "$(cat "${PREFIX}/observability/marker")" = "new" ]
 }
+
+@test "#408 a failed SHA256SUMS fetch skips only observability, not the install" {
+    # Connection refused: curl exit 7, HTTP 000. The helper dies on this; the
+    # observability phase must turn it into a skip and return to main().
+    SUMS_FAIL="7 000"
+    printf '%s  %s\n' "${GOOD_SHA}" "${ASSET}" > "${RELEASE}/SHA256SUMS"
+
+    run _provision
+    [[ "$output" == *"RETURNED 1"* ]]
+    [[ "$output" == *"could not fetch SHA256SUMS for anolishq/anolis v9.9.9 (curl exit 7, HTTP 000)"* ]]
+    [[ "$output" == *"${ASSET} failed verification; dashboards not updated"* ]]
+    [ "$(cat "${PREFIX}/observability/marker")" = "old" ]
+    [ ! -e "${HOST_WRITES}" ]
+
+    # The real phase, with only its host and package steps stubbed.
+    WITH_OBSERVABILITY=1
+    apt-get() { :; }
+    dpkg() { :; }
+    sleep() { :; }
+    _obs_apt_repos() { :; }
+    _obs_write_influx_dropin() { :; }
+    _obs_setup_influx() { :; }
+    _phase() { phase_observability; echo "CONTINUED rc=$?"; }
+    run _phase
+    [[ "$output" == *"grafana provisioning failed"* ]]
+    [[ "$output" == *"CONTINUED rc=0"* ]]
+    [ "$(cat "${PREFIX}/observability/marker")" = "old" ]
+    [ ! -e "${HOST_WRITES}" ]
+}
