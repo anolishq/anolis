@@ -51,3 +51,40 @@ _expected_host_arch() {
     phase_detect
     [ "${ARCH}" = "${expected}" ]
 }
+
+# --- #407: an explicit --arch is validated against the release asset names ---
+
+@test "#407 --arch aarch64 maps to the arm64 release asset name" {
+    TARGET_ARCH="aarch64"
+    run resolve_target_arch
+    [ "$status" -eq 0 ]
+    [ "$output" = "arm64" ]
+}
+
+@test "#407 --arch x86_64 is accepted as given" {
+    TARGET_ARCH="x86_64"
+    run resolve_target_arch
+    [ "$status" -eq 0 ]
+    [ "$output" = "x86_64" ]
+}
+
+@test "#407 an unsupported --arch dies naming the valid values" {
+    TARGET_ARCH="armv7l"
+    run resolve_target_arch
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unsupported --arch 'armv7l' (arm64|x86_64)"* ]]
+}
+
+@test "#407 --stage with an unsupported --arch dies before any download" {
+    # Run the script itself (main + set -e), with curl stubbed to log each URL.
+    local stub="${BATS_TEST_TMPDIR}/bin" log="${BATS_TEST_TMPDIR}/curl.log"
+    mkdir -p "${stub}"
+    printf '#!/bin/sh\necho "$*" >> "%s"\nexit 22\n' "${log}" > "${stub}/curl"
+    chmod +x "${stub}/curl"
+    run env -u ANOLIS_INSTALL_SH_NO_MAIN PATH="${stub}:${PATH}" bash "${INSTALL_SH}" \
+        --stage "${BATS_TEST_TMPDIR}/out" \
+        --project "${BATS_TEST_DIRNAME}/fixtures/stage-project" --arch armv7l
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unsupported --arch 'armv7l' (arm64|x86_64)"* ]]
+    [ ! -e "${log}" ]
+}
