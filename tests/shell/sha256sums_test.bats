@@ -20,21 +20,33 @@ setup() {
     printf 'tarball bytes' > "${RELEASE}/${ASSET}"
     GOOD_SHA=$(sha256sum "${RELEASE}/${ASSET}" | awk '{print $1}')
 
-    # Serve <url basename> from ${RELEASE}; a missing file is curl -f's 22.
+    # Serve <url basename> from ${RELEASE}. A missing file is curl -f's 22
+    # with HTTP 404. SUMS_FAIL="<exit> <http_code>" makes the SHA256SUMS
+    # request fail that way instead. -w '%{http_code}' prints the code, as
+    # real curl does under -f.
+    SUMS_FAIL=""
     curl() {
-        local out="" url="" a
+        local out="" url="" w="" a code=200 rc=0
         while [[ $# -gt 0 ]]; do
             a="$1"; shift
             case "${a}" in
                 -o) out="$1"; shift ;;
+                -w) w="$1"; shift ;;
                 -H) shift ;;
                 -*) ;;
                 *)  url="${a}" ;;
             esac
         done
         printf '%s\n' "${url}" >> "${CURL_LOG}"
-        [[ -f "${RELEASE}/${url##*/}" ]] || return 22
-        cp "${RELEASE}/${url##*/}" "${out}"
+        if [[ -n "${SUMS_FAIL}" && "${url}" == */SHA256SUMS ]]; then
+            read -r rc code <<< "${SUMS_FAIL}"
+        elif [[ -f "${RELEASE}/${url##*/}" ]]; then
+            cp "${RELEASE}/${url##*/}" "${out}"
+        else
+            rc=22 code=404
+        fi
+        [[ "${w}" == '%{http_code}' ]] && printf '%s' "${code}"
+        return "${rc}"
     }
 }
 
@@ -67,7 +79,7 @@ setup() {
     [[ "$output" == *"anolishq/foo v1.0.0 has no entry for ${ASSET}"* ]]
 }
 
-@test "#408 a release with no SHA256SUMS warns and continues" {
+@test "#408 a release with no SHA256SUMS (HTTP 404) warns and continues" {
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
     [ "$status" -eq 0 ]
     [ -f "${DL}/${ASSET}" ]
@@ -80,4 +92,57 @@ setup() {
     [ "$status" -eq 0 ]
     [ -f "${DL}/install.sh" ]
     ! grep -q 'SHA256SUMS' "${CURL_LOG}"
+}
+
+@test "#408 a connection failure fetching SHA256SUMS fails closed" {
+    printf '%s  %s\n' "${GOOD_SHA}" "${ASSET}" > "${RELEASE}/SHA256SUMS"
+    SUMS_FAIL="7 000"
+    run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not fetch SHA256SUMS for anolishq/foo v1.0.0 (curl exit 7, HTTP 000)"* ]]
+    [[ "$output" != *"no SHA256SUMS fetched"* ]]
+    [ ! -e "${DL}/${ASSET}.SHA256SUMS" ]
+}
+
+@test "#408 an HTTP 5xx fetching SHA256SUMS fails closed" {
+    printf '%s  %s\n' "${GOOD_SHA}" "${ASSET}" > "${RELEASE}/SHA256SUMS"
+    SUMS_FAIL="22 503"
+    run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not fetch SHA256SUMS for anolishq/foo v1.0.0 (curl exit 22, HTTP 503)"* ]]
+    [[ "$output" != *"no SHA256SUMS fetched"* ]]
+}
+
+@test "#408 --stage stops and writes no bundle when SHA256SUMS cannot be fetched" {
+    # Run the script itself (main + set -e). The curl stub serves any asset
+    # but refuses the SHA256SUMS connection, as curl does with exit 7.
+    local stub="${BATS_TEST_TMPDIR}/bin" out="${BATS_TEST_TMPDIR}/out"
+    mkdir -p "${stub}" "${out}"
+    cat > "${stub}/curl" <<'STUB'
+#!/bin/bash
+out="" w="" url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        -w) w="$2"; shift 2 ;;
+        -H) shift 2 ;;
+        -*) shift ;;
+        *)  url="$1"; shift ;;
+    esac
+done
+if [[ "${url}" == */SHA256SUMS ]]; then
+    [[ -n "${w}" ]] && printf '000'
+    exit 7
+fi
+printf 'bytes' > "${out}"
+[[ -n "${w}" ]] && printf '200'
+exit 0
+STUB
+    chmod +x "${stub}/curl"
+    run env -u ANOLIS_INSTALL_SH_NO_MAIN PATH="${stub}:${PATH}" bash "${INSTALL_SH}" \
+        --stage "${out}" \
+        --project "${BATS_TEST_DIRNAME}/fixtures/stage-project" --arch x86_64
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not fetch SHA256SUMS for anolishq/anolis v9.9.9 (curl exit 7, HTTP 000)"* ]]
+    [ -z "$(ls -A "${out}")" ]
 }
