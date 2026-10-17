@@ -1402,6 +1402,13 @@ _obs_provision_grafana() {
         rm -rf "${tmp}"
         return 1
     fi
+    # Check it against the release's SHA256SUMS (#408). The helper dies on a
+    # mismatch; the subshell turns that into a skip that keeps the old copy.
+    if ! ( _stage_verify_sha256 anolishq/anolis "v${ver}" "${asset}" "${tmp}" ); then
+        log_err "observability: ${asset} failed verification; dashboards not updated"
+        rm -rf "${tmp}"
+        return 1
+    fi
     # Extract to the temp dir first — a corrupt download must not destroy the
     # previously provisioned copy.
     install -d "${tmp}/extract" || { rm -rf "${tmp}"; return 1; }
