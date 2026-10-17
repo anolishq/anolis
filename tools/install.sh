@@ -2223,6 +2223,37 @@ _stage_fetch() {
         log_info "Fully offline? Build a bundle elsewhere with --stage and install it here with --local."
         exit 1
     fi
+    # Release tarballs are checked against the release's SHA256SUMS (#408).
+    # install.sh is never listed there.
+    if [[ "${asset}" == *.tar.gz ]]; then
+        _stage_verify_sha256 "${repo}" "${tag}" "${asset}" "${dir}"
+    fi
+}
+
+# Check a downloaded tarball against its release's SHA256SUMS. A mismatch is
+# fatal. A release with no SHA256SUMS, or one with no entry for the tarball,
+# warns and continues: published releases exist that lack arm64 entries.
+_stage_verify_sha256() {
+    local repo="$1" tag="$2" asset="$3" dir="$4"
+    local sums="${dir}/${asset}.SHA256SUMS" expected actual
+    local auth=()
+    [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    if ! curl -fsSL "${auth[@]}" -o "${sums}" \
+        "https://github.com/${repo}/releases/download/${tag}/SHA256SUMS"; then
+        rm -f "${sums}"
+        log_warn "stage: no SHA256SUMS fetched for ${repo} ${tag}; ${asset} is not verified"
+        return 0
+    fi
+    expected=$(awk -v a="${asset}" '$2 == a || $2 == "*" a { print $1; exit }' "${sums}")
+    rm -f "${sums}"
+    if [[ -z "${expected}" ]]; then
+        log_warn "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; it is not verified"
+        return 0
+    fi
+    actual=$(sha256sum "${dir}/${asset}" | awk '{print $1}')
+    if [[ "${actual}" != "${expected}" ]]; then
+        die "stage: ${asset} does not match SHA256SUMS of ${repo} ${tag}: expected ${expected}, got ${actual}"
+    fi
 }
 
 # Tools needed to build a bundle from a config (staging / online install).

@@ -204,8 +204,8 @@ run always stops the install. A provider that gives no answer (one that predates
 
 `install.sh` holds no list of providers. For each entry under
 `components.providers` in `machine-profile.yaml` it downloads a release asset
-from the `repo` that entry names, and the asset's name and layout are the whole
-contract. A provider from any organisation installs the same way as one from
+and the release's `SHA256SUMS` from the `repo` that entry names, and the
+requirements below are the whole contract. A provider from any organisation installs the same way as one from
 anolishq: `repo` may be any `owner/repo` on GitHub.
 
 For an entry with key `<kind>`, `repo` and `version`:
@@ -214,6 +214,7 @@ For an entry with key `<kind>`, `repo` and `version`:
 | --- | --- |
 | a GitHub release tagged `v<version>` | `version` is written without the `v`, e.g. `version: 0.4.1` downloads tag `v0.4.1`. |
 | an asset named `anolis-provider-<kind>-<version>-linux-<arch>.tar.gz` | `<arch>` is `arm64` or `x86_64`: the names `install.sh` derives from the host (it maps `aarch64` to `arm64`) and the values `--arch` documents. Name the asset `arm64`, not `aarch64` or `amd64`. Publish one asset per architecture you support. |
+| a `SHA256SUMS` asset listing every tarball | standard `sha256sum` output with bare file names, one line per `.tar.gz` asset, every architecture included. `install.sh` checks each downloaded tarball against it and stops on a mismatch. Today a release with no `SHA256SUMS`, or one with no line for the tarball, gets a warning naming the release and the asset, and the install continues unverified. |
 | the archive holds `bin/anolis-provider-<kind>` | at the archive root, with no top-level directory. It is the only file `install.sh` copies out. |
 | `<kind>` uses `a-z`, `0-9` and `-` only | the runtime configs refer to the binary as `<prefix>/bin/anolis-provider-<kind>`, and staging refuses a config whose provider command does not resolve to a pinned kind. |
 | `--version` exits `0` | the host preflight runs it as the service user, and a binary that cannot run stops the install. |
@@ -226,9 +227,9 @@ which is the contract for the binary itself.
 What is **not** required:
 
 - Nothing else in the archive. Other files are ignored.
-- No checksum or manifest file. `install.sh` does not read the release's
-  `SHA256SUMS` or `manifest.json`; it computes the bundle's own
-  `checksums.sha256` after downloading.
+- No manifest file. `install.sh` does not read the release's
+  `manifest.json`; it computes the bundle's own `checksums.sha256` after
+  downloading.
 - No naming by the runtime. The runtime starts whatever `command` a runtime
   config names; the asset pattern is `install.sh`'s alone.
 - No config-schema asset. `install.sh` never fetches one. A composer that
