@@ -292,7 +292,19 @@ So we do **not** enforce clang-tidy on Windows.
 
 - Configure with `-DENABLE_CLANG_TIDY=ON` (example: `cmake --preset dev-debug -DENABLE_CLANG_TIDY=ON`).
 - Or use a preset that sets `ENABLE_CLANG_TIDY=ON`.
-- You need `clang-tidy` installed (`sudo apt install clang-tidy`).
+- You need the same SHA-pinned static LLVM **clang-tidy 18.1.8** that CI
+  installs (the org `setup-clang-tools` action with `tidy: "true"`, used by
+  the `clang-tidy` job in `.github/workflows/ci.yml`). Do **not** use the
+  distro/apt `clang-tidy`: its version follows the distro release, and with
+  `WarningsAsErrors: "*"` a different version can fail a build that passes
+  in CI, or pass one that fails.
+- **Dev boxes**: install the `clang-tidy-18` binary from the same public
+  `muttleyxd/clang-tools-static-binaries` release as clang-format, plus the
+  clang resource directory the action vendors
+  (`clang18-resource-dir.tar.xz`) at `<bin>/../lib/clang/18`; the static
+  binary ships without it and fails on `'stddef.h' file not found`.
+  `just lint` also needs the action's vendored `run-clang-tidy` on PATH.
+- **Verify**: `clang-tidy --version` should show version 18.1.8.
 
 **Windows note**: You can install clang-tidy with the "C++ Clang tools" workload or LLVM, but results under MSVC are incomplete.
 Prefer running analysis from Linux/WSL instead.
