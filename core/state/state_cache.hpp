@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -136,10 +137,19 @@ public:
      * which re-enter StateCache through CallRouter's post-call poll; dispatching
      * under the lock would self-deadlock on a non-recursive mutex.
      *
+     * Because of that, two edges for one device can reach the sink in the
+     * opposite order to the one they were decided in: the poll loop and a
+     * post-call poll read the same device on different threads (#403). Each
+     * edge carries `edge_seq`, taken under `mutex_` where the edge is decided.
+     * It is strictly increasing across every edge this cache emits, so it is
+     * strictly increasing per device too, and the consumer drops an edge
+     * older than the newest it has applied for that device.
+     *
      * Must be set before start_polling().
      */
-    using DeviceReachabilitySink = std::function<void(const std::string &device_handle, bool reachable,
-                                                      anolis::deviceprovider::v1::Status_Code last_status)>;
+    using DeviceReachabilitySink =
+        std::function<void(const std::string &device_handle, bool reachable,
+                           anolis::deviceprovider::v1::Status_Code last_status, std::uint64_t edge_seq)>;
     void set_device_reachability_sink(DeviceReachabilitySink sink);
 
     /**
@@ -220,6 +230,13 @@ private:
 
     // Cached state (indexed by device_handle)
     std::unordered_map<std::string, DeviceState> device_states_;
+
+    // Last reachability edge number handed out (#403). Guarded by `mutex_`.
+    // One counter for the whole cache rather than one per DeviceState: a
+    // provider rebuild drops and recreates device states, and a per-state
+    // counter starting again from zero would make the device's next edges look
+    // older than ones the consumer has already applied.
+    std::uint64_t reachability_edge_seq_ = 0;
 
     // Polling configuration (built from registry at init)
     struct PollConfig {

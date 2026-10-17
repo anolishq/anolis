@@ -432,6 +432,7 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
         // call. A board that is dark when its provider dies must still latch
         // on the first in-band failure after the provider comes back.
         bool report_loss = false;
+        std::uint64_t loss_seq = 0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = device_states_.find(device_handle);
@@ -445,15 +446,17 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
                 if (!shutting_down && !provider_lost && !it->second.loss_reported && device_reachability_sink_) {
                     it->second.loss_reported = true;
                     report_loss = true;
+                    loss_seq = ++reachability_edge_seq_;
                 }
             }
         }
 
         // Dispatched OUTSIDE the lock (#285): the consumer's handler issues
         // safe-state calls, which re-enter this class via CallRouter's post-call
-        // poll. Notifying under `mutex_` would self-deadlock.
+        // poll. Notifying under `mutex_` would self-deadlock. `loss_seq` lets
+        // the consumer drop this edge if a newer one reached it first (#403).
         if (report_loss) {
-            device_reachability_sink_(device_handle, false, failure_status);
+            device_reachability_sink_(device_handle, false, failure_status, loss_seq);
         }
 
         return false;
@@ -477,6 +480,7 @@ void StateCache::update_device_state(const std::string &device_handle, const std
     };
     std::vector<PendingEvent> pending_events;
     bool report_return = false;
+    std::uint64_t return_seq = 0;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -497,6 +501,7 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         if (state.loss_reported) {
             state.loss_reported = false;
             report_return = true;
+            return_seq = ++reachability_edge_seq_;
         }
 
         // Update signal values with change detection
@@ -545,7 +550,7 @@ void StateCache::update_device_state(const std::string &device_handle, const std
     // loss edge: the consumer re-issues safe state for a returning device, and
     // that call path re-enters this class.
     if (report_return && device_reachability_sink_) {
-        device_reachability_sink_(device_handle, true, anolis::deviceprovider::v1::Status_Code_CODE_OK);
+        device_reachability_sink_(device_handle, true, anolis::deviceprovider::v1::Status_Code_CODE_OK, return_seq);
     }
 }
 

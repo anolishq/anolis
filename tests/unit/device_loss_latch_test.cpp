@@ -74,3 +74,70 @@ TEST(DeviceLossLatchTest, ConcurrentEngageAndQueryAreSafe) {
 
     EXPECT_TRUE(latch.is_latched("bread0/dcmt0"));
 }
+
+// Reachability edges, numbered by StateCache under its lock, can reach the
+// latch out of order (#403). Each test below delivers them in a chosen order.
+namespace {
+constexpr auto kUnavailable = anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
+constexpr auto kDeadline = anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+constexpr auto kInternal = anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
+constexpr auto kOk = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+}  // namespace
+
+TEST(DeviceLossLatchEdgeTest, LossThenReturnInOrderLatchesAndAsksForReissue) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+    EXPECT_TRUE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2));
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm";
+}
+
+TEST(DeviceLossLatchEdgeTest, LossOlderThanAnAppliedReturnIsDropped) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
+    EXPECT_FALSE(latch.is_latched("sim0/dev1")) << "a late loss latched a device that has since answered";
+}
+
+TEST(DeviceLossLatchEdgeTest, ReturnOlderThanAnAppliedLossIsDropped) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kDeadline, 3));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2))
+        << "a late return asked for safe state on a device that is gone again";
+    EXPECT_TRUE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 4));
+}
+
+// Order is per device: a newer edge for one device says nothing about how old
+// another device's edge is.
+TEST(DeviceLossLatchEdgeTest, EdgeOrderIsTrackedPerDevice) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 5));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev2", false, kUnavailable, 3));
+    EXPECT_TRUE(latch.is_latched("sim0/dev2"));
+    EXPECT_FALSE(latch.is_latched("sim0/dev1"));
+}
+
+// A re-arm does not make an edge decided before it any newer.
+TEST(DeviceLossLatchEdgeTest, ReleaseAllKeepsEdgeOrder) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
+    EXPECT_TRUE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 3));
+    latch.release_all();
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 2));
+    EXPECT_FALSE(latch.is_latched("sim0/dev1"));
+}
+
+// Only a transport-level failure latches; a decode failure means the device
+// answered. Moved here from Runtime's handler with the order check.
+TEST(DeviceLossLatchEdgeTest, OnlyTransportFailuresLatch) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", false, kInternal, 1));
+    EXPECT_FALSE(latch.is_latched("sim0/dev1"));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2)) << "nothing latched, nothing to re-issue";
+
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev2", false, kUnavailable, 3));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev3", false, kDeadline, 4));
+    EXPECT_TRUE(latch.is_latched("sim0/dev2"));
+    EXPECT_TRUE(latch.is_latched("sim0/dev3"));
+}
