@@ -126,12 +126,10 @@ std::vector<std::string> unmatched_excluded_signals(
     return lines;
 }
 
-std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderRegistry &provider_registry,
-                                                             registry::DeviceRegistry &device_registry,
-                                                             state::StateCache &state_cache,
-                                                             provider::ProviderSupervisor *supervisor,
-                                                             const StalenessPolicy &staleness_policy,
-                                                             std::chrono::system_clock::time_point now) {
+std::vector<ProviderHealthSnapshot> collect_providers_health(
+    provider::ProviderRegistry &provider_registry, registry::DeviceRegistry &device_registry,
+    state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,
+    std::optional<std::chrono::system_clock::time_point> fixed_now) {
     using namespace std::chrono;
     using SupervisionSnapshot = provider::ProviderSupervisor::ProviderSupervisionSnapshot;
 
@@ -147,7 +145,19 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
         ProviderHealthSnapshot ps;
         ps.provider_id = provider_id;
 
-        bool is_available = provider->is_available();
+        // Provider-reported ADPP health (#185), fetched on demand: the
+        // provider's own view — per-device metrics and last_seen, plus devices
+        // it expected but could not bring up (absent from the registry,
+        // reported UNREACHABLE by the provider).
+        adpp::GetHealthResponse reported;
+        bool has_reported = provider->is_available() && provider->get_health(reported);
+
+        // GetHealth can wait behind an in-flight call for up to the provider's
+        // timeout (#411). Read availability and the clock after it returns, so
+        // the answer is no older than the request.
+        const bool is_available = provider->is_available();
+        has_reported = has_reported && is_available;
+        const auto now = fixed_now.value_or(system_clock::now());
         ps.state = is_available ? "AVAILABLE" : "UNAVAILABLE";
 
         auto devices = device_registry.get_devices_for_provider(provider_id);
@@ -157,12 +167,6 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(provider::ProviderR
         // cycle cost so a healthy multi-device bus stops false-flapping STALE.
         const StalenessBounds bounds = resolve_staleness_bounds(staleness_policy, devices.size());
 
-        // Provider-reported ADPP health (#185), fetched on demand: the
-        // provider's own view — per-device metrics and last_seen, plus devices
-        // it expected but could not bring up (absent from the registry,
-        // reported UNREACHABLE by the provider).
-        adpp::GetHealthResponse reported;
-        const bool has_reported = is_available && provider->get_health(reported);
         std::map<std::string, const adpp::DeviceHealth *> reported_by_id;
         if (has_reported) {
             for (const auto &dh : reported.devices()) {
