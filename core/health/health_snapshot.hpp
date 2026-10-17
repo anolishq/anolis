@@ -184,14 +184,18 @@ std::vector<std::string> unmatched_excluded_signals(
  * provider may answer with a live device query per device), so callers
  * choose the cadence deliberately.
  *
+ * Each provider's availability and the clock are read after its GetHealth
+ * returns, so a provider that goes unavailable while the call waits is
+ * reported UNAVAILABLE and ages are measured at the answer, not the request.
+ *
  * @param supervisor may be nullptr when supervision is disabled.
  * @param staleness_policy cadence-derived liveness bounds (#220).
- * @param now current time; defaulted, overridable for deterministic tests.
+ * @param fixed_now fixed time for deterministic tests; unset reads the clock.
  */
 std::vector<ProviderHealthSnapshot> collect_providers_health(
     provider::ProviderRegistry &provider_registry, registry::DeviceRegistry &device_registry,
     state::StateCache &state_cache, provider::ProviderSupervisor *supervisor, const StalenessPolicy &staleness_policy,
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
+    std::optional<std::chrono::system_clock::time_point> fixed_now = std::nullopt);
 
 /**
  * @brief Devices with an ACTUATE function whose provider reports the

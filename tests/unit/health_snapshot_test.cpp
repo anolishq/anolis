@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "mocks/mock_provider_handle.hpp"
@@ -217,6 +218,61 @@ TEST_F(HealthSnapshotCollectorTest, ProviderUnavailableReportsUnavailable) {
     auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
                                                  poll_time + std::chrono::milliseconds(100));
     EXPECT_EQ(HealthOf(snap, "dev0"), "UNAVAILABLE");
+}
+
+// #411: GetHealth can wait behind a stuck call until the provider times out.
+// A provider that goes unavailable during that wait must not be reported with
+// the availability it had when the request arrived.
+TEST_F(HealthSnapshotCollectorTest, ProviderLostDuringGetHealthReportsUnavailable) {
+    RegisterDevices(1);
+    auto poll_time = PollAndGetPollTime();
+    bool available = true;
+    ON_CALL(*mock_provider, is_available()).WillByDefault(Invoke([&available] { return available; }));
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([&available](GetHealthResponse &) {
+        available = false;
+        return false;
+    }));
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    ASSERT_EQ(snap.size(), 1u);
+    EXPECT_EQ(snap[0].state, "UNAVAILABLE");
+    EXPECT_EQ(snap[0].lifecycle_state, "DOWN");
+    EXPECT_EQ(HealthOf(snap, "dev0"), "UNAVAILABLE");
+}
+
+// #411: a report that arrives from a provider lost during the call is dropped,
+// as for any unavailable provider, so it cannot mark the provider degraded.
+TEST_F(HealthSnapshotCollectorTest, ReportFromProviderLostDuringGetHealthIsDropped) {
+    RegisterDevices(1);
+    auto poll_time = PollAndGetPollTime();
+    bool available = true;
+    ON_CALL(*mock_provider, is_available()).WillByDefault(Invoke([&available] { return available; }));
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([&available](GetHealthResponse &response) {
+        response.mutable_provider()->set_state(anolis::deviceprovider::v1::ProviderHealth::STATE_FAULT);
+        available = false;
+        return true;
+    }));
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    ASSERT_EQ(snap.size(), 1u);
+    EXPECT_EQ(snap[0].state, "UNAVAILABLE");
+    EXPECT_FALSE(snap[0].reported.has_value());
+    EXPECT_FALSE(snap[0].degraded);
+}
+
+// #411: ages are measured when GetHealth returns, not when the request arrived.
+TEST_F(HealthSnapshotCollectorTest, StalenessIsMeasuredAfterGetHealthReturns) {
+    RegisterDevices(1);
+    PollAndGetPollTime();
+    constexpr auto kWait = std::chrono::milliseconds(200);
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([kWait](GetHealthResponse &) {
+        std::this_thread::sleep_for(kWait);
+        return false;
+    }));
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0});
+    ASSERT_EQ(snap.size(), 1u);
+    ASSERT_EQ(snap[0].devices.size(), 1u);
+    EXPECT_GE(snap[0].devices[0].staleness_ms, static_cast<uint64_t>(kWait.count()));
 }
 
 // ---------------------------------------------------------------------------
