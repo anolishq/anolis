@@ -40,19 +40,35 @@ setup() {
     tar -czf "${RELEASE}/${ASSET}" -C "${t}" .
     GOOD_SHA=$(sha256sum "${RELEASE}/${ASSET}" | awk '{print $1}')
 
+    # Serve release URLs from ${RELEASE}, as the stub in sha256sums_test.bats
+    # does: a missing file is curl -f's 22 with HTTP 404, SUMS_FAIL="<exit>
+    # <http_code>" makes the SHA256SUMS request fail that way instead, and
+    # -w '%{http_code}' prints the code. Any other URL (the vendor apt keys,
+    # Grafana's health endpoint) succeeds.
+    SUMS_FAIL=""
     curl() {
-        local out="" url="" a
+        local out="" url="" w="" a code=200 rc=0
         while [[ $# -gt 0 ]]; do
             a="$1"; shift
             case "${a}" in
                 -o) out="$1"; shift ;;
+                -w) w="$1"; shift ;;
                 -H) shift ;;
                 -*) ;;
                 *)  url="${a}" ;;
             esac
         done
-        [[ -f "${RELEASE}/${url##*/}" ]] || return 22
-        cp "${RELEASE}/${url##*/}" "${out}"
+        if [[ "${url}" != https://github.com/*/releases/download/* ]]; then
+            return 0
+        elif [[ -n "${SUMS_FAIL}" && "${url}" == */SHA256SUMS ]]; then
+            read -r rc code <<< "${SUMS_FAIL}"
+        elif [[ -f "${RELEASE}/${url##*/}" ]]; then
+            cp "${RELEASE}/${url##*/}" "${out}"
+        else
+            rc=22 code=404
+        fi
+        [[ "${w}" == '%{http_code}' ]] && printf '%s' "${code}"
+        return "${rc}"
     }
     install() {
         local a
