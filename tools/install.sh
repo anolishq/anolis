@@ -1989,15 +1989,16 @@ _removable_prefix() {
 
 # Remove the install prefix, keeping recorded runtime data (#304). The run
 # journal lives at <prefix>/anolis-data; an uninstall must not silently destroy
-# it -- the same contract the observability data has further down. A non-empty
-# journal is moved aside, the prefix is removed as one canonical path, and the
-# journal is moved back. Prints the kept directory (if any) on stdout. Pure:
+# it -- the same contract the observability data has further down. A journal
+# holding any file is moved aside (one with only empty directories, such as the
+# runs/ the runtime creates at startup, is empty: #328), the prefix is removed
+# as one canonical path, and the journal is moved back. Prints the kept directory (if any) on stdout. Pure:
 # acts on the path given, so the bats suite can cover it without root.
 _remove_prefix_keeping_data() {
     local prefix
     prefix=$(_removable_prefix "${1:-}") || return 1
     local data="${prefix}/anolis-data"
-    if [[ ! -d "${data}" || -L "${data}" || -z "$(ls -A "${data}" 2>/dev/null)" ]]; then
+    if [[ ! -d "${data}" || -L "${data}" || -z "$(find "${data}" -mindepth 1 ! -type d -print -quit 2>/dev/null)" ]]; then
         rm -rf --one-file-system -- "${prefix}"
         return
     fi
@@ -2091,12 +2092,12 @@ do_uninstall() {
         if [[ ${#kept_data[@]} -gt 0 ]]; then
             log_info "Kept: influxdb2/grafana packages, and the recorded data in ${kept_data[*]}"
             log_info "Full purge (DESTROYS recorded data):"
-            log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
+            log_info "  apt-get purge influxdb2 influxdb2-cli grafana influxdata-archive-keyring"
             log_info "  rm -rf ${kept_data[*]}"
         else
             log_info "Kept: influxdb2/grafana packages. No data directories found on this host."
             log_info "Full purge:"
-            log_info "  apt-get purge influxdb2 influxdb2-cli grafana"
+            log_info "  apt-get purge influxdb2 influxdb2-cli grafana influxdata-archive-keyring"
         fi
         # .ucf-dist is left behind by dpkg when the vendor list file was modified;
         # without it a later reinstall can resurrect the vendor repo.
@@ -2104,6 +2105,7 @@ do_uninstall() {
         log_info "  rm -f /etc/apt/sources.list.d/grafana.list"
         log_info "  rm -f /etc/apt/keyrings/influxdata-archive.gpg /etc/apt/keyrings/grafana.gpg"
         log_info "  rm -rf /etc/influxdb /etc/grafana   # dpkg leaves these when non-empty"
+        log_info "  rm -rf /var/log/grafana"
     fi
 
     log_ok "uninstall complete"

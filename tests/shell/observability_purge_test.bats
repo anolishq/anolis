@@ -52,3 +52,34 @@ teardown() {
     [ "$status" -eq 0 ]
     [ -z "${output}" ]
 }
+
+# Every command that could change the host is recorded instead of run, and the
+# prefix does not exist, so do_uninstall only prints.
+_run_stubbed_uninstall() {
+    CALLS="${BATS_TEST_TMPDIR}/calls.log"
+    : >"${CALLS}"
+    local name
+    for name in rm rmdir systemctl mv chown chmod; do
+        eval "${name}() { printf '%s\n' \"${name} \$*\" >>\"\${CALLS}\"; }"
+    done
+    _obs_provisioned() { return 0; }
+    PREFIX="${BATS_TEST_TMPDIR}/no-such-prefix"
+    run do_uninstall
+    unset -f rm rmdir systemctl mv chown chmod
+}
+
+@test "#328: the printed purge names the keyring package and Grafana's logs" {
+    # The install's apt-get pulls influxdata-archive-keyring in as a dependency,
+    # and grafana leaves /var/log/grafana; both survived the old purge text.
+    _run_stubbed_uninstall
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"apt-get purge influxdb2 influxdb2-cli grafana influxdata-archive-keyring"* ]]
+    [[ "${output}" == *"rm -rf /var/log/grafana"* ]]
+
+    # The same text when recorded data is found.
+    mkdir -p "${FAKE}/var/lib/influxdb"
+    _run_stubbed_uninstall
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"apt-get purge influxdb2 influxdb2-cli grafana influxdata-archive-keyring"* ]]
+    [[ "${output}" == *"rm -rf /var/log/grafana"* ]]
+}

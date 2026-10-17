@@ -117,6 +117,25 @@ assert_each_refused() {
     [ ! -e "${P}" ]
 }
 
+@test "328: a journal holding only empty directories is empty -- the whole prefix goes" {
+    # Since #303 the runtime creates anolis-data/runs at startup, so an unused
+    # machine has that directory and nothing in it.
+    mkdir -p "${P}/anolis-data/runs"
+    run --separate-stderr _remove_prefix_keeping_data "${P}"
+    [ "$status" -eq 0 ]
+    [ -z "${output}" ]
+    [ ! -e "${P}" ]
+}
+
+@test "328: one file anywhere under anolis-data is a journal worth keeping" {
+    mkdir -p "${P}/anolis-data/runs/nested"
+    touch "${P}/anolis-data/runs/nested/r.events.jsonl"
+    run --separate-stderr _remove_prefix_keeping_data "${P}"
+    [ "$status" -eq 0 ]
+    [ "${output}" = "${P}/anolis-data" ]
+    [ -f "${P}/anolis-data/runs/nested/r.events.jsonl" ]
+}
+
 @test "304: no anolis-data at all -- the whole prefix goes (pre-#303 machines)" {
     run --separate-stderr _remove_prefix_keeping_data "${P}"
     [ "$status" -eq 0 ]
