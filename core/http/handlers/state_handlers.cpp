@@ -272,6 +272,14 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["available"] = e.available;
                 data["timestamp_ms"] = e.timestamp_ms;
 
+            } else if constexpr (std::is_same_v<T, events::DeviceRemovedEvent>) {
+                result = "event: device_removed\n";
+                result += "id: " + std::to_string(e.event_id) + "\n";
+
+                data["provider_id"] = e.provider_id;
+                data["device_id"] = e.device_id;
+                data["timestamp_ms"] = e.timestamp_ms;
+
             } else if constexpr (std::is_same_v<T, events::ModeChangeEvent>) {
                 result = "event: mode_change\n";
                 result += "id: " + std::to_string(e.event_id) + "\n";

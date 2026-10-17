@@ -165,7 +165,7 @@ bool EventFilter::matches(const Event &event) const {
 
             if (!provider_id.empty()) {
                 if constexpr (std::is_same_v<T, StateUpdateEvent> || std::is_same_v<T, QualityChangeEvent> ||
-                              std::is_same_v<T, DeviceAvailabilityEvent>) {
+                              std::is_same_v<T, DeviceAvailabilityEvent> || std::is_same_v<T, DeviceRemovedEvent>) {
                     if (e.provider_id != provider_id) {
                         return false;
                     }
@@ -174,7 +174,7 @@ bool EventFilter::matches(const Event &event) const {
 
             if (!device_id.empty()) {
                 if constexpr (std::is_same_v<T, StateUpdateEvent> || std::is_same_v<T, QualityChangeEvent> ||
-                              std::is_same_v<T, DeviceAvailabilityEvent>) {
+                              std::is_same_v<T, DeviceAvailabilityEvent> || std::is_same_v<T, DeviceRemovedEvent>) {
                     if (e.device_id != device_id) {
                         return false;
                     }

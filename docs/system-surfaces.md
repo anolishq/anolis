@@ -105,8 +105,8 @@ at its `schema-source.json` pin, sha-verified, Renovate-bumped), docs site
 `schemas/http/runtime-http.openapi.v0.yaml` — OpenAPI 3.1, everything under
 `/v0`: runtime/provider/telemetry status, devices + capabilities, state,
 `/v0/call`, `/v0/mode`, `/v0/parameters`, automation tree/status, runs (+ run
-events), and SSE `/v0/events` (state/quality/availability/mode/parameter/
-provider-health/`automation_fault`). Routes register in
+events), and SSE `/v0/events` (state/quality/availability/removal/mode/
+parameter/provider-health/`automation_fault`). Routes register in
 `core/http/server.cpp`; human guide in [docs/http/README.md](http/README.md).
 **Security is real but code-defined**: Bearer auth (`core/http/auth.cpp`,
 global pre-routing 401; loopback-exempt by default; token via config or

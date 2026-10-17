@@ -269,6 +269,10 @@ private:
     // Helper: Emit device availability event. Call WITH `mutex_` held, so the
     // edges reach subscribers in the order they were decided.
     void emit_device_availability(const std::string &provider_id, const std::string &device_id, bool available);
+
+    // Helper: Emit a device_removed event. Call WITH `mutex_` held, for the
+    // same ordering reason as emit_device_availability.
+    void emit_device_removed(const std::string &provider_id, const std::string &device_id);
 };
 
 }  // namespace state

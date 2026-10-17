@@ -184,6 +184,20 @@ struct DeviceAvailabilityEvent {
 };
 
 /**
+ * @brief Device removed event
+ *
+ * Emitted when a provider restart republishes an inventory without a device
+ * the cache was tracking, whether that device was available or not. The
+ * device has no state after this event; no `device_availability` follows it.
+ */
+struct DeviceRemovedEvent {
+    uint64_t event_id;
+    std::string provider_id;
+    std::string device_id;
+    int64_t timestamp_ms;
+};
+
+/**
  * @brief Mode change event
  *
  * Emitted when runtime mode transitions (MANUAL/AUTO/IDLE/FAULT).
@@ -245,7 +259,7 @@ struct ProviderHealthChangeEvent {
  * Subscribers receive Event variants and can dispatch on type.
  */
 using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
-                           ParameterChangeEvent, AutomationFaultEvent, ProviderHealthChangeEvent>;
+                           ParameterChangeEvent, AutomationFaultEvent, ProviderHealthChangeEvent, DeviceRemovedEvent>;
 
 /**
  * @brief Get event ID from any event type
