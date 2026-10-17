@@ -2475,6 +2475,14 @@ resolve_target_arch() {
             x86_64)        arch="x86_64" ;;
             *) die "unsupported host arch '${arch}' — pass --arch arm64|x86_64" ;;
         esac
+    else
+        # Release assets are named linux-arm64 / linux-x86_64; accept the
+        # uname -m spelling too (#407). stderr: callers use $(...).
+        case "${arch}" in
+            aarch64|arm64) arch="arm64" ;;
+            x86_64)        arch="x86_64" ;;
+            *) die "unsupported --arch '${arch}' (arm64|x86_64)" >&2 ;;
+        esac
     fi
     printf '%s' "${arch}"
 }
