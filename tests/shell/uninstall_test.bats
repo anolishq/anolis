@@ -48,7 +48,7 @@ setup() {
 
 # bats removes its own output file after teardown; let it.
 teardown() {
-    unset -f rm mv
+    unset -f rm mv find
 }
 
 _confined() {
@@ -134,6 +134,19 @@ assert_each_refused() {
     [ "$status" -eq 0 ]
     [ "${output}" = "${P}/anolis-data" ]
     [ -f "${P}/anolis-data/runs/nested/r.events.jsonl" ]
+}
+
+@test "328: a journal walk that fails is not read as empty -- the journal is kept" {
+    # find can exit non-zero partway through (EIO, an unreadable directory)
+    # having printed nothing; that is "could not tell", not "empty".
+    mkdir -p "${P}/anolis-data/runs"
+    printf '{"run":1}\n' >"${P}/anolis-data/runs/index.jsonl"
+    find() { return 1; }
+    run --separate-stderr _remove_prefix_keeping_data "${P}"
+    unset -f find
+    [ "$status" -eq 0 ]
+    [ "${output}" = "${P}/anolis-data" ]
+    [ -f "${P}/anolis-data/runs/index.jsonl" ]
 }
 
 @test "304: no anolis-data at all -- the whole prefix goes (pre-#303 machines)" {

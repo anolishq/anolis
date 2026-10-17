@@ -1990,15 +1990,19 @@ _removable_prefix() {
 # Remove the install prefix, keeping recorded runtime data (#304). The run
 # journal lives at <prefix>/anolis-data; an uninstall must not silently destroy
 # it -- the same contract the observability data has further down. A journal
-# holding any file is moved aside (one with only empty directories, such as the
-# runs/ the runtime creates at startup, is empty: #328), the prefix is removed
-# as one canonical path, and the journal is moved back. Prints the kept directory (if any) on stdout. Pure:
-# acts on the path given, so the bats suite can cover it without root.
+# holding any file is moved aside, the prefix is removed as one canonical path,
+# and the journal is moved back. One holding only empty directories, such as
+# the runs/ the runtime creates at startup, is empty and goes with the prefix
+# (#328). Empty means the walk finished and found no file: a find that fails
+# partway keeps the journal. Prints the kept directory (if any) on stdout.
+# Pure: acts on the path given, so the bats suite can cover it without root.
 _remove_prefix_keeping_data() {
     local prefix
     prefix=$(_removable_prefix "${1:-}") || return 1
     local data="${prefix}/anolis-data"
-    if [[ ! -d "${data}" || -L "${data}" || -z "$(find "${data}" -mindepth 1 ! -type d -print -quit 2>/dev/null)" ]]; then
+    local found walk_rc=0
+    found=$(find "${data}" -mindepth 1 ! -type d -print -quit 2>/dev/null) || walk_rc=$?
+    if [[ ! -d "${data}" || -L "${data}" ]] || [[ ${walk_rc} -eq 0 && -z "${found}" ]]; then
         rm -rf --one-file-system -- "${prefix}"
         return
     fi
