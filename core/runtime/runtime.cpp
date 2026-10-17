@@ -586,14 +586,12 @@ bool Runtime::init_automation(std::string &error) {
                 event_emitter_->emit(event);
                 LOG_INFO("[Runtime] Mode change event emitted: " << event.previous_mode << " -> " << event.new_mode);
             }
-            // Fold the mode change into the open run's event stream (if any).
+            // Fold the mode change into the open run's event stream (if any). A
+            // tick exception's FAULT transition runs on the tick thread, so it goes
+            // through the async queue behind the fault that caused it (#282).
             if (run_journal_) {
-                if (auto open_id = run_journal_->open_run_id()) {
-                    run_journal_->append_event(*open_id, runs::RunEventCategory::ModeChange, "",
-                                               nlohmann::json{{"previous_mode", automation::mode_to_string(prev)},
-                                                              {"new_mode", automation::mode_to_string(next)}},
-                                               0);
-                }
+                run_journal_->record_mode_change(automation::mode_to_string(prev), automation::mode_to_string(next),
+                                                 bt_runtime_ != nullptr && bt_runtime_->on_tick_thread());
             }
         });
     }

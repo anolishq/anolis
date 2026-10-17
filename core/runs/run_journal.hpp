@@ -27,9 +27,10 @@
  *
  * Concurrency: all run/event writes take one mutex, so concurrent HTTP requests
  * serialize on the journal. Run open/close and operator markers write on the
- * calling (HTTP/runtime) thread; engine faults from the automation tick thread go
- * through a non-blocking bounded queue drained by a single background writer, so
- * the tick thread never fsyncs.
+ * calling (HTTP/runtime) thread; engine faults and mode changes from the
+ * automation tick thread go through a non-blocking bounded queue drained in FIFO
+ * order by a single background writer, so the tick thread never fsyncs and a
+ * fault is journaled before the FAULT transition it caused.
  *
  * Cardinality: at most one run is open at a time (D8); open() rejects while a run
  * is open.
@@ -85,7 +86,8 @@ public:
     /// Synchronously append an event to a run's stream (flushed before return).
     /// Rejected for an unknown or already-closed run (closed runs are immutable).
     /// Used by HTTP/runtime-thread sources (operator markers, mode/parameter
-    /// changes). NEVER call from the automation tick thread — use enqueue_fault.
+    /// changes). NEVER call from the automation tick thread — use enqueue_fault,
+    /// or record_mode_change with from_tick_thread set.
     AppendEventResult append_event(const std::string& run_id, RunEventCategory category, const std::string& type,
                                    const nlohmann::json& payload, uint64_t occurred_at_epoch_ms);
 
@@ -95,10 +97,17 @@ public:
     /// and counted. Performs no file I/O on the caller's thread.
     void enqueue_fault(const std::string& locus, const std::string& message, uint64_t occurred_at_epoch_ms);
 
+    /// Journal a mode change into the open run, if any. From the automation tick
+    /// thread (`from_tick_thread`) it rides the async fault queue, so it lands
+    /// after any fault the tick enqueued first and does no file I/O on that
+    /// thread. From any other thread it is written synchronously.
+    void record_mode_change(const std::string& previous_mode, const std::string& new_mode, bool from_tick_thread);
+
     /// Oldest-first (ascending sequence) page of a run's events.
     std::vector<RunEvent> list_events(const std::string& run_id, size_t limit, size_t offset) const;
 
-    /// Count of fault events dropped because the async queue was full.
+    /// Count of queued events dropped because the async queue was full, plus
+    /// faults that drained with no run open.
     uint64_t events_dropped() const { return events_dropped_.load(); }
 
 private:
@@ -123,17 +132,19 @@ private:
     uint64_t mint_counter_ = 0;                           // disambiguates ids minted within the same ms
     std::unordered_map<std::string, uint64_t> next_seq_;  // open run_id -> next event sequence
 
-    // Bounded async queue for tick-thread faults. A separate mutex (never held
-    // during file I/O) keeps enqueue_fault from ever blocking on a journal flush.
-    struct QueuedFault {
-        std::string locus;
-        std::string message;
+    // Bounded async queue for tick-thread events. A separate mutex (never held
+    // during file I/O) keeps enqueueing from ever blocking on a journal flush.
+    struct QueuedEvent {
+        RunEventCategory category = RunEventCategory::AutomationFault;
+        std::string type;
+        nlohmann::json payload;
         uint64_t occurred_at_epoch_ms = 0;
     };
+    void enqueue_event(QueuedEvent event);
     static constexpr size_t kMaxFaultQueue = 512;
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
-    std::deque<QueuedFault> fault_queue_;
+    std::deque<QueuedEvent> fault_queue_;
     std::thread writer_thread_;
     bool writer_stop_ = false;
     std::atomic<uint64_t> events_dropped_{0};
