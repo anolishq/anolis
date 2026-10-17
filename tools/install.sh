@@ -2238,18 +2238,23 @@ _stage_fetch() {
 }
 
 # Check a downloaded tarball against its release's SHA256SUMS. A mismatch is
-# fatal. A release with no SHA256SUMS, or one with no entry for the tarball,
-# warns and continues: published releases exist that lack arm64 entries.
+# fatal. A release with no SHA256SUMS (HTTP 404), or one with no entry for the
+# tarball, warns and continues: published releases exist that lack arm64
+# entries. Any other failure to fetch SHA256SUMS is fatal.
 _stage_verify_sha256() {
     local repo="$1" tag="$2" asset="$3" dir="$4"
-    local sums="${dir}/${asset}.SHA256SUMS" expected actual
+    local sums="${dir}/${asset}.SHA256SUMS" expected actual code rc=0
     local auth=()
     [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    if ! curl -fsSL "${auth[@]}" -o "${sums}" \
-        "https://github.com/${repo}/releases/download/${tag}/SHA256SUMS"; then
+    code=$(curl -fsSL "${auth[@]}" -w '%{http_code}' -o "${sums}" \
+        "https://github.com/${repo}/releases/download/${tag}/SHA256SUMS") || rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
         rm -f "${sums}"
-        log_warn "stage: no SHA256SUMS fetched for ${repo} ${tag}; ${asset} is not verified"
-        return 0
+        if [[ "${code}" == "404" ]]; then
+            log_warn "stage: no SHA256SUMS fetched for ${repo} ${tag}; ${asset} is not verified"
+            return 0
+        fi
+        die "stage: could not fetch SHA256SUMS for ${repo} ${tag} (curl exit ${rc}, HTTP ${code:-000}); refusing to use ${asset} unverified"
     fi
     expected=$(awk -v a="${asset}" '$2 == a || $2 == "*" a { print $1; exit }' "${sums}")
     rm -f "${sums}"
