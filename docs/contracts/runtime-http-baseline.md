@@ -54,7 +54,7 @@ Freeze implemented `/v0` HTTP behavior so OpenAPI, examples, and conformance tes
    boundary — cutting mid-codepoint would emit invalid UTF-8 and fail the whole
    response.
 6. `/v0/events` currently emits:
-   - `state_update`, `quality_change`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`, `provider_health_change`.
+   - `state_update`, `quality_change`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`.
 
 ## Validation Gates
 
