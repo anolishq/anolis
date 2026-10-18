@@ -367,6 +367,31 @@ TEST(EventEmitterTest, FilterByDevice) {
     EXPECT_FALSE(sub->try_pop().has_value());
 }
 
+// A subscriber filtered to one device must not hear about other devices'
+// removals (#402).
+TEST(EventEmitterTest, FilterByDeviceAppliesToDeviceRemoved) {
+    EventEmitter emitter;
+
+    EventFilter filter;
+    filter.provider_id = "p1";
+    filter.device_id = "device1";
+
+    auto sub = emitter.subscribe(filter);
+
+    emitter.emit(DeviceRemovedEvent{0, "p1", "device2", 1});
+    emitter.emit(DeviceRemovedEvent{0, "p2", "device1", 1});
+    emitter.emit(DeviceRemovedEvent{0, "p1", "device1", 1});
+
+    auto evt = sub->pop(100);
+    ASSERT_TRUE(evt.has_value());
+    const auto *removed = std::get_if<DeviceRemovedEvent>(&*evt);
+    ASSERT_TRUE(removed != nullptr);
+    EXPECT_EQ(removed->provider_id, "p1");
+    EXPECT_EQ(removed->device_id, "device1");
+
+    EXPECT_FALSE(sub->try_pop().has_value());
+}
+
 TEST(EventEmitterTest, FilterBySignal) {
     EventEmitter emitter;
 
