@@ -13,6 +13,12 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- The integration suite and the compatibility lane pin anolis-provider-sim
+  v0.2.8, up from v0.1.6. v0.2.8 adds the `inject_device_unreachable` chaos
+  function, which a Runtime-level test of the device-loss latch needs (#429).
+
 ## [0.1.47] - 2026-10-17
 
 Upgrade notes for operators:
