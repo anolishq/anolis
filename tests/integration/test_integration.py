@@ -21,6 +21,7 @@ from tests.integration.automation_suite import (
 )
 from tests.integration.concurrency_stress_suite import StressTestRunner
 from tests.integration.core_suite import CORE_CHECKS, CoreFeatureTester
+from tests.integration.device_loss_suite import DEVICE_LOSS_CHECKS, DeviceLossTester
 from tests.integration.estop_suite import (
     ESTOP_CHECKS,
     FAULT_HOOK_CHECKS,
@@ -72,6 +73,28 @@ def test_http_suite(
     check_fn,
 ) -> None:
     tester = HttpGatewayTester(runtime_exe, provider_exe, port=unique_port, timeout=integration_timeout)
+    try:
+        tester.start_runtime()
+        check_fn(tester)
+    finally:
+        tester.cleanup()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("_check_name", "check_fn"),
+    DEVICE_LOSS_CHECKS,
+    ids=[name for name, _ in DEVICE_LOSS_CHECKS],
+)
+def test_device_loss_suite(
+    runtime_exe: Path,
+    provider_exe: Path,
+    unique_port: int,
+    _check_name: str,
+    check_fn,
+) -> None:
+    tester = DeviceLossTester(runtime_exe, provider_exe, port=unique_port)
     try:
         tester.start_runtime()
         check_fn(tester)
