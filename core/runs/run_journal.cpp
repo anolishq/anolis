@@ -407,20 +407,38 @@ RunJournal::AppendEventResult RunJournal::append_event(const std::string& run_id
 }
 
 void RunJournal::enqueue_fault(const std::string& locus, const std::string& message, uint64_t occurred_at_epoch_ms) {
+    enqueue_event(
+        {RunEventCategory::AutomationFault, locus, nlohmann::json{{"message", message}}, occurred_at_epoch_ms});
+}
+
+void RunJournal::record_mode_change(const std::string& previous_mode, const std::string& new_mode,
+                                    bool from_tick_thread) {
+    nlohmann::json payload{{"previous_mode", previous_mode}, {"new_mode", new_mode}};
+    if (from_tick_thread) {
+        // Behind any fault this tick enqueued, so the cause sorts before the effect.
+        enqueue_event({RunEventCategory::ModeChange, "", std::move(payload), now_epoch_ms()});
+        return;
+    }
+    if (auto open_id = open_run_id()) {
+        append_event(*open_id, RunEventCategory::ModeChange, "", payload, 0);
+    }
+}
+
+void RunJournal::enqueue_event(QueuedEvent event) {
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
         if (fault_queue_.size() >= kMaxFaultQueue) {
             events_dropped_.fetch_add(1);
             return;
         }
-        fault_queue_.push_back({locus, message, occurred_at_epoch_ms});
+        fault_queue_.push_back(std::move(event));
     }
     queue_cv_.notify_one();
 }
 
 void RunJournal::writer_loop() {
     for (;;) {
-        QueuedFault item;
+        QueuedEvent item;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             queue_cv_.wait(lock, [this] { return writer_stop_ || !fault_queue_.empty(); });
@@ -434,13 +452,15 @@ void RunJournal::writer_loop() {
         // Persist off the queue lock, against whichever run is open now.
         std::lock_guard<std::mutex> lock(mutex_);
         if (!open_run_id_.has_value()) {
-            events_dropped_.fetch_add(1);  // no run to attribute the fault to
+            if (item.category == RunEventCategory::AutomationFault) {
+                events_dropped_.fetch_add(1);  // no run to attribute the fault to
+            }
             continue;
         }
-        auto res = append_event_locked(*open_run_id_, RunEventCategory::AutomationFault, item.locus,
-                                       nlohmann::json{{"message", item.message}}, item.occurred_at_epoch_ms);
+        auto res =
+            append_event_locked(*open_run_id_, item.category, item.type, item.payload, item.occurred_at_epoch_ms);
         if (!res.ok) {
-            LOG_WARN("[RunJournal] Failed to persist automation_fault: " << res.error);
+            LOG_WARN("[RunJournal] Failed to persist " << to_string(item.category) << ": " << res.error);
         }
     }
 }

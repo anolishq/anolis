@@ -81,6 +81,10 @@ void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &e
 
 void BTRuntime::set_fault_sink(FaultSink sink) { fault_sink_ = std::move(sink); }
 
+bool BTRuntime::on_tick_thread() const {
+    return tick_thread_id_.load(std::memory_order_acquire) == std::this_thread::get_id();
+}
+
 LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
     LoadOutcome outcome;
     const std::string &path = ref.source_path;
@@ -237,6 +241,7 @@ void BTRuntime::tick_loop() {
     auto next_tick = steady_clock::now() + tick_period;
 
     LOG_INFO("[BTRuntime] Tick loop started (period: " << tick_period.count() << "ms)");
+    tick_thread_id_.store(std::this_thread::get_id(), std::memory_order_release);
 
     // Whether the previous iteration saw AUTO, so the loop can tell when AUTO
     // is entered and start a new run (#378).
@@ -364,6 +369,7 @@ void BTRuntime::tick_loop() {
         next_tick += tick_period;
     }
 
+    tick_thread_id_.store(std::thread::id{}, std::memory_order_release);
     LOG_INFO("[BTRuntime] Tick loop exiting");
 }
 

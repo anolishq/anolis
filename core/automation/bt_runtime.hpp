@@ -194,6 +194,10 @@ public:
         std::function<void(const std::string& locus, const std::string& message, int64_t occurred_at_epoch_ms)>;
     void set_fault_sink(FaultSink sink);
 
+    /// True when called on the tick loop thread, e.g. from a mode-change
+    /// callback that a tick exception's FAULT transition dispatched.
+    bool on_tick_thread() const;
+
 private:
     /**
      * Non-virtual stop implementation (so the destructor and the virtual stop()
@@ -244,6 +248,7 @@ private:
     // Threading
     std::atomic<bool> running_{false};
     std::unique_ptr<std::thread> tick_thread_;
+    std::atomic<std::thread::id> tick_thread_id_{};  ///< Set by the tick loop itself while it runs.
     int tick_rate_hz_ = 10;
 
     // Health tracking
