@@ -17,7 +17,12 @@
 #include "control/call_router.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
+#include "runs/run_journal.hpp"
 #include "state/state_cache.hpp"
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 namespace {
 
@@ -570,6 +575,188 @@ TEST(BTRuntimeTest, EnteringAutoClearsStallCountAndLastError) {
     runtime.stop();
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
+}
+
+#ifndef _WIN32
+namespace {
+
+// Holds the RunJournal's mutex while it lives, so a test can tell which threads
+// wait on a journal write. list_events reads its events file under that mutex,
+// and opening a FIFO for reading blocks until a writer opens the other end.
+class JournalLock {
+public:
+    JournalLock(anolis::runs::RunJournal& journal, const std::filesystem::path& data_dir)
+        : fifo_(data_dir / "runs" / "lock.events.jsonl") {
+        if (::mkfifo(fifo_.c_str(), 0600) != 0) {
+            return;
+        }
+        reader_ = std::thread([&journal] { (void)journal.list_events("lock", 1, 0); });
+        // Returns once the reader has opened its end, which it does with the
+        // journal mutex held.
+        writer_.open(fifo_);
+    }
+    ~JournalLock() { release(); }
+    JournalLock(const JournalLock&) = delete;
+    JournalLock& operator=(const JournalLock&) = delete;
+
+    bool held() const { return writer_.is_open(); }
+    void release() {
+        if (writer_.is_open()) {
+            writer_.close();
+        }
+        if (reader_.joinable()) {
+            reader_.join();
+        }
+    }
+
+private:
+    std::filesystem::path fifo_;
+    std::thread reader_;
+    std::ofstream writer_;
+};
+
+std::filesystem::path unique_data_dir() {
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = std::filesystem::temp_directory_path() / ("anolis-bt-journal-" + std::to_string(nonce));
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+}  // namespace
+#endif
+
+// #282: a tick exception's FAULT transition is journaled behind the fault that
+// caused it, and the tick thread does not wait on the journal to make it.
+TEST(BTRuntimeTest, TickFaultJournalsCauseBeforeModeChange) {
+#ifdef _WIN32
+    GTEST_SKIP() << "holds the journal mutex with a POSIX FIFO";
+#else
+    using namespace anolis::automation;
+    using anolis::runs::RunEventCategory;
+    const auto dir = unique_data_dir();
+    anolis::runs::RunJournal journal(dir, "rt1", 100);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    const auto opened = journal.open(anolis::runs::RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+
+    // Wired as Runtime wires them.
+    runtime.set_fault_sink([&journal](const std::string& locus, const std::string& message, int64_t occurred_at) {
+        journal.enqueue_fault(locus, message, static_cast<uint64_t>(occurred_at));
+    });
+    mode_manager.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        journal.record_mode_change(mode_to_string(prev), mode_to_string(next), runtime.on_tick_thread());
+    });
+    std::atomic<bool> fault_dispatched{false};
+    mode_manager.on_mode_change([&](RuntimeMode, RuntimeMode next) {
+        if (next == RuntimeMode::FAULT) {
+            fault_dispatched = true;
+        }
+    });
+
+    const auto tree_path = write_tree_file("anolis-bt-journal-order", kThrowingTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+
+    {
+        JournalLock lock(journal, dir);
+        ASSERT_TRUE(lock.held());
+        ASSERT_TRUE(runtime.start(err)) << err;
+        EXPECT_TRUE(wait_for([&] { return fault_dispatched.load(); }))
+            << "the tick thread waited on the journal while dispatching its FAULT transition";
+    }
+
+    std::optional<uint64_t> fault_seq;
+    std::optional<uint64_t> mode_seq;
+    ASSERT_TRUE(wait_for([&] {
+        for (const auto& ev : journal.list_events(opened.run.run_id, 100, 0)) {
+            if (ev.category == RunEventCategory::AutomationFault) {
+                fault_seq = ev.sequence;
+            } else if (ev.category == RunEventCategory::ModeChange && ev.payload.value("new_mode", "") == "FAULT") {
+                mode_seq = ev.sequence;
+            }
+        }
+        return fault_seq.has_value() && mode_seq.has_value();
+    })) << "the fault or the FAULT mode change never reached the journal";
+    EXPECT_LT(*fault_seq, *mode_seq) << "the FAULT transition sorts before the fault that caused it";
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+    std::filesystem::remove_all(dir, ec);
+#endif
+}
+
+// #282: a mode change from any other thread (an HTTP request's) stays
+// synchronous: set_mode returns only after the event is in the journal.
+TEST(BTRuntimeTest, NonTickModeChangeJournalsSynchronously) {
+#ifdef _WIN32
+    GTEST_SKIP() << "holds the journal mutex with a POSIX FIFO";
+#else
+    using namespace anolis::automation;
+    using anolis::runs::RunEventCategory;
+    const auto dir = unique_data_dir();
+    anolis::runs::RunJournal journal(dir, "rt1", 100);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    const auto opened = journal.open(anolis::runs::RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", ParameterType::DOUBLE, 25.0));
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    mode_manager.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        journal.record_mode_change(mode_to_string(prev), mode_to_string(next), runtime.on_tick_thread());
+    });
+
+    // A running tick thread, so the check is against that thread, not against
+    // whether the engine runs.
+    const auto tree_path = write_tree_file("anolis-bt-journal-sync", kSimpleTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    std::atomic<bool> returned{false};
+    std::thread request;
+    {
+        JournalLock lock(journal, dir);
+        ASSERT_TRUE(lock.held());
+        request = std::thread([&] {
+            std::string set_err;
+            (void)mode_manager.set_mode(RuntimeMode::IDLE, set_err);
+            returned = true;
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        EXPECT_FALSE(returned.load()) << "set_mode returned before its mode change was journaled";
+    }
+    request.join();
+
+    // No polling: the write happened before set_mode returned.
+    bool found = false;
+    for (const auto& ev : journal.list_events(opened.run.run_id, 100, 0)) {
+        if (ev.category == RunEventCategory::ModeChange && ev.payload.value("new_mode", "") == "IDLE") {
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found) << "the MANUAL -> IDLE mode change was not in the journal when set_mode returned";
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+    std::filesystem::remove_all(dir, ec);
+#endif
 }
 
 // Pins the C++ AutomationStatus -> wire-string mapping. The wire side

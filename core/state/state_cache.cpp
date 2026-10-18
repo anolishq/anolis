@@ -190,6 +190,19 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
         }
     }
 
+    // A device the new inventory dropped has no state now, and nothing will
+    // report it again: no poll reads it, so no `available: true` can follow a
+    // loss already sent for it. Say it is gone, under the lock like the
+    // availability edges (#402).
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto &[handle, prior] : carried) {
+            if (device_states_.find(handle) == device_states_.end()) {
+                emit_device_removed(provider_id, handle.substr(provider_id.size() + 1));
+            }
+        }
+    }
+
     LOG_INFO("[StateCache] Rebuilt poll configs for " << new_device_count << " devices from provider " << provider_id);
 }
 
@@ -671,6 +684,22 @@ void StateCache::emit_device_availability(const std::string &provider_id, const 
     event.provider_id = provider_id;
     event.device_id = device_id;
     event.available = available;
+    event.timestamp_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
+
+    event_emitter_->emit(event);
+}
+
+void StateCache::emit_device_removed(const std::string &provider_id, const std::string &device_id) {
+    if (!event_emitter_) {
+        return;
+    }
+
+    events::DeviceRemovedEvent event;
+    event.event_id = 0;  // assigned by emitter
+    event.provider_id = provider_id;
+    event.device_id = device_id;
     event.timestamp_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
             .count();

@@ -588,6 +588,18 @@ protected:
         return seen;
     }
 
+    // Every device_removed event emitted so far, in order.
+    std::vector<events::DeviceRemovedEvent> removed() {
+        availability();
+        std::vector<events::DeviceRemovedEvent> out;
+        for (const auto &event : all_events) {
+            if (const auto *r = std::get_if<events::DeviceRemovedEvent>(&event)) {
+                out.push_back(*r);
+            }
+        }
+        return out;
+    }
+
     std::shared_ptr<events::EventEmitter> emitter;
     std::unique_ptr<events::Subscription> subscription;
     std::vector<events::DeviceAvailabilityEvent> seen;
@@ -736,6 +748,69 @@ TEST_F(StateCacheAvailabilityEventTest, NoLossEventWhenProviderGoesDownDuringShu
     state_cache->poll_once(*provider_registry);
 
     EXPECT_TRUE(availability().empty());
+}
+
+//=============================================================================
+// device_removed events (#402)
+//
+// A supervised restart can republish an inventory without a device. The
+// rebuild drops that device's state, and a subscriber that last saw
+// `available: false` for it would otherwise be left holding a device that no
+// longer exists, since no `available: true` can ever follow.
+//=============================================================================
+
+TEST_F(StateCacheAvailabilityEventTest, DeviceRemovedWhileUnavailableEmitsDeviceRemoved) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillRepeatedly(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    available = false;
+    state_cache->poll_once(*provider_registry);
+    available = true;
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+
+    const auto removals = removed();
+    ASSERT_EQ(all_events.size(), 3U) << "state_update, the loss, then the removal and nothing after it";
+    ASSERT_TRUE(std::holds_alternative<events::StateUpdateEvent>(all_events[0]));
+    const auto *loss = std::get_if<events::DeviceAvailabilityEvent>(&all_events[1]);
+    ASSERT_TRUE(loss != nullptr && !loss->available);
+    ASSERT_EQ(removals.size(), 1U);
+    ASSERT_TRUE(std::holds_alternative<events::DeviceRemovedEvent>(all_events[2]));
+    EXPECT_EQ(removals[0].provider_id, "sim0");
+    EXPECT_EQ(removals[0].device_id, "dev1");
+    EXPECT_GT(removals[0].timestamp_ms, 0);
+    EXPECT_TRUE(state_cache->get_device_state("sim0/dev1") == nullptr);
+}
+
+TEST_F(StateCacheAvailabilityEventTest, DeviceRemovedWhileAvailableEmitsDeviceRemoved) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillOnce(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    const auto removals = removed();
+    EXPECT_TRUE(seen.empty()) << "an available device that goes away sends no availability edge";
+    ASSERT_EQ(removals.size(), 1U);
+    EXPECT_EQ(removals[0].provider_id, "sim0");
+    EXPECT_EQ(removals[0].device_id, "dev1");
+    EXPECT_TRUE(state_cache->get_device_state("sim0/dev1") == nullptr);
+}
+
+TEST_F(StateCacheAvailabilityEventTest, RebuildThatKeepsTheDeviceEmitsNoRemoval) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _)).WillRepeatedly(good_read());
+
+    state_cache->poll_once(*provider_registry);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_TRUE(removed().empty()) << "a device the restart republished was not removed";
+    EXPECT_TRUE(state_cache->get_device_state("sim0/dev1") != nullptr);
 }
 
 // The poll thread and a control call's post-call refresh (poll_device_now)

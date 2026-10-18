@@ -537,8 +537,8 @@ paths:
         plus top-level streaming media type.
 
         Event types: state_update, quality_change, device_availability,
-        mode_change, parameter_change, provider_health_change, and
-        automation_fault. `automation_fault` (engine-abnormal only — a generic
+        device_removed, mode_change, parameter_change, and automation_fault.
+        `automation_fault` (engine-abnormal only — a generic
         `locus`, never a BT node) carries the engine fault; the former `bt_error`
         compatibility alias was removed in v0.1.26. An ordinary unsuccessful
         execution is NOT a fault (it surfaces via `execution_status=failed`).
