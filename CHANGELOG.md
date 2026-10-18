@@ -13,6 +13,58 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.47] - 2026-10-17
+
+Upgrade notes for operators:
+
+- **A call to a device that was latched after a loss no longer hangs
+  the runtime.** On 0.1.45 and 0.1.46, when a call's post-call read was
+  a latched device's first good read since a transport loss, the
+  safe-state re-assert ran on the calling thread and blocked on the
+  provider lock that thread held. That call never returned, and every
+  later call to the provider blocked behind it, e-stop ladder calls
+  included (#427, #428). Manual `POST /v0/call`, the e-stop ladder,
+  mode-transition hooks and non-actuating tree calls could all trigger
+  it. The latch is always on, so this applies to every machine.
+- **A transport loss that reaches the latch late now latches the
+  device and re-asserts its safe state** (#403, #426). Before, a loss
+  edge overtaken by the device's return could latch a device the cache
+  said had answered, with no re-assert to follow. Actuating tree calls
+  to that device stay refused until MANUAL -> AUTO, as for any latched
+  device.
+
+No config schema or provider protocol change. `GET /v0/events` gains
+`device_removed`; the OpenAPI change is to a description string only.
+
+### Added
+
+- **`device_removed` events** (#402, #421). When a supervised restart
+  republishes a provider's inventory without a device, the state cache
+  emits `{provider_id, device_id, timestamp_ms}` for it. The
+  `provider_id` and `device_id` filters on `GET /v0/events` apply.
+
+### Fixed
+
+- The safe-state re-assert after a device returns runs on its own
+  worker thread and never while a provider lock is held (#427, #428).
+  See the upgrade notes.
+- Reachability edges carry a sequence number, and the device-loss latch
+  applies them in the order the state cache decided them (#403, #426).
+  A stale return is dropped; a stale transport loss still latches.
+- A mode change made on the automation tick thread is journalled after
+  the fault that caused it, and the tick thread no longer writes the
+  run journal itself (#282, #422).
+- `install.sh --uninstall` removes a run journal that holds only empty
+  directories with the prefix, and keeps it if the emptiness check
+  fails. The printed full purge names `influxdata-archive-keyring` and
+  `/var/log/grafana` (#328, #423).
+
+### Removed
+
+- `provider_health_change` from the `GET /v0/events` documentation and
+  the event types (#400, #419). Nothing ever emitted it, so the stream
+  is unchanged. Provider health is read from `GET /v0/providers/health`.
+
 ## [0.1.46] - 2026-10-17
 
 Upgrade notes for operators:
