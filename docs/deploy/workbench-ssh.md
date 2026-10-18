@@ -107,8 +107,18 @@ ssh -L 8080:127.0.0.1:8080 pi@192.168.1.50
 curl -s http://127.0.0.1:8080/v0/providers/health | jq
 ```
 
-No token is needed over the tunnel — loopback is exempt from bearer auth by
-default.
+If the runtime has `http.auth_enabled: true`, a request through the tunnel
+needs the API token like any other: it arrives on the device's loopback, and
+loopback is not exempt unless `http.auth_exempt_loopback` is set. Copy the
+header into a file only you can read, and have curl read it from there, so the
+token stays off the command line:
+
+```bash
+(umask 077; ssh pi@192.168.1.50 \
+  "sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env" \
+  > ~/.anolis-pi-auth-header)
+curl -s -H @"$HOME/.anolis-pi-auth-header" http://127.0.0.1:8080/v0/providers/health | jq
+```
 
 ## A caution about upgrades
 

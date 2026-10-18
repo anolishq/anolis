@@ -134,7 +134,8 @@ bool HttpServer::start(std::string &error) {
     });
 
     // Authentication gate (runs before routing, so it covers every endpoint
-    // including the SSE stream). Loopback is exempt by default; see config.
+    // including the SSE stream). Loopback is exempt only when
+    // http.auth_exempt_loopback is set; see config.
     if (config_.auth_enabled) {
         server_->set_pre_routing_handler(
             [auth_enabled = config_.auth_enabled, exempt_loopback = config_.auth_exempt_loopback,

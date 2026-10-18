@@ -12,7 +12,9 @@ INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 
 setup() {
     export ANOLIS_INSTALL_SH_NO_MAIN=1
-    source "${INSTALL_SH}"
+    # The health probes read the API token from RUNTIME_ENV_FILE (readonly in
+    # install.sh); point it into the test dir so no test reads the host's.
+    source <(sed "s|^readonly RUNTIME_ENV_FILE=.*|readonly RUNTIME_ENV_FILE=\"${BATS_TEST_TMPDIR}/runtime.env\"|" "${INSTALL_SH}")
     set +u  # errexit+pipefail stay on so a non-final assertion fails the test (anolishq/anolis#207)
 }
 
@@ -177,6 +179,7 @@ _providers_body() {
 # health timeout elapses at once.
 _stub_health_endpoints() {
     NO_START=0
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
     PROVIDERS_BODY_FILE="${BATS_TEST_TMPDIR}/providers.json"
     _runtime_port() { echo 8080; }
     sleep() { :; }

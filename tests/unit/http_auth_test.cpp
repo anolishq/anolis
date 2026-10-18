@@ -164,6 +164,103 @@ TEST(HttpTls, NeitherIsValid) {
     EXPECT_TRUE(validate_config(c, error)) << error;
 }
 
+// ---- loopback exemption: off by default, opt-in with a WARN -------------
+
+namespace {
+const char *const kFakeToken = "fake-test-token-not-a-secret";
+
+// Load a config whose `http:` block also carries @p http_lines; return what the
+// loader logged (and any error) in @p log.
+bool load_http_config(const std::string &http_lines, RuntimeConfig &config, std::string &log) {
+    namespace fs = std::filesystem;
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    fs::path dir = fs::temp_directory_path() / ("anolis_http_exempt_test-" + std::to_string(nonce));
+    fs::create_directories(dir);
+    fs::path cfg = dir / "runtime.yaml";
+    {
+        std::ofstream out(cfg);
+        out << "providers:\n"
+            << "  - id: test0\n"
+            << "    command: ./provider-test\n"
+            << "http:\n"
+            << "  enabled: true\n"
+            << "  bind: 127.0.0.1\n"
+            << http_lines;
+    }
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    std::string error;
+    const bool ok = load_config(cfg.string(), config, error);
+    std::cerr.rdbuf(old);
+    fs::remove_all(dir);
+    log = captured.str() + error;
+    return ok;
+}
+
+bool authorize_with(const RuntimeConfig &c, const std::string &remote, const std::string &header) {
+    return authorize(c.http.auth_enabled, c.http.auth_exempt_loopback, c.http.auth_token, remote, header);
+}
+
+std::string auth_lines(bool exempt) {
+    std::string lines = "  auth_enabled: true\n";
+    if (exempt) {
+        lines += "  auth_exempt_loopback: true\n";
+    }
+    return lines + "  auth_token: " + kFakeToken + "\n";
+}
+}  // namespace
+
+TEST(HttpLoopbackExemption, DefaultIsOff) { EXPECT_FALSE(HttpConfig{}.auth_exempt_loopback); }
+
+TEST(HttpLoopbackExemption, AuthEnabledLoopbackNeedsTokenByDefault) {
+    RuntimeConfig c;
+    std::string log;
+    ASSERT_TRUE(load_http_config(auth_lines(false), c, log)) << log;
+    EXPECT_FALSE(c.http.auth_exempt_loopback);
+    EXPECT_FALSE(authorize_with(c, "127.0.0.1", ""));
+    EXPECT_FALSE(authorize_with(c, "::1", ""));
+    EXPECT_FALSE(authorize_with(c, "127.0.0.1", "Bearer wrong"));
+    EXPECT_TRUE(authorize_with(c, "127.0.0.1", std::string("Bearer ") + kFakeToken));
+}
+
+TEST(HttpLoopbackExemption, AuthDisabledStillAllowsEveryRequest) {
+    RuntimeConfig c;
+    std::string log;
+    ASSERT_TRUE(load_http_config("", c, log)) << log;
+    EXPECT_FALSE(c.http.auth_enabled);
+    EXPECT_TRUE(authorize_with(c, "127.0.0.1", ""));
+    EXPECT_TRUE(authorize_with(c, "10.0.0.5", ""));
+}
+
+TEST(HttpLoopbackExemption, ExplicitTrueStillExemptsLoopback) {
+    RuntimeConfig c;
+    std::string log;
+    ASSERT_TRUE(load_http_config(auth_lines(true), c, log)) << log;
+    EXPECT_TRUE(c.http.auth_exempt_loopback);
+    EXPECT_TRUE(authorize_with(c, "127.0.0.1", ""));
+    EXPECT_FALSE(authorize_with(c, "10.0.0.5", ""));
+}
+
+TEST(HttpLoopbackExemption, ExplicitTrueWithAuthLogsWarn) {
+    RuntimeConfig c;
+    std::string log;
+    ASSERT_TRUE(load_http_config(auth_lines(true), c, log)) << log;
+    EXPECT_NE(log.find("WARN"), std::string::npos) << log;
+    EXPECT_NE(log.find("auth_exempt_loopback"), std::string::npos) << log;
+    EXPECT_EQ(log.find(kFakeToken), std::string::npos) << log;
+}
+
+TEST(HttpLoopbackExemption, NoWarnWhenExemptionOffOrAuthDisabled) {
+    RuntimeConfig on;
+    std::string log;
+    ASSERT_TRUE(load_http_config(auth_lines(false), on, log)) << log;
+    EXPECT_EQ(log.find("auth_exempt_loopback"), std::string::npos) << log;
+
+    RuntimeConfig off;
+    ASSERT_TRUE(load_http_config("  auth_exempt_loopback: true\n", off, log)) << log;
+    EXPECT_EQ(log.find("auth_exempt_loopback"), std::string::npos) << log;
+}
+
 // ---- redaction: the auth token must never reach the logs ----------------
 
 TEST(HttpAuthRedaction, AuthTokenNotLogged) {

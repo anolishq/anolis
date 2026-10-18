@@ -110,7 +110,8 @@ the last *different* install.
 > **`--uninstall` is destructive beyond the binaries.** It stops, disables and
 > removes every `anolis-*` unit, then removes the prefix — which includes
 > `<prefix>/projects/<profile>`, your installed config and behaviours — and deletes
-> the environment files holding the runtime's API token. Recorded data is kept:
+> the environment files holding the runtime's API token, including the
+> workbench service's copy at `/etc/anolis/workbench-runtime-token`. Recorded data is kept:
 > the run journal in `<prefix>/anolis-data` (when it holds anything), observability
 > data, packages and the system user. The uninstall prints the purge command for
 > what it kept. Back up your config directory first if it is not also held
@@ -130,10 +131,19 @@ journalctl -u anolis-runtime -f
 curl -s http://127.0.0.1:8080/v0/providers/health | jq
 ```
 
+With `http.auth_enabled: true` that request needs the API token too, even on
+the device itself. This reads it from the root-only `runtime.env` and passes
+it to curl on stdin, so it does not appear on the command line:
+
+```bash
+sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env \
+  | curl -s -H @- http://127.0.0.1:8080/v0/providers/health | jq
+```
+
 There is one unit. Providers are **forked child processes** of the runtime, so
 there is no `anolis-provider-*` service to check.
 
-The install's own health check confirms that `/v0/runtime/status` answers and
+The install's own health check sends the token the same way. It confirms that `/v0/runtime/status` answers and
 that `/v0/runs` answers 200, then reports provider liveness. The second matters because the run registry
 fails soft — if its data directory cannot be created, the runtime logs one
 warning at boot and then serves 503 on every run endpoint for as long as it
