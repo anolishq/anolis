@@ -917,38 +917,18 @@ void Runtime::shutdown() {
 }
 
 void Runtime::wire_device_loss_latch() {
-    state_cache_->set_device_reachability_sink(
-        [this](const std::string &device_handle, bool reachable, anolis::deviceprovider::v1::Status_Code last_status) {
-            if (!reachable) {
-                // Latch on TRANSPORT-level unreachability only. A decode or
-                // frame-header mismatch reports INTERNAL and means the device
-                // answered -- the reference rig produced three such reads in
-                // three minutes while entirely healthy, and latching on those
-                // would force a human re-arm several times a day. A powered-off
-                // board cannot answer at all, so this loses no detection for the
-                // case the latch exists for.
-                const bool transport_failure =
-                    last_status == anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE ||
-                    last_status == anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
-                if (transport_failure) {
-                    device_loss_latch_->engage(device_handle);
-                }
-                return;
-            }
-
-            // The device answered again. If it was latched, re-assert its
-            // declared safe state ONCE, in whatever mode we are in.
-            //
-            // A device that rebooted is already at its power-on default and
-            // these calls are harmless. A device that returned WITHOUT
-            // rebooting -- a bus outage shorter than the firmware watchdog --
-            // is still running its last command, and the latch now refuses the
-            // tree's next command to it, including a stop. Leaving that running
-            // would be worse than the behaviour this latch replaces.
-            if (device_loss_latch_->is_latched(device_handle)) {
-                reissue_safe_state_for(device_handle);
-            }
-        });
+    // The latch applies each edge by its number (#403) and asks for a
+    // re-issue of the device's declared safe state when a latched device
+    // returns; it is re-asserted ONCE, in whatever mode we are in.
+    //
+    // A device that rebooted is already at its power-on default and
+    // these calls are harmless. A device that returned WITHOUT
+    // rebooting -- a bus outage shorter than the firmware watchdog --
+    // is still running its last command, and the latch now refuses the
+    // tree's next command to it, including a stop. Leaving that running
+    // would be worse than the behaviour this latch replaces.
+    state_cache_->set_device_reachability_sink(control::make_reachability_sink(
+        *device_loss_latch_, [this](const std::string &device_handle) { reissue_safe_state_for(device_handle); }));
 }
 
 void Runtime::reissue_safe_state_for(const std::string &device_handle) {
