@@ -13,6 +13,8 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.48] - 2026-10-18
+
 Upgrade notes for operators:
 
 - **With `http.auth_enabled: true`, requests from the device itself now
@@ -43,6 +45,15 @@ Upgrade notes for operators:
   `install.sh`'s health checks send the token from `runtime.env` (or
   `http.auth_token`), passed to curl on stdin rather than in its
   arguments. `docs/security.md` states what the exemption trusts.
+
+### Fixed
+
+- `install.sh` reads `runtime.env` the way systemd does when it looks for
+  the token: the last `ANOLIS_API_TOKEN=` line wins, and surrounding
+  double quotes and a trailing CR are dropped.
+- `install.sh --uninstall` also removes `/etc/anolis/workbench-runtime-token`,
+  the copy of the API token anolis-workbench 0.18.0's service keeps, so
+  `/etc/anolis` no longer outlives the uninstall because of it.
 
 ### Changed
 
