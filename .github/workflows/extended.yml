@@ -27,6 +27,9 @@ concurrency:
   group: extended-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   sanitizer-linux:
     name: ${{ matrix.lane }}

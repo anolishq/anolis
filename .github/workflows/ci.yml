@@ -11,11 +11,18 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # dorny/paths-filter lists a pull request's changed files through the API.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
       cpp: ${{ steps.cppfilter.outputs.cpp }}
