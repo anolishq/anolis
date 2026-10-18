@@ -9,6 +9,8 @@ set(ANOLIS_UNIT_TEST_SOURCES
     call_router_test.cpp
     device_loss_latch_test.cpp
     safe_state_test.cpp
+    reissue_worker_test.cpp
+    reissue_off_provider_lock_test.cpp
     actuation_gate_test.cpp
     config_test.cpp
     runtime_ownership_validation_test.cpp

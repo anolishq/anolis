@@ -912,6 +912,12 @@ void Runtime::shutdown() {
         state_cache_->stop_polling();
     }
 
+    // After everything that delivers reachability edges has stopped, and
+    // while the providers are still up: re-asserts still queued run now.
+    if (reissue_worker_) {
+        reissue_worker_->stop();
+    }
+
     // Provider cleanup handled by ProviderRegistry destructor
     provider_registry_.clear();
 }
@@ -927,8 +933,14 @@ void Runtime::wire_device_loss_latch() {
     // is still running its last command, and the latch now refuses the
     // tree's next command to it, including a stop. Leaving that running
     // would be worse than the behaviour this latch replaces.
-    state_cache_->set_device_reachability_sink(control::make_reachability_sink(
-        *device_loss_latch_, [this](const std::string &device_handle) { reissue_safe_state_for(device_handle); }));
+    //
+    // The re-assert never runs on the thread that delivered the edge (#427).
+    // That can be CallRouter's post-call poll, which holds the provider's
+    // lock, and the re-assert goes back through CallRouter to the same
+    // provider. The worker holds no provider lock when it starts one.
+    reissue_worker_ = std::make_unique<control::ReissueWorker>(
+        [this](const std::string &device_handle) { reissue_safe_state_for(device_handle); });
+    state_cache_->set_device_reachability_sink(control::make_reachability_sink(*device_loss_latch_, *reissue_worker_));
 }
 
 void Runtime::reissue_safe_state_for(const std::string &device_handle) {

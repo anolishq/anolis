@@ -98,8 +98,9 @@ private:
  *
  * Applies each edge with its number and calls `reissue` with the device handle,
  * outside the latch's lock, when the latch asks for the device's safe state to
- * be re-asserted. Runtime installs this; it is a function so the forwarding is
- * tested.
+ * be re-asserted. `reissue` runs on the delivering thread, which may hold a
+ * provider lock; Runtime installs the ReissueWorker overload
+ * (control/reissue_worker.hpp), which posts it instead (#427).
  */
 state::StateCache::DeviceReachabilitySink make_reachability_sink(DeviceLossLatch &latch,
                                                                  std::function<void(const std::string &)> reissue);
