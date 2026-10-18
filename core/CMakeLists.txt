@@ -222,6 +222,7 @@ anolis_apply_warnings(anolis_health)
 add_library(anolis_control STATIC
     control/call_router.cpp
     control/device_loss_latch.cpp
+    control/reissue_worker.cpp
     control/safe_state.cpp
 )
 

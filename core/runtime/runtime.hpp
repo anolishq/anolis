@@ -13,6 +13,7 @@
 #include "config.hpp"
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
+#include "control/reissue_worker.hpp"
 #include "control/safe_state.hpp"
 #include "events/event_emitter.hpp"
 #include "http/server.hpp"
@@ -148,6 +149,10 @@ private:
     std::unique_ptr<control::CallRouter> call_router_;
     std::unique_ptr<control::SafeStateController> safe_state_controller_;
     std::unique_ptr<control::DeviceLossLatch> device_loss_latch_;
+    // Runs the latch's safe-state re-asserts off the thread that delivered the
+    // edge, which may hold a provider lock (#427). Declared after everything it
+    // calls into, so it is joined before they are destroyed.
+    std::unique_ptr<control::ReissueWorker> reissue_worker_;
     std::unique_ptr<http::HttpServer> http_server_;
     std::unique_ptr<telemetry::InfluxSink> telemetry_sink_;
     std::unique_ptr<telemetry::HealthSnapshotTask> health_snapshot_task_;
