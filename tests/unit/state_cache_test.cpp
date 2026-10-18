@@ -3,12 +3,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <future>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -825,10 +827,10 @@ TEST_F(StateCacheAvailabilityOrderTest, EdgesStayOrderedAcrossThreads) {
 // The sink runs outside the cache's lock, and the poll loop and a post-call
 // poll read the same device on different threads. A failed read can decide
 // the loss edge, and a good read on the other thread decide and deliver the
-// return edge, before the loss edge reaches the latch. The sink below is
-// Runtime::wire_device_loss_latch's, with one hook that forces that order:
-// the loss edge waits, after the cache has made it, until the return edge has
-// been applied. No timing is involved.
+// return edge, before the loss edge reaches the latch. The sink below is the
+// one Runtime installs (control::make_reachability_sink), with one hook that
+// forces that order: the loss edge waits, after the cache has made it, until
+// the return edge has been applied. No timing is involved.
 //=============================================================================
 
 class StateCacheEdgeOrderTest : public StateCacheTest {
@@ -855,20 +857,17 @@ protected:
             }));
     }
 
-    // Runtime's handler: apply the edge, and count a safe-state re-issue
-    // where Runtime would run one.
-    void apply(const std::string &handle, bool reachable, anolis::deviceprovider::v1::Status_Code status,
-               std::uint64_t edge_seq) {
-        if (latch.apply_reachability_edge(handle, reachable, status, edge_seq)) {
-            ++reissues;
-        }
-    }
-
     control::DeviceLossLatch latch;
     int reissues = 0;
+    // Runtime's sink, counting a safe-state re-issue where Runtime runs one.
+    state::StateCache::DeviceReachabilitySink runtime_sink =
+        control::make_reachability_sink(latch, [this](const std::string &) { ++reissues; });
 };
 
-TEST_F(StateCacheEdgeOrderTest, LateLossEdgeDoesNotLatchADeviceThatAnswered) {
+// The late loss fails closed: it latches, and asks for the re-issue the
+// return could not make because it found the device unlatched. The outcome is
+// the in-order one (EdgesInOrderLatchThenReissue).
+TEST_F(StateCacheEdgeOrderTest, LateLossEdgeStillLatchesAndReissues) {
     std::promise<void> loss_made;
     std::promise<void> return_applied;
     auto return_applied_f = return_applied.get_future();
@@ -879,10 +878,11 @@ TEST_F(StateCacheEdgeOrderTest, LateLossEdgeDoesNotLatchADeviceThatAnswered) {
         if (!reachable) {
             loss_made.set_value();
             return_applied_f.wait();
-            apply(handle, reachable, status, edge_seq);
+            runtime_sink(handle, reachable, status, edge_seq);
             return;
         }
-        apply(handle, reachable, status, edge_seq);
+        runtime_sink(handle, reachable, status, edge_seq);
+        EXPECT_EQ(reissues, 0) << "the return found the device unlatched";
         return_applied.set_value();
     });
 
@@ -898,17 +898,14 @@ TEST_F(StateCacheEdgeOrderTest, LateLossEdgeDoesNotLatchADeviceThatAnswered) {
     std::cerr.rdbuf(old);
 
     ASSERT_TRUE(state_cache->get_device_state("sim0/dev1")->provider_available);
-    EXPECT_FALSE(latch.is_latched("sim0/dev1")) << "a stale loss edge latched a device the cache says answered";
-    EXPECT_EQ(reissues, 0);
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a late transport loss must still latch (fail closed)";
+    EXPECT_EQ(reissues, 1);
 }
 
 // The same two edges delivered in the order they were made: the loss latches
-// and the return asks for the safe-state re-issue. The order check must not
-// drop current edges.
+// and the return asks for the safe-state re-issue.
 TEST_F(StateCacheEdgeOrderTest, EdgesInOrderLatchThenReissue) {
-    state_cache->set_device_reachability_sink(
-        [this](const std::string &handle, bool reachable, anolis::deviceprovider::v1::Status_Code status,
-               std::uint64_t edge_seq) { apply(handle, reachable, status, edge_seq); });
+    state_cache->set_device_reachability_sink(runtime_sink);
 
     std::ostringstream discarded;
     std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
@@ -921,4 +918,51 @@ TEST_F(StateCacheEdgeOrderTest, EdgesInOrderLatchThenReissue) {
     state_cache->poll_device_now("sim0/dev1", *provider_registry);
     EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
     EXPECT_EQ(reissues, 1);
+}
+
+// The number must be taken in the same critical section that decides the
+// edge. A device's edges are decided alternating loss/return, so sorted by
+// number they must alternate too, starting with a loss. A number taken after
+// the lock is released lets the two threads swap numbers between deciding and
+// numbering. Two threads read the same device at once, one failing and one
+// succeeding.
+TEST_F(StateCacheEdgeOrderTest, EdgeNumbersFollowTheOrderEdgesWereDecided) {
+    std::mutex edges_mutex;
+    std::vector<std::pair<std::uint64_t, bool>> edges;
+    state_cache->set_device_reachability_sink(
+        [&](const std::string &, bool reachable, anolis::deviceprovider::v1::Status_Code, std::uint64_t edge_seq) {
+            std::lock_guard<std::mutex> lock(edges_mutex);
+            edges.emplace_back(edge_seq, reachable);
+        });
+
+    constexpr int kIterations = 5000;
+    std::ostringstream discarded;  // one ERROR line per failed read
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    std::thread failing([this] {
+        t_fail_reads = true;
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    std::thread succeeding([this] {
+        for (int i = 0; i < kIterations; ++i) {
+            state_cache->poll_device_now("sim0/dev1", *provider_registry);
+        }
+    });
+    failing.join();
+    succeeding.join();
+    std::cerr.rdbuf(old);
+
+    ASSERT_GT(edges.size(), 1U) << "the two threads never interleaved";
+    std::sort(edges.begin(), edges.end());
+    size_t out_of_alternation = 0;
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (i > 0 && edges[i].first == edges[i - 1].first) {
+            ADD_FAILURE() << "edge number " << edges[i].first << " issued twice";
+        }
+        if (edges[i].second != (i % 2 == 1)) {
+            ++out_of_alternation;
+        }
+    }
+    EXPECT_EQ(out_of_alternation, 0U) << "among " << edges.size() << " edges sorted by number";
 }

@@ -1558,7 +1558,7 @@ TEST_F(HttpRuntimeStatusLatchTest, ReportsEmptyArrayWhenNothingIsLatched) {
 }
 
 TEST_F(HttpRuntimeStatusLatchTest, ReportsLatchedDeviceHandles) {
-    latch->engage("bread0/dcmt0");
+    latch->apply_reachability_edge("bread0/dcmt0", false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, 1);
 
     const auto json = get_status();
     ASSERT_TRUE(json["device_loss_latched"].is_array());
@@ -1567,7 +1567,7 @@ TEST_F(HttpRuntimeStatusLatchTest, ReportsLatchedDeviceHandles) {
 }
 
 TEST_F(HttpRuntimeStatusLatchTest, ClearsAfterRelease) {
-    latch->engage("bread0/dcmt0");
+    latch->apply_reachability_edge("bread0/dcmt0", false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, 1);
     ASSERT_EQ(1u, get_status()["device_loss_latched"].size());
 
     latch->release_all();
