@@ -11,6 +11,7 @@ exposure** (e.g. the bioreactor target under systemd).
 | --- | --- | --- |
 | `http.bind` | `127.0.0.1` | loopback only — not reachable from the network |
 | `http.auth_enabled` | `false` | no token required |
+| `http.auth_exempt_loopback` | `false` | with auth on, requests from this host need the token too |
 | `http.tls_cert_path` / `http.tls_key_path` | unset | plain HTTP |
 
 With the defaults the API is reachable only from the same host, so local
@@ -32,7 +33,6 @@ http:
   bind: 0.0.0.0
   auth_enabled: true
   auth_token: "<a long random secret>"   # or set the ANOLIS_API_TOKEN env var
-  auth_exempt_loopback: true             # local tools skip auth (default)
 ```
 
 Prefer the **`ANOLIS_API_TOKEN`** environment variable over putting the secret
@@ -45,6 +45,40 @@ curl -H "Authorization: Bearer $ANOLIS_API_TOKEN" https://host:8080/v0/state
 ```
 
 The token is compared in constant time and is never written to the logs.
+
+With auth on, every client sends the token, including one on the same host.
+Local scripts can read it from root-only storage and pass the header on stdin,
+which keeps it off the command line (`ps` shows a process's arguments):
+
+```bash
+sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env \
+  | curl -s -H @- http://127.0.0.1:8080/v0/runtime/status
+```
+
+`install.sh`'s health check sends the token the same way. While it polls, a
+local process that has already bound the runtime's loopback port, before the
+runtime does, receives the token from the probe. That is narrower than before:
+with the old default, any local process could call the API without the token.
+
+### The loopback exemption
+
+`http.auth_exempt_loopback: true` lets any request from the runtime's own host
+(`127.*`, `::1`) skip the token. It decides by source address alone, so it
+trusts:
+
+- every process on the host, under any user account;
+- every local service that forwards requests from other machines, such as a
+  reverse proxy or the workbench's Operate proxy. Whoever can reach such a
+  service reaches the full runtime API, control endpoints included, without the
+  token.
+
+It is off by default. Up to 0.1.47 it defaulted to `true`, which left a host
+running a forwarding service open to that service's clients. A workbench on the
+device needs anolis-workbench 0.18.0 or later, which sends the token; upgrade it
+before the runtime, or its Operate proxy gets `401`. Turn it on only on
+a host where no local service forwards network requests to the runtime and every
+local user is trusted to operate the hardware. The runtime logs a warning at
+startup whenever it is on with auth enabled.
 
 ## TLS
 

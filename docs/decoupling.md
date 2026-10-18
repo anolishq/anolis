@@ -55,7 +55,7 @@ crowns none:
 
 | Topology | Bind and auth | Deploy artifact |
 | --- | --- | --- |
-| **Loopback on-device** | `127.0.0.1`, auth-exempt | `--project` online, or `--local` offline |
+| **Loopback on-device** | `127.0.0.1`; with auth on, local clients send the token | `--project` online, or `--local` offline |
 | **LAN with auth** | non-loopback with a generated token | either |
 | **Fully air-gapped** | loopback | staged bundle, carried to the target |
 

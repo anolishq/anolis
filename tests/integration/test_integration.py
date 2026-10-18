@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration import (
+    http_auth_suite,
     process_cleanup_suite,
     provider_config_suite,
     signal_fault_injection_suite,
@@ -281,6 +282,19 @@ def test_provider_supervision_suite(
     ],
 )
 def test_provider_config_suite(runtime_exe: Path, provider_exe: Path, unique_port: int, check) -> None:
+    check(runtime_exe, provider_exe, unique_port)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    "check",
+    [
+        http_auth_suite.test_loopback_requires_token_by_default,
+        http_auth_suite.test_explicit_exemption_still_exempts_and_warns,
+    ],
+)
+def test_http_auth_suite(runtime_exe: Path, provider_exe: Path, unique_port: int, check) -> None:
     check(runtime_exe, provider_exe, unique_port)
 
 

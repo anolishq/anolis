@@ -34,6 +34,10 @@ readonly TELEMETRY_ENV_FILE="/etc/anolis/telemetry-export.env"
 # enters runtime.yaml — which is world-readable, preserved across upgrades, and
 # copied around. Generated per-device at install time, never baked into a bundle.
 readonly RUNTIME_ENV_FILE="/etc/anolis/runtime.env"
+# The workbench service keeps its own copy of the runtime token here (owned by
+# the workbench's user, 0600). install.sh does not write it; the uninstall
+# removes it with the runtime's secrets.
+readonly WORKBENCH_TOKEN_FILE="/etc/anolis/workbench-runtime-token"
 # Pinned for reproducible installs; override via the environment if needed.
 # Capture whether the env was explicitly set BEFORE the fallback default, so a
 # profile pin (components.optional.telemetry_export, #223/D12) can beat an env
@@ -1699,6 +1703,41 @@ _runtime_port() {
     fi
 }
 
+# The runtime's API token, resolved as the runtime resolves it: http.auth_token
+# in runtime.yaml, else ANOLIS_API_TOKEN from runtime.env. Prints nothing when
+# neither is set (auth off, or a config this install did not provision).
+# runtime.env is read as systemd's EnvironmentFile= reads it: the last
+# assignment wins, a trailing CR is dropped and surrounding double quotes are
+# removed.
+_runtime_api_token() {
+    local token
+    token=$(_http_value "${PREFIX}/config/runtime.yaml" auth_token)
+    token="${token#[\"\']}"
+    token="${token%[\"\']}"
+    if [[ -z "${token}" && -r "${RUNTIME_ENV_FILE}" ]]; then
+        # shellcheck disable=SC2016  # sed's $ (last line), not a shell expansion
+        token=$(sed -n '/^ANOLIS_API_TOKEN=/{s///;h;}; ${x;p;}' "${RUNTIME_ENV_FILE}")
+        token="${token%$'\r'}"
+        if [[ "${token}" == \"*\" ]]; then
+            token="${token:1:${#token}-2}"
+        fi
+    fi
+    printf '%s' "${token}"
+}
+
+# curl against the runtime's own API. With auth on, loopback requests need the
+# token too, so send it when there is one. The header goes to curl on stdin
+# (-H @-), never in its argv, where `ps` would show it. The URL stays last.
+_runtime_curl() {
+    local token
+    token=$(_runtime_api_token)
+    if [[ -z "${token}" ]]; then
+        curl "$@"
+        return
+    fi
+    curl -H @- "$@" <<< "Authorization: Bearer ${token}"
+}
+
 # The run registry fails soft: if its data dir cannot be created the runtime
 # logs one WARN at boot and GET /v0/runs answers 503 for the life of the
 # process, while /v0/runtime/status stays green. An install that only checks
@@ -1707,7 +1746,7 @@ _runtime_port() {
 _run_registry_available() {
     local base_url="$1"
     local code
-    code=$(curl -sS -o /dev/null -w '%{http_code}' "${base_url}/v0/runs" 2>/dev/null || echo 000)
+    code=$(_runtime_curl -sS -o /dev/null -w '%{http_code}' "${base_url}/v0/runs" 2>/dev/null || echo 000)
     [[ "${code}" == "200" ]]
 }
 
@@ -1721,7 +1760,7 @@ _run_registry_available() {
 # checks that one of them is present.
 _provider_states() {
     local base_url="$1" body
-    body=$(curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
+    body=$(_runtime_curl -fsS "${base_url}/v0/providers/health" 2>/dev/null) || return 1
     [[ -n "${body//[[:space:]]/}" ]] || return 2
     if command -v jq >/dev/null 2>&1; then
         jq -r '.providers | if type == "array" then .[] else error end
@@ -1801,9 +1840,9 @@ phase_health() {
     local elapsed=0
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
-        if curl -fsS "${url}" &>/dev/null; then
+        if _runtime_curl -fsS "${url}" &>/dev/null; then
             local version
-            version=$(curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
+            version=$(_runtime_curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
             log_ok "health: runtime responding (v${version})"
             if _run_registry_available "http://localhost:${port}"; then
                 log_ok "health: run registry available"
@@ -1878,8 +1917,8 @@ phase_summary() {
     # through `tee` into a logfile, and a secret must not land there.
     if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
         log_info "API token: ${RUNTIME_ENV_FILE} (read it with: sudo cat ${RUNTIME_ENV_FILE})"
-        log_info "           Remote clients must send it as: Authorization: Bearer <token>"
-        log_info "           Requests from the device itself are exempt."
+        log_info "           Clients must send it as: Authorization: Bearer <token>"
+        log_info "           This includes requests from the device itself, unless http.auth_exempt_loopback is true."
     fi
 
     if [[ ${HEALTH_FAILED} -eq 1 ]]; then
@@ -2062,7 +2101,8 @@ do_uninstall() {
     fi
 
     # Secrets live outside ${PREFIX}, so they survive the rm -rf above.
-    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}" "${OBSERVABILITY_ENV_FILE}" "${GRAFANA_ENV_FILE}"; do
+    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}" "${WORKBENCH_TOKEN_FILE}" \
+        "${OBSERVABILITY_ENV_FILE}" "${GRAFANA_ENV_FILE}"; do
         if [[ -f "${secret}" ]]; then
             rm -f "${secret}"
             log_ok "removed ${secret}"

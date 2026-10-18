@@ -265,6 +265,14 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
                 "will be sent in plaintext. Configure http.tls_cert_path/tls_key_path or terminate TLS "
                 "at a reverse proxy.");
         }
+
+        if (config.http.auth_enabled && config.http.auth_exempt_loopback) {
+            LOG_WARN(
+                "[Config] http.auth_exempt_loopback is true: requests from this host skip the Bearer "
+                "token. That trusts every local process, and any local service that forwards requests "
+                "from the network (a reverse proxy, the workbench's Operate proxy). Set it to false "
+                "unless every such service authenticates its own clients.");
+        }
     }
 
     // Validate Provider settings

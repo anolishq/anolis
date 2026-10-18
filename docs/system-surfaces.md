@@ -109,7 +109,7 @@ events), and SSE `/v0/events` (state/quality/availability/removal/mode/
 parameter/`automation_fault`). Routes register in
 `core/http/server.cpp`; human guide in [docs/http/README.md](http/README.md).
 **Security is real but code-defined**: Bearer auth (`core/http/auth.cpp`,
-global pre-routing 401; loopback-exempt by default; token via config or
+global pre-routing 401, loopback included unless `auth_exempt_loopback`; token via config or
 `ANOLIS_API_TOKEN`), TLS via `tls_cert_path`/`tls_key_path`
 (`httplib::SSLServer`), and startup guards that refuse non-loopback binds
 without auth (`allow_insecure_bind` opt-out). None of this appears in the

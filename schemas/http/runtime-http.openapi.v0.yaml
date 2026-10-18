@@ -10,8 +10,8 @@ info:
     (`bearerAuth`). Auth is opt-in via `http.auth_enabled`; the token comes
     from `http.auth_token` or, when that is empty, the `ANOLIS_API_TOKEN`
     environment variable (the env var supplies the token only — it does not
-    enable auth). Loopback clients are exempt by default
-    (`http.auth_exempt_loopback: true`). When enabled, unauthorized requests
+    enable auth). Loopback clients need the token too unless
+    `http.auth_exempt_loopback` is set to true. When enabled, unauthorized requests
     receive `401` with `WWW-Authenticate: Bearer`. TLS is available via
     `http.tls_cert_path` + `http.tls_key_path` (the server then speaks
     https); the runtime refuses non-loopback binds without auth unless
@@ -579,8 +579,8 @@ components:
         Configured via `http.auth_token` or the `ANOLIS_API_TOKEN` environment
         variable; enforced for every endpoint by a global pre-routing check
         when `http.auth_enabled` is true. Loopback clients (textual
-        `127.*`, `::1`, `::ffff:127.0.0.1`) are exempt unless
-        `http.auth_exempt_loopback` is false.
+        `127.*`, `::1`, `::ffff:127.0.0.1`) are exempt only when
+        `http.auth_exempt_loopback` is true (default false).
   parameters:
     provider_id:
       name: provider_id

@@ -13,6 +13,37 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes for operators:
+
+- **With `http.auth_enabled: true`, requests from the device itself now
+  need the API token.** `http.auth_exempt_loopback` defaults to `false`.
+  After upgrading, a local script or service that calls the API without
+  the token gets `401`. Send `Authorization: Bearer <token>` (the token
+  `install.sh` generated is in `/etc/anolis/runtime.env`), or set
+  `http.auth_exempt_loopback: true` knowingly: it trusts every local
+  process and every local service that forwards requests from the
+  network (see `docs/security.md`). A config that already sets it to
+  `true` behaves as before, and the runtime now logs a warning at
+  startup for it. With auth off, nothing changes.
+- **Upgrade anolis-workbench first, to anolis-workbench 0.18.0 or
+  later.** On a device with auth on, a workbench that does not send
+  the token gets `401` from this runtime: its Operate proxy on the
+  device, and a workbench session that reaches the runtime over an ssh
+  tunnel. anolis-workbench 0.18.0 or later sends the token, and works
+  against this runtime and earlier ones.
+
+### Security
+
+- `http.auth_exempt_loopback` defaults to `false`. With it on, any
+  request from the runtime's host skipped the token, including one a
+  local proxy forwarded for a remote client, so a service on the same
+  host that proxies to the runtime exposed the whole API to its own
+  clients without the token. The exemption is now opt-in, and the
+  runtime logs a WARN at startup when it is on with auth enabled.
+  `install.sh`'s health checks send the token from `runtime.env` (or
+  `http.auth_token`), passed to curl on stdin rather than in its
+  arguments. `docs/security.md` states what the exemption trusts.
+
 ### Changed
 
 - The integration suite and the compatibility lane pin anolis-provider-sim
