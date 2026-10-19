@@ -13,6 +13,24 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.49] - 2026-10-19
+
+No config schema, HTTP API or provider protocol change.
+
+### Fixed
+
+- **`install.sh` warns when the `runtime.yaml` it keeps points a
+  provider at another project's config** (#439, #440). Reinstalling
+  with a different project keeps the existing `runtime.yaml`, so its
+  providers went on reading `--config` files from the old project's
+  directory under `projects/`. That directory stays on disk, so they
+  started without an error and on the old configs. For each such
+  provider the install now prints a `⚠` line naming the provider, the
+  file it reads, its project, and the path in the new project. The
+  kept file is not changed. anolis-workbench's `anolis-provision`
+  shows these lines in its install summary
+  (anolishq/anolis-workbench#521).
+
 ## [0.1.48] - 2026-10-18
 
 Upgrade notes for operators:
