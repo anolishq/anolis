@@ -169,6 +169,57 @@ _make_bundle() {  # <profile-writer-fn>
     grep -q "enabled: true" "${PREFIX}/config/runtime.yaml"  # unchanged
 }
 
+# A kept runtime.yaml from an install under another project name (#439): bread0
+# (flow args) and ezo0 (block args) read the old project's configs, sim0 this one's,
+# and foo0 one outside any project.
+_kept_runtime_yaml() {  # <project of bread0 and ezo0>
+    local old="${PREFIX}/projects/$1/config"
+    {
+        echo "providers:"
+        echo "  - id: bread0"
+        echo "    command: ${PREFIX}/bin/anolis-provider-bread"
+        echo "    args: [\"--config\", \"${old}/provider-bread.yaml\"]"
+        echo "  - id: ezo0"
+        echo "    command: ${PREFIX}/bin/anolis-provider-ezo"
+        echo "    args:"
+        echo "      - --config"
+        echo "      - ${old}/provider-ezo.yaml"
+        echo "  - id: sim0"
+        echo "    command: ${PREFIX}/bin/anolis-provider-sim"
+        echo "    args: [\"--config\", \"${PREFIX}/projects/proj/config/provider-sim.yaml\"]"
+        echo "  - id: foo0"
+        echo "    command: ${PREFIX}/bin/anolis-provider-foo"
+        echo "    args: [\"--config\", \"${PREFIX}/config/providers/foo.yaml\"]"
+        echo "automation:"
+        echo "  enabled: false"
+    } > "${PREFIX}/config/runtime.yaml"
+}
+
+@test "phase_config_runtime: warns per provider whose kept --config is another project's" {
+    _make_bundle _write_profile
+    _kept_runtime_yaml old-proj
+    cp "${PREFIX}/config/runtime.yaml" "${TMP}/before.yaml"
+    RUNTIME_VARIANT=""
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(grep -c "config (runtime): provider .* preserved" <<< "${output}")" -eq 2 ]
+    [[ "${output}" == *"provider 'bread0' still reads ${PREFIX}/projects/old-proj/config/provider-bread.yaml"*"${PREFIX}/projects/proj/config/provider-bread.yaml"* ]]
+    [[ "${output}" == *"provider 'ezo0' still reads ${PREFIX}/projects/old-proj/config/provider-ezo.yaml"*"${PREFIX}/projects/proj/config/provider-ezo.yaml"* ]]
+    [[ "${output}" != *"'sim0'"* ]]
+    [[ "${output}" != *"'foo0'"* ]]
+    cmp "${TMP}/before.yaml" "${PREFIX}/config/runtime.yaml"  # unchanged
+}
+
+@test "phase_config_runtime: no provider warning when the kept --config paths are this project's" {
+    _make_bundle _write_profile
+    _kept_runtime_yaml proj
+    RUNTIME_VARIANT=""
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"exists (preserved)"* ]]
+    [[ "${output}" != *"⚠"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # arg parsing
 # ---------------------------------------------------------------------------

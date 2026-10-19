@@ -627,6 +627,7 @@ phase_config_runtime() {
             log_info "To switch variants, remove ${dest} and re-run, or edit it directly."
         fi
         verify_inert_runtime_config "${dest}" warn
+        warn_kept_provider_configs "${dest}"
     else
         verify_inert_runtime_config "${src}" die
         cp "${src}" "${dest}"
@@ -635,6 +636,24 @@ phase_config_runtime() {
     fi
 
     preflight_runtime_config "${dest}"
+}
+
+# A kept runtime.yaml can start its providers on another project's configs: an
+# upgrade under a new project name writes ${PREFIX}/projects/<new>/ next to the
+# old project, which stays on disk, so the old --config paths keep resolving and
+# nothing fails (#439). Name each such provider and leave the file as it is.
+warn_kept_provider_configs() {
+    local cfg="$1"
+    [[ -n "${INSTALLED_PROFILE:-}" ]] || return 0
+    local root="${PREFIX}/projects/"
+    local id conf rel project
+    while IFS=$'\t' read -r id _ conf; do
+        [[ "${conf}" == "${root}"* ]] || continue
+        rel="${conf#"${root}"}"
+        project="${rel%%/*}"
+        [[ "${project}" != "${INSTALLED_PROFILE}" ]] || continue
+        log_warn "config (runtime): provider '${id}' still reads ${conf} from project '${project}', not ${root}${INSTALLED_PROFILE}/${rel#*/}; ${cfg} is preserved, edit it to switch."
+    done < <(_runtime_providers "${cfg}")
 }
 
 # Refuse to install a runtime config the runtime is guaranteed to reject at
