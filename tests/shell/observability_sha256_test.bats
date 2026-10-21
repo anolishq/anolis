@@ -94,7 +94,7 @@ _provision() {
     printf '%s  %s\n' "${GOOD_SHA}" "${ASSET}" > "${RELEASE}/SHA256SUMS"
     run _provision
     [[ "$output" == *"RETURNED 0"* ]]
-    [[ "$output" != *"not verified"* ]]
+    [[ "$output" != *"unverified"* ]]
     [ "$(cat "${PREFIX}/observability/marker")" = "new" ]
     grep -q 'dashboards' "${HOST_WRITES}"
 }
@@ -111,19 +111,23 @@ _provision() {
     [ ! -e "${HOST_WRITES}" ]
 }
 
-@test "#408 a SHA256SUMS with no entry for the observability tarball warns and provisions" {
+@test "#408 a SHA256SUMS with no entry for the observability tarball is skipped and the previous copy kept" {
     printf '%s  %s\n' "${GOOD_SHA}" "anolis-9.9.9-linux-x86_64.tar.gz" > "${RELEASE}/SHA256SUMS"
     run _provision
-    [[ "$output" == *"RETURNED 0"* ]]
+    [[ "$output" == *"RETURNED 1"* ]]
     [[ "$output" == *"anolishq/anolis v9.9.9 has no entry for ${ASSET}"* ]]
-    [ "$(cat "${PREFIX}/observability/marker")" = "new" ]
+    [[ "$output" == *"${ASSET} failed verification; dashboards not updated"* ]]
+    [ "$(cat "${PREFIX}/observability/marker")" = "old" ]
+    [ ! -e "${HOST_WRITES}" ]
 }
 
-@test "#408 a release with no SHA256SUMS warns and provisions the observability tarball" {
+@test "#408 a release with no SHA256SUMS skips the observability tarball and keeps the previous copy" {
     run _provision
-    [[ "$output" == *"RETURNED 0"* ]]
-    [[ "$output" == *"no SHA256SUMS fetched for anolishq/anolis v9.9.9; ${ASSET} is not verified"* ]]
-    [ "$(cat "${PREFIX}/observability/marker")" = "new" ]
+    [[ "$output" == *"RETURNED 1"* ]]
+    [[ "$output" == *"anolishq/anolis v9.9.9 publishes no SHA256SUMS; refusing to use ${ASSET} unverified"* ]]
+    [[ "$output" == *"${ASSET} failed verification; dashboards not updated"* ]]
+    [ "$(cat "${PREFIX}/observability/marker")" = "old" ]
+    [ ! -e "${HOST_WRITES}" ]
 }
 
 @test "#408 a failed SHA256SUMS fetch skips only observability, not the install" {

@@ -2302,10 +2302,12 @@ _stage_fetch() {
     fi
 }
 
-# Check a downloaded tarball against its release's SHA256SUMS. A mismatch is
-# fatal. A release with no SHA256SUMS (HTTP 404), or one with no entry for the
-# tarball, warns and continues: published releases exist that lack arm64
-# entries. Any other failure to fetch SHA256SUMS is fatal.
+# Check a downloaded tarball against its release's SHA256SUMS. A mismatch, a
+# release with no SHA256SUMS, a SHA256SUMS with no entry for the tarball, and
+# any other failure to fetch it are all fatal: nothing is used unverified
+# (#408). Every release the current pins name publishes complete sums; an
+# older release that does not cannot be staged online. An air-gapped install
+# uses --local with a bundle staged elsewhere, which does not download.
 _stage_verify_sha256() {
     local repo="$1" tag="$2" asset="$3" dir="$4"
     local sums="${dir}/${asset}.SHA256SUMS" expected actual code rc=0
@@ -2316,16 +2318,14 @@ _stage_verify_sha256() {
     if [[ "${rc}" -ne 0 ]]; then
         rm -f "${sums}"
         if [[ "${code}" == "404" ]]; then
-            log_warn "stage: no SHA256SUMS fetched for ${repo} ${tag}; ${asset} is not verified"
-            return 0
+            die "stage: ${repo} ${tag} publishes no SHA256SUMS; refusing to use ${asset} unverified"
         fi
         die "stage: could not fetch SHA256SUMS for ${repo} ${tag} (curl exit ${rc}, HTTP ${code:-000}); refusing to use ${asset} unverified"
     fi
     expected=$(awk -v a="${asset}" '$2 == a || $2 == "*" a { print $1; exit }' "${sums}")
     rm -f "${sums}"
     if [[ -z "${expected}" ]]; then
-        log_warn "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; it is not verified"
-        return 0
+        die "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; refusing to use it unverified"
     fi
     actual=$(sha256sum "${dir}/${asset}" | awk '{print $1}')
     if [[ "${actual}" != "${expected}" ]]; then
