@@ -125,12 +125,7 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
     // "reachable": a device that was unreachable before the restart has not
     // been polled since, and claiming otherwise would swallow its return edge
     // -- the one the device-loss latch (#285) re-asserts safe state on.
-    struct Carried {
-        bool provider_available;
-        bool loss_reported;
-        bool unavailable_emitted;
-    };
-    std::unordered_map<std::string, Carried> carried;
+    std::unordered_map<std::string, CarriedReachability> carried;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = device_states_.begin(); it != device_states_.end();) {
@@ -177,14 +172,22 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             // Initialize empty device state
             DeviceState state;
             state.device_handle = device.get_handle();
-            const auto prior = carried.find(state.device_handle);
-            state.provider_available = prior == carried.end() ? true : prior->second.provider_available;
-            state.loss_reported = prior == carried.end() ? false : prior->second.loss_reported;
-            state.unavailable_emitted = prior == carried.end() ? false : prior->second.unavailable_emitted;
             state.last_poll_time = std::chrono::system_clock::now();
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                // This rebuild's old state first, else the record of an earlier
+                // rebuild that dropped the device while it was lost (#424).
+                CarriedReachability prior;
+                if (const auto it = carried.find(state.device_handle); it != carried.end()) {
+                    prior = it->second;
+                } else if (const auto gone = departed_.find(state.device_handle); gone != departed_.end()) {
+                    prior = gone->second;
+                }
+                departed_.erase(state.device_handle);
+                state.provider_available = prior.provider_available;
+                state.loss_reported = prior.loss_reported;
+                state.unavailable_emitted = prior.unavailable_emitted;
                 device_states_[state.device_handle] = state;
             }
         }
@@ -199,6 +202,11 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
         for (const auto &[handle, prior] : carried) {
             if (device_states_.find(handle) == device_states_.end()) {
                 emit_device_removed(provider_id, handle.substr(provider_id.size() + 1));
+                // Keep the loss on record, so the device's return is a return
+                // edge if it is registered again (#424).
+                if (prior.loss_reported) {
+                    departed_[handle] = prior;
+                }
             }
         }
     }

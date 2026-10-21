@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "control/device_loss_latch.hpp"
+#include "control/reissue_worker.hpp"
 #include "events/event_emitter.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/i_provider_handle.hpp"
@@ -993,6 +994,98 @@ TEST_F(StateCacheEdgeOrderTest, EdgesInOrderLatchThenReissue) {
     state_cache->poll_device_now("sim0/dev1", *provider_registry);
     EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
     EXPECT_EQ(reissues, 1);
+}
+
+// #424: a device latched after a transport loss, removed by a provider restart
+// that republishes a smaller inventory, then registered again under the same
+// id. Its first good read after it returns is a return edge, and the safe-state
+// re-assert runs through the ReissueWorker, as on Runtime (#428). While it is
+// gone its latch entry stays (decided on #424): a device that comes back from
+// a loss is not commandable by automation until MANUAL -> AUTO re-arms it.
+TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileLatchedReturnsWithAReturnEdge) {
+    int worker_reissues = 0;
+    control::ReissueWorker worker([&worker_reissues](const std::string &) { ++worker_reissues; });
+    state_cache->set_device_reachability_sink(control::make_reachability_sink(latch, worker));
+
+    std::ostringstream discarded;  // the failed read logs an ERROR line
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    state_cache->poll_once(*provider_registry);  // 1. a good read
+    t_fail_reads = true;
+    state_cache->poll_once(*provider_registry);  // 2. a transport loss
+    t_fail_reads = false;
+    std::cerr.rdbuf(old);
+    ASSERT_TRUE(latch.is_latched("sim0/dev1"));
+
+    registry->commit_provider_devices("sim0", {}, true);  // 3. the restart drops it
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1") == nullptr);
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "the latch keeps a device removed while lost";
+
+    RegisterMockDevice();  // 4. it returns under the same id
+    state_cache->rebuild_poll_configs("sim0");
+    const auto returned = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(returned != nullptr);
+    EXPECT_FALSE(returned->provider_available) << "a returned device has not been read since its loss";
+
+    state_cache->poll_once(*provider_registry);  // 5. and 6. two good reads
+    state_cache->poll_once(*provider_registry);
+    worker.stop();  // runs what is queued, then joins
+
+    EXPECT_EQ(worker_reissues, 1) << "the first good read after the return re-asserts safe state, once";
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
+    EXPECT_EQ(latch.release_all(), std::vector<std::string>{"sim0/dev1"});
+}
+
+// A device removed while reachable and registered again comes back as a new
+// device: no loss is on record, so its first read is not a return.
+TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileReachableReturnsWithNoEdge) {
+    std::vector<bool> edges;
+    state_cache->set_device_reachability_sink([&edges](const std::string &, bool reachable,
+                                                       anolis::deviceprovider::v1::Status_Code,
+                                                       std::uint64_t) { edges.push_back(reachable); });
+
+    state_cache->poll_once(*provider_registry);
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    RegisterMockDevice();
+    state_cache->rebuild_poll_configs("sim0");
+    const auto returned = state_cache->get_device_state("sim0/dev1");
+    ASSERT_TRUE(returned != nullptr);
+    EXPECT_TRUE(returned->provider_available);
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_TRUE(edges.empty());
+}
+
+// The record of a device removed while lost is used once. After it returns
+// and is read, a later removal while reachable leaves nothing behind, so the
+// next return is not a second return edge.
+TEST_F(StateCacheEdgeOrderTest, DepartedRecordIsUsedOnce) {
+    std::vector<bool> edges;
+    state_cache->set_device_reachability_sink([&edges](const std::string &, bool reachable,
+                                                       anolis::deviceprovider::v1::Status_Code,
+                                                       std::uint64_t) { edges.push_back(reachable); });
+
+    std::ostringstream discarded;
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    t_fail_reads = true;
+    state_cache->poll_once(*provider_registry);
+    t_fail_reads = false;
+    std::cerr.rdbuf(old);
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    RegisterMockDevice();
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    ASSERT_EQ(edges, (std::vector<bool>{false, true}));
+
+    registry->commit_provider_devices("sim0", {}, true);  // removed again, reachable this time
+    state_cache->rebuild_poll_configs("sim0");
+    RegisterMockDevice();
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    EXPECT_EQ(edges, (std::vector<bool>{false, true})) << "a stale departed record made a second return edge";
 }
 
 // The number must be taken in the same critical section that decides the
