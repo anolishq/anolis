@@ -600,18 +600,36 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [release-linux-x86_64, release-linux-arm64, release-contracts]
     steps:
-      - name: Regenerate SHA256SUMS across all release tarballs
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Regenerate SHA256SUMS across the release's assets
         env:
           GH_TOKEN: ${{ github.token }}
-        # Build jobs upload their tarballs independently; the x86_64 job's
+        # Build jobs upload their assets independently; the x86_64 job's
         # SHA256SUMS covered neither the arm64 asset nor the schema tarballs
         # (same gap as anolis-provider-bread#102). Rebuild the checksum file
-        # from everything actually attached to the release, then replace it.
+        # from what is actually attached to the release, install.sh and the
+        # manifests included (#446), then replace it.
         run: |
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern '*.tar.gz'
-          sha256sum *.tar.gz > SHA256SUMS
-          cat SHA256SUMS
-          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS --clobber --repo "${GITHUB_REPOSITORY}"
+          set -euo pipefail
+          mkdir release
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir release \
+            --pattern '*.tar.gz' --pattern install.sh --pattern 'manifest*.json' --pattern '*-manifest.json'
+          bash tools/release-sha256sums.sh write release
+          cat release/SHA256SUMS
+          gh release upload "${GITHUB_REF_NAME}" release/SHA256SUMS --clobber --repo "${GITHUB_REPOSITORY}"
+
+      - name: Check the published SHA256SUMS covers install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Read back what was published, so a lost or stale upload fails here
+        # rather than in an install.
+        run: |
+          set -euo pipefail
+          mkdir published
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir published \
+            --pattern SHA256SUMS --pattern install.sh --pattern 'manifest*.json' --pattern '*-manifest.json'
+          bash tools/release-sha256sums.sh check published
 
   upload-metrics:
     name: Upload metrics to release
