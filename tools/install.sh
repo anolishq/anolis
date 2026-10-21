@@ -1090,6 +1090,37 @@ resolve_telemetry_export_version() {
     fi
 }
 
+# Create the telemetry-export venv, or keep the one a previous install made,
+# then bring its pip and certifi up to the floor below on every install. A
+# kept venv otherwise keeps the CA bundle it was created with: certifi before
+# 2026.10.19 trusts emSign roots whose intermediate CA keys are compromised,
+# and pip before 26.2.2 vendors that bundle (the eMudhra incident, 2026-10).
+# The upgrade only warns on failure, like the rest of this optional phase.
+# Returns 1 when the venv cannot be created or populated.
+_telemetry_venv_ensure() {
+    local venv="$1"
+    if [[ ! -x "${venv}/bin/anolis-telemetry-export" ]]; then
+        python3 -m venv "${venv}" || {
+            log_warn "telemetry-export: venv creation failed — skipped"
+            return 1
+        }
+        # Ambient pip3 would trip PEP-668 (externally-managed) on Bookworm; the
+        # venv sidesteps that. Pinned for reproducibility.
+        "${venv}/bin/pip" install --quiet "anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}" || {
+            log_warn "telemetry-export: pip install failed — skipped"
+            return 1
+        }
+        log_ok "telemetry-export: installed anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}"
+    else
+        log_skip "telemetry-export: venv present (preserved)"
+    fi
+    if "${venv}/bin/pip" install --quiet --upgrade 'pip>=26.2.2' 'certifi>=2026.10.19'; then
+        log_ok "telemetry-export: pip and certifi in the venv are current"
+    else
+        log_warn "telemetry-export: could not upgrade pip and certifi in ${venv}; its CA bundle may trust compromised emSign roots"
+    fi
+}
+
 phase_telemetry_export() {
     [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] || return 0
 
@@ -1115,21 +1146,7 @@ phase_telemetry_export() {
         fi
     fi
 
-    if [[ ! -x "${venv}/bin/anolis-telemetry-export" ]]; then
-        python3 -m venv "${venv}" || {
-            log_warn "telemetry-export: venv creation failed — skipped"
-            return
-        }
-        # Ambient pip3 would trip PEP-668 (externally-managed) on Bookworm; the
-        # venv sidesteps that. Pinned for reproducibility.
-        "${venv}/bin/pip" install --quiet "anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}" || {
-            log_warn "telemetry-export: pip install failed — skipped"
-            return
-        }
-        log_ok "telemetry-export: installed anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}"
-    else
-        log_skip "telemetry-export: venv present (preserved)"
-    fi
+    _telemetry_venv_ensure "${venv}" || return
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/telemetry-export"
 
     # Config — skip-if-exists so operator edits (influxdb url/bucket) survive.
