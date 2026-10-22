@@ -1156,9 +1156,11 @@ components:
           type: string
           enum: [default, operator]
           description: >-
-            "default" while the value is the config default; "operator" once a
-            POST /v0/parameters has changed it. Values are not persisted, so
-            every parameter is back to "default" after a runtime restart.
+            "default" until a POST /v0/parameters changes the value;
+            "operator" from then on, even after a later POST sets it back to
+            the config default. A POST of the value it already holds changes
+            nothing. Values are not persisted, so every parameter is back to
+            "default" after a runtime restart.
       additionalProperties: false
     ParametersResponse:
       type: object
@@ -1399,9 +1401,11 @@ components:
             (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
             necessarily benign waiting). "completed" is emitted ONLY when the
             engine declares a terminal completed state (a behaviour tree may
-            never emit it until terminal capture lands). Engine faults
-            (exceptions, corrupt definitions) are NOT a status value — they
-            surface as automation_fault events.
+            never emit it until terminal capture lands). A tick exception
+            reports "failed" (execution_reason "terminal_failure"), moves the
+            runtime to FAULT and emits an automation_fault event. A definition
+            that fails to load is not a status either: the runtime does not
+            start.
         execution_reason:
           type: string
           enum: [mode_gate, waiting, terminal_failure, engine_fault, no_definition, stopped]
