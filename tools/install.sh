@@ -1090,6 +1090,37 @@ resolve_telemetry_export_version() {
     fi
 }
 
+# Create the telemetry-export venv, or keep the one a previous install made,
+# then bring its pip and certifi up to the floor below on every install. A
+# kept venv otherwise keeps the CA bundle it was created with: certifi before
+# 2026.10.19 trusts emSign roots whose intermediate CA keys are compromised,
+# and pip before 26.2.2 vendors that bundle (the eMudhra incident, 2026-10).
+# The upgrade only warns on failure, like the rest of this optional phase.
+# Returns 1 when the venv cannot be created or populated.
+_telemetry_venv_ensure() {
+    local venv="$1"
+    if [[ ! -x "${venv}/bin/anolis-telemetry-export" ]]; then
+        python3 -m venv "${venv}" || {
+            log_warn "telemetry-export: venv creation failed — skipped"
+            return 1
+        }
+        # Ambient pip3 would trip PEP-668 (externally-managed) on Bookworm; the
+        # venv sidesteps that. Pinned for reproducibility.
+        "${venv}/bin/pip" install --quiet "anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}" || {
+            log_warn "telemetry-export: pip install failed — skipped"
+            return 1
+        }
+        log_ok "telemetry-export: installed anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}"
+    else
+        log_skip "telemetry-export: venv present (preserved)"
+    fi
+    if "${venv}/bin/pip" install --quiet --upgrade 'pip>=26.2.2' 'certifi>=2026.10.19'; then
+        log_ok "telemetry-export: pip and certifi in the venv are current"
+    else
+        log_warn "telemetry-export: could not upgrade pip and certifi in ${venv}; its CA bundle may trust compromised emSign roots"
+    fi
+}
+
 phase_telemetry_export() {
     [[ ${WITH_TELEMETRY_EXPORT} -eq 1 ]] || return 0
 
@@ -1115,21 +1146,7 @@ phase_telemetry_export() {
         fi
     fi
 
-    if [[ ! -x "${venv}/bin/anolis-telemetry-export" ]]; then
-        python3 -m venv "${venv}" || {
-            log_warn "telemetry-export: venv creation failed — skipped"
-            return
-        }
-        # Ambient pip3 would trip PEP-668 (externally-managed) on Bookworm; the
-        # venv sidesteps that. Pinned for reproducibility.
-        "${venv}/bin/pip" install --quiet "anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}" || {
-            log_warn "telemetry-export: pip install failed — skipped"
-            return
-        }
-        log_ok "telemetry-export: installed anolis-telemetry-export==${TELEMETRY_EXPORT_VERSION}"
-    else
-        log_skip "telemetry-export: venv present (preserved)"
-    fi
+    _telemetry_venv_ensure "${venv}" || return
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}/telemetry-export"
 
     # Config — skip-if-exists so operator edits (influxdb url/bucket) survive.
@@ -2302,10 +2319,12 @@ _stage_fetch() {
     fi
 }
 
-# Check a downloaded tarball against its release's SHA256SUMS. A mismatch is
-# fatal. A release with no SHA256SUMS (HTTP 404), or one with no entry for the
-# tarball, warns and continues: published releases exist that lack arm64
-# entries. Any other failure to fetch SHA256SUMS is fatal.
+# Check a downloaded tarball against its release's SHA256SUMS. A mismatch, a
+# release with no SHA256SUMS, a SHA256SUMS with no entry for the tarball, and
+# any other failure to fetch it are all fatal: nothing is used unverified
+# (#408). Every release the current pins name publishes complete sums; an
+# older release that does not cannot be staged online. An air-gapped install
+# uses --local with a bundle staged elsewhere, which does not download.
 _stage_verify_sha256() {
     local repo="$1" tag="$2" asset="$3" dir="$4"
     local sums="${dir}/${asset}.SHA256SUMS" expected actual code rc=0
@@ -2316,16 +2335,14 @@ _stage_verify_sha256() {
     if [[ "${rc}" -ne 0 ]]; then
         rm -f "${sums}"
         if [[ "${code}" == "404" ]]; then
-            log_warn "stage: no SHA256SUMS fetched for ${repo} ${tag}; ${asset} is not verified"
-            return 0
+            die "stage: ${repo} ${tag} publishes no SHA256SUMS; refusing to use ${asset} unverified"
         fi
         die "stage: could not fetch SHA256SUMS for ${repo} ${tag} (curl exit ${rc}, HTTP ${code:-000}); refusing to use ${asset} unverified"
     fi
     expected=$(awk -v a="${asset}" '$2 == a || $2 == "*" a { print $1; exit }' "${sums}")
     rm -f "${sums}"
     if [[ -z "${expected}" ]]; then
-        log_warn "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; it is not verified"
-        return 0
+        die "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; refusing to use it unverified"
     fi
     actual=$(sha256sum "${dir}/${asset}" | awk '{print $1}')
     if [[ "${actual}" != "${expected}" ]]; then
