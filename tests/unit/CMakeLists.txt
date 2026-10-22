@@ -51,6 +51,18 @@ target_link_libraries(provider_hello_mismatch_helper PRIVATE
 )
 anolis_apply_warnings(provider_hello_mismatch_helper)
 
+add_executable(provider_stalled_read_helper
+    helpers/stalled_read_provider.cpp
+)
+target_include_directories(provider_stalled_read_helper SYSTEM PRIVATE
+    ${CMAKE_BINARY_DIR}/core
+)
+target_link_libraries(provider_stalled_read_helper PRIVATE
+    anolis_proto
+    protobuf::libprotobuf
+)
+anolis_apply_warnings(provider_stalled_read_helper)
+
 # Test executable
 add_executable(anolis_unit_tests
     ${ANOLIS_UNIT_TEST_SOURCES}
@@ -66,8 +78,9 @@ target_include_directories(anolis_unit_tests SYSTEM PRIVATE
 
 target_compile_definitions(anolis_unit_tests PRIVATE
     PROVIDER_HELLO_MISMATCH_HELPER_PATH="$<TARGET_FILE:provider_hello_mismatch_helper>"
+    PROVIDER_STALLED_READ_HELPER_PATH="$<TARGET_FILE:provider_stalled_read_helper>"
 )
-add_dependencies(anolis_unit_tests provider_hello_mismatch_helper)
+add_dependencies(anolis_unit_tests provider_hello_mismatch_helper provider_stalled_read_helper)
 
 target_link_libraries(anolis_unit_tests PRIVATE
     GTest::gtest

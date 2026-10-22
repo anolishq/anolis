@@ -149,8 +149,12 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
         // provider's own view — per-device metrics and last_seen, plus devices
         // it expected but could not bring up (absent from the registry,
         // reported UNREACHABLE by the provider).
+        //
+        // Bounded wait for the session (#411): behind a stuck call the
+        // provider's report is left out, and the rows below still come from
+        // the state cache, rather than this request waiting out the call.
         adpp::GetHealthResponse reported;
-        bool has_reported = provider->is_available() && provider->get_health(reported);
+        bool has_reported = provider->is_available() && provider->try_get_health(reported, kGetHealthSessionWait);
 
         // GetHealth can wait behind an in-flight call for up to the provider's
         // timeout (#411). Read availability and the clock after it returns, so

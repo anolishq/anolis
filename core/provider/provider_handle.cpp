@@ -30,7 +30,7 @@ ProviderHandle::ProviderHandle(const std::string &provider_id, const std::string
 void ProviderHandle::stop() {
     // Under mutex_ so an in-flight request finishes before its pipes close, and
     // the flag first so every later request and is_available() see it.
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::timed_mutex> lock(mutex_);
     session_healthy_.store(false, std::memory_order_release);
     process_.shutdown();
 }
@@ -248,6 +248,16 @@ bool ProviderHandle::call(const std::string &device_id, uint32_t function_id, co
 }
 
 bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &response) {
+    return get_health_impl(response, std::nullopt);
+}
+
+bool ProviderHandle::try_get_health(anolis::deviceprovider::v1::GetHealthResponse &response,
+                                    std::chrono::milliseconds max_wait) {
+    return get_health_impl(response, max_wait);
+}
+
+bool ProviderHandle::get_health_impl(anolis::deviceprovider::v1::GetHealthResponse &response,
+                                     std::optional<std::chrono::milliseconds> lock_wait) {
     anolis::deviceprovider::v1::Request request;
     uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
     request.set_request_id(request_id);
@@ -255,7 +265,7 @@ bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &r
 
     anolis::deviceprovider::v1::Response resp;
     anolis::deviceprovider::v1::Status_Code status;
-    if (!send_request(request, resp, request_id, status)) {
+    if (!send_request(request, resp, request_id, status, lock_wait)) {
         return false;
     }
 
@@ -270,11 +280,21 @@ bool ProviderHandle::get_health(anolis::deviceprovider::v1::GetHealthResponse &r
 
 bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &request,
                                   anolis::deviceprovider::v1::Response &response, uint64_t request_id,
-                                  anolis::deviceprovider::v1::Status_Code &status) {
+                                  anolis::deviceprovider::v1::Status_Code &status,
+                                  std::optional<std::chrono::milliseconds> lock_wait) {
+    using anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
     using anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
     using anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+    if (!lock_wait) {
+        lock.lock();
+    } else if (!lock.try_lock_for(*lock_wait)) {
+        // Another exchange still holds the session. Nothing was sent, and
+        // error_/last_status_code_ describe that exchange, so leave them.
+        status = Status_Code_CODE_DEADLINE_EXCEEDED;
+        return false;
+    }
 
     // Every exit below assigns `status` and mirrors it into last_status_code_
     // while still holding the lock, so the shared view and the per-call value

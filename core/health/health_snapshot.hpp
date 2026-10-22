@@ -178,11 +178,25 @@ std::vector<std::string> unmatched_excluded_signals(
     const std::map<std::string, std::set<std::string>> &excluded_signals, const registry::DeviceRegistry &registry);
 
 /**
+ * @brief How long collect_providers_health() waits for a provider session
+ * that another call holds before leaving that provider's report out (#411).
+ *
+ * Long enough for an ordinary in-flight read on a serialized bus, short
+ * enough that a call stuck until its timeout does not hold up the health
+ * endpoint or the health snapshot task.
+ */
+inline constexpr std::chrono::milliseconds kGetHealthSessionWait{250};
+
+/**
  * @brief Collect the full health view across all providers.
  *
  * Performs a live ADPP GetHealth round-trip per available provider (a
  * provider may answer with a live device query per device), so callers
  * choose the cadence deliberately.
+ *
+ * A provider whose session another call still holds after
+ * kGetHealthSessionWait has no `reported` block; its state and device rows
+ * still come from availability and the state cache (#411).
  *
  * Each provider's availability and the clock are read after its GetHealth
  * returns, so a provider that goes unavailable while the call waits is

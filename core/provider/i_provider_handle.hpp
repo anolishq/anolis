@@ -5,6 +5,7 @@
  * @brief Abstract provider-session interface used by the runtime core.
  */
 
+#include <chrono>
 #include <map>
 #include <string>
 #include <vector>
@@ -107,6 +108,22 @@ public:
      * therefore absent from the runtime registry.
      */
     virtual bool get_health(anolis::deviceprovider::v1::GetHealthResponse &response) = 0;
+
+    /**
+     * @brief GetHealth that gives up when the session stays busy for `max_wait`.
+     *
+     * One exchange is in flight per session, so a plain get_health() queues
+     * behind a stuck call for up to that call's timeout (#411). This waits at
+     * most `max_wait` for the session and returns false without sending
+     * anything when it is still busy. Once sent, the exchange keeps the
+     * normal timeout: cutting it short would mark the session unhealthy.
+     * The default has no session to wait on and calls get_health().
+     */
+    virtual bool try_get_health(anolis::deviceprovider::v1::GetHealthResponse &response,
+                                std::chrono::milliseconds max_wait) {
+        (void)max_wait;
+        return get_health(response);
+    }
 
     /**
      * @brief Get the most recent human-readable failure string.
