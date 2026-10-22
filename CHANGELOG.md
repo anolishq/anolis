@@ -13,7 +13,7 @@ commit messages only.
 
 ## [Unreleased]
 
-## [0.1.50] - 2026-10-21
+## [0.1.50] - 2026-10-22
 
 No config schema or provider protocol change. The HTTP API changes in
 description text only (#453).
