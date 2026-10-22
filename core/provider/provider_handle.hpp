@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,9 @@ public:
 
     /** @brief Fetch provider-reported health via ADPP GetHealth. */
     bool get_health(anolis::deviceprovider::v1::GetHealthResponse &response) override;
+    /** @brief GetHealth that waits at most `max_wait` for a busy session (#411). */
+    bool try_get_health(anolis::deviceprovider::v1::GetHealthResponse &response,
+                        std::chrono::milliseconds max_wait) override;
 
     /**
      * @brief Return the last client-side or provider-reported error.
@@ -93,7 +97,7 @@ public:
      * data race.
      */
     std::string last_error() const override {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::timed_mutex> lock(mutex_);
         return error_;
     }
 
@@ -104,7 +108,7 @@ public:
      * send_request under the lock and read here from other threads.
      */
     anolis::deviceprovider::v1::Status_Code last_status_code() const override {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::timed_mutex> lock(mutex_);
         return last_status_code_;
     }
 
@@ -118,8 +122,9 @@ private:
     anolis::deviceprovider::v1::Status_Code last_status_code_ = anolis::deviceprovider::v1::Status_Code_CODE_OK;
     std::atomic<uint32_t> next_request_id_;
     // Guards error_ and serializes the one-in-flight request. `mutable` so the
-    // const last_error() can copy error_ under the lock.
-    mutable std::mutex mutex_;
+    // const last_error() can copy error_ under the lock; timed so
+    // try_get_health() can stop waiting for it.
+    mutable std::timed_mutex mutex_;
 
     int timeout_ms_;        // ADPP operation timeout
     int hello_timeout_ms_;  // Process liveness check timeout
@@ -132,7 +137,7 @@ private:
      * while writing error_ directly — calling this there would self-deadlock).
      */
     void set_error(std::string message) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::timed_mutex> lock(mutex_);
         error_ = std::move(message);
     }
 
@@ -146,10 +151,20 @@ private:
      * the per-call value; `last_status_code_` is the shared last-value view of
      * the same thing, which a concurrent RPC on another thread can overwrite
      * before the caller reads it back.
+     *
+     * With `lock_wait`, gives up when `mutex_` is still held after that long:
+     * returns false with DEADLINE_EXCEEDED, sends nothing, and leaves
+     * error_ and last_status_code_ alone, since they belong to the exchange
+     * that holds the lock.
      */
     bool send_request(const anolis::deviceprovider::v1::Request &request,
                       anolis::deviceprovider::v1::Response &response, uint64_t request_id,
-                      anolis::deviceprovider::v1::Status_Code &status);
+                      anolis::deviceprovider::v1::Status_Code &status,
+                      std::optional<std::chrono::milliseconds> lock_wait = std::nullopt);
+
+    /** @brief GetHealth, with an optional bound on the wait for the session. */
+    bool get_health_impl(anolis::deviceprovider::v1::GetHealthResponse &response,
+                         std::optional<std::chrono::milliseconds> lock_wait);
 
     /** @brief Wait for one correlated response frame within the given timeout. */
     bool wait_for_response(anolis::deviceprovider::v1::Response &response, uint64_t expected_request_id, int timeout_ms,

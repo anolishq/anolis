@@ -275,6 +275,33 @@ TEST_F(HealthSnapshotCollectorTest, StalenessIsMeasuredAfterGetHealthReturns) {
     EXPECT_GE(snap[0].devices[0].staleness_ms, static_cast<uint64_t>(kWait.count()));
 }
 
+// #411: behind a call that holds the provider session, the snapshot waits at
+// most kGetHealthSessionWait, leaves the provider's report out, and still
+// builds the provider and device rows from availability and the state cache.
+TEST_F(HealthSnapshotCollectorTest, BusySessionLeavesTheReportOutAndKeepsTheRows) {
+    RegisterDevices(1);
+    auto poll_time = PollAndGetPollTime();
+    mock_provider->session_busy = true;
+    EXPECT_CALL(*mock_provider, get_health(_)).Times(0);
+    auto snap = health::collect_providers_health(*provider_registry, *registry, *state_cache, nullptr, {500, 0, 0},
+                                                 poll_time + std::chrono::milliseconds(100));
+    ASSERT_EQ(mock_provider->last_try_wait, health::kGetHealthSessionWait);
+    ASSERT_EQ(snap.size(), 1u);
+    EXPECT_EQ(snap[0].state, "AVAILABLE");
+    EXPECT_FALSE(snap[0].reported.has_value());
+    EXPECT_EQ(HealthOf(snap, "dev0"), "OK");
+}
+
+// The startup watchdog preflight is not on a polled path and keeps the
+// unbounded GetHealth, so a busy session cannot hide a disarmed watchdog.
+TEST_F(HealthSnapshotCollectorTest, WatchdogPreflightWaitsForTheSession) {
+    RegisterDevices(1);
+    mock_provider->session_busy = true;
+    EXPECT_CALL(*mock_provider, get_health(_)).Times(1).WillOnce(Return(false));
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+    EXPECT_FALSE(mock_provider->last_try_wait.has_value());
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2 (#220): per-signal freshness/quality folded into device health.
 // ---------------------------------------------------------------------------
