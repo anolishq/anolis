@@ -55,7 +55,7 @@ setup() {
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
     [ "$status" -eq 0 ]
     [ -f "${DL}/${ASSET}" ]
-    [[ "$output" != *"not verified"* ]]
+    [[ "$output" != *"unverified"* ]]
     grep -q '/v1.0.0/SHA256SUMS$' "${CURL_LOG}"
 }
 
@@ -70,20 +70,19 @@ setup() {
     [[ "$output" == *"got ${GOOD_SHA}"* ]]
 }
 
-@test "#408 a SHA256SUMS with no entry for the tarball warns and continues" {
+@test "#408 a SHA256SUMS with no entry for the tarball fails closed" {
     printf '%s  %s\n' "${GOOD_SHA}" "anolis-provider-foo-1.0.0-linux-x86_64.tar.gz" \
         > "${RELEASE}/SHA256SUMS"
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
-    [ "$status" -eq 0 ]
-    [ -f "${DL}/${ASSET}" ]
-    [[ "$output" == *"anolishq/foo v1.0.0 has no entry for ${ASSET}"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"SHA256SUMS of anolishq/foo v1.0.0 has no entry for ${ASSET}; refusing to use it unverified"* ]]
 }
 
-@test "#408 a release with no SHA256SUMS (HTTP 404) warns and continues" {
+@test "#408 a release with no SHA256SUMS (HTTP 404) fails closed" {
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
-    [ "$status" -eq 0 ]
-    [ -f "${DL}/${ASSET}" ]
-    [[ "$output" == *"no SHA256SUMS fetched for anolishq/foo v1.0.0; ${ASSET} is not verified"* ]]
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"anolishq/foo v1.0.0 publishes no SHA256SUMS; refusing to use ${ASSET} unverified"* ]]
+    [ ! -e "${DL}/${ASSET}.SHA256SUMS" ]
 }
 
 @test "#408 install.sh is not checked against SHA256SUMS" {
@@ -100,7 +99,7 @@ setup() {
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
     [ "$status" -eq 1 ]
     [[ "$output" == *"could not fetch SHA256SUMS for anolishq/foo v1.0.0 (curl exit 7, HTTP 000)"* ]]
-    [[ "$output" != *"no SHA256SUMS fetched"* ]]
+    [[ "$output" != *"publishes no SHA256SUMS"* ]]
     [ ! -e "${DL}/${ASSET}.SHA256SUMS" ]
 }
 
@@ -110,7 +109,7 @@ setup() {
     run _stage_fetch anolishq/foo v1.0.0 "${ASSET}" "${DL}"
     [ "$status" -eq 1 ]
     [[ "$output" == *"could not fetch SHA256SUMS for anolishq/foo v1.0.0 (curl exit 22, HTTP 503)"* ]]
-    [[ "$output" != *"no SHA256SUMS fetched"* ]]
+    [[ "$output" != *"publishes no SHA256SUMS"* ]]
 }
 
 @test "#408 --stage stops and writes no bundle when SHA256SUMS cannot be fetched" {

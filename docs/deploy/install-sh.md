@@ -21,6 +21,24 @@ versions, assembles a bundle, and installs it.
 with `pyyaml` to resolve the profile. Set `GITHUB_TOKEN` if you hit release
 rate-limiting — that is the usual cause of a failed download.
 
+### Using `install.sh` from a release
+
+Without a checkout, take `install.sh` from the release whose runtime you
+install, and check it against that release's `SHA256SUMS` before running it as
+root:
+
+```bash
+tag=v<version>   # the runtime version machine-profile.yaml pins
+curl -fsSLO "https://github.com/anolishq/anolis/releases/download/${tag}/install.sh"
+curl -fsSLO "https://github.com/anolishq/anolis/releases/download/${tag}/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS && sudo bash install.sh --project /path/to/bioreactor-v1
+```
+
+`sha256sum -c` prints `install.sh: OK`. `--ignore-missing` skips the lines for
+assets you did not download. A `SHA256SUMS` with no line for `install.sh`
+verifies nothing, and `sha256sum` then reports `no file was verified` and exits
+1, so the `&&` stops before `sudo`. Releases up to v0.1.49 have no such line.
+
 ## Offline: stage, carry, install
 
 Build the bundle somewhere with internet. No root needed:
@@ -224,7 +242,7 @@ For an entry with key `<kind>`, `repo` and `version`:
 | --- | --- |
 | a GitHub release tagged `v<version>` | `version` is written without the `v`, e.g. `version: 0.4.1` downloads tag `v0.4.1`. |
 | an asset named `anolis-provider-<kind>-<version>-linux-<arch>.tar.gz` | `<arch>` is `arm64` or `x86_64`: the names `install.sh` derives from the host (it maps `aarch64` to `arm64`) and the values `--arch` documents. Name the asset `arm64`, not `aarch64` or `amd64`. Publish one asset per architecture you support. |
-| a `SHA256SUMS` asset listing every tarball | standard `sha256sum` output with bare file names, one line per `.tar.gz` asset, every architecture included. `install.sh` checks each downloaded tarball against it and stops on a mismatch. Today a release with no `SHA256SUMS` (HTTP 404), or one with no line for the tarball, gets a warning naming the release and the asset, and the install continues unverified. Any other failure to fetch `SHA256SUMS`, such as a refused connection or a 5xx, stops the install. |
+| a `SHA256SUMS` asset listing every tarball | standard `sha256sum` output with bare file names, one line per `.tar.gz` asset, every architecture included. `install.sh` checks each downloaded tarball against it, and stops when the hash does not match, when the release has no `SHA256SUMS` (HTTP 404), when it has no line for the tarball, or when `SHA256SUMS` cannot be fetched (a refused connection, a 5xx). Nothing is installed unverified. |
 | the archive holds `bin/anolis-provider-<kind>` | at the archive root, with no top-level directory. It is the only file `install.sh` copies out. |
 | `<kind>` uses `a-z`, `0-9` and `-` only | the runtime configs refer to the binary as `<prefix>/bin/anolis-provider-<kind>`, and staging refuses a config whose provider command does not resolve to a pinned kind. |
 | `--version` exits `0` | the host preflight runs it as the service user, and a binary that cannot run stops the install. |

@@ -238,6 +238,22 @@ private:
     // older than ones the consumer has already applied.
     std::uint64_t reachability_edge_seq_ = 0;
 
+    // Reachability a provider rebuild carries from a device's old state to its
+    // new one (#285, #424).
+    struct CarriedReachability {
+        bool provider_available = true;
+        bool loss_reported = false;
+        bool unavailable_emitted = false;
+    };
+
+    // A device a rebuild dropped while a loss was on record for it, by handle.
+    // If a later rebuild brings it back under the same handle, its state starts
+    // from this record, so its first good read is the return edge the loss
+    // latch re-asserts safe state on (#424). Without it the device would come
+    // back as new, and still latched with nothing to re-assert its safe state.
+    // Guarded by `mutex_`.
+    std::unordered_map<std::string, CarriedReachability> departed_;
+
     // Polling configuration (built from registry at init)
     struct PollConfig {
         std::string provider_id;

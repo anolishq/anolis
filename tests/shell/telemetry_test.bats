@@ -2,9 +2,10 @@
 # Tests for the --with-telemetry-export provisioning surface in tools/install.sh.
 #
 # These source install.sh (main() guarded) and exercise the pure helpers +
-# flag parsing — no root, network, venv, or systemd required. The venv/pip/
-# systemctl orchestration in phase_telemetry_export is validated on real
-# hardware (anolishq/anolis#138), not here. See anolishq/anolis#137.
+# flag parsing — no root, network, venv, or systemd required. The venv helper
+# runs against a stubbed python3 and pip; the rest of phase_telemetry_export
+# (systemctl, /etc/anolis) is validated on real hardware (anolishq/anolis#138),
+# not here. See anolishq/anolis#137.
 
 INSTALL_SH="${BATS_TEST_DIRNAME}/../../tools/install.sh"
 
@@ -168,4 +169,67 @@ JSON
     _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" ""  # providers present, no optional
     run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
     [ -z "${output}" ]
+}
+
+# _telemetry_venv_ensure with python3 and the venv's pip stubbed: the stub pip
+# logs its arguments to PIP_LOG and fails when PIP_FAIL matches them.
+_stub_venv_tools() {
+    PIP_LOG="${BATS_TEST_TMPDIR}/pip.log"
+    VENV="${BATS_TEST_TMPDIR}/venv"
+    export PIP_LOG PIP_FAIL=""
+    _write_stub_pip() {
+        mkdir -p "${VENV}/bin"
+        cat > "${VENV}/bin/pip" <<'PIP'
+#!/bin/bash
+printf '%s\n' "$*" >> "${PIP_LOG}"
+if [[ -n "${PIP_FAIL}" && "$*" == *"${PIP_FAIL}"* ]]; then exit 1; fi
+if [[ "$*" == *"anolis-telemetry-export=="* ]]; then
+    printf '#!/bin/bash\n' > "$(dirname "$0")/anolis-telemetry-export"
+    chmod +x "$(dirname "$0")/anolis-telemetry-export"
+fi
+PIP
+        chmod +x "${VENV}/bin/pip"
+    }
+    python3() {
+        [[ "$1 $2" == "-m venv" ]] || return 99
+        _write_stub_pip
+    }
+    TELEMETRY_EXPORT_VERSION="0.1.1"
+}
+
+@test "a new telemetry-export venv gets current pip and certifi after the package" {
+    _stub_venv_tools
+    run _telemetry_venv_ensure "${VENV}"
+    [ "$status" -eq 0 ]
+    [ "$(sed -n 1p "${PIP_LOG}")" = "install --quiet anolis-telemetry-export==0.1.1" ]
+    [ "$(sed -n 2p "${PIP_LOG}")" = "install --quiet --upgrade pip>=26.2.2 certifi>=2026.10.19" ]
+    [[ "${output}" == *"pip and certifi in the venv are current"* ]]
+}
+
+@test "a kept telemetry-export venv still gets current pip and certifi" {
+    _stub_venv_tools
+    _write_stub_pip
+    printf '#!/bin/bash\n' > "${VENV}/bin/anolis-telemetry-export"
+    chmod +x "${VENV}/bin/anolis-telemetry-export"
+    run _telemetry_venv_ensure "${VENV}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"venv present (preserved)"* ]]
+    [ "$(cat "${PIP_LOG}")" = "install --quiet --upgrade pip>=26.2.2 certifi>=2026.10.19" ]
+}
+
+@test "a failed pip/certifi upgrade warns and does not stop the phase" {
+    _stub_venv_tools
+    PIP_FAIL="--upgrade"
+    run _telemetry_venv_ensure "${VENV}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"could not upgrade pip and certifi in ${VENV}"* ]]
+}
+
+@test "a venv that cannot be populated returns 1 and skips the upgrade" {
+    _stub_venv_tools
+    PIP_FAIL="anolis-telemetry-export=="
+    run _telemetry_venv_ensure "${VENV}"
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"pip install failed — skipped"* ]]
+    ! grep -q -- '--upgrade' "${PIP_LOG}"
 }

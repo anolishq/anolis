@@ -179,7 +179,7 @@ jobs:
       - name: ShellCheck
         # shellcheck is static analysis (arch-independent) — run it once, on x64.
         if: matrix.os == 'ubuntu-24.04'
-        run: shellcheck tools/install.sh
+        run: shellcheck tools/install.sh tools/release-sha256sums.sh
 
       - name: BATS smoke tests
         run: bats tests/shell/
