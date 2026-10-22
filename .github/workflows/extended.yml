@@ -201,13 +201,16 @@ jobs:
       - name: Collect coverage data
         run: |
           set -euo pipefail
+          # lcov 2.4 (ubuntu-26.04) stops on a test function's "mismatched end
+          # line" as an `inconsistent` error; lcov 2.0 (24.04) accepts the
+          # category too.
           lcov --rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1 \
-            --ignore-errors mismatch,gcov \
+            --ignore-errors mismatch,gcov,inconsistent \
             --directory build/ci-coverage \
             --capture \
             --output-file coverage.raw.info
 
-          lcov --rc branch_coverage=1 --ignore-errors unused \
+          lcov --rc branch_coverage=1 --ignore-errors unused,inconsistent \
             --remove coverage.raw.info \
             '/usr/*' \
             '*/vcpkg_installed/*' \
@@ -219,7 +222,7 @@ jobs:
 
       - name: Generate HTML coverage report
         run: |
-          genhtml --rc branch_coverage=1 coverage.info \
+          genhtml --rc branch_coverage=1 --ignore-errors inconsistent coverage.info \
             --output-directory coverage-html \
             --title "Anolis Runtime Coverage" \
             --demangle-cpp \
