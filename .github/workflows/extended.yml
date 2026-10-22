@@ -218,7 +218,7 @@ jobs:
             '*/tests/*' \
             --output-file coverage.info
 
-          lcov --rc branch_coverage=1 --list coverage.info
+          lcov --rc branch_coverage=1 --ignore-errors inconsistent --list coverage.info
 
       - name: Generate HTML coverage report
         run: |
