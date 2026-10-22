@@ -21,6 +21,24 @@ versions, assembles a bundle, and installs it.
 with `pyyaml` to resolve the profile. Set `GITHUB_TOKEN` if you hit release
 rate-limiting — that is the usual cause of a failed download.
 
+### Using `install.sh` from a release
+
+Without a checkout, take `install.sh` from the release whose runtime you
+install, and check it against that release's `SHA256SUMS` before running it as
+root:
+
+```bash
+tag=v<version>   # the runtime version machine-profile.yaml pins
+curl -fsSLO "https://github.com/anolishq/anolis/releases/download/${tag}/install.sh"
+curl -fsSLO "https://github.com/anolishq/anolis/releases/download/${tag}/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS && sudo bash install.sh --project /path/to/bioreactor-v1
+```
+
+`sha256sum -c` prints `install.sh: OK`. `--ignore-missing` skips the lines for
+assets you did not download. A `SHA256SUMS` with no line for `install.sh`
+verifies nothing, and `sha256sum` then reports `no file was verified` and exits
+1, so the `&&` stops before `sudo`. Releases up to v0.1.49 have no such line.
+
 ## Offline: stage, carry, install
 
 Build the bundle somewhere with internet. No root needed:
