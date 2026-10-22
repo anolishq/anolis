@@ -13,6 +13,77 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.50] - 2026-10-22
+
+No config schema or provider protocol change. The HTTP API changes in
+description text only (#453).
+
+### Security
+
+- **The release's `SHA256SUMS` covers `install.sh` and the manifest
+  JSON files** (#446, #449). Until now it listed only the `.tar.gz`
+  assets, so a downloaded `install.sh`, which runs as root, had nothing
+  to be checked against. The release job writes `SHA256SUMS` with
+  `tools/release-sha256sums.sh` and fails unless the published file has
+  a line for `install.sh` and for every other asset it covers.
+  `docs/deploy/install-sh.md` shows how to check `install.sh` before
+  running it:
+  `sha256sum -c --ignore-missing SHA256SUMS && sudo bash install.sh`.
+  anolis-workbench's next release checks it before running it
+  (anolishq/anolis-workbench#530).
+- **`install.sh` refuses a release tarball with no `SHA256SUMS` entry**
+  (#408, #445). A release with no `SHA256SUMS`, or no line for the
+  tarball, used to warn and install it unverified. It now stops, as it
+  already did on a mismatch. The observability phase skips in those
+  cases and keeps the previous dashboards. Every release the current
+  pins name publishes complete sums.
+- **`install.sh` brings pip and certifi current in the telemetry-export
+  venv** (#451). The venv is created once and kept on later installs,
+  so it kept the certifi it was created with. certifi before 2026.10.19
+  trusts emSign roots whose intermediate CA keys are compromised (the
+  eMudhra incident), and pip before 26.2.2 always loads its own copy of
+  that bundle. Each install now runs
+  `pip install --upgrade 'pip>=26.2.2' 'certifi>=2026.10.19'` in the
+  venv, and warns rather than failing when that can't run, offline for
+  instance. An existing install picks the fix up on its next
+  `install.sh` run.
+
+### Fixed
+
+- **A device that returns after a provider restart dropped it gets its
+  safe-state re-assert** (#424, #447). A device latched by the
+  device-loss latch, then left out of a provider's smaller inventory on
+  restart, then registered again under the same id came back without a
+  return edge, and kept running whatever it was last commanded. The
+  state cache now keeps the device's loss record across that rebuild,
+  so its first good read is a return and the re-assert runs. The latch
+  entry is kept meanwhile: the device stays blocked to automation until
+  MANUAL → AUTO, as any device latched after a loss is.
+- **`/v0/providers/health` no longer waits out a stuck provider call**
+  (#411, #455). One request is in flight per provider session, and
+  health queued behind a stuck one for up to the provider's
+  `timeout_ms` (5 s by default). It now waits at most 250 ms for the
+  session. When another call still holds it, that provider's `reported`
+  is `null`, and its state and device rows still come from availability
+  and the state cache. The InfluxDB health rows take the same path. A
+  provider that hangs while its session is idle still holds health for
+  up to `timeout_ms` (#454).
+- **The OpenAPI descriptions of a parameter's `source` and of
+  `execution_status` say what the runtime does** (#387, #453). `source`
+  reads `operator` from the first change on, even after a later POST
+  sets the value back to its default. A tick exception reports
+  `failed` (`execution_reason` `terminal_failure`), moves the runtime
+  to FAULT and emits `automation_fault`.
+
+### Changed
+
+- CI, the extended checks and the soak run on ubuntu-26.04 (#444). The
+  coverage job's `lcov` calls continue past lcov 2.4's `inconsistent`
+  records (#448, #452). Release builds stay on ubuntu-24.04, so the
+  binaries need the same glibc as before.
+- certifi 2026.10.19 in `uv.lock` (#450). It serves the Python test and
+  tooling environment; the runtime doesn't use it.
+
 ## [0.1.49] - 2026-10-19
 
 No config schema, HTTP API or provider protocol change.
