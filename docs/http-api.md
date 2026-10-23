@@ -119,8 +119,12 @@ Notes:
 4. What `safety.on_startup` did at startup is surfaced under
    `startup_safe_state` in `GET /v0/runtime/status`: `on_startup`, `ran`,
    `software_safe_state`, `safe_state_achieved` (the same verdict) and
-   `failed_actions` (same shape as the `/v0/estop` actions). `ran` is
-   `false` for `leave` and when no safe state is declared.
+   `failed_actions` (same shape as the `/v0/estop` actions), and
+   `skipped_actions`: calls not issued because their provider reported the
+   device `UNREACHABLE` and it is not registered, each with
+   `device_handle`, `function` and the provider's `reason`. `ran` is
+   `false` for `leave` and when no safe state is declared. Runtimes before
+   0.1.51 do not send `skipped_actions`.
 5. This is a software stop, not a substitute for the hardware emergency stop.
 
 ### Device-loss latch
