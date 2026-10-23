@@ -15,7 +15,14 @@ Use this file for operational semantics and practical examples.
 1. Base URL default: `http://127.0.0.1:8080`
 2. JSON content type: `application/json`
 3. API prefix: `/v0`
-4. No auth model in v0
+4. Authentication: bearer token, off by default (`http.auth_enabled`). With it
+   on, every request needs `Authorization: Bearer <token>`, including one from
+   this host unless `http.auth_exempt_loopback` is set. The check runs before
+   routing, so it covers every endpoint, the `/v0/events` stream and CORS
+   preflight. Without a valid token the reply is `401` with
+   `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, not the
+   envelope below. `install.sh` generates the token into
+   `/etc/anolis/runtime.env`. See [security.md](security.md).
 
 CORS behavior comes from runtime config (`http.cors_*`).
 
@@ -119,7 +126,15 @@ Notes:
 ### Device-loss latch
 
 `GET /v0/runtime/status` carries `device_loss_latched`: an array of device
-handles that went unreachable at the transport level and have not been re-armed.
+handles whose provider answered a read and reported the device itself
+unreachable (`UNAVAILABLE` or `DEADLINE_EXCEEDED` for that device), and that
+have not been re-armed since.
+
+A provider that hangs, crashes or is restarted does not latch its devices:
+provider loss is not device loss (see [safety.md](safety.md)). Its devices go
+unavailable, with `device_availability` events, and come back without a latch.
+Once the provider is back, a read it reports failed for a device latches that
+device as usual.
 
 Notes:
 
