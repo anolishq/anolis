@@ -242,25 +242,39 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     return outcome;
 }
 
-EstopResult SafeStateController::run_ladder(const std::string *only_device) {
+EstopResult SafeStateController::run_ladder(const std::string *only_device, const AbsentDevices *absent) {
     const auto wanted = [only_device](const std::string &handle) {
         return only_device == nullptr || handle == *only_device;
     };
 
     EstopResult result;
+    // A declared call to a device its provider reports missing is recorded,
+    // not issued (anolishq/anolis#461). The zero rung needs no such check: it
+    // only walks registered devices.
+    const auto run_or_skip = [&](const runtime::ModeTransitionCallConfig &call) {
+        if (absent != nullptr) {
+            if (const auto it = absent->find(call.device_handle); it != absent->end()) {
+                result.skipped.push_back(
+                    {call.device_handle,
+                     call.function_name.empty() ? std::to_string(call.function_id) : call.function_name, it->second});
+                return;
+            }
+        }
+        result.actions.push_back(run_call(call));
+    };
     result.kind = planned_kind();
     switch (result.kind) {
         case SafeStateKind::Hooks:
             for (const auto &call : safety_.safe_state.hooks) {
                 if (wanted(call.device_handle)) {
-                    result.actions.push_back(run_call(call));
+                    run_or_skip(call);
                 }
             }
             break;
         case SafeStateKind::Setpoints:
             for (const auto &call : safety_.safe_state.setpoints) {
                 if (wanted(call.device_handle)) {
-                    result.actions.push_back(run_call(call));
+                    run_or_skip(call);
                 }
             }
             break;
@@ -285,8 +299,8 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device) {
 
 EstopResult SafeStateController::reassert_for(const std::string &device_handle) { return run_ladder(&device_handle); }
 
-EstopResult SafeStateController::drive_safe_state() {
-    EstopResult result = run_ladder();
+EstopResult SafeStateController::drive_safe_state(const AbsentDevices &absent) {
+    EstopResult result = run_ladder(nullptr, &absent);
 
     StartupSafeStateReport report;
     report.ran = result.kind != SafeStateKind::None;
@@ -297,6 +311,7 @@ EstopResult SafeStateController::drive_safe_state() {
             report.failed_actions.push_back(action);
         }
     }
+    report.skipped_actions = result.skipped;
     std::lock_guard<std::mutex> lock(mutex_);
     startup_report_ = std::move(report);
     return result;

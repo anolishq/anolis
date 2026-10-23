@@ -26,7 +26,8 @@
     "ran": true,
     "software_safe_state": "hooks",
     "safe_state_achieved": true,
-    "failed_actions": []
+    "failed_actions": [],
+    "skipped_actions": []
   },
   "device_loss_latched": []
 }

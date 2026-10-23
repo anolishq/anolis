@@ -115,13 +115,14 @@ public:
      *
      * Error handling:
      * Devices that fail `DescribeDevice` or capability parsing are skipped.
-     * Returns false if discovery fails outright or no devices can be
-     * registered.
+     * A provider that lists no devices, or none of whose listed devices can
+     * be registered, succeeds with an empty inventory (anolishq/anolis#461).
+     * Returns false only if `ListDevices` fails.
      *
      * @param provider_id Configured provider identifier
      * @param provider Connected provider handle used for discovery RPCs
      * @param discovered_devices Output vector populated with discovered devices
-     * @return true if at least one device was successfully discovered
+     * @return false only when `ListDevices` fails
      */
     bool inspect_provider_devices(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
                                   std::vector<RegisteredDevice> &discovered_devices);
@@ -148,7 +149,7 @@ public:
      * @param provider_id Configured provider identifier
      * @param provider Connected provider handle used for discovery RPCs
      * @param replace_existing Whether to replace the provider's existing published devices
-     * @return true if discovery produced at least one publishable device
+     * @return the result of `inspect_provider_devices()`
      */
     bool discover_provider(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
                            bool replace_existing = false);

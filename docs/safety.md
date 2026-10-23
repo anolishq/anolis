@@ -188,8 +188,19 @@ With `safe_state` and no software safe state declared (`software_safe_state:
 not achieved is logged at ERROR, with one ERROR line per call that failed; the
 runtime still starts and does not latch. `GET /v0/runtime/status` reports the
 outcome in `startup_safe_state` (`on_startup`, `ran`, `software_safe_state`,
-`safe_state_achieved`, `failed_actions`); `ran` is `false` for `leave` and for
-no declared safe state. Set `leave` only on a machine where a restart must not
+`safe_state_achieved`, `failed_actions`, `skipped_actions`); `ran` is `false`
+for `leave` and for no declared safe state.
+
+A device can be absent at startup, for instance on a bus that is powered off.
+A provider that answers and lists no devices is up with none registered,
+and logs a WARN; the runtime starts. A call to a device its provider reports
+`UNREACHABLE`, and that is not registered, is skipped rather than failed: it
+is listed in `skipped_actions` with the provider's reason and logged at WARN,
+and preflight warns `absent at startup` for it. Any other call that cannot be
+resolved still fails, at ERROR. `safe_state_achieved` is `true` only when at
+least one call ran and every call that ran succeeded, so a boot with every
+device absent reports `false` with no failed actions, logged at WARN. A
+skipped device is not driven when it appears later. Set `leave` only on a machine where a restart must not
 interrupt a running process, such as a culture that must keep its heater on.
 
 `safety.on_startup` acts at runtime startup only. A supervised provider

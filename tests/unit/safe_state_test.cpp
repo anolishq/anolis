@@ -779,3 +779,55 @@ TEST(ModeHookRequestTest, TagsOnlyTransitionsIntoFault) {
         EXPECT_FALSE(request.safe_state);
     }
 }
+
+// anolishq/anolis#461: at startup, a call to a device its provider reports
+// missing is skipped with the provider's reason. A handle no provider reports
+// (here a typo) is still issued and fails, so a wrong hook stays visible.
+TEST_F(SafeStateTest, StartupRunSkipsOnlyDevicesTheirProviderReportsMissing) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/rlht0", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/heatr", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->drive_safe_state({{"sim0/rlht0", "probe failed (version_read_failed)"}});
+    ASSERT_EQ(result.skipped.size(), 1u);
+    EXPECT_EQ(result.skipped[0].device_handle, "sim0/rlht0");
+    EXPECT_EQ(result.skipped[0].function, "set_output");
+    EXPECT_EQ(result.skipped[0].reason, "probe failed (version_read_failed)");
+    ASSERT_EQ(result.actions.size(), 2u);
+    EXPECT_TRUE(result.actions[0].success);
+    EXPECT_EQ(result.actions[1].device_handle, "sim0/heatr");
+    EXPECT_FALSE(result.actions[1].success);
+    EXPECT_FALSE(result.safe_state_achieved);
+
+    const auto report = controller->startup_report();
+    ASSERT_EQ(report.skipped_actions.size(), 1u);
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].device_handle, "sim0/heatr");
+}
+
+// The 2026-10-23 boot: every hook's device is missing. Nothing is issued,
+// nothing fails, and the safe state is not reported achieved.
+TEST_F(SafeStateTest, AStartupRunWithEveryDeviceAbsentSkipsAllAndIsNotAchieved) {
+    safety.safe_state.hooks.push_back(make_call("sim0/rlht0", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/dcmt0", "set_output"));
+    safety.safe_state.hooks.push_back(make_call("sim0/dcmt1", "set_output"));
+    auto controller = make_controller();
+
+    // StrictMock: no call() expected.
+    const auto result =
+        controller->drive_safe_state({{"sim0/rlht0", "missing"}, {"sim0/dcmt0", "missing"}, {"sim0/dcmt1", "missing"}});
+    EXPECT_EQ(result.kind, control::SafeStateKind::Hooks);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_EQ(result.skipped.size(), 3u);
+    EXPECT_FALSE(result.safe_state_achieved);
+
+    const auto report = controller->startup_report();
+    EXPECT_TRUE(report.ran);
+    EXPECT_FALSE(report.safe_state_achieved);
+    EXPECT_TRUE(report.failed_actions.empty());
+    EXPECT_EQ(report.skipped_actions.size(), 3u);
+}

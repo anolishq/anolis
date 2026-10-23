@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -80,10 +81,30 @@ struct CallOutcome {
     std::string error;
 };
 
+/**
+ * @brief A call the startup run left out because its provider reports the
+ *        target device missing (anolishq/anolis#461).
+ */
+struct SkippedAction {
+    std::string device_handle;
+    std::string function;
+    std::string reason;  // the provider's own message for the missing device
+};
+
+/**
+ * @brief Devices their provider reports missing at startup, by handle, with
+ *        the provider's reason. Keys are "<provider_id>/<device_id>".
+ */
+using AbsentDevices = std::map<std::string, std::string>;
+
 /** @brief Result of a POST /v0/estop trigger. */
 struct EstopResult {
     SafeStateKind kind = SafeStateKind::None;
     std::vector<CallOutcome> actions;
+    // Calls left out because their device is absent; only drive_safe_state()
+    // with an AbsentDevices map fills this. Not in `actions`, so they count
+    // for neither side of the verdict.
+    std::vector<SkippedAction> skipped;
     // True only when a rung ran, issued at least one call, and every call
     // succeeded. One failed call makes the whole rung not achieved (#256).
     bool safe_state_achieved = false;
@@ -106,6 +127,7 @@ struct StartupSafeStateReport {
     SafeStateKind kind = SafeStateKind::None;
     bool safe_state_achieved = false;  // same verdict as EstopResult
     std::vector<CallOutcome> failed_actions;
+    std::vector<SkippedAction> skipped_actions;
 };
 
 /**
@@ -165,8 +187,15 @@ public:
      * or driving FAULT. Used by `safety.on_startup: safe_state` before the
      * HTTP server opens, so nothing else is calling in yet. The outcome is
      * kept for `startup_report()`.
+     *
+     * A hook or setpoint call whose device is in `absent` is not issued: it
+     * goes in `skipped` with the provider's reason (anolishq/anolis#461).
+     * Skipped calls are not actions, so a run that skips every call reports
+     * `safe_state_achieved` false with no failed actions. Only devices a
+     * provider reports missing belong in `absent`: any other handle that does
+     * not resolve is still issued and fails.
      */
-    EstopResult drive_safe_state();
+    EstopResult drive_safe_state(const AbsentDevices &absent = {});
 
     /** @brief The outcome of `drive_safe_state()`; `ran` is false if it never ran a rung. */
     StartupSafeStateReport startup_report() const;
@@ -179,8 +208,9 @@ private:
     // ACTUATE functions the rung `kind` cannot drive (all of them for None).
     size_t uncovered_count(SafeStateKind kind) const;
     // Runs the planned rung. With `only_device` set, only calls whose target is
-    // that handle are issued.
-    EstopResult run_ladder(const std::string *only_device = nullptr);
+    // that handle are issued. With `absent` set, calls whose target is in it
+    // are skipped instead of issued.
+    EstopResult run_ladder(const std::string *only_device = nullptr, const AbsentDevices *absent = nullptr);
     CallOutcome run_call(const runtime::ModeTransitionCallConfig &call);
     CallOutcome run_zero_call(const std::string &device_handle, const registry::FunctionSpec &spec);
 

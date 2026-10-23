@@ -45,6 +45,15 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
 
     LOG_INFO("[Registry] Found " << device_list.size() << " devices");
 
+    // A provider that answers and lists nothing is up with no devices, not a
+    // failed discovery: bread started on an unpowered bus reports its expected
+    // devices missing and lists none (anolishq/anolis#461). The runtime runs
+    // with it AVAILABLE and devices that join later come in through a restart.
+    if (device_list.empty()) {
+        LOG_WARN("[Registry] Provider " << provider_id << " lists no devices; it is up with none registered");
+        return true;
+    }
+
     // Build devices outside lock (discovery is network I/O)
     discovered_devices.reserve(device_list.size());
 
@@ -82,11 +91,13 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
         discovered_devices.push_back(std::move(reg_device));
     }
 
-    // Check if ANY devices were successfully registered
+    // Listed devices of which none could be registered leave the provider up
+    // with none, like a partial registration leaves it up with some
+    // (anolishq/anolis#461).
     if (discovered_devices.empty()) {
-        error_ = "No devices could be registered from provider " + provider_id;
-        LOG_ERROR("[Registry] " << error_);
-        return false;
+        LOG_WARN("[Registry] No devices could be registered from provider " << provider_id << " (" << device_list.size()
+                                                                            << " listed); it is up with none");
+        return true;
     }
 
     // Log summary

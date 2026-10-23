@@ -129,15 +129,16 @@ TEST_F(DeviceRegistryConcurrencyTest, DiscoverProviderReplaceFailureKeepsPreviou
     ASSERT_TRUE(registry->get_device_copy("sim0", "device0").has_value());
 
     auto mock = std::make_shared<StrictMock<MockProviderHandle>>();
-    mock->_err = "describe failed";
+    mock->_err = "transport closed";
 
+    // Only a failed ListDevices fails discovery; a listing none of whose
+    // devices describe is an empty inventory (anolishq/anolis#461).
     EXPECT_CALL(*mock, list_devices(_)).WillOnce(Invoke([](std::vector<Device> &devices) {
         Device dev;
         dev.set_device_id("replacement0");
         devices.push_back(dev);
-        return true;
+        return false;
     }));
-    EXPECT_CALL(*mock, describe_device("replacement0", _)).WillOnce(Return(false));
     EXPECT_CALL(*mock, last_error()).WillOnce(ReturnPointee(&mock->_err));
 
     ASSERT_FALSE(registry->discover_provider("sim0", *mock, true));

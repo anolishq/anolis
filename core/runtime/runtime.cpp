@@ -242,6 +242,25 @@ bool Runtime::init_providers(std::string &error) {
     return true;
 }
 
+control::AbsentDevices Runtime::devices_reported_missing() const {
+    control::AbsentDevices absent;
+    for (const auto &[provider_id, provider] : provider_registry_.get_all_providers()) {
+        anolis::deviceprovider::v1::GetHealthResponse health;
+        if (!provider->is_available() || !provider->get_health(health)) {
+            continue;
+        }
+        for (const auto &device : health.devices()) {
+            if (device.state() != anolis::deviceprovider::v1::DeviceHealth::STATE_UNREACHABLE ||
+                registry_->get_device_copy(provider_id, device.device_id()).has_value()) {
+                continue;
+            }
+            absent[provider_id + "/" + device.device_id()] =
+                device.message().empty() ? "reported unreachable by its provider" : device.message();
+        }
+    }
+    return absent;
+}
+
 void Runtime::preflight_declared_calls() const {
     // Every call the config declares is dispatched at a moment when nobody is
     // watching a terminal: a mode transition, or an operator pulling the e-stop.
@@ -270,6 +289,10 @@ void Runtime::preflight_declared_calls() const {
 
     size_t checked = 0;
     size_t failed = 0;
+    size_t absent_calls = 0;
+    // A call to a device its provider reports missing is expected not to
+    // dispatch until the device comes up: a warning, not an error (#461).
+    const control::AbsentDevices absent = devices_reported_missing();
 
     // Which rung `POST /v0/estop` would actually run. The ladder runs exactly one
     // (safe_state.cpp), so a broken call in an unselected rung is worth a warning
@@ -299,6 +322,12 @@ void Runtime::preflight_declared_calls() const {
 
         const std::string target =
             call.function_name.empty() ? ("#" + std::to_string(call.function_id)) : call.function_name;
+        if (const auto it = absent.find(call.device_handle); it != absent.end()) {
+            LOG_WARN("[Runtime] " << where << " " << call.device_handle << "/" << target
+                                  << " absent at startup: " << it->second);
+            ++absent_calls;
+            return;
+        }
         if (active) {
             ++failed;
             LOG_ERROR("[Runtime] " << where << " cannot be dispatched: " << call.device_handle << "/" << target << " - "
@@ -371,6 +400,10 @@ void Runtime::preflight_declared_calls() const {
         LOG_ERROR("[Runtime] " << failed << " of " << checked
                                << " declared call(s) could not be dispatched against the device inventory as it "
                                   "stands now. They will fail at the moment they are needed.");
+    } else if (absent_calls > 0) {
+        LOG_WARN("[Runtime] preflight: " << absent_calls << " of " << checked
+                                         << " declared call(s) target devices absent at startup; the rest are "
+                                            "dispatchable against the current inventory");
     } else if (checked > 0) {
         // Deliberately a snapshot, not a guarantee: a provider restart can
         // republish a different inventory (see restart_provider) and invalidate
@@ -983,7 +1016,11 @@ void Runtime::apply_startup_outputs() {
         return;
     }
 
-    const auto result = safe_state_controller_->drive_safe_state();
+    const auto result = safe_state_controller_->drive_safe_state(devices_reported_missing());
+    for (const auto &skipped : result.skipped) {
+        LOG_WARN("[Runtime] safety.on_startup=safe_state skipped " << skipped.device_handle << "/" << skipped.function
+                                                                   << ": absent at startup: " << skipped.reason);
+    }
     if (result.kind == control::SafeStateKind::None) {
         LOG_WARN("[Runtime] safety.on_startup=safe_state: no software safe state is declared, nothing to run");
         return;
@@ -997,7 +1034,13 @@ void Runtime::apply_startup_outputs() {
                       << action.device_handle << "/" << action.function << ": " << action.error);
         }
     }
-    if (result.safe_state_achieved) {
+    if (result.actions.empty() && !result.skipped.empty()) {
+        // Nothing failed: every call's device is absent, and was skipped above.
+        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
+                                                                   << " drove nothing; all " << result.skipped.size()
+                                                                   << " call(s) target devices absent at startup,"
+                                                                      " safe_state_achieved=false");
+    } else if (result.safe_state_achieved) {
         LOG_INFO("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
                                                                    << " actions=" << result.actions.size()
                                                                    << " safe_state_achieved=true");

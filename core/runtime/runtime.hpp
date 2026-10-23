@@ -92,6 +92,7 @@ public:
     // Access to core components (for HTTP and automation integration points)
     registry::DeviceRegistry &get_registry() { return *registry_; }
     state::StateCache &get_state_cache() { return *state_cache_; }
+    const control::SafeStateController &get_safe_state() const { return *safe_state_controller_; }
     control::CallRouter &get_call_router() { return *call_router_; }
     events::EventEmitter &get_event_emitter() { return *event_emitter_; }
 
@@ -112,6 +113,16 @@ private:
      * Reports loudly; never refuses to start.
      */
     void preflight_declared_calls() const;
+
+    /**
+     * @brief Devices a provider reports missing and the registry does not
+     *        hold, with the provider's reason (anolishq/anolis#461).
+     *
+     * Asks each available provider for its health once: a device it reports
+     * UNREACHABLE that is not registered is one it expected and could not
+     * bring up, such as bread's devices on an unpowered bus.
+     */
+    control::AbsentDevices devices_reported_missing() const;
     bool init_core_services(std::string &error);
     bool init_automation(std::string &error);
     bool init_http(std::string &error);
