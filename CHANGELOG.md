@@ -13,6 +13,47 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.51] - 2026-10-23
+
+No config schema or provider protocol change. `GET /v0/runtime/status`
+gains an optional field, `startup_safe_state.skipped_actions` (#461).
+
+### Fixed
+
+- **The runtime starts with a provider that lists no devices** (#461,
+  #462). A provider that answered and listed no devices failed
+  discovery with `No devices could be registered from provider <id>`,
+  and the runtime exited. Under systemd it restarted about every 8 s,
+  for as long as the bus stayed unpowered. That provider is now up with
+  no devices registered, and logs a WARN. A listing where no device
+  describes is treated the same way. Discovery fails only when
+  `ListDevices` itself fails, and a supervised restart that lists
+  nothing replaces the old inventory with none.
+- **The startup safe state skips a device that is absent, rather than
+  failing it** (#461, #462). A call is skipped when its provider
+  reports the device `UNREACHABLE` and the device is not registered.
+  It is listed in the new `startup_safe_state.skipped_actions`
+  (`device_handle`, `function`, `reason`) and logged at WARN, and
+  preflight warns `absent at startup` for it. Any other call that
+  cannot be resolved still fails, at ERROR. `safe_state_achieved` is
+  `true` only when at least one call ran and every call that ran
+  succeeded, so a boot with every device absent reports `false` with no
+  failed actions, logged at WARN. A device that appears later is not
+  driven.
+
+### Changed
+
+- `docs/http-api.md` describes bearer authentication, and says the
+  device-loss latch engages on a device the provider reports
+  unreachable, not on a provider that hangs, crashes or restarts (#457,
+  #459).
+- The device-loss integration check waits 1 s after the first
+  re-assert before counting them, so a late second one fails it. With
+  a provider-sim too old to inject a device loss, it now says that it
+  needs v0.2.8, the pinned version. `.ci/compatibility-matrix.yml`,
+  which nothing read, is removed; `.ci/dependency-pins.yml` is the one
+  record of the pins (#433, #458).
+
 ## [0.1.50] - 2026-10-22
 
 No config schema or provider protocol change. The HTTP API changes in
