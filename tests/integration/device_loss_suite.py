@@ -35,6 +35,12 @@ LATCH_TIMEOUT_S = POLL_INTERVAL_S + 5.0
 # that returns at all returns in milliseconds.
 CALL_DEADLINE_S = 3.0
 REASSERT_TIMEOUT_S = 3.0
+# How long the check keeps watching after the first re-assert, so a second
+# one arriving just after it is counted (#433).
+REASSERT_SETTLE_S = 1.0
+# inject_device_unreachable arrived in provider-sim v0.2.8, the version
+# .ci/dependency-pins.yml pins.
+MIN_SIM_VERSION = "v0.2.8"
 RETURN_LINE = f"[Runtime] {HANDLE} returned while latched"
 
 
@@ -133,13 +139,18 @@ class DeviceLossTester:
 
 def check_manual_call_to_a_returning_latched_device_returns(tester: DeviceLossTester) -> None:
     """The manual call's post-call read is the return edge; the call returns and safe state is re-asserted once."""
-    body = tester.call(
-        "chaos_control",
-        INJECT_DEVICE_UNREACHABLE,
-        {"device_id": {"type": "string", "string": DEVICE}, "duration_ms": {"type": "int64", "int64": 60000}},
-        timeout=5,
-    )
-    assert body["status"]["code"] == "OK", body
+    try:
+        body = tester.call(
+            "chaos_control",
+            INJECT_DEVICE_UNREACHABLE,
+            {"device_id": {"type": "string", "string": DEVICE}, "duration_ms": {"type": "int64", "int64": 60000}},
+            timeout=5,
+        )
+        assert body["status"]["code"] == "OK", body
+    except AssertionError as err:
+        raise AssertionError(
+            f"inject_device_unreachable failed; it needs anolis-provider-sim {MIN_SIM_VERSION} or later: {err}"
+        ) from err
 
     # Precondition: the poll loop's read failed with a transport-level code
     # and latched the device. Without this the rest would pass vacuously.
@@ -179,6 +190,7 @@ def check_manual_call_to_a_returning_latched_device_returns(tester: DeviceLossTe
     while tester.runtime_log().count(RETURN_LINE) < 1 or tester.relay_ch1() is not False:
         assert time.monotonic() < deadline, f"safe state was not re-asserted\n{tester.runtime_log()[-3000:]}"
         time.sleep(0.05)
+    time.sleep(REASSERT_SETTLE_S)
     assert tester.runtime_log().count(RETURN_LINE) == 1, tester.runtime_log()[-3000:]
     assert f"{RETURN_LINE}; re-asserted 1 hooks safe-state call(s)" in tester.runtime_log()
 

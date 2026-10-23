@@ -16,22 +16,18 @@ This document defines governance for dependency pinning, CI lanes, presets, and 
 
 ## Cross-Repo Pinning and Compatibility
 
-Anolis tracks provider/runtime compatibility with two control files:
-
-- `.ci/dependency-pins.yml`: refs consumed by compatibility lanes
-- `.ci/compatibility-matrix.yml`: tested runtime/provider/protocol/fluxgraph combinations
+Anolis tracks provider/runtime compatibility in `.ci/dependency-pins.yml`, the
+refs the compatibility lanes consume.
 
 Rules:
 
-1. Pin updates and matrix updates must be in the same reviewed PR.
-2. Compatibility lane must consume pinned refs, never floating `main`.
-3. Pin changes require rationale and date.
+1. Compatibility lane must consume pinned refs, never floating `main`.
+2. Pin changes require rationale and date.
 
 ## Version Numbering Policy (Cross-Repo)
 
 - `anolis`, `anolis-provider-sim`, `fluxgraph`, and `anolis-protocol` version independently using **SemVer** (`MAJOR.MINOR.PATCH`).
 - Public contract/build-surface changes require version-bump decision + changelog note.
-- Compatibility matrix records tested cross-repo version/ref combinations.
 
 ## CI Lane Tiers
 
@@ -82,9 +78,8 @@ On Windows local development, use `dev-windows-*` presets (MSVC toolchain).
 When updating runtime/provider compatibility pins:
 
 1. Update `.ci/dependency-pins.yml` (`provider_sim.ref`, `updated_utc`, `rationale`).
-2. Update matching entry in `.ci/compatibility-matrix.yml`.
-3. Run `anolis-provider-compat` lane against the new pin.
-4. Merge only when required lanes and compatibility lane are green.
+2. Run `anolis-provider-compat` lane against the new pin.
+3. Merge only when required lanes and compatibility lane are green.
 
 ## Current C++ Dependencies
 
@@ -101,5 +96,5 @@ When updating runtime/provider compatibility pins:
 
 1. Update dependency refs/policies in one PR.
 2. Validate required lanes and compatibility lane.
-3. Update compatibility matrix + changelog note.
+3. Add a changelog note.
 4. Merge only after lane tier and rollout rules are satisfied.
