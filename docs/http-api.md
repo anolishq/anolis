@@ -18,8 +18,8 @@ Use this file for operational semantics and practical examples.
 4. Authentication: bearer token, off by default (`http.auth_enabled`). With it
    on, every request needs `Authorization: Bearer <token>`, including one from
    this host unless `http.auth_exempt_loopback` is set. The check runs before
-   routing, so it covers every endpoint, the `/v0/events` stream and CORS
-   preflight. Without a valid token the reply is `401` with
+   routing, so it covers every endpoint and the `/v0/events` stream. Without a
+   valid token the reply is `401` with
    `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, not the
    envelope below. `install.sh` generates the token into
    `/etc/anolis/runtime.env`. See [security.md](security.md).
