@@ -192,6 +192,7 @@ def check_startup_runs_safe_state(tester: StartupSafeStateTester) -> None:
         "software_safe_state": "hooks",
         "safe_state_achieved": True,
         "failed_actions": [],
+        "skipped_actions": [],
     }
 
 
@@ -218,6 +219,7 @@ def check_startup_no_safe_state(tester: StartupSafeStateTester) -> None:
         "software_safe_state": "none",
         "safe_state_achieved": False,
         "failed_actions": [],
+        "skipped_actions": [],
     }
     tester.log_index("no software safe state is declared, nothing to run")
 
@@ -233,6 +235,7 @@ def check_startup_leave(tester: StartupSafeStateTester) -> None:
         "software_safe_state": "none",
         "safe_state_achieved": False,
         "failed_actions": [],
+        "skipped_actions": [],
     }
 
 

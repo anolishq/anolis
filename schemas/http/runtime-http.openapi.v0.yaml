@@ -774,12 +774,35 @@ components:
           description: >-
             The POST /v0/estop verdict for the startup run: true only when the
             rung issued at least one call and every call succeeded. False
-            when ran is false.
+            when ran is false. Skipped calls are not issued, so a run that
+            skips every call is false with no failed actions.
         failed_actions:
           type: array
           description: The calls of the startup run that failed. Empty when none did.
           items:
             $ref: '#/components/schemas/EstopAction'
+        skipped_actions:
+          type: array
+          description: >-
+            Calls of the startup run that were not issued because their
+            provider reports the target device missing, such as a device on
+            a bus that was unpowered at boot. Each carries the provider's
+            reason. A call to a device no provider reports is issued and, if
+            it does not resolve, listed in failed_actions instead. Empty when
+            nothing was skipped; absent from runtimes before 0.1.51.
+          items:
+            $ref: '#/components/schemas/SkippedAction'
+    SkippedAction:
+      type: object
+      additionalProperties: false
+      required: [device_handle, function, reason]
+      properties:
+        device_handle:
+          type: string
+        function:
+          type: string
+        reason:
+          type: string
     EstopAction:
       type: object
       additionalProperties: false

@@ -84,12 +84,18 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
             }
             failed_actions.push_back(entry);
         }
+        nlohmann::json skipped_actions = nlohmann::json::array();
+        for (const auto &skipped : startup.skipped_actions) {
+            skipped_actions.push_back(
+                {{"device_handle", skipped.device_handle}, {"function", skipped.function}, {"reason", skipped.reason}});
+        }
         response["startup_safe_state"] = {
             {"on_startup", startup.on_startup == runtime::StartupOutputs::Leave ? "leave" : "safe_state"},
             {"ran", startup.ran},
             {"software_safe_state", control::safe_state_kind_to_string(startup.kind)},
             {"safe_state_achieved", startup.safe_state_achieved},
-            {"failed_actions", failed_actions}};
+            {"failed_actions", failed_actions},
+            {"skipped_actions", skipped_actions}};
     }
 
     // Devices blocked from autonomous actuation after going unreachable (#285).
