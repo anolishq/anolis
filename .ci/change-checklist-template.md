@@ -23,5 +23,4 @@ Use this checklist in implementation PRs for build/dependency/CI policy changes.
 ## Traceability
 
 - [ ] Related pins updated (`.ci/dependency-pins.yml`)
-- [ ] Compatibility matrix updated (`.ci/compatibility-matrix.yml`)
 - [ ] Rationale/changelog notes included
