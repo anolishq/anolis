@@ -642,6 +642,18 @@ protected:
                 arg4->set_type(ValueType::VALUE_TYPE_BOOL);
                 arg4->set_required(true);
 
+                // Function: set_mode(mode: string in {open_loop, closed_speed} required)
+                auto* fn4 = caps->add_functions();
+                fn4->set_name("set_mode");
+                fn4->set_function_id(4);
+
+                auto* arg5 = fn4->add_args();
+                arg5->set_name("mode");
+                arg5->set_type(ValueType::VALUE_TYPE_STRING);
+                arg5->set_required(true);
+                arg5->add_allowed_values("open_loop");
+                arg5->add_allowed_values("closed_speed");
+
                 return true;
             }));
 
@@ -835,6 +847,40 @@ TEST_F(CallRouterValidationTest, UnknownArgument) {
     std::string error;
     EXPECT_FALSE(router->validate_call(req, error));
     EXPECT_THAT(error, HasSubstr("Unknown argument: unknown_param"));
+}
+
+TEST_F(CallRouterValidationTest, StringInAllowedValues) {
+    control::CallRequest req;
+    req.device_handle = "sim0/testdev";
+    req.function_name = "set_mode";
+
+    std::string error;
+    req.args["mode"] = make_string("open_loop");
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+    req.args["mode"] = make_string("closed_speed");
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
+}
+
+TEST_F(CallRouterValidationTest, StringOutsideAllowedValues) {
+    control::CallRequest req;
+    req.device_handle = "sim0/testdev";
+    req.function_name = "set_mode";
+    req.args["mode"] = make_string("Open_Loop");  // Exact match only
+
+    std::string error;
+    EXPECT_FALSE(router->validate_call(req, error));
+    EXPECT_EQ(error, "Argument 'mode': Value 'Open_Loop' not in allowed values: open_loop, closed_speed");
+}
+
+TEST_F(CallRouterValidationTest, StringWithoutAllowedValuesIsUnconstrained) {
+    control::CallRequest req;
+    req.device_handle = "sim0/testdev";
+    req.function_name = "set_temperature";
+    req.args["value"] = make_double(50.0);
+    req.args["unit"] = make_string("anything at all");
+
+    std::string error;
+    EXPECT_TRUE(router->validate_call(req, error)) << "Error: " << error;
 }
 
 TEST_F(CallRouterValidationTest, OptionalArgumentCanBeOmitted) {

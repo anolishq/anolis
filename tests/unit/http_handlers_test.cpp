@@ -1575,6 +1575,104 @@ TEST_F(HttpRuntimeStatusLatchTest, ClearsAfterRelease) {
     EXPECT_TRUE(get_status()["device_loss_latched"].empty());
 }
 
+//=============================================================================
+// String arg allowed_values (#467)
+//=============================================================================
+
+// set_mode(mode: string in {open_loop, closed_speed}, label: string unconstrained)
+void RegisterMockDeviceWithAllowedValues(anolis::tests::MockProviderHandle& mock_provider,
+                                         anolis::registry::DeviceRegistry& registry,
+                                         const std::string& device_id = "test_device") {
+    using Device = anolis::deviceprovider::v1::Device;
+    using DescribeDeviceResponse = anolis::deviceprovider::v1::DescribeDeviceResponse;
+
+    EXPECT_CALL(mock_provider, list_devices(_)).WillOnce(Invoke([device_id](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id(device_id);
+        devices.push_back(dev);
+        return true;
+    }));
+
+    EXPECT_CALL(mock_provider, describe_device(device_id, _))
+        .WillOnce(Invoke([device_id](const std::string&, DescribeDeviceResponse& response) {
+            auto* device = response.mutable_device();
+            device->set_device_id(device_id);
+
+            auto* caps = response.mutable_capabilities();
+            auto* fn = caps->add_functions();
+            fn->set_name("set_mode");
+            fn->set_function_id(400);
+
+            auto* mode = fn->add_args();
+            mode->set_name("mode");
+            mode->set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+            mode->set_required(true);
+            mode->add_allowed_values("open_loop");
+            mode->add_allowed_values("closed_speed");
+
+            auto* label = fn->add_args();
+            label->set_name("label");
+            label->set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+            label->set_required(false);
+
+            return true;
+        }));
+
+    registry.discover_provider("test_provider", mock_provider);
+}
+
+TEST_F(HttpHandlersTest, GetDeviceCapabilitiesCarriesAllowedValues) {
+    RegisterMockDeviceWithAllowedValues(*mock_provider, *registry);
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    const auto json = nlohmann::json::parse(res->body);
+    const auto& args = json["capabilities"]["functions"][0]["args"];
+    ASSERT_TRUE(args["mode"].contains("allowed_values"));
+    EXPECT_EQ(nlohmann::json::array({"open_loop", "closed_speed"}), args["mode"]["allowed_values"]);
+    EXPECT_FALSE(args["label"].contains("allowed_values"));
+}
+
+TEST_F(HttpHandlersTest, PostCallRefusesValueOutsideAllowedValues) {
+    RegisterMockDeviceWithAllowedValues(*mock_provider, *registry);
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    nlohmann::json request_body = {{"provider_id", "test_provider"},
+                                   {"device_id", "test_device"},
+                                   {"function_id", 400},
+                                   {"args", {{"mode", {{"type", "string"}, {"string", "closed_position"}}}}}};
+
+    auto res = client->Post("/v0/call", request_body.dump(), "application/json");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(400, res->status);
+    auto json = nlohmann::json::parse(res->body);
+    EXPECT_EQ("INVALID_ARGUMENT", json["status"]["code"]);
+    EXPECT_EQ("Argument 'mode': Value 'closed_position' not in allowed values: open_loop, closed_speed",
+              json["status"]["message"]);
+}
+
+TEST_F(HttpHandlersTest, PostCallAcceptsAllowedValueAndUnconstrainedString) {
+    RegisterMockDeviceWithAllowedValues(*mock_provider, *registry);
+    EXPECT_CALL(*mock_provider, call("test_device", _, "set_mode", _, _)).WillOnce(Return(true));
+
+    nlohmann::json request_body = {{"provider_id", "test_provider"},
+                                   {"device_id", "test_device"},
+                                   {"function_id", 400},
+                                   {"args",
+                                    {{"mode", {{"type", "string"}, {"string", "closed_speed"}}},
+                                     {"label", {{"type", "string"}, {"string", "anything"}}}}}};
+
+    auto res = client->Post("/v0/call", request_body.dump(), "application/json");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    auto json = nlohmann::json::parse(res->body);
+    EXPECT_EQ("OK", json["status"]["code"]);
+}
+
 #else  // ANOLIS_SKIP_HTTP_TESTS
 TEST(HttpHandlersTest, DISABLED_SkippedUnderThreadSanitizer) {
     // This test exists to document that HttpHandlersTest suite is disabled

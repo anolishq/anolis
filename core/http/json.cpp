@@ -239,6 +239,9 @@ nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
         } else if (arg.type() == anolis::deviceprovider::v1::VALUE_TYPE_UINT64) {
             if (arg.has_min_uint64()) arg_info["min"] = arg.min_uint64();
             if (arg.has_max_uint64()) arg_info["max"] = arg.max_uint64();
+        } else if (arg.type() == anolis::deviceprovider::v1::VALUE_TYPE_STRING && arg.allowed_values_size() > 0) {
+            arg_info["allowed_values"] =
+                std::vector<std::string>(arg.allowed_values().begin(), arg.allowed_values().end());
         }
 
         args[arg.name()] = arg_info;

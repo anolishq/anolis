@@ -24,6 +24,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     provider_supervisor_test.cpp
     device_registry_concurrency_test.cpp
     device_registry_test.cpp
+    runtime_preflight_test.cpp
     runtime_zero_devices_test.cpp
     event_emitter_test.cpp
     influx_sink_test.cpp

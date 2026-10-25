@@ -5,6 +5,9 @@
 // restart: the restarted helper finds no file and stays up. With `--mixed` it
 // also lists rlht1, which describes but is reported UNREACHABLE, and reports
 // dcmt2 OK without listing it: neither is a device its provider says is missing.
+// With `--allowed-values` it also lists dcmt3, reported OK, whose CONFIG set_mode takes
+// a `mode` limited to open_loop or closed_speed (anolis#467), and answers every
+// call OK.
 
 #include <array>
 #include <chrono>
@@ -80,11 +83,14 @@ int main(int argc, char **argv) {
 
     std::string exit_when;
     bool mixed = false;
+    bool allowed_values = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
         } else if (std::string(argv[i]) == "--mixed") {
             mixed = true;
+        } else if (std::string(argv[i]) == "--allowed-values") {
+            allowed_values = true;
         }
     }
     if (!exit_when.empty()) {
@@ -119,12 +125,31 @@ int main(int argc, char **argv) {
             if (mixed) {
                 list->add_devices()->set_device_id("rlht1");
             }
+            if (allowed_values) {
+                list->add_devices()->set_device_id("dcmt3");
+            }
         } else if (mixed && request.has_describe_device() && request.describe_device().device_id() == "rlht1") {
             auto *describe = response.mutable_describe_device();
             describe->mutable_device()->set_device_id("rlht1");
             auto *fn = describe->mutable_capabilities()->add_functions();
             fn->set_name("set_power");
             fn->set_function_id(1);
+        } else if (allowed_values && request.has_describe_device() &&
+                   request.describe_device().device_id() == "dcmt3") {
+            auto *describe = response.mutable_describe_device();
+            describe->mutable_device()->set_device_id("dcmt3");
+            auto *fn = describe->mutable_capabilities()->add_functions();
+            fn->set_name("set_mode");
+            fn->set_function_id(3);
+            fn->mutable_policy()->set_category(adpp::FunctionPolicy_Category_CATEGORY_CONFIG);
+            auto *mode = fn->add_args();
+            mode->set_name("mode");
+            mode->set_type(adpp::VALUE_TYPE_STRING);
+            mode->set_required(true);
+            mode->add_allowed_values("open_loop");
+            mode->add_allowed_values("closed_speed");
+        } else if (allowed_values && request.has_call()) {
+            response.mutable_call();
         } else if (request.has_get_health()) {
             auto *health = response.mutable_get_health();
             health->mutable_provider()->set_state(adpp::ProviderHealth::STATE_OK);
@@ -141,6 +166,11 @@ int main(int argc, char **argv) {
                 auto *ok = health->add_devices();
                 ok->set_device_id("dcmt2");
                 ok->set_state(adpp::DeviceHealth::STATE_OK);
+            }
+            if (allowed_values) {
+                auto *enum_device = health->add_devices();
+                enum_device->set_device_id("dcmt3");
+                enum_device->set_state(adpp::DeviceHealth::STATE_OK);
             }
         } else {
             response.mutable_status()->set_code(adpp::Status_Code_CODE_NOT_FOUND);

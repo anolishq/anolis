@@ -1,0 +1,31 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "provider_id": "provider0",
+  "device_id": "device0",
+  "capabilities": {
+    "signals": [],
+    "functions": [
+      {
+        "function_id": 3,
+        "name": "set_mode",
+        "label": "Set control mode",
+        "category": "CONFIG",
+        "actuating": false,
+        "args": {
+          "mode": {
+            "type": "string",
+            "required": true,
+            "description": "Control mode",
+            "allowed_values": [
+              "open_loop",
+              "closed_speed"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
