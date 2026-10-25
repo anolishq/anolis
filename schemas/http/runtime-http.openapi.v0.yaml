@@ -944,6 +944,10 @@ components:
           type: number
         max:
           type: number
+        allowed_values:
+          type: array
+          items:
+            type: string
       additionalProperties: false
     FunctionSpec:
       type: object

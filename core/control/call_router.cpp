@@ -9,6 +9,8 @@
 
 #include "call_router.hpp"
 
+#include <algorithm>
+#include <format>
 #include <limits>
 #include <sstream>
 #include <unordered_map>
@@ -565,8 +567,21 @@ bool CallRouter::validate_argument_range(const anolis::deviceprovider::v1::ArgSp
             }
             break;
         }
+        case ValueType::VALUE_TYPE_STRING: {
+            const auto& allowed = spec.allowed_values();
+            if (!allowed.empty() && std::find(allowed.begin(), allowed.end(), value.string_value()) == allowed.end()) {
+                std::string list;
+                for (const auto& candidate : allowed) {
+                    if (!list.empty()) list += ", ";
+                    list += candidate;
+                }
+                error = std::format("Value '{}' not in allowed values: {}", value.string_value(), list);
+                return false;
+            }
+            break;
+        }
         default:
-            // No range validation for bool, string, bytes
+            // No range validation for bool, bytes
             break;
     }
 

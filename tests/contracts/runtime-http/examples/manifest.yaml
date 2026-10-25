@@ -66,6 +66,11 @@ examples:
     file: device-capabilities.200.json
   - method: GET
     path: /v0/devices/{provider_id}/{device_id}/capabilities
+    status: "200"
+    content_type: application/json
+    file: device-capabilities.allowed-values.200.json
+  - method: GET
+    path: /v0/devices/{provider_id}/{device_id}/capabilities
     status: "404"
     content_type: application/json
     file: error.404.json
