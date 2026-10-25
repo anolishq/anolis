@@ -1864,6 +1864,74 @@ _check_provider_liveness() {
     log_info "  sudo journalctl -u anolis-runtime --no-pager -n 50"
 }
 
+# Print the startup_safe_state of a GET /v0/runtime/status body as lines the
+# report below formats: "achieved <rung>", "notrun <on_startup>", or "failed"
+# followed by one "<device> <function>: <reason>" line per failed or skipped
+# call. Nothing when the body has no startup_safe_state (a runtime before
+# 0.1.45). jq and python3 agree on all of this.
+_startup_safe_state_lines() {
+    local body="$1"
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.startup_safe_state // empty | select(type == "object")
+            | if .ran != true then "notrun \(.on_startup // "")"
+              elif .safe_state_achieved == true then "achieved \(.software_safe_state // "unknown")"
+              else "failed",
+                (.failed_actions // [] | .[] | select(type == "object")
+                    | "\(.device_handle // "?") \(.function // "?"): \(.error // "failed")"),
+                (.skipped_actions // [] | .[] | select(type == "object")
+                    | "\(.device_handle // "?") \(.function // "?"): skipped, \(.reason // "absent")")
+              end' <<< "${body}" 2>/dev/null
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json, sys
+s = json.load(sys.stdin).get("startup_safe_state")
+if not isinstance(s, dict):
+    sys.exit(0)
+if s.get("ran") is not True:
+    print("notrun", s.get("on_startup") or "")
+elif s.get("safe_state_achieved") is True:
+    print("achieved", s.get("software_safe_state") or "unknown")
+else:
+    print("failed")
+    for a in s.get("failed_actions") or []:
+        if isinstance(a, dict):
+            print("%s %s: %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("error", "failed")))
+    for a in s.get("skipped_actions") or []:
+        if isinstance(a, dict):
+            print("%s %s: skipped, %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("reason", "absent")))' <<< "${body}" 2>/dev/null
+    fi
+}
+
+# Every install restarts the runtime, and the restart runs safety.on_startup
+# again, so report what it did (#471). A safe state not achieved is a
+# warning, not a failed install: a board that comes up tripped after downtime
+# is an expected state the operator clears. Without a JSON parser this says
+# nothing; the provider check below already names the missing parser.
+_report_startup_safe_state() {
+    local url="$1" body lines first
+    body=$(_runtime_curl -fsS "${url}" 2>/dev/null) || return 0
+    lines=$(_startup_safe_state_lines "${body}") || return 0
+    [[ -n "${lines}" ]] || return 0
+    first=$(head -n 1 <<< "${lines}")
+    case "${first}" in
+        "achieved "*)
+            log_ok "health: startup safe state achieved (${first#achieved })"
+            ;;
+        "notrun leave")
+            log_skip "health: startup safe state not run (on_startup: leave)"
+            ;;
+        "notrun "*)
+            log_skip "health: startup safe state not run (no software safe state declared)"
+            ;;
+        failed)
+            log_warn "health: startup safe state NOT achieved"
+            local line
+            while IFS= read -r line; do
+                log_info "  ${line}"
+            done < <(tail -n +2 <<< "${lines}")
+            ;;
+    esac
+}
+
 phase_health() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "health: skipped (services not started)"
@@ -1886,6 +1954,7 @@ phase_health() {
                 log_warn "health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded"
                 log_info "  sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'"
             fi
+            _report_startup_safe_state "${url}"
             _check_provider_liveness "http://localhost:${port}"
             return
         fi
