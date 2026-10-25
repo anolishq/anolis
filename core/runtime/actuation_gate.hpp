@@ -114,6 +114,26 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
                                              const AutomationConfig &automation, const SafetyConfig &safety);
 
 /**
+ * @brief Install the refuse-hookless gate on every transition into AUTO.
+ *
+ * Registers the gate twice on `mode_manager`. As a before-callback it refuses
+ * early, ahead of the before_transition hooks, so a refused AUTO entry issues
+ * no hook calls. As a commit guard it re-runs against the registry under the
+ * mode lock, immediately before AUTO is written (#239). The commit guard is
+ * what closes the race: an inventory committed by a provider restart while
+ * the transition's callbacks run is seen either here, or, once AUTO has been
+ * written, by `enforce_hookless_gate_in_auto` in the restart path.
+ *
+ * Lock order: the guard takes the registry's shared lock while the mode lock
+ * is held. The registry never reaches the ModeManager, so nothing takes them
+ * in the other order.
+ *
+ * `registry`, `automation` and `safety` must outlive `mode_manager`.
+ */
+void install_hookless_auto_gate(automation::ModeManager &mode_manager, const registry::DeviceRegistry &registry,
+                                const AutomationConfig &automation, const SafetyConfig &safety);
+
+/**
  * @brief Re-enforce the refuse-hookless gate while already in AUTO (#233).
  *
  * The entry-time gate runs only on `MANUAL -> AUTO`. A provider restart can

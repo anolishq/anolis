@@ -125,6 +125,26 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return false;
         }
 
+        // Re-judge the transition against the state it commits into (#239).
+        // A before-callback's verdict can be stale by now: it ran unlocked,
+        // ahead of callbacks that may take seconds.
+        if (new_mode != RuntimeMode::FAULT) {
+            for (const auto &guard : commit_guards_) {
+                std::string guard_error;
+                bool allowed = false;
+                try {
+                    allowed = guard(previous_mode, new_mode, guard_error);
+                } catch (const std::exception &e) {
+                    guard_error = std::string("Mode commit guard error: ") + e.what();
+                }
+                if (!allowed) {
+                    error = guard_error.empty() ? "Mode transition rejected at commit" : guard_error;
+                    LOG_ERROR("[ModeManager] " << error);
+                    return false;
+                }
+            }
+        }
+
         current_mode_ = new_mode;
     }
 
@@ -145,6 +165,11 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
 void ModeManager::on_before_mode_change(const BeforeModeChangeCallback &callback) {
     std::lock_guard<std::mutex> lock(mutex_);
     before_callbacks_.push_back(callback);
+}
+
+void ModeManager::add_commit_guard(const CommitGuard &guard) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    commit_guards_.push_back(guard);
 }
 
 void ModeManager::on_mode_change(const ModeChangeCallback &callback) {

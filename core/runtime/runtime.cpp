@@ -444,18 +444,10 @@ bool Runtime::init_automation(std::string &error) {
                 "[Runtime] AUTO is refused until safe-state hooks are declared; "
                 "manual control and /v0/estop remain available.");
         }
-        mode_manager_->on_before_mode_change(
-            [this](automation::RuntimeMode /*prev*/, automation::RuntimeMode next, std::string &veto_reason) {
-                if (next != automation::RuntimeMode::AUTO) {
-                    return true;
-                }
-                const auto gate = evaluate_hookless_auto_gate(*registry_, config_.automation, config_.safety);
-                if (gate.refused) {
-                    veto_reason = gate.message;
-                    return false;
-                }
-                return true;
-            });
+        // Checked before the transition's hooks run, and again under the mode
+        // lock as AUTO is written, so a provider restart that commits a hookless
+        // inventory meanwhile cannot slip in between (#239).
+        install_hookless_auto_gate(*mode_manager_, *registry_, config_.automation, config_.safety);
     }
 
     // Create and initialize ParameterManager BEFORE HTTP server
@@ -1143,11 +1135,10 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // cannot be vetoed). Restart still succeeded, so this returns true regardless
     // (returning false would make the supervisor retry-restart a healthy
     // provider). The AUTO-check/set_mode race is benign (FAULT is legal from any
-    // mode). A narrow residual TOCTOU remains — a commit landing during an
-    // in-flight MANUAL->AUTO transition's callbacks can be missed by both this
-    // re-check (still MANUAL) and the entry gate (evaluated the pre-commit
-    // registry); tracked in #239. This still closes the permanent in-AUTO
-    // fail-open.
+    // mode). A commit landing during an in-flight MANUAL->AUTO transition is
+    // caught by the gate's commit guard, which re-runs under the mode lock as
+    // AUTO is written (#239): either it sees this inventory and refuses AUTO,
+    // or AUTO was already written and this re-check sees it.
     if (mode_manager_ && config_.automation.enabled) {
         enforce_hookless_gate_in_auto(*registry_, config_.automation, config_.safety, *mode_manager_,
                                       "provider '" + provider_id + "' restart");

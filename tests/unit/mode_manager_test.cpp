@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -500,4 +501,67 @@ TEST_F(ModeManagerTest, CallbackRegistrationDuringTransitionsIsSafe) {
 
     // No crashes means thread-safety is working
     EXPECT_GT(callback_count.load(), 0);
+}
+
+/******************************************************************************
+ * Commit guards (#239)
+ ******************************************************************************/
+
+TEST_F(ModeManagerTest, CommitGuardRefusalKeepsTheModeAndSkipsAfterCallbacks) {
+    bool notified = false;
+    mode_manager_->on_mode_change([&](RuntimeMode, RuntimeMode) { notified = true; });
+    mode_manager_->add_commit_guard([](RuntimeMode, RuntimeMode next, std::string &error) {
+        if (next != RuntimeMode::AUTO) return true;
+        error = "refused at commit";
+        return false;
+    });
+
+    std::string error;
+    EXPECT_FALSE(mode_manager_->set_mode(RuntimeMode::AUTO, error));
+    EXPECT_EQ(error, "refused at commit");
+    EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::MANUAL);
+    EXPECT_FALSE(notified);
+
+    EXPECT_TRUE(mode_manager_->set_mode(RuntimeMode::IDLE, error)) << error;
+}
+
+TEST_F(ModeManagerTest, CommitGuardJudgesTheStateAfterTheBeforeCallbacks) {
+    // A before-callback that changes the world (as the before_transition hooks
+    // can, for seconds) runs first; the guard sees the changed world.
+    bool changed = false;
+    mode_manager_->on_before_mode_change([&](RuntimeMode, RuntimeMode, std::string &) {
+        changed = true;
+        return true;
+    });
+    mode_manager_->add_commit_guard([&](RuntimeMode, RuntimeMode, std::string &error) {
+        error = "changed while the transition was in flight";
+        return !changed;
+    });
+
+    std::string error;
+    EXPECT_FALSE(mode_manager_->set_mode(RuntimeMode::AUTO, error));
+    EXPECT_EQ(error, "changed while the transition was in flight");
+}
+
+TEST_F(ModeManagerTest, CommitGuardIsNotConsultedForFault) {
+    int consulted = 0;
+    mode_manager_->add_commit_guard([&](RuntimeMode, RuntimeMode, std::string &) {
+        ++consulted;
+        return false;
+    });
+
+    std::string error;
+    EXPECT_TRUE(mode_manager_->set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::FAULT);
+    EXPECT_EQ(consulted, 0);
+}
+
+TEST_F(ModeManagerTest, ThrowingCommitGuardRefusesTheTransition) {
+    mode_manager_->add_commit_guard(
+        [](RuntimeMode, RuntimeMode, std::string &) -> bool { throw std::runtime_error("registry unreadable"); });
+
+    std::string error;
+    EXPECT_FALSE(mode_manager_->set_mode(RuntimeMode::AUTO, error));
+    EXPECT_EQ(error, "Mode commit guard error: registry unreadable");
+    EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::MANUAL);
 }
