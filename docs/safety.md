@@ -94,7 +94,8 @@ can hurt someone or destroy a batch.
   back able to be started, not started. Today the runtime does this per device
   (anolishq/anolis#285, #299). A device that went unreachable stays
   latched, and the behaviour tree may not actuate it until an operator re-enters
-  AUTO. Its declared safe state is re-asserted when it answers again, and
+  AUTO. When it answers again, the active safe-state rung is re-run for it (under
+  rung `none` that does nothing), and
   `GET /v0/runtime/status` lists it under `device_loss_latched`. The latch does
   not hold manual calls or mode-transition hooks, and the runtime cannot yet
   tell a stop from a fault (see the stop chain below).

@@ -14,7 +14,7 @@ backplane, a blown fuse.
 
 The runtime already does the safety-relevant part, whatever the cause. A lost
 device is latched, the behaviour tree may not actuate it until an operator
-re-enters AUTO, and its safe state is re-asserted when it returns. What's
+re-enters AUTO, and the active safe-state rung is re-run for it when it returns. What's
 missing is:
 
 - **classification:** saying "emergency stop in force" instead of "fault", and
@@ -81,10 +81,12 @@ safety:
 
 On load, the runtime warns when:
 
-- the status source is itself a device in `devices` (it would go silent with the
-  stop, so it cannot separate a stop from a power fault);
-- the status signal is one the runtime can drive (a software action would read
-  back as a stop).
+- the status source is itself a device in `devices`. It would go silent with the
+  stop, so it can't separate a stop from a power fault.
+- the status source's device also has actuating functions. The protocol doesn't
+  link a signal to the function that drives it, so this is a heuristic: a status
+  line that the runtime can also drive would read back a software action as a
+  stop.
 
 ### States and classification
 
@@ -104,26 +106,45 @@ unreadable or unregistered is `unknown`, never `clear`.
 ISO 13850: releasing an emergency stop "shall not restart the machinery but
 only permit restarting".
 
-- When the status goes `in_force` or `unknown`, the runtime engages the software
-  stop's latch. The latch refuses every actuating call, manual ones included,
-  except safe-state actions.
+- When the status goes `in_force` or `unknown`, the runtime **engages the
+  software stop's latch without running its ladder**. On an automation machine
+  it also enters FAULT. It sends no device calls: the devices in scope may be
+  unpowered, and commanding them would only produce failed actions, which is the
+  churn this RFC removes. The hardware stop is what makes them safe.
+- The latch refuses every actuating call, manual ones included. "Actuating" fails
+  closed: every function not marked READ, CONFIG included. Two calls are exempt:
+  - safe-state actions;
+  - the FAULT-entry hook that a software stop with no declared safe state lets
+    through for its own FAULT entry (#251).
 - AUTO entry is refused, with the reason, while the latch is engaged or the
-  status is `in_force` or `unknown`. Today the latch refuses the behaviour tree's
-  calls one by one, but doesn't prevent entering AUTO.
-- Clearing the latch is refused while the status is `in_force` or `unknown`. The
-  check goes in `SafeStateController::clear()`, so every caller gets it.
+  status is `in_force` or `unknown`. Today a software stop also enters FAULT, and
+  FAULT can only exit to MANUAL. But MANUAL -> AUTO is not refused while the
+  latch is still engaged, nor after a FAULT entry that failed. In those cases the
+  behaviour tree's calls are refused one by one.
+- Clearing the latch is refused while the status is `in_force` or `unknown`.
+  `SafeStateController::clear()` returns a reason instead of `void`, so every
+  caller gets the check. `POST /v0/estop/clear` answers it as FAILED_PRECONDITION
+  rather than its current unconditional 200 `{latched: false}`.
 - Once the stop is released, one deliberate clear by the operator permits a
   restart. Releasing the stop never clears anything.
 
 ### Surviving a restart
 
-- The latch is persisted to `<data_dir>/estop.json`: written with
-  write-temp, fsync and rename when it engages, and removed when it clears. If
-  the file is present at startup, the runtime starts latched. A corrupt or
-  unreadable file also means latched.
-- At startup the runtime also latches if the status reads `in_force` or
-  `unknown`. That covers a stop pressed while the runtime was down.
-- Installs must put `data_dir` on persistent storage.
+- The latch is persisted to a file under `data_dir`, keyed per runtime config,
+  for example `<data_dir>/estop/<config-name>.json`. It is written with
+  write-temp, fsync and rename when the latch engages, and removed when it
+  clears. If the file is present at startup, the runtime starts latched. A
+  corrupt or unreadable file also means latched.
+  - The key matters because the workbench starts every project it launches with
+    the same working directory. With one shared file, project A's latch would
+    hold project B.
+  - Installs already keep `data_dir` under the install prefix, through the
+    systemd unit's working directory. It must stay on persistent storage.
+- At startup the runtime also checks the stop status, after provider discovery
+  and the first poll, with a bounded wait. If it reads `in_force` or `unknown`
+  then, the runtime starts latched. That covers a stop pressed while the runtime
+  was down. It also means a machine whose status source isn't up at boot starts
+  latched. That is intended: it fails toward held.
 
 ### Things the runtime never does
 
@@ -149,8 +170,12 @@ Each ships on its own. Without a `stop_chain` in config, none of them changes
 behaviour except steps 1 and 2, which apply to every machine.
 
 1. Refuse AUTO, with a reason, while the software stop's latch is engaged.
-2. Persist the latch.
-3. `stop_chain.status`: the states, the hold, and refusing the clear.
+2. Persist the latch, keyed per runtime config.
+3. `stop_chain.status`: the states, the hold, and refusing the clear. This
+   changes `SafeStateController::clear()`, and the HTTP contract of
+   `POST /v0/estop/clear`, which gains a FAILED_PRECONDITION reply, in the
+   OpenAPI file. The workbench's clear handling has to change with it: its
+   epoch logic (anolishq/anolis-workbench#617) reads `latched` from the reply.
 4. `devices` and `expect`, with the mismatch alarm. The runtime then reads
    devices' `estop` signals, which nothing does today.
 5. Workbench: show the stop status and a guided reset (anolishq/anolis-workbench#572).
