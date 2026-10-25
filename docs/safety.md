@@ -91,8 +91,13 @@ can hurt someone or destroy a batch.
 - **Releasing an emergency stop must never restart the machine.** ISO 13850:2015
   §4.1.4: disengagement "shall not restart the machinery but only permit
   restarting". The second half is the actionable part — the runtime must come
-  back able to be started, not started. It does not model this yet
-  (anolishq/anolis#285).
+  back able to be started, not started. Today the runtime does this per device
+  (anolishq/anolis#285, #299). A device that went unreachable stays
+  latched, and the behaviour tree may not actuate it until an operator re-enters
+  AUTO. Its declared safe state is re-asserted when it answers again, and
+  `GET /v0/runtime/status` lists it under `device_loss_latched`. The latch does
+  not hold manual calls or mode-transition hooks, and the runtime cannot yet
+  tell a stop from a fault (see the stop chain below).
 - **"Confirmed safe" is not always achievable.** Any reporting that claims it
   unconditionally is asserting something the system cannot observe.
 
@@ -121,17 +126,17 @@ Two gaps, and they are the reason this distinction kept getting re-litigated:
 1. The field is declared **informational**: "nothing may branch runtime behavior
    on these fields beyond presentation/interpretation". So the runtime knows the
    answer and is forbidden from acting on it.
-2. Neither reference machine profile actually sets it.
+2. It describes the whole machine with one value, but real machines are mixed,
+   and the two values mix up *what* a stop de-energises (a board's actuators, or
+   the whole board) with *how* (a contactor, or a board's stop input).
 
-Promoting it from informational to behavioural — so the runtime can tell an
-expected `power_cut` blackout from a genuine fleet fault — is the substance of
-anolishq/anolis#284, and the smallest useful piece of anolishq/anolis#283.
-
-Promotion has to define what an **absent** declaration means, which today is
-every machine, and it must not let a mis-declared `power_cut` silently reinterpret
-a genuine fleet fault as an expected stop. Treating device-loss as expected should
-be gated on a stop having actually been commanded or observed, not on the profile
-field alone.
+Device loss can be treated as an expected stop only when the stop is *observed*,
+never on a declaration alone: a dead supply or an unplugged backplane looks the
+same as a power-cut stop. The planned model is
+[rfcs/stop-chain.md](rfcs/stop-chain.md) (anolishq/anolis#284). It replaces
+`estop_topology` with an observed stop status and a per-device scope. Until it
+lands, nothing here changes: device loss is handled as described under Runtime
+Mode Safety Semantics, whatever caused it.
 
 Design work on this model is tracked in anolishq/anolis#283.
 
