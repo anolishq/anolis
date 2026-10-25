@@ -13,6 +13,40 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.52] - 2026-10-25
+
+No runtime, config schema, provider protocol or HTTP API change. This
+release changes `tools/install.sh` and the docs.
+
+### Added
+
+- **The install health check reports the startup safe state** (#471,
+  #473). Every install restarts the runtime, and the restart runs
+  `safety.on_startup` again, but `phase_health` printed only the
+  version, the run registry and provider liveness. A deploy whose
+  startup safe state failed on every call still read as healthy.
+  `phase_health` now reads `startup_safe_state` from the runtime status
+  it already fetches, and prints one line after the run-registry line:
+
+  - `✓ health: startup safe state achieved (<software_safe_state>)`,
+    for example `(hooks)`;
+  - `⚠ health: startup safe state NOT achieved`, then one indented line
+    per failed call (`<device> <function>: <error>`) and per skipped
+    call (`<device> <function>: skipped, <reason>`);
+  - `→ health: startup safe state not run (on_startup: leave)`, or
+    `(no software safe state declared)`;
+  - nothing, for a runtime before 0.1.45, which does not report it.
+
+  Not achieved is a warning, not a failed install. The line is parsed
+  with jq, or python3 when jq is absent, and left out when neither is
+  installed.
+
+### Changed
+
+- `docs/safety.md` puts the advice on when to set `leave` back with
+  the `on_startup` options, and says a run where every call was
+  skipped for an absent device logs a WARN, not an ERROR (#464).
+
 ## [0.1.51] - 2026-10-23
 
 No config schema or provider protocol change. `GET /v0/runtime/status`
