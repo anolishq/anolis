@@ -115,7 +115,10 @@ jobs:
       - name: Setup vcpkg
         uses: anolishq/.github/.github/actions/setup-vcpkg@a9b3d134acbcc7dcd6da02c1a345a1fbdca15064 # v2.4
         with:
-          triplet: x64-linux-static
+          # ci-tsan builds x64-linux-tsan. The triplet names the cache key, so
+          # naming x64-linux-static here saved TSan packages under the key the
+          # x64-linux-static jobs restore, and they rebuilt every run.
+          triplet: x64-linux-tsan
 
       - name: Configure
         run: cmake --preset ci-tsan
