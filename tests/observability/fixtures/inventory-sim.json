@@ -1,0 +1,293 @@
+{
+  "devices": {
+    "status": {
+      "code": "OK",
+      "message": "ok"
+    },
+    "devices": [
+      {
+        "provider_id": "sim0",
+        "device_id": "tempctl0",
+        "display_name": "Sim Temp Control Card (2TC + 2Relay)",
+        "type": "sim.temp_control_card"
+      },
+      {
+        "provider_id": "sim0",
+        "device_id": "tempctl1",
+        "display_name": "Sim Temp Control Card (2TC + 2Relay)",
+        "type": "sim.temp_control_card"
+      },
+      {
+        "provider_id": "sim0",
+        "device_id": "motorctl0",
+        "display_name": "Sim Dual DC Motor Controller",
+        "type": "sim.dual_dc_motor"
+      },
+      {
+        "provider_id": "sim0",
+        "device_id": "relayio0",
+        "display_name": "Sim Relay/IO Module (4 Relay + 4 GPIO)",
+        "type": "sim.relay_io_module"
+      },
+      {
+        "provider_id": "sim0",
+        "device_id": "analogsensor0",
+        "display_name": "Sim Analog Sensor Module (4 channels)",
+        "type": "sim.analog_sensor_module"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "sim0",
+      "device_id": "tempctl0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "tc1_temp",
+            "value_type": "double",
+            "label": "TC1 Temperature",
+            "unit": "C",
+            "description": "Thermocouple channel 1"
+          },
+          {
+            "signal_id": "tc2_temp",
+            "value_type": "double",
+            "label": "TC2 Temperature",
+            "unit": "C",
+            "description": "Thermocouple channel 2"
+          },
+          {
+            "signal_id": "relay1_state",
+            "value_type": "bool",
+            "label": "Relay 1 State",
+            "description": "Relay output channel 1"
+          },
+          {
+            "signal_id": "relay2_state",
+            "value_type": "bool",
+            "label": "Relay 2 State",
+            "description": "Relay output channel 2"
+          },
+          {
+            "signal_id": "control_mode",
+            "value_type": "string",
+            "label": "Control Mode",
+            "description": "open or closed"
+          },
+          {
+            "signal_id": "setpoint",
+            "value_type": "double",
+            "label": "Setpoint",
+            "unit": "C",
+            "description": "Closed-loop temperature setpoint"
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "sim0",
+      "device_id": "tempctl1",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "tc1_temp",
+            "value_type": "double",
+            "label": "TC1 Temperature",
+            "unit": "C",
+            "description": "Thermocouple channel 1"
+          },
+          {
+            "signal_id": "tc2_temp",
+            "value_type": "double",
+            "label": "TC2 Temperature",
+            "unit": "C",
+            "description": "Thermocouple channel 2"
+          },
+          {
+            "signal_id": "relay1_state",
+            "value_type": "bool",
+            "label": "Relay 1 State",
+            "description": "Relay output channel 1"
+          },
+          {
+            "signal_id": "relay2_state",
+            "value_type": "bool",
+            "label": "Relay 2 State",
+            "description": "Relay output channel 2"
+          },
+          {
+            "signal_id": "control_mode",
+            "value_type": "string",
+            "label": "Control Mode",
+            "description": "open or closed"
+          },
+          {
+            "signal_id": "setpoint",
+            "value_type": "double",
+            "label": "Setpoint",
+            "unit": "C",
+            "description": "Closed-loop temperature setpoint"
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "sim0",
+      "device_id": "motorctl0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "motor1_speed",
+            "value_type": "double",
+            "label": "Motor 1 Speed",
+            "unit": "rpm",
+            "description": "Estimated speed"
+          },
+          {
+            "signal_id": "motor2_speed",
+            "value_type": "double",
+            "label": "Motor 2 Speed",
+            "unit": "rpm",
+            "description": "Estimated speed"
+          },
+          {
+            "signal_id": "motor1_duty",
+            "value_type": "double",
+            "label": "Motor 1 Duty",
+            "description": "PWM duty 0..1"
+          },
+          {
+            "signal_id": "motor2_duty",
+            "value_type": "double",
+            "label": "Motor 2 Duty",
+            "description": "PWM duty 0..1"
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "sim0",
+      "device_id": "relayio0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "relay_ch1_state",
+            "value_type": "bool",
+            "label": "Relay Ch1 State",
+            "description": "Relay channel 1 state"
+          },
+          {
+            "signal_id": "relay_ch2_state",
+            "value_type": "bool",
+            "label": "Relay Ch2 State",
+            "description": "Relay channel 2 state"
+          },
+          {
+            "signal_id": "relay_ch3_state",
+            "value_type": "bool",
+            "label": "Relay Ch3 State",
+            "description": "Relay channel 3 state"
+          },
+          {
+            "signal_id": "relay_ch4_state",
+            "value_type": "bool",
+            "label": "Relay Ch4 State",
+            "description": "Relay channel 4 state"
+          },
+          {
+            "signal_id": "gpio_input_1",
+            "value_type": "bool",
+            "label": "GPIO Input 1",
+            "description": "GPIO input channel 1"
+          },
+          {
+            "signal_id": "gpio_input_2",
+            "value_type": "bool",
+            "label": "GPIO Input 2",
+            "description": "GPIO input channel 2"
+          },
+          {
+            "signal_id": "gpio_input_3",
+            "value_type": "bool",
+            "label": "GPIO Input 3",
+            "description": "GPIO input channel 3"
+          },
+          {
+            "signal_id": "gpio_input_4",
+            "value_type": "bool",
+            "label": "GPIO Input 4",
+            "description": "GPIO input channel 4"
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "sim0",
+      "device_id": "analogsensor0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "voltage_ch1",
+            "value_type": "double",
+            "label": "Voltage Ch1",
+            "unit": "V",
+            "description": "Analog input channel 1 voltage (0-10V)"
+          },
+          {
+            "signal_id": "voltage_ch2",
+            "value_type": "double",
+            "label": "Voltage Ch2",
+            "unit": "V",
+            "description": "Analog input channel 2 voltage (0-10V)"
+          },
+          {
+            "signal_id": "voltage_ch3",
+            "value_type": "double",
+            "label": "Voltage Ch3",
+            "unit": "V",
+            "description": "Analog input channel 3 voltage (0-10V)"
+          },
+          {
+            "signal_id": "voltage_ch4",
+            "value_type": "double",
+            "label": "Voltage Ch4",
+            "unit": "V",
+            "description": "Analog input channel 4 voltage (0-10V)"
+          },
+          {
+            "signal_id": "sensor_quality",
+            "value_type": "string",
+            "label": "Sensor Quality",
+            "description": "Overall sensor quality: GOOD, NOISY, or FAULT"
+          }
+        ],
+        "functions": []
+      }
+    }
+  ]
+}
