@@ -18,6 +18,7 @@
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
+#include "control/i_actuation_latch.hpp"
 
 namespace anolis {
 
@@ -132,6 +133,21 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
  */
 void install_hookless_auto_gate(automation::ModeManager &mode_manager, const registry::DeviceRegistry &registry,
                                 const AutomationConfig &automation, const SafetyConfig &safety);
+
+/**
+ * @brief Refuse AUTO while the software stop's latch is engaged (#481).
+ *
+ * A software stop latches and enters FAULT, and FAULT exits only to MANUAL;
+ * without this, MANUAL -> AUTO then succeeded with the latch still engaged,
+ * and the behaviour tree's actuating calls were refused one by one. Registered
+ * like the hookless gate: as a before-callback, so a refused entry runs no
+ * hooks, and as a commit guard, so a stop that latches while the transition's
+ * hooks run still keeps AUTO from committing. `latch.is_engaged()` is
+ * lock-free, so the guard adds nothing to the lock order.
+ *
+ * `latch` must outlive `mode_manager`.
+ */
+void install_estop_auto_gate(automation::ModeManager &mode_manager, const control::IActuationLatch &latch);
 
 /**
  * @brief Re-enforce the refuse-hookless gate while already in AUTO (#233).

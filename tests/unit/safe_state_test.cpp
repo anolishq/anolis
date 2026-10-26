@@ -831,3 +831,29 @@ TEST_F(SafeStateTest, AStartupRunWithEveryDeviceAbsentSkipsAllAndIsNotAchieved) 
     EXPECT_TRUE(report.failed_actions.empty());
     EXPECT_EQ(report.skipped_actions.size(), 3u);
 }
+
+// --- #481: AUTO waits for the latch to be cleared ----------------------------
+
+TEST_F(SafeStateTest, AutoIsRefusedAfterAStopUntilTheLatchIsCleared) {
+    // A stop latches and enters FAULT; FAULT -> MANUAL is the recovery path,
+    // and MANUAL -> AUTO used to succeed with the latch still engaged.
+    auto controller = make_controller();
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    runtime::install_estop_auto_gate(mode, *controller);
+    controller->set_mode_manager(&mode);
+
+    controller->trigger("operator");
+    ASSERT_TRUE(controller->is_engaged());
+    ASSERT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+
+    std::string error;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
+    EXPECT_FALSE(mode.set_mode(automation::RuntimeMode::AUTO, error));
+    EXPECT_THAT(error, HasSubstr("the software stop's latch is engaged"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::MANUAL);
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::IDLE, error)) << error;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
+
+    controller->clear();
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::AUTO, error)) << error;
+}

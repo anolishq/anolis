@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <future>
 #include <memory>
 #include <string>
@@ -341,6 +342,54 @@ TEST_F(ActuationGateTest, InstalledGate_AdmitsAutoWithAFaultHookAndLeavesOtherTr
     EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::AUTO, error)) << error;
     EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
     EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::IDLE, error)) << error;
+}
+
+// --- install_estop_auto_gate (#481: AUTO waits for the latch) ---------------
+
+namespace {
+// A latch the test sets by hand, so the mode is left alone (a real trigger()
+// also enters FAULT, which would refuse the transition on its own).
+struct FakeLatch : control::IActuationLatch {
+    std::atomic<bool> engaged{false};
+    bool is_engaged() const override { return engaged.load(); }
+};
+}  // namespace
+
+TEST_F(ActuationGateTest, EstopGate_RefusesAutoWhileLatchedAndAdmitsItOnceCleared) {
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    FakeLatch latch;
+    runtime::install_estop_auto_gate(mode, latch);
+    latch.engaged = true;
+
+    std::string error;
+    EXPECT_FALSE(mode.set_mode(automation::RuntimeMode::AUTO, error));
+    EXPECT_THAT(error, HasSubstr("the software stop's latch is engaged"));
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::IDLE, error)) << error;
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::FAULT, error)) << error;
+
+    latch.engaged = false;
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::AUTO, error)) << error;
+}
+
+TEST_F(ActuationGateTest, EstopGate_RefusesAutoWhenTheLatchEngagesMidTransition) {
+    // The latch engages while MANUAL -> AUTO's hooks run, after the early
+    // check passed. AUTO must not commit.
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    FakeLatch latch;
+    runtime::install_estop_auto_gate(mode, latch);
+    bool hooks_ran = false;
+    mode.on_before_mode_change([&](automation::RuntimeMode, automation::RuntimeMode, std::string&) {
+        hooks_ran = true;
+        latch.engaged = true;  // an operator's software stop, mid-transition
+        return true;
+    });
+
+    std::string error;
+    EXPECT_FALSE(mode.set_mode(automation::RuntimeMode::AUTO, error));
+    EXPECT_TRUE(hooks_ran);
+    EXPECT_THAT(error, HasSubstr("the software stop's latch is engaged"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::MANUAL);
 }
 
 // --- #251: the predicate is now shared, so it must stay one predicate --------

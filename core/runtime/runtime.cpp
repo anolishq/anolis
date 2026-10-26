@@ -453,6 +453,9 @@ bool Runtime::init_automation(std::string &error) {
         // lock as AUTO is written, so a provider restart that commits a hookless
         // inventory meanwhile cannot slip in between (#239).
         install_hookless_auto_gate(*mode_manager_, *registry_, config_.automation, config_.safety);
+        // A software stop's latch holds until a deliberate clear, so AUTO waits
+        // for it too (#481).
+        install_estop_auto_gate(*mode_manager_, *safe_state_controller_);
     }
 
     // Create and initialize ParameterManager BEFORE HTTP server
