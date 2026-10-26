@@ -1,6 +1,6 @@
 {
   "name": "anolis",
-  "version": "0.1.54",
+  "version": "0.1.55",
   "dependencies": [
     "protobuf",
     "yaml-cpp",

@@ -13,6 +13,60 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-10-26
+
+Upgrade notes for operators:
+
+- **`safety.stop_chain.devices` entries can declare what a device does when
+  the stop is in force.** An entry is a bare handle, as before, or
+  `{handle, expect}` with `expect` `power_loss` (the stop cuts power to the
+  device's controller, so it goes silent) or `reports_estop` (it stays on the
+  bus and reports its `estop` signal true). Existing configs load unchanged.
+- **A handle listed twice in `safety.stop_chain.devices` now fails config
+  load**, in either form, naming both positions. Before, it loaded, and with
+  two mappings the last `expect` won silently.
+- **`GET /v0/runtime/status`'s `stop_chain` gains two required fields,
+  `expectations` and `mismatches`, and `/v0/events` a `stop_chain_mismatch`
+  event.** An older workbench keeps working: it reads `stop_chain` loosely
+  and does not validate runtime responses against the OpenAPI file. Only a
+  client that does needs the new file.
+
+The config schema accepts the new `devices` entry form. `install.sh` is
+unchanged since 0.1.54.
+
+### Added
+
+- **Per-device stop expectations and the "Stop not reaching *device*"
+  alarm** (#484, #503), increment 4 of
+  [rfcs/stop-chain.md](docs/rfcs/stop-chain.md). Once the stop has been in
+  force for the status signal's stale bound, max(1000 ms, 3 x
+  `polling.interval_ms`), a `power_loss` device that still has a fresh
+  reading, or a `reports_estop` device whose `estop` reads a fresh `false`,
+  raises it:
+  - a WARN, `Stop not reaching <device> (expect <expect>): <reason>`;
+  - an entry in `stop_chain.mismatches` (`device`, `expect`, `reason`,
+    `since_epoch_ms`);
+  - a `stop_chain_mismatch` event with `raised: true`.
+
+  It is resolved, with an event with `raised: false`, when the device
+  behaves as expected or the stop leaves `in_force`. The hold is the same
+  either way. A `reports_estop` device with no fresh `estop` reading does
+  not raise it, and a device with no `expect` never does.
+  `stop_chain.expectations` lists each declared `expect` by handle. At
+  startup the runtime warns about a `reports_estop` device with no polled
+  bool `estop` signal, or a `power_loss` device with no polled signal.
+
+### Changed
+
+- CI (#501): the TSan lane's vcpkg packages get their own cache key, the
+  compatibility lane downloads the pinned anolis-provider-sim release and
+  checks it against its `SHA256SUMS` instead of building it, and changes
+  only to `tools/`, `tests/shell/`, `observability/` or
+  `tests/observability/` skip the build lanes. The provider-sim pin must
+  name a release tag (`docs/dependencies.md`).
+- `docs/configuration-schema.md` names a handle listed twice among the
+  `safety.stop_chain` config-load failures (#505).
+
 ## [0.1.54] - 2026-10-26
 
 Upgrade notes for operators:
