@@ -197,8 +197,16 @@ int main(int argc, char **argv) {
             auto *read = response.mutable_read_signals();
             read->set_device_id(request.read_signals().device_id());
             if (request.read_signals().device_id() == "gpio0") {
+                // The test replaces `chain` by rename, and on Windows an open that
+                // lands mid-rename fails. Retrying for up to 50 ms hides the swap;
+                // a file removed for good still reads empty and reports FAULT.
                 std::string chain;
-                std::ifstream(std::filesystem::path(stop_chain_dir) / "chain") >> chain;
+                for (int attempt = 0; attempt < 10 && chain.empty(); ++attempt) {
+                    if (attempt > 0) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    }
+                    std::ifstream(std::filesystem::path(stop_chain_dir) / "chain") >> chain;
+                }
                 auto *value = read->add_values();
                 value->set_signal_id("chain_open");
                 value->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
