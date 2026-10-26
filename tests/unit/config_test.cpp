@@ -1640,6 +1640,14 @@ TEST_F(ConfigTest, StopChainRejectsMalformedEntries) {
          "safety.stop_chain.devices[0].handle must be provider/device, got 'dcmt0'"},
         {"    devices:\n      - [bread0/dcmt0]\n",
          "safety.stop_chain.devices[0] must be a provider/device handle or a mapping with handle"},
+        // A handle listed twice, in either form: the second expect would win silently.
+        {"    devices: [bread0/dcmt0, bread0/rlht0, bread0/dcmt0]\n",
+         "safety.stop_chain.devices[2] lists bread0/dcmt0, already listed at devices[0]"},
+        {"    devices:\n      - bread0/dcmt0\n      - handle: bread0/dcmt0\n        expect: reports_estop\n",
+         "safety.stop_chain.devices[1] lists bread0/dcmt0, already listed at devices[0]"},
+        {"    devices:\n      - handle: bread0/dcmt0\n        expect: power_loss\n"
+         "      - handle: bread0/dcmt0\n        expect: reports_estop\n",
+         "safety.stop_chain.devices[1] lists bread0/dcmt0, already listed at devices[0]"},
     };
     for (size_t i = 0; i < cases.size(); ++i) {
         SCOPED_TRACE(cases[i].first);

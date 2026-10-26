@@ -90,3 +90,6 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/06-health-excluded-signals-duplicate.yaml
     expect: invalid/runtime
     note: health.excluded_signals lists one device_handle twice
+  - file: tests/contracts/runtime-config/invalid/runtime/07-safety-stop-chain-duplicate-device.yaml
+    expect: invalid/runtime
+    note: safety.stop_chain.devices lists one handle twice, with different expects
