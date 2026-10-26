@@ -13,11 +13,19 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+      - "tools/**"
+      - "tests/shell/**"
+      - "observability/**"
+      - "tests/observability/**"
   pull_request:
     branches: [main]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+      - "tools/**"
+      - "tests/shell/**"
+      - "observability/**"
+      - "tests/observability/**"
   workflow_dispatch:
 
 concurrency:

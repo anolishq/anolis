@@ -25,6 +25,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      native: ${{ steps.filter.outputs.native }}
       cpp: ${{ steps.cppfilter.outputs.cpp }}
       docs: ${{ steps.docsfilter.outputs.docs }}
       observability: ${{ steps.obsfilter.outputs.observability }}
@@ -44,6 +45,23 @@ jobs:
               - '!**/*.jpg'
               - '!**/*.jpeg'
               - '!**/*.gif'
+            # What the runtime build and its tests can see: code, minus the shell
+            # installer and the observability stack, which have their own lanes
+            # and nothing in CMake or CTest reads. Keep in step with the
+            # paths-ignore lists in extended.yml and hardening.yml.
+            native:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!**/*.png'
+              - '!**/*.svg'
+              - '!**/*.jpg'
+              - '!**/*.jpeg'
+              - '!**/*.gif'
+              - '!tools/**'
+              - '!tests/shell/**'
+              - '!observability/**'
+              - '!tests/observability/**'
       # Separate OR-filter (default quantifier) for the C++ sources the clang-tidy
       # gate lints, so it skips (and the ok gate stays green) on non-C++ PRs.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -272,7 +290,7 @@ jobs:
   core-build-test:
     name: ${{ matrix.lane }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -362,7 +380,7 @@ jobs:
   anolis-provider-compat:
     name: anolis-provider-compat
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 90
 

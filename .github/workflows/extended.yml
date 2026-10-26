@@ -11,6 +11,10 @@ on:
       - "**/*.jpg"
       - "**/*.jpeg"
       - "**/*.gif"
+      - "tools/**"
+      - "tests/shell/**"
+      - "observability/**"
+      - "tests/observability/**"
   pull_request:
     branches: [main]
     paths-ignore:
@@ -21,6 +25,10 @@ on:
       - "**/*.jpg"
       - "**/*.jpeg"
       - "**/*.gif"
+      - "tools/**"
+      - "tests/shell/**"
+      - "observability/**"
+      - "tests/observability/**"
   workflow_dispatch:
 
 concurrency:
