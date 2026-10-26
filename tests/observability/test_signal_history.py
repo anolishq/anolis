@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.observability.harness import Telemetry, UInt
+from tests.observability.harness import Telemetry, UInt, Window
 from tests.observability.scenarios import MINUTE
 
 UID = "anolis-signal-history"
@@ -41,6 +41,19 @@ def test_every_typed_value_field_is_shown(grafana, dashboards, typed, hour):
     shown = _series(grafana, dashboards[UID], hour)
     missing = sorted({"double", "int", "uint", "bool", "string"} - set(shown))
     assert not missing, f"signals with no panel: {missing}"
+
+
+def test_a_signal_unchanged_since_before_the_range_is_still_drawn(grafana, dashboards, load, now_ms, hour):
+    load(Telemetry().signal(now_ms - 3 * 60 * MINUTE, signal="steady", value=4.25))
+    assert 4.25 in _series(grafana, dashboards[UID], hour).get("steady", [])
+
+
+def test_history_plots_the_last_value_per_window_not_a_mean(grafana, dashboards, load, now_ms):
+    """Changes are events, not samples: a window shows where the value ended up."""
+    window = Window.last(3600, now_ms=now_ms, interval_ms=60_000)
+    start = now_ms - 30 * MINUTE - (now_ms % MINUTE)  # one whole one-minute window
+    load(Telemetry().signal(start + 1_000, signal="x", value=0.0).signal(start + 2_000, signal="x", value=10.0))
+    assert _series(grafana, dashboards[UID], window).get("x") == [10.0]
 
 
 @pytest.mark.parametrize("signal", ["double", "int", "uint", "bool", "string"])

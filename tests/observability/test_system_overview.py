@@ -45,6 +45,13 @@ def test_status_table_lists_each_signal_with_its_last_change(grafana, dashboards
     assert seen == [("d1", "a", "OK", first), ("d1", "b", "FAULT", second)]
 
 
+def test_status_table_shows_a_signal_unchanged_since_before_the_range(grafana, dashboards, load, now_ms, hour):
+    steady = now_ms - 3 * 60 * MINUTE
+    load(Telemetry().signal(steady, signal="steady", value=1.0))
+    table = rows(grafana.panel(dashboards[UID], STATUS_TABLE, hour))
+    assert [(r["Signal"], r["Last change"]) for r in table] == [("steady", steady)]
+
+
 def test_quality_pie_counts_latest_quality_per_signal(grafana, dashboards, load, now_ms, hour):
     t = Telemetry()
     for device, earlier, latest in (("d1", "FAULT", "OK"), ("d2", "OK", "OK"), ("d3", "OK", "FAULT")):

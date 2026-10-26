@@ -9,9 +9,7 @@
         "enable": true,
         "iconColor": "rgba(255, 96, 96, 1)",
         "name": "Mode Changes",
-        "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"mode_change\")\n  |> filter(fn: (r) => r._field == \"previous_mode\")\n  |> map(fn: (r) => ({\n      time: r._time,\n      text: \"Mode: \" + r.previous_mode + \" -> \" + r.new_mode\n    }))",
-        "tagKeys": "previous_mode,new_mode",
-        "textFormat": "Mode: {{previous_mode}} -> {{new_mode}}",
+        "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mode_change\")\n  |> filter(fn: (r) => not exists r.runtime_name or r.runtime_name =~ /^${runtime_name:regex}$/)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({time: r._time, text: \"Mode: \" + r.previous_mode + \" -> \" + r.new_mode}))",
         "titleFormat": "Mode Change"
       },
       {
@@ -22,9 +20,7 @@
         "enable": true,
         "iconColor": "rgba(96, 165, 250, 1)",
         "name": "Parameter Changes",
-        "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"parameter_change\")\n  |> filter(fn: (r) => r._field == \"parameter_name\")\n  |> map(fn: (r) => ({\n      time: r._time,\n      text: r.parameter_name + \": \" + r.old_value + \" -> \" + r.new_value\n    }))",
-        "tagKeys": "parameter_name,old_value,new_value",
-        "textFormat": "{{parameter_name}}: {{old_value}} -> {{new_value}}",
+        "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"parameter_change\")\n  |> filter(fn: (r) => not exists r.runtime_name or r.runtime_name =~ /^${runtime_name:regex}$/)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({time: r._time, text: r.parameter_name + \": \" + r.old_value + \" -> \" + r.new_value}))",
         "titleFormat": "Parameter Change"
       }
     ]
@@ -93,7 +89,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Last Update"
+              "options": "Last change"
             },
             "properties": [
               {
@@ -135,7 +131,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> group()\n  |> map(fn: (r) => ({\n    \"Provider\": r.provider_id,\n    \"Device\": r.device_id,\n    \"Signal\": r.signal_id,\n    \"Quality\": r._value,\n    \"Last Update\": int(v: r._time) / 1000000\n  }))",
+          "query": "import \"date\"\n\n// The state as of the end of the range: rows are written only on change, so a\n// signal unchanged since before the range is found by looking back 30d.\nfrom(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStop), stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> group()\n  |> map(fn: (r) => ({\n    \"Runtime\": r.runtime_name,\n    \"Provider\": r.provider_id,\n    \"Device\": r.device_id,\n    \"Signal\": r.signal_id,\n    \"Quality\": r._value,\n    \"Last change\": int(v: r._time) / 1000000\n  }))",
           "refId": "A"
         }
       ],
@@ -151,40 +147,10 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "green"
           },
-          "mappings": [
-            {
-              "options": {
-                "OK": {
-                  "color": "green",
-                  "index": 0,
-                  "text": "OK"
-                },
-                "STALE": {
-                  "color": "orange",
-                  "index": 1,
-                  "text": "STALE"
-                },
-                "ERROR": {
-                  "color": "red",
-                  "index": 2,
-                  "text": "ERROR"
-                },
-                "UNKNOWN": {
-                  "color": "blue",
-                  "index": 3,
-                  "text": "UNKNOWN"
-                },
-                "FAULT": {
-                  "color": "red",
-                  "index": 4,
-                  "text": "FAULT"
-                }
-              },
-              "type": "value"
-            }
-          ],
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -193,13 +159,14 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 10
       },
@@ -212,7 +179,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "count"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -227,12 +194,13 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"OK\")\n  |> group()\n  |> count()",
+          "query": "import \"date\"\n\n// The state as of the end of the range: rows are written only on change, so a\n// signal unchanged since before the range is found by looking back 30d.\nfrom(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStop), stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"OK\")\n  |> group()\n  |> count()",
           "refId": "A"
         }
       ],
       "title": "Signals OK",
-      "type": "stat"
+      "type": "stat",
+      "description": "Signals whose latest quality is OK, as of the end of the range."
     },
     {
       "datasource": {
@@ -242,7 +210,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "orange"
           },
           "mappings": [],
           "thresholds": {
@@ -253,14 +222,15 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 10
       },
       "id": 3,
@@ -272,7 +242,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "count"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -287,12 +257,13 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"STALE\")\n  |> group()\n  |> count()",
+          "query": "import \"date\"\n\n// The state as of the end of the range: rows are written only on change, so a\n// signal unchanged since before the range is found by looking back 30d.\nfrom(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStop), stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"STALE\")\n  |> group()\n  |> count()",
           "refId": "A"
         }
       ],
       "title": "Signals STALE",
-      "type": "stat"
+      "type": "stat",
+      "description": "Signals whose latest quality is STALE, as of the end of the range."
     },
     {
       "datasource": {
@@ -302,7 +273,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "purple"
           },
           "mappings": [],
           "thresholds": {
@@ -313,14 +285,15 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 10
       },
       "id": 4,
@@ -332,7 +305,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "count"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -347,12 +320,76 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"ERROR\")\n  |> group()\n  |> count()",
+          "query": "import \"date\"\n\n// The state as of the end of the range: rows are written only on change, so a\n// signal unchanged since before the range is found by looking back 30d.\nfrom(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStop), stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"UNAVAILABLE\")\n  |> group()\n  |> count()",
           "refId": "A"
         }
       ],
-      "title": "Signals ERROR",
-      "type": "stat"
+      "title": "Signals UNAVAILABLE",
+      "type": "stat",
+      "description": "Signals whose latest quality is UNAVAILABLE, as of the end of the range."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 10
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "import \"date\"\n\n// The state as of the end of the range: rows are written only on change, so a\n// signal unchanged since before the range is found by looking back 30d.\nfrom(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStop), stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == \"FAULT\")\n  |> group()\n  |> count()",
+          "refId": "A"
+        }
+      ],
+      "title": "Signals FAULT",
+      "type": "stat",
+      "description": "Signals whose latest quality is FAULT, as of the end of the range."
     },
     {
       "datasource": {
@@ -406,7 +443,8 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "displayName": "${__field.labels.quality}"
         },
         "overrides": [
           {
@@ -496,7 +534,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> group(columns: [\"_value\"])\n  |> count()\n  |> rename(columns: {_value: \"Quality\"})\n  |> group()\n  |> pivot(rowKey: [\"_stop\"], columnKey: [\"Quality\"], valueColumn: \"_time\")",
+          "query": "import \"date\"\n\n// Each signal's quality carried forward through the range, seeded with its\n// last quality before it (rows are written only on change, looking back 30d).\nseed = from(bucket: v.defaultBucket)\n  |> range(start: date.sub(d: 30d, from: v.timeRangeStart), stop: v.timeRangeStart)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> map(fn: (r) => ({r with _time: v.timeRangeStart}))\n\nchanges = from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n\nunion(tables: [seed, changes])\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> group(columns: [\"_start\", \"_stop\", \"_measurement\", \"_field\", \"runtime_name\", \"provider_id\", \"device_id\", \"signal_id\"])\n  |> sort(columns: [\"_time\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n  |> fill(usePrevious: true)\n  |> filter(fn: (r) => exists r._value)\n  |> map(fn: (r) => ({_time: r._time, quality: r._value, _value: 1}))\n  |> group(columns: [\"_time\", \"quality\"])\n  |> sum()\n  |> group(columns: [\"quality\"])",
           "refId": "A"
         }
       ],
@@ -531,7 +569,8 @@
               }
             ]
           },
-          "unit": "ms"
+          "unit": "ms",
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -548,7 +587,7 @@
         "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
-            "last"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -563,12 +602,13 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_signal\")\n  |> filter(fn: (r) => r[\"_field\"] == \"quality\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> map(fn: (r) => ({\n    r with\n    _value: int(v: now()) - int(v: r._time),\n    _field: r.device_id + \"/\" + r.signal_id\n  }))\n  |> group()",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"staleness_ms\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()",
           "refId": "A"
         }
       ],
-      "title": "Time Since Last Update (Staleness)",
-      "type": "gauge"
+      "title": "Device Staleness (latest health snapshot)",
+      "type": "gauge",
+      "description": "anolis_device_health.staleness_ms: how long since the runtime last polled the device. Signal rows are written only on change, so a signal's last change is not its freshness."
     }
   ],
   "refresh": "5s",
@@ -612,14 +652,14 @@
           "type": "influxdb",
           "uid": "${DS_INFLUXDB}"
         },
-        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"provider_id\")",
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"runtime_name\")",
         "hide": 0,
         "includeAll": true,
-        "label": "Provider",
+        "label": "Runtime",
         "multi": true,
-        "name": "provider_id",
+        "name": "runtime_name",
         "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"provider_id\")",
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"runtime_name\")",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -640,14 +680,42 @@
           "type": "influxdb",
           "uid": "${DS_INFLUXDB}"
         },
-        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"device_id\")",
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"provider_id\")",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Provider",
+        "multi": true,
+        "name": "provider_id",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"provider_id\")",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "influxdb",
+          "uid": "${DS_INFLUXDB}"
+        },
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"device_id\")",
         "hide": 0,
         "includeAll": true,
         "label": "Device",
         "multi": true,
         "name": "device_id",
         "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"device_id\")",
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"device_id\")",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,

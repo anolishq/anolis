@@ -9,7 +9,7 @@
         "enable": true,
         "iconColor": "rgba(255, 96, 96, 1)",
         "name": "Mode Changes",
-        "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"mode_change\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({\n      time: r._time,\n      text: \"Mode: \" + r.previous_mode + \" -> \" + r.new_mode\n    }))",
+        "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mode_change\")\n  |> filter(fn: (r) => not exists r.runtime_name or r.runtime_name =~ /^${runtime_name:regex}$/)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({time: r._time, text: \"Mode: \" + r.previous_mode + \" -> \" + r.new_mode}))",
         "titleFormat": "Mode Change"
       },
       {
@@ -20,7 +20,7 @@
         "enable": true,
         "iconColor": "rgba(250, 176, 5, 1)",
         "name": "Watchdog Trips",
-        "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"anolis_device_health\")\n  |> filter(fn: (r) => r._field == \"watchdog_trip_count\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> filter(fn: (r) => r._value > 0.0)\n  |> map(fn: (r) => ({\n      time: r._time,\n      text: \"Watchdog trip: \" + r.provider_id + \"/\" + r.device_id\n    }))",
+        "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"watchdog_trip_count\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> filter(fn: (r) => r._value > 0.0)\n  |> map(fn: (r) => ({time: r._time, text: \"Watchdog trip: \" + r.provider_id + \"/\" + r.device_id}))",
         "titleFormat": "Watchdog Trip"
       }
     ]
@@ -159,7 +159,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => contains(value: r[\"_field\"], set: [\"health\", \"io_ok\", \"io_failed\", \"io_retried_attempts\", \"watchdog_armed\", \"watchdog_tripped\", \"watchdog_trip_count\", \"missing\", \"excluded\"]))\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> pivot(rowKey: [\"provider_id\", \"device_id\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => contains(value: r[\"_field\"], set: [\"health\", \"io_ok\", \"io_failed\", \"io_retried_attempts\", \"watchdog_armed\", \"watchdog_tripped\", \"watchdog_trip_count\", \"missing\", \"excluded\"]))\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> pivot(rowKey: [\"provider_id\", \"device_id\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()",
           "refId": "A"
         }
       ],
@@ -278,7 +278,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"io_failed\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"io_failed\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
           "refId": "A"
         }
       ],
@@ -369,7 +369,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"io_retried_attempts\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"io_retried_attempts\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
           "refId": "A"
         }
       ],
@@ -459,7 +459,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"watchdog_trip_count\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"watchdog_trip_count\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
           "refId": "A"
         }
       ],
@@ -536,7 +536,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"watchdog_armed\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> map(fn: (r) => ({r with _value: if r._value then 1 else 0, _field: r.provider_id + \"/\" + r.device_id}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"watchdog_armed\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> map(fn: (r) => ({r with _value: if r._value then 1 else 0, _field: r.provider_id + \"/\" + r.device_id}))",
           "refId": "A"
         }
       ],
@@ -601,7 +601,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"missing\" or r[\"_field\"] == \"excluded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> last()\n  |> filter(fn: (r) => r._value == true)\n  |> map(fn: (r) => ({handle: r.provider_id + \"/\" + r.device_id}))\n  |> group()\n  |> unique(column: \"handle\")\n  |> count(column: \"handle\")",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"missing\" or r[\"_field\"] == \"excluded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == true)\n  |> map(fn: (r) => ({handle: r.provider_id + \"/\" + r.device_id}))\n  |> group()\n  |> unique(column: \"handle\")\n  |> count(column: \"handle\")",
           "refId": "A"
         }
       ],
@@ -700,7 +700,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"staleness_ms\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /${device_id:regex}/)\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"staleness_ms\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \"/\" + r.device_id}))",
           "refId": "A"
         }
       ],
@@ -790,7 +790,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_provider_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"degraded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _value: if r._value then 1 else 0, _field: r.provider_id + \" degraded\"}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_provider_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"degraded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _value: if r._value then 1 else 0, _field: r.provider_id + \" degraded\"}))",
           "refId": "A"
         },
         {
@@ -798,7 +798,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"anolis\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_provider_health\")\n  |> filter(fn: (r) => r[\"_field\"] == \"failed_device_count\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /${provider_id:regex}/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \" failed_devices\"}))",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_provider_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"failed_device_count\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({r with _field: r.provider_id + \" failed_devices\"}))",
           "refId": "B"
         }
       ],
@@ -848,14 +848,14 @@
           "type": "influxdb",
           "uid": "${DS_INFLUXDB}"
         },
-        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"provider_id\")",
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"runtime_name\")",
         "hide": 0,
         "includeAll": true,
-        "label": "Provider",
+        "label": "Runtime",
         "multi": true,
-        "name": "provider_id",
+        "name": "runtime_name",
         "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"provider_id\")",
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"runtime_name\")",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -876,14 +876,42 @@
           "type": "influxdb",
           "uid": "${DS_INFLUXDB}"
         },
-        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"device_id\")",
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"provider_id\")",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Provider",
+        "multi": true,
+        "name": "provider_id",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"provider_id\")",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "influxdb",
+          "uid": "${DS_INFLUXDB}"
+        },
+        "definition": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"device_id\")",
         "hide": 0,
         "includeAll": true,
         "label": "Device",
         "multi": true,
         "name": "device_id",
         "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: \"anolis\", tag: \"device_id\")",
+        "query": "import \"influxdata/influxdb/schema\"\n\nschema.tagValues(bucket: v.defaultBucket, tag: \"device_id\")",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
