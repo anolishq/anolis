@@ -261,8 +261,8 @@ safety:
    signal: a mismatch is then never raised for it.
 
 A `status` without `signal`, a handle of the wrong shape, a `devices` mapping
-without `handle`, or an `expect` other than `power_loss` or `reports_estop`
-fails config load.
+without `handle`, an `expect` other than `power_loss` or `reports_estop`, or a
+handle listed twice in `devices`, in either form, fails config load.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
