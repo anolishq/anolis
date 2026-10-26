@@ -25,6 +25,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      native: ${{ steps.filter.outputs.native }}
       cpp: ${{ steps.cppfilter.outputs.cpp }}
       docs: ${{ steps.docsfilter.outputs.docs }}
       observability: ${{ steps.obsfilter.outputs.observability }}
@@ -44,6 +45,23 @@ jobs:
               - '!**/*.jpg'
               - '!**/*.jpeg'
               - '!**/*.gif'
+            # What the runtime build and its tests can see: code, minus the shell
+            # installer and the observability stack, which have their own lanes
+            # and nothing in CMake or CTest reads. Keep in step with the
+            # paths-ignore lists in extended.yml and hardening.yml.
+            native:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!**/*.png'
+              - '!**/*.svg'
+              - '!**/*.jpg'
+              - '!**/*.jpeg'
+              - '!**/*.gif'
+              - '!tools/**'
+              - '!tests/shell/**'
+              - '!observability/**'
+              - '!tests/observability/**'
       # Separate OR-filter (default quantifier) for the C++ sources the clang-tidy
       # gate lints, so it skips (and the ok gate stays green) on non-C++ PRs.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -273,7 +291,7 @@ jobs:
   core-build-test:
     name: ${{ matrix.lane }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -363,7 +381,7 @@ jobs:
   anolis-provider-compat:
     name: anolis-provider-compat
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 90
 
@@ -390,13 +408,6 @@ jobs:
           echo "ref=$PROVIDER_REF" >> "$GITHUB_OUTPUT"
           echo "Using provider pin: $PROVIDER_REPO@$PROVIDER_REF"
 
-      - name: Checkout pinned provider-sim
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: ${{ steps.pins.outputs.repo }}
-          ref: ${{ steps.pins.outputs.ref }}
-          path: anolis-provider-sim
-
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
@@ -416,17 +427,28 @@ jobs:
         with:
           triplet: x64-linux-static
 
-      - name: Build pinned provider-sim (FluxGraph OFF)
-        working-directory: anolis-provider-sim
-        run: |
-          cmake --preset ci-linux-release
-          cmake --build --preset ci-linux-release --parallel
-
-      - name: Resolve provider executable
+      # The pin's release tarball rather than a source build: the release is
+      # built with FluxGraph off for x64-linux-static, as the source build here
+      # was, and checking it against the release's SHA256SUMS ties it to the tag.
+      # The pin must therefore name a release tag.
+      - name: Download pinned provider-sim release (FluxGraph OFF)
         id: provider
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER_REPO: ${{ steps.pins.outputs.repo }}
+          PROVIDER_REF: ${{ steps.pins.outputs.ref }}
         run: |
           set -euo pipefail
-          EXE="$GITHUB_WORKSPACE/anolis-provider-sim/build/ci-linux-release/anolis-provider-sim"
+          DIR="$GITHUB_WORKSPACE/anolis-provider-sim"
+          mkdir -p "$DIR"
+          if ! gh release download "$PROVIDER_REF" -R "$PROVIDER_REPO" -D "$DIR" \
+              --pattern '*-linux-x86_64.tar.gz' --pattern SHA256SUMS; then
+            echo "::error::No release $PROVIDER_REF in $PROVIDER_REPO; the provider_sim pin in .ci/dependency-pins.yml must name a release tag" >&2
+            exit 1
+          fi
+          (cd "$DIR" && sha256sum --check --ignore-missing --strict SHA256SUMS)
+          tar -xzf "$DIR"/*-linux-x86_64.tar.gz -C "$DIR"
+          EXE="$DIR/bin/anolis-provider-sim"
           if [ ! -x "$EXE" ]; then
             echo "Provider executable not found: $EXE" >&2
             exit 1

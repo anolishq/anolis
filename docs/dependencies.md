@@ -23,6 +23,9 @@ Rules:
 
 1. Compatibility lane must consume pinned refs, never floating `main`.
 2. Pin changes require rationale and date.
+3. The `provider_sim` ref must be a release tag. The lane downloads that
+   release's `linux-x86_64` tarball and checks it against the release's
+   `SHA256SUMS`; it does not build the provider.
 
 ## Version Numbering Policy (Cross-Repo)
 
