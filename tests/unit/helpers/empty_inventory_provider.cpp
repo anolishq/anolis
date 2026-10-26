@@ -16,7 +16,8 @@
 // `--stop-chain-no-hint`, chain_open carries no poll hint, so it is never polled.
 // With `--stop-chain-estop`, motor0 also publishes a polled bool `estop` that
 // reads <dir>/estop like chain_open, and while <dir>/motor0_off exists its
-// reads fail UNAVAILABLE, as a device behind a cut supply does (#484).
+// reads fail UNAVAILABLE, as a device behind a cut supply does (#484). If
+// motor0_off holds "stale", motor0 is reported instead, with stale quality.
 
 #include <array>
 #include <chrono>
@@ -241,7 +242,10 @@ int main(int argc, char **argv) {
             if (request.read_signals().device_id() == "gpio0") {
                 set_bool_reading(read->add_values(), "chain_open", read_word(dir / "chain"));
             } else if (request.read_signals().device_id() == "motor0" && stop_chain_estop) {
-                if (std::filesystem::exists(dir / "motor0_off")) {
+                const bool off = std::filesystem::exists(dir / "motor0_off");
+                if (off && read_word(dir / "motor0_off") == "stale") {
+                    set_bool_reading(read->add_values(), "estop", "stale");
+                } else if (off) {
                     response.mutable_status()->set_code(adpp::Status_Code_CODE_UNAVAILABLE);
                     response.mutable_status()->set_message("motor0 did not answer");
                     response.clear_read_signals();

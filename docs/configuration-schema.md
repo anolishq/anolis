@@ -213,7 +213,12 @@ safety:
     status:
       signal: gpio0/estop/chain_open  # provider/device/signal, a bool
       active: true                    # the value meaning "stop in force" (default true)
-    devices: [bread0/rlht0, bread0/dcmt0]  # provider/device handles in scope
+    devices:                          # provider/device handles in scope
+      - bread0/rlht0                  # held; no expectation
+      - handle: bread0/dcmt0
+        expect: power_loss            # goes silent when stopped
+      - handle: bread0/dcmt1
+        expect: reports_estop         # stays on the bus, reports estop=true
 ```
 
 1. The status reads `in_force`, `clear` or `unknown`. A signal that is stale
@@ -236,8 +241,23 @@ safety:
 6. At startup the runtime warns when the status device is itself in
    `devices`, is not registered, has actuating functions, or its signal has no
    poll hint (it is then never polled, and the status reads `unknown`).
+7. A device's optional `expect` says what it does when the stop is in force.
+   Once the stop has been in force for the status signal's stale bound, a
+   `power_loss` device that still has a fresh reading of any signal, or a
+   `reports_estop` device whose `estop` signal reads a fresh `false`, raises
+   "Stop not reaching *device*": a WARN in the log, an entry in
+   `stop_chain.mismatches` in `GET /v0/runtime/status`, and a
+   `stop_chain_mismatch` event. It is resolved, with another event, when the
+   device behaves as expected or the stop is released. The hold is the same
+   either way. A `reports_estop` device with no fresh `estop` reading does not
+   raise it: it may have lost power. A device with no `expect` never raises
+   it. At startup the runtime warns when a registered `reports_estop` device
+   has no polled bool `estop` signal, or a `power_loss` device has no polled
+   signal: a mismatch is then never raised for it.
 
-A `status` without `signal`, or a handle of the wrong shape, fails config load.
+A `status` without `signal`, a handle of the wrong shape, a `devices` mapping
+without `handle`, or an `expect` other than `power_loss` or `reports_estop`
+fails config load.
 Per-device `expect` comes in a later increment; an entry that is not a
 `provider/device` string fails config load until then.
 

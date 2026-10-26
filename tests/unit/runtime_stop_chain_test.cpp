@@ -15,7 +15,9 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <variant>
+#include <vector>
 
 #include "control/device_loss_latch.hpp"
 #include "events/event_types.hpp"
@@ -406,7 +408,11 @@ TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatStillAnswersRaisesStopNotRe
     {
         MainLoop loop(runtime);
         press_the_stop(rig, runtime);
-        EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty()) << "judged before the grace";
+        // Not judged before the grace: four polls' worth, well inside it.
+        for (int sample = 0; sample < 20; ++sample) {
+            EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty()) << "judged before the grace";
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
 
         ASSERT_TRUE(eventually([&] { return !runtime.get_stop_chain().mismatches().empty(); }));
         const auto standing = runtime.get_stop_chain().mismatches();
@@ -427,21 +433,25 @@ TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatStillAnswersRaisesStopNotRe
 }
 
 TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatGoesSilentRaisesNothing) {
-    const auto rig = fresh_rig("anolis-484-power-loss-silent");
-    set_chain(rig, "0");
-    set_file(rig, "estop", "0");
-    anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
-    std::string error;
-    std::string log;
-    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
-    auto events = runtime.get_event_emitter().subscribe();
+    // Silent: its reads fail, or its provider still reports it with stale quality.
+    for (const std::string off : {"1", "stale"}) {
+        SCOPED_TRACE("motor0_off " + off);
+        const auto rig = fresh_rig("anolis-484-power-loss-silent-" + off);
+        set_chain(rig, "0");
+        set_file(rig, "estop", "0");
+        anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
+        std::string error;
+        std::string log;
+        ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+        auto events = runtime.get_event_emitter().subscribe();
 
-    MainLoop loop(runtime);
-    set_file(rig, "motor0_off", "1");
-    press_the_stop(rig, runtime);
-    std::this_thread::sleep_for(kPastTheGrace);
-    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
-    EXPECT_TRUE(mismatch_moves(*events).empty());
+        MainLoop loop(runtime);
+        set_file(rig, "motor0_off", off);
+        press_the_stop(rig, runtime);
+        std::this_thread::sleep_for(kPastTheGrace);
+        EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+        EXPECT_TRUE(mismatch_moves(*events).empty());
+    }
 }
 
 TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesStopNotReaching) {
@@ -526,4 +536,30 @@ TEST(RuntimeStopChainExpectTest, ADeviceWithNoExpectationNeverRaises) {
     EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
     EXPECT_TRUE(mismatch_moves(*events).empty());
     EXPECT_TRUE(runtime.get_safe_state().is_engaged()) << "held all the same";
+}
+
+TEST(RuntimeStopChainExpectTest, WarnsWhenAnExpectationHasNothingToJudgeItBy) {
+    // Without --stop-chain-estop, motor0 publishes no signals at all.
+    const std::vector<std::tuple<std::string, std::string, std::string>> cases = {
+        {kReportsEstop, "", "bread0/motor0 expects reports_estop but has no polled bool estop signal"},
+        {kPowerLoss, "", "bread0/motor0 expects power_loss but has no polled signal"},
+        {kReportsEstop, kEstopArgs, ""},
+        {kPowerLoss, kEstopArgs, ""},
+    };
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto &[scope, args, warning] = cases[i];
+        SCOPED_TRACE(scope + args);
+        const auto rig = fresh_rig("anolis-484-warn-" + std::to_string(i));
+        set_chain(rig, "0");
+        set_file(rig, "estop", "1");
+        anolis::runtime::Runtime runtime(config_for(rig, scope, args));
+        std::string error;
+        std::string log;
+        ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+        if (warning.empty()) {
+            EXPECT_EQ(log.find("a mismatch is never raised"), std::string::npos) << log;
+        } else {
+            EXPECT_NE(log.find(warning), std::string::npos) << log;
+        }
+    }
 }

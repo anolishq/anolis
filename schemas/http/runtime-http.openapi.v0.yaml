@@ -549,10 +549,14 @@ paths:
         plus top-level streaming media type.
 
         Event types: state_update, quality_change, device_availability,
-        device_removed, mode_change, parameter_change, automation_fault, and
-        stop_chain_change. `stop_chain_change` carries previous_state,
-        new_state (in_force, clear or unknown), reason and timestamp_ms when
-        the observed emergency stop's state moves.
+        device_removed, mode_change, parameter_change, automation_fault,
+        stop_chain_change and stop_chain_mismatch. `stop_chain_change` carries
+        previous_state, new_state (in_force, clear or unknown), reason and
+        timestamp_ms when the observed emergency stop's state moves.
+        `stop_chain_mismatch` carries device, expect (power_loss or
+        reports_estop), raised, reason and timestamp_ms: raised true when a
+        device's declared expect is contradicted while the stop is in force
+        ("Stop not reaching <device>"), false when that ends.
         `automation_fault` (engine-abnormal only — a generic
         `locus`, never a BT node) carries the engine fault; the former `bt_error`
         compatibility alias was removed in v0.1.26. An ordinary unsuccessful
@@ -746,7 +750,7 @@ components:
         The observed emergency stop, present when safety.stop_chain names a
         status signal. The runtime only observes it. While it is in_force or
         unknown, the software stop's latch is held and cannot be cleared.
-      required: [state, reason, signal, devices, expected_losses, since_epoch_ms]
+      required: [state, reason, signal, devices, expectations, expected_losses, mismatches, since_epoch_ms]
       properties:
         state:
           type: string
@@ -765,6 +769,16 @@ components:
           items:
             type: string
           description: The provider/device handles in the stop's scope.
+        expectations:
+          type: object
+          description: >-
+            Each device in scope with a declared expect, by handle: power_loss
+            (it goes silent) or reports_estop (it reports its estop signal
+            true). A device with no expect is absent, and never raises a
+            mismatch.
+          additionalProperties:
+            type: string
+            enum: [power_loss, reports_estop]
         expected_losses:
           type: array
           items:
@@ -772,9 +786,36 @@ components:
           description: >-
             Devices in scope that are lost while the stop is in force: the stop,
             not a device fault. Empty otherwise.
+        mismatches:
+          type: array
+          description: >-
+            "Stop not reaching <device>": devices whose declared expect is
+            contradicted while the stop is in force, judged once it has been in
+            force for the status signal's stale bound. A power_loss device that
+            still has a fresh reading, or a reports_estop device whose estop
+            reads false. Empty otherwise. The hold is the same either way.
+          items:
+            $ref: '#/components/schemas/StopChainMismatch'
         since_epoch_ms:
           type: [integer, "null"]
           description: When the current state began.
+    StopChainMismatch:
+      type: object
+      additionalProperties: false
+      required: [device, expect, reason, since_epoch_ms]
+      properties:
+        device:
+          type: string
+          description: The provider/device handle.
+        expect:
+          type: string
+          enum: [power_loss, reports_estop]
+        reason:
+          type: string
+          description: What contradicted the expectation.
+        since_epoch_ms:
+          type: integer
+          description: When the mismatch was raised.
     SoftwareSafeState:
       type: string
       description: >-

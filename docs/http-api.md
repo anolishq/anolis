@@ -128,9 +128,14 @@ Notes:
 5. This is a software stop, not a substitute for the hardware emergency stop.
 6. With `safety.stop_chain` (see [configuration-schema.md](configuration-schema.md)),
    `GET /v0/runtime/status` carries `stop_chain`: `state` (`in_force`, `clear`
-   or `unknown`), `reason`, `signal`, `devices`, `expected_losses` and
-   `since_epoch_ms`. A move of the state is a `stop_chain_change` event on
-   `/v0/events`. While the state is `in_force` or `unknown`,
+   or `unknown`), `reason`, `signal`, `devices`, `expectations` (each
+   device's declared `expect`, by handle), `expected_losses`, `mismatches`
+   and `since_epoch_ms`. A move of the state is a `stop_chain_change` event on
+   `/v0/events`. A `mismatches` entry (`device`, `expect`, `reason`,
+   `since_epoch_ms`) is "Stop not reaching *device*": a declared `expect`
+   contradicted while the stop is in force. Each one raised or resolved is a
+   `stop_chain_mismatch` event (`device`, `expect`, `raised`, `reason`,
+   `timestamp_ms`). While the state is `in_force` or `unknown`,
    `POST /v0/estop/clear` answers `409` FAILED_PRECONDITION with the reason in
    `status.message`, and the latch stays engaged.
 

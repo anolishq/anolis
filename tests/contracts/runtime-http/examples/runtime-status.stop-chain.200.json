@@ -38,10 +38,23 @@
     "signal": "gpio0/estop/chain_open",
     "devices": [
       "bread0/rlht0",
-      "bread0/dcmt0"
+      "bread0/dcmt0",
+      "bread0/dcmt1"
     ],
+    "expectations": {
+      "bread0/dcmt0": "power_loss",
+      "bread0/dcmt1": "reports_estop"
+    },
     "expected_losses": [
       "bread0/dcmt0"
+    ],
+    "mismatches": [
+      {
+        "device": "bread0/dcmt1",
+        "expect": "reports_estop",
+        "reason": "bread0/dcmt1/estop reads false",
+        "since_epoch_ms": 1761400001500
+      }
     ],
     "since_epoch_ms": 1761400000000
   }

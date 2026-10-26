@@ -146,10 +146,13 @@ private:
     // safety.stop_chain (#483): build the monitor, and install its clear guard
     // and its expected-loss reason.
     void wire_stop_chain();
-    // Re-read the stop status; on a move to in_force or unknown, hold.
+    // Re-read the stop status; on a move to in_force or unknown, hold. Then
+    // re-judge the per-device expectations, raising or resolving mismatches.
     void update_stop_chain();
     // Load-time checks on the stop chain, once providers have been discovered.
     void warn_stop_chain_config() const;
+    // Per-device expectations with nothing to judge them by (#484).
+    void warn_unjudgeable_expectations() const;
 
     /** @brief Re-assert a returning latched device's declared safe state, in any mode. */
     void reissue_safe_state_for(const std::string &device_handle);

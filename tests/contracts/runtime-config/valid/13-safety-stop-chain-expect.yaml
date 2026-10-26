@@ -1,0 +1,21 @@
+providers:
+  - id: bread0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+safety:
+  stop_chain:
+    status:
+      signal: gpio0/estop/chain_open
+    devices:
+      - bread0/rlht0
+      - handle: bread0/dcmt0
+        expect: power_loss
+      - handle: bread0/dcmt1
+        expect: reports_estop
+      - handle: bread0/rlht1
+
+logging:
+  level: info

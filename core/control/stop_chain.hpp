@@ -98,6 +98,9 @@ public:
 private:
     std::pair<StopChainState, std::string> classify() const;
 
+    /** @brief Why `device_handle` contradicts `expect` now, or nullopt. */
+    std::optional<std::string> contradiction(const std::string &device_handle, runtime::StopChainExpect expect) const;
+
     const runtime::StopChainConfig &config_;
     const state::StateCache &cache_;
     const std::chrono::milliseconds stale_after_;

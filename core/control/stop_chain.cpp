@@ -94,9 +94,90 @@ StopChainSnapshot StopChainMonitor::snapshot() const {
     return current_;
 }
 
-std::vector<StopChainMismatchChange> StopChainMonitor::update_mismatches() { return {}; }
+std::optional<std::string> StopChainMonitor::contradiction(const std::string &device_handle,
+                                                           runtime::StopChainExpect expect) const {
+    // Judged only once the stop has been in force for the stale bound, so a
+    // reading still fresh now was taken after the stop began.
+    if (expect == runtime::StopChainExpect::PowerLoss) {
+        const auto device = cache_.get_device_state(device_handle);
+        if (device == nullptr) {
+            return std::nullopt;
+        }
+        for (const auto &[signal_id, value] : device->signals) {
+            if (!value.is_stale(stale_after_)) {
+                return std::format("{} still answers: {} read {} ms ago, after the stop", device_handle, signal_id,
+                                   value.age().count());
+            }
+        }
+        return std::nullopt;
+    }
+    // reports_estop: only a fresh estop=false contradicts it. No reading, or a
+    // stale one, is a device that may have lost power, not the stop failing.
+    const auto estop = cache_.get_signal_value(device_handle, "estop");
+    if (estop == nullptr || estop->is_stale(stale_after_) || !estop->value.has_bool_value() ||
+        estop->value.bool_value()) {
+        return std::nullopt;
+    }
+    return std::format("{}/estop reads false", device_handle);
+}
 
-std::vector<StopChainMismatch> StopChainMonitor::mismatches() const { return {}; }
+std::vector<StopChainMismatchChange> StopChainMonitor::update_mismatches() {
+    if (!configured() || config_.expectations.empty()) {
+        return {};
+    }
+    const auto chain = snapshot();
+    const int64_t now = now_epoch_ms();
+
+    // Judged once the stop has been in force for the stale bound: until then a
+    // device that lost power can still have a fresh reading, and estop can lag
+    // a poll.
+    std::map<std::string, StopChainMismatch> found;
+    if (chain.state == StopChainState::InForce && chain.since_epoch_ms.has_value() &&
+        now - *chain.since_epoch_ms >= stale_after_.count()) {
+        for (const auto &[handle, expect] : config_.expectations) {
+            if (auto reason = contradiction(handle, expect)) {
+                found.emplace(handle, StopChainMismatch{handle, expect, std::move(*reason), now});
+            }
+        }
+    }
+
+    std::vector<StopChainMismatchChange> changes;
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = mismatches_.begin(); it != mismatches_.end();) {
+        if (found.contains(it->first)) {
+            ++it;
+            continue;
+        }
+        StopChainMismatch resolved = it->second;
+        resolved.reason = chain.state == StopChainState::InForce
+                              ? std::format("{} now behaves as expected", resolved.device)
+                              : std::string("the stop is no longer in force");
+        resolved.since_epoch_ms = now;
+        changes.push_back({std::move(resolved), false});
+        it = mismatches_.erase(it);
+    }
+    for (auto &[handle, mismatch] : found) {
+        const auto standing = mismatches_.find(handle);
+        if (standing != mismatches_.end()) {
+            standing->second.reason = std::move(mismatch.reason);  // e.g. a read age that changes
+            continue;
+        }
+        changes.push_back({mismatch, true});
+        mismatches_.emplace(handle, std::move(mismatch));
+    }
+    return changes;
+}
+
+std::vector<StopChainMismatch> StopChainMonitor::mismatches() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<StopChainMismatch> standing;
+    standing.reserve(mismatches_.size());
+    for (const auto &[handle, mismatch] : mismatches_) {
+        (void)handle;
+        standing.push_back(mismatch);
+    }
+    return standing;
+}
 
 bool StopChainMonitor::holds() const {
     const auto state = snapshot().state;

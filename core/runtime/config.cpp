@@ -259,15 +259,40 @@ bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::strin
         for (size_t i = 0; i < node["devices"].size(); ++i) {
             const auto &entry = node["devices"][i];
             const std::string path = std::format("safety.stop_chain.devices[{}]", i);
-            if (!entry.IsScalar()) {
-                // Per-device `expect` is the next increment (#484).
-                error = std::format("{} must be a provider/device handle", path);
+            if (entry.IsScalar()) {
+                const auto handle = entry.as<std::string>();
+                if (!is_handle(handle, 2)) {
+                    error = std::format("{} must be provider/device, got '{}'", path, handle);
+                    return false;
+                }
+                chain.devices.push_back(handle);
+                continue;
+            }
+            // {handle, expect} (#484): expect is optional.
+            if (!entry.IsMap()) {
+                error = std::format("{} must be a provider/device handle or a mapping with handle", path);
                 return false;
             }
-            const auto handle = entry.as<std::string>();
-            if (!is_handle(handle, 2)) {
-                error = std::format("{} must be provider/device, got '{}'", path, handle);
+            warn_unknown_keys(entry, path, {"handle", "expect"});
+            if (!entry["handle"] || !entry["handle"].IsScalar()) {
+                error = std::format("{}.handle is required", path);
                 return false;
+            }
+            const auto handle = entry["handle"].as<std::string>();
+            if (!is_handle(handle, 2)) {
+                error = std::format("{}.handle must be provider/device, got '{}'", path, handle);
+                return false;
+            }
+            if (entry["expect"]) {
+                const auto expect = entry["expect"].IsScalar() ? entry["expect"].as<std::string>() : std::string();
+                if (expect == "power_loss") {
+                    chain.expectations[handle] = StopChainExpect::PowerLoss;
+                } else if (expect == "reports_estop") {
+                    chain.expectations[handle] = StopChainExpect::ReportsEstop;
+                } else {
+                    error = std::format("{}.expect must be power_loss or reports_estop, got '{}'", path, expect);
+                    return false;
+                }
             }
             chain.devices.push_back(handle);
         }

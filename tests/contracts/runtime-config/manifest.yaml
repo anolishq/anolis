@@ -37,6 +37,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/12-safety-on-startup-leave.yaml
     expect: valid
     note: safety.on_startup leave opts out of the startup safe state (#362)
+  - file: tests/contracts/runtime-config/valid/13-safety-stop-chain-expect.yaml
+    expect: valid
+    note: safety.stop_chain devices as handles and as handle/expect mappings (#484)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -65,6 +68,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/09-safety-on-startup-unknown.yaml
     expect: invalid/schema
     note: safety.on_startup must be safe_state or leave
+  - file: tests/contracts/runtime-config/invalid/schema/10-safety-stop-chain-unknown-expect.yaml
+    expect: invalid/schema
+    note: safety.stop_chain device expect must be power_loss or reports_estop
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime
