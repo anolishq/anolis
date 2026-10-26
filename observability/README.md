@@ -89,6 +89,13 @@ quality **changes**, not on every poll. The panels are built around that:
   30 days for its last row. A steady signal that last changed before the
   range is still shown. One that last changed more than 30 days before the
   end of the range is not.
+- **Only a running runtime's state is shown.** Nothing is written when a
+  runtime stops, so its last rows would otherwise stand. The latest-state
+  panels, and the seeds of the history panels, show a runtime's signals only
+  if it wrote an `anolis_provider_health` row in the selected range. They are
+  empty with health ingestion off (`telemetry.health_interval_ms: 0`) or on a
+  runtime before 0.1.37, and can be for a range shorter than the health
+  interval (15 s by default).
 - **History panels** plot the **last value in each window** as steps, seeded
   with each signal's last value before the range. A window's value is where
   the signal ended up, not an average of its changes, which would weight each
