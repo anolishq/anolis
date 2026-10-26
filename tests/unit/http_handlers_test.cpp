@@ -27,6 +27,7 @@
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
 #include "control/safe_state.hpp"
+#include "control/stop_chain.hpp"
 #include "http/json.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
@@ -797,6 +798,49 @@ TEST_F(HttpHandlersTest, GetRuntimeStatus) {
     EXPECT_FALSE(provider.contains("supervision"));
 
     EXPECT_EQ(1, json["device_count"]);
+}
+
+TEST_F(HttpHandlersTest, GetRuntimeStatusCarriesTheStopChainWithItsExpectations) {
+    // #483/#484: a stop chain whose status signal is not registered reads
+    // unknown; no device has been judged, so there are no mismatches.
+    runtime::StopChainConfig chain;
+    chain.status = runtime::StopChainStatusConfig{"gpio0/estop/chain_open", true};
+    chain.devices = {"bread0/rlht0", "bread0/dcmt1"};
+    chain.expectations = {{"bread0/dcmt1", runtime::StopChainExpect::ReportsEstop}};
+    control::StopChainMonitor monitor(chain, *state_cache, std::chrono::milliseconds(1000));
+    monitor.update();
+
+    client.reset();
+    server->stop();
+    runtime::HttpConfig http_config;
+    http_config.enabled = true;
+    http_config.bind = "127.0.0.1";
+    http_config.port = 0;
+    HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+    dependencies.stop_chain = &monitor;
+    server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+    std::string error;
+    ASSERT_TRUE(server->start(error)) << error;
+    client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+    client->set_connection_timeout(1, 0);
+
+    auto res = client->Get("/v0/runtime/status");
+    ASSERT_TRUE(res);
+    ASSERT_EQ(200, res->status);
+    const auto json = nlohmann::json::parse(res->body);
+    ASSERT_TRUE(json.contains("stop_chain")) << res->body;
+    const auto& stop_chain = json["stop_chain"];
+    EXPECT_EQ(stop_chain["state"], "unknown");
+    EXPECT_EQ(stop_chain["signal"], "gpio0/estop/chain_open");
+    EXPECT_EQ(stop_chain["devices"], nlohmann::json::array({"bread0/rlht0", "bread0/dcmt1"}));
+    EXPECT_EQ(stop_chain["expectations"], nlohmann::json({{"bread0/dcmt1", "reports_estop"}}));
+    EXPECT_EQ(stop_chain["expected_losses"], nlohmann::json::array());
+    EXPECT_EQ(stop_chain["mismatches"], nlohmann::json::array());
+    EXPECT_TRUE(stop_chain["since_epoch_ms"].is_number_integer()) << stop_chain.dump();
+
+    // The server holds a pointer to the monitor: stop it before the monitor goes.
+    client.reset();
+    server->stop();
 }
 
 TEST_F(HttpHandlersTest, GetRuntimeStatusUsesUnavailableWhenProviderUnavailable) {
