@@ -13,6 +13,68 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.54] - 2026-10-26
+
+Upgrade notes for operators:
+
+- **`--uninstall` now keeps the InfluxDB credentials while observability is
+  provisioned.** `/etc/anolis/observability.env` and
+  `/etc/anolis/observability-grafana.env` stay on disk with the InfluxDB
+  instance they belong to. The uninstall reports them as kept and adds them
+  to the `rm -f` purge line it prints. Without observability they are
+  removed as before. A later `--with-observability` install reuses them.
+- **A host uninstalled by an earlier `install.sh` is refused with a recovery
+  step.** If InfluxDB is already set up but neither file is there,
+  observability is not provisioned, and the install prints the
+  `sudo -H influx` commands that mint the two tokens and where to write
+  them.
+- **The latest-state dashboard panels show only a runtime that reports
+  health in the range.** Signal tables, quality counts and the quality pie,
+  and the seeds of the history charts, keep a runtime's signals only if it
+  wrote an `anolis_provider_health` row in the range. They are empty with
+  `telemetry.health_interval_ms: 0` or before 0.1.37, and can be for a range
+  shorter than the health interval (15 s by default).
+
+No config schema, provider protocol or HTTP API change. `install.sh`
+changed, so `SHA256SUMS` lists a new hash for it.
+
+### Added
+
+- **`runtime_name` on `mode_change` and `parameter_change` telemetry rows**
+  (#478, #493), so the dashboards' annotations filter by runtime. These
+  measurements are outside the locked telemetry contract. Rows written by
+  older runtimes have no `runtime_name`, and the annotations show them under
+  every runtime.
+- **A query suite for the bundled Grafana dashboards** (#478, #493). It runs
+  every panel, annotation and variable query through Grafana against
+  InfluxDB loaded with fixture telemetry: `just test-observability` (needs
+  Docker), and CI's `observability` job.
+
+### Fixed
+
+- **The bundled Grafana dashboards** (#478, #493). Each read the
+  datasource's bucket and filters by runtime. Variable filters are anchored,
+  so selecting signal `int` no longer also matches `uint`. Device Health
+  counts the contract's qualities (OK, STALE, UNAVAILABLE, FAULT), its
+  staleness gauge reads `staleness_ms`, and both quality-distribution panels
+  run instead of failing. Latest-state panels look back 30 days for a
+  signal's last change. History panels plot the last value per window, held
+  between changes. System Overview counts providers, devices and signals seen
+  in range by full identity. Signal History shows unsigned and string values.
+  The mode and parameter annotations show their fields. IO Health counts a
+  missing or excluded device per runtime.
+- **A reinstall after `--uninstall` left Grafana and the runtime without an
+  InfluxDB token** (#469, #495). The uninstall deleted the credentials of
+  the instance it kept, so the reinstall found InfluxDB set up and could not
+  mint new ones. It now reuses the kept tokens: the Grafana env file is
+  restored, and a missing or blank `INFLUXDB_TOKEN` in `runtime.env` gets
+  the write token. A token the operator set is left alone. A Grafana
+  password the recovery path generates is written to `observability.env`,
+  after that file is set to `0600 root:root`.
+
+`tools/process-dashboard/` (#477, #496), a prototype dashboard generator, is
+not in any release.
+
 ## [0.1.53] - 2026-10-25
 
 Upgrade notes for operators:
