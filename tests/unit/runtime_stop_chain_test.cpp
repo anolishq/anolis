@@ -235,6 +235,21 @@ TEST(RuntimeStopChainTest, AStatusThatGoesStaleHolds) {
         << runtime.get_stop_chain().snapshot().reason;
 }
 
+TEST(RuntimeStopChainTest, AStatusThatCannotBeReadHolds) {
+    const auto rig = fresh_rig("anolis-483-unreadable");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    MainLoop loop(runtime);
+    set_chain(rig, "");  // removed for good: the helper reports FAULT quality
+    ASSERT_TRUE(eventually([&] { return runtime.get_safe_state().is_engaged(); }));
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+}
+
 TEST(RuntimeStopChainTest, WarnsWhenTheStatusSourceIsInItsOwnScopeOrCanBeDriven) {
     const auto rig = fresh_rig("anolis-483-warnings");
     set_chain(rig, "0");

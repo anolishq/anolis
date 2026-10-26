@@ -13,6 +13,74 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.53] - 2026-10-25
+
+Upgrade notes for operators:
+
+- **The software stop's latch survives a restart.** A latch engaged by
+  `POST /v0/estop` is now written to `<data_dir>/estop/` and restored at
+  startup, so a redeploy or reboot comes back latched instead of accepting
+  actuating calls. Clear it with `POST /v0/estop/clear` once the machine is
+  safe. `GET /v0/runtime/status` says why a runtime started latched in
+  `estop.restored_reason`. `data_dir` must be on persistent storage; installs
+  already keep it under the install prefix.
+- **AUTO is refused while the latch is engaged.** After a software stop,
+  `FAULT -> MANUAL` still works, but `MANUAL -> AUTO` is refused with the
+  reason until the latch is cleared.
+- **A string argument outside a provider's `allowed_values` is refused.**
+  `POST /v0/call`, safe-state hooks, mode-transition hooks and behaviour-tree
+  calls get `INVALID_ARGUMENT`. Startup preflight reports a declared call
+  that would be refused. Nothing changes until a provider sets the field;
+  anolis-provider-bread 0.9.1 sets it for `set_mode`.
+
+The config schema gains `safety.stop_chain`, which is optional. The OpenAPI
+changes are additive except one: `POST /v0/estop/clear` can now answer `409`,
+but only when `safety.stop_chain` is configured. anolis-workbench vendors this
+OpenAPI file and needs a repin to pick them up.
+
+### Added
+
+- **`safety.stop_chain`: observing the emergency stop** (#283, #284, #483,
+  #490), specified in
+  [rfcs/stop-chain.md](docs/rfcs/stop-chain.md) (#480). It names a bool
+  signal any provider publishes, `provider/device/signal`, such as a
+  contactor's mirror contact, and the devices the stop removes power from.
+  The runtime only observes it.
+  - The status reads `in_force`, `clear` or `unknown`. A reading that is
+    stale, missing or not a bool is `unknown`, never `clear`.
+  - On `in_force` or `unknown` the latch is held without running the ladder,
+    and an automation machine enters `FAULT`. No safe-state calls are sent.
+  - The clear is refused, with `409` and the reason, until the stop reads
+    `clear`. Releasing the stop never clears the latch.
+  - A device in scope that goes unreachable while the stop is in force is
+    reported as the stop, not as a device fault.
+  - `safety.on_startup: safe_state` with the stop in force at boot skips the
+    devices in scope, reported as `stop chain in force`, and still drives the
+    rest.
+  - `GET /v0/runtime/status` carries `stop_chain`, and a move is a
+    `stop_chain_change` event on `/v0/events`.
+  - Startup warns when the status device is in its own scope, is not
+    registered, has actuating functions, or its signal has no poll hint and
+    is never polled.
+- **The software stop's latch is kept across restarts** (#482, #489), one
+  file per machine under `data_dir`, keyed by the config file's directory, so
+  a project's variants share it and separate projects do not. A present but
+  unreadable or corrupt file starts the runtime latched.
+- **`allowed_values` on string function arguments** (#467, #479). The
+  capabilities response carries a provider's `ArgSpec.allowed_values`, the
+  OpenAPI `ArgSpec` describes it, and a call outside it is refused with
+  `INVALID_ARGUMENT` before it reaches the provider.
+
+### Fixed
+
+- **AUTO could be entered with the software stop still latched** (#481,
+  #488). It is refused, with the reason, both before the transition's hooks
+  run and again as AUTO commits, so a stop pressed mid-transition is caught.
+- **The refuse-hookless gate could be passed by a provider restart during
+  MANUAL -> AUTO** (#239, #486). The gate is checked again under the mode lock
+  as AUTO commits, so a hookless actuating inventory committed while the
+  transition's hooks run cannot land the runtime in AUTO.
+
 ## [0.1.52] - 2026-10-25
 
 No runtime, config schema, provider protocol or HTTP API change. This
