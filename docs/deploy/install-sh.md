@@ -131,8 +131,11 @@ the last *different* install.
 > the environment files holding the runtime's API token, including the
 > workbench service's copy at `/etc/anolis/workbench-runtime-token`. Recorded data is kept:
 > the run journal in `<prefix>/anolis-data` (when it holds anything), observability
-> data, packages and the system user. The uninstall prints the purge command for
-> what it kept. Back up your config directory first if it is not also held
+> data, packages and the system user. With observability installed, the InfluxDB
+> credentials in `/etc/anolis/observability.env` and
+> `/etc/anolis/observability-grafana.env` are kept with the instance they
+> unlock, and a later `--with-observability` install reuses them. The uninstall
+> prints the purge command for what it kept. Back up your config directory first if it is not also held
 > elsewhere.
 >
 > Before it stops anything, the uninstall checks the prefix and refuses one that
