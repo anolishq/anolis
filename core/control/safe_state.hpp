@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include "control/i_actuation_latch.hpp"
+#include "control/latch_store.hpp"
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
 
@@ -118,6 +120,8 @@ struct EstopCapability {
     SafeStateKind software_safe_state = SafeStateKind::None;  // what a trigger WOULD do now
     std::optional<int64_t> latched_at_epoch_ms;
     size_t uncovered_actuating_functions = 0;  // ACTUATE functions the active rung cannot drive
+    // Set while the latch is one this runtime started with, read from disk (#482): why.
+    std::optional<std::string> restored_reason;
 };
 
 /** @brief What the `safety.on_startup` run did, for GET /v0/runtime/status (#362). */
@@ -143,6 +147,16 @@ public:
 
     /** @brief Attach the mode manager (nullptr when automation is disabled). */
     void set_mode_manager(automation::ModeManager *mode_manager);
+
+    /**
+     * @brief Keep the latch on disk across restarts, and restore it now (#482).
+     *
+     * A file that is present, or present but unreadable, engages the latch
+     * before anything can call in; why is logged and kept for `capability()`.
+     * From then on `trigger()` writes the file before it returns and `clear()`
+     * removes it. Call once, before the HTTP server opens.
+     */
+    void attach_latch_store(std::unique_ptr<LatchStore> store);
 
     // IActuationLatch
     bool is_engaged() const override;
@@ -223,9 +237,11 @@ private:
     std::atomic<bool> latched_{false};
     // The thread running trigger()'s FAULT entry under rung none; empty otherwise.
     std::atomic<std::thread::id> fault_entry_hook_thread_{};
-    mutable std::mutex mutex_;               // serialize trigger()/clear(); guard metadata
-    std::optional<int64_t> latched_at_ms_;   // guarded by mutex_
-    StartupSafeStateReport startup_report_;  // guarded by mutex_
+    mutable std::mutex mutex_;                    // serialize trigger()/clear(); guard metadata
+    std::optional<int64_t> latched_at_ms_;        // guarded by mutex_
+    std::unique_ptr<LatchStore> latch_store_;     // optional; set once at startup
+    std::optional<std::string> restored_reason_;  // guarded by mutex_
+    StartupSafeStateReport startup_report_;       // guarded by mutex_
 };
 
 }  // namespace control

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <map>
 #include <thread>
 
@@ -334,7 +335,16 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
     std::lock_guard<std::mutex> lock(mutex_);
     latched_.store(true, std::memory_order_release);
     latched_at_ms_ = now_epoch_ms();
+    restored_reason_.reset();
     LOG_WARN("[SafeState] E-stop engaged" << (reason.empty() ? "" : (": " + reason)));
+    // On disk before the ladder runs, so a crash or restart mid-ladder still
+    // comes back latched (#482).
+    if (latch_store_ != nullptr) {
+        std::string error;
+        if (!latch_store_->save(*latched_at_ms_, reason, error)) {
+            LOG_ERROR("[SafeState] E-stop latch not persisted (" << error << "); a restart would come back unlatched");
+        }
+    }
 
     EstopResult result = run_ladder();
 
@@ -396,7 +406,36 @@ void SafeStateController::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     latched_.store(false, std::memory_order_release);
     latched_at_ms_.reset();
+    restored_reason_.reset();
     LOG_INFO("[SafeState] E-stop latch cleared");
+    if (latch_store_ != nullptr) {
+        std::string error;
+        if (!latch_store_->remove(error)) {
+            // Fails toward held: a file left behind latches the next start.
+            LOG_WARN("[SafeState] E-stop latch file not removed (" << error
+                                                                   << "); the next start will come back latched");
+        }
+    }
+}
+
+void SafeStateController::attach_latch_store(std::unique_ptr<LatchStore> store) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    latch_store_ = std::move(store);
+    if (latch_store_ == nullptr) {
+        return;
+    }
+    const PersistedLatch persisted = latch_store_->load();
+    if (persisted.state == PersistedLatch::State::Absent) {
+        return;
+    }
+    latched_.store(true, std::memory_order_release);
+    // latched_at is never null while latched; a file that cannot say when
+    // gets the time it was found.
+    latched_at_ms_ = persisted.latched_at_epoch_ms.value_or(now_epoch_ms());
+    restored_reason_ = std::format("started latched: {}", persisted.detail);
+    LOG_WARN("[SafeState] E-stop " << *restored_reason_
+                                   << "; clear it (POST /v0/estop/clear) once the machine is "
+                                      "safe");
 }
 
 size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
@@ -439,6 +478,7 @@ EstopCapability SafeStateController::capability() const {
         std::lock_guard<std::mutex> lock(mutex_);
         cap.latched = latched_.load(std::memory_order_acquire);
         cap.latched_at_epoch_ms = latched_at_ms_;
+        cap.restored_reason = restored_reason_;
     }
     return cap;
 }

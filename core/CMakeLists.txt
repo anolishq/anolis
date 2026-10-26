@@ -222,6 +222,7 @@ anolis_apply_warnings(anolis_health)
 add_library(anolis_control STATIC
     control/call_router.cpp
     control/device_loss_latch.cpp
+    control/latch_store.cpp
     control/reissue_worker.cpp
     control/safe_state.cpp
 )
@@ -238,6 +239,7 @@ target_link_libraries(anolis_control PUBLIC
     anolis_state
     anolis_automation_support
     protobuf::libprotobuf
+    nlohmann_json::nlohmann_json
 )
 anolis_apply_warnings(anolis_control)
 
