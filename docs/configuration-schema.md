@@ -216,9 +216,9 @@ safety:
     devices:                          # provider/device handles in scope
       - bread0/rlht0                  # held; no expectation
       - handle: bread0/dcmt0
-        expect: power_loss            # goes silent when stopped
-      - handle: bread0/dcmt1
         expect: reports_estop         # stays on the bus, reports estop=true
+      - handle: relay0/heater0
+        expect: power_loss            # its controller loses power: goes silent
 ```
 
 1. The status reads `in_force`, `clear` or `unknown`. A signal that is stale
@@ -242,6 +242,11 @@ safety:
    `devices`, is not registered, has actuating functions, or its signal has no
    poll hint (it is then never polled, and the status reads `unknown`).
 7. A device's optional `expect` says what it does when the stop is in force.
+   Use `power_loss` only when the stop removes power from the device's
+   controller itself; a device whose controller stays powered while its
+   output is cut is `reports_estop`, or has no `expect` if it has no `estop`
+   signal. A bread DCMT or RLHT behind a stop that cuts only the motor and
+   relay paths stays on the bus and reports `estop`.
    Once the stop has been in force for the status signal's stale bound, a
    `power_loss` device that still has a fresh reading of any signal, or a
    `reports_estop` device whose `estop` signal reads a fresh `false`, raises
@@ -258,8 +263,6 @@ safety:
 A `status` without `signal`, a handle of the wrong shape, a `devices` mapping
 without `handle`, or an `expect` other than `power_loss` or `reports_estop`
 fails config load.
-Per-device `expect` comes in a later increment; an entry that is not a
-`provider/device` string fails config load until then.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires

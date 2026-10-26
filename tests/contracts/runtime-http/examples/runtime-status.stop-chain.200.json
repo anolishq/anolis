@@ -42,7 +42,6 @@
       "bread0/dcmt1"
     ],
     "expectations": {
-      "bread0/dcmt0": "power_loss",
       "bread0/dcmt1": "reports_estop"
     },
     "expected_losses": [

@@ -11,7 +11,7 @@ safety:
       signal: gpio0/estop/chain_open
     devices:
       - bread0/rlht0
-      - handle: bread0/dcmt0
+      - handle: relay0/heater0
         expect: power_loss
       - handle: bread0/dcmt1
         expect: reports_estop
