@@ -27,7 +27,7 @@ def _series(grafana, dashboard, window, selected=None) -> dict[str, list]:
 
 @pytest.fixture()
 def typed(load, now_ms):
-    t = Telemetry()
+    t = Telemetry().provider_health(now_ms - MINUTE)
     at = now_ms - 5 * MINUTE
     t.signal(at, signal="double", value=1.5)
     t.signal(at, signal="int", value=-3)
@@ -44,7 +44,7 @@ def test_every_typed_value_field_is_shown(grafana, dashboards, typed, hour):
 
 
 def test_a_signal_unchanged_since_before_the_range_is_still_drawn(grafana, dashboards, load, now_ms, hour):
-    load(Telemetry().signal(now_ms - 3 * 60 * MINUTE, signal="steady", value=4.25))
+    load(Telemetry().provider_health(now_ms - MINUTE).signal(now_ms - 3 * 60 * MINUTE, signal="steady", value=4.25))
     assert 4.25 in _series(grafana, dashboards[UID], hour).get("steady", [])
 
 
@@ -53,7 +53,23 @@ def test_history_plots_the_last_value_per_window_not_a_mean(grafana, dashboards,
     window = Window.last(3600, now_ms=now_ms, interval_ms=60_000)
     start = now_ms - 30 * MINUTE - (now_ms % MINUTE)  # one whole one-minute window
     load(Telemetry().signal(start + 1_000, signal="x", value=0.0).signal(start + 2_000, signal="x", value=10.0))
-    assert _series(grafana, dashboards[UID], window).get("x") == [10.0]
+    assert set(_series(grafana, dashboards[UID], window).get("x", [])) == {10.0}
+
+
+@pytest.mark.parametrize(
+    "panel_id, signal, value, drawn", [(1, "double", 2.5, 2.5), (2, "bool", True, 1), (3, "int", 4, 4.0)]
+)
+def test_a_value_is_drawn_to_the_end_of_the_range(grafana, dashboards, load, hour, panel_id, signal, value, drawn):
+    """A value holds until the next change, so the line reaches the range's last window."""
+    load(Telemetry().signal(hour.start_ms + 50 * MINUTE, signal=signal, value=value))
+    points = []
+    for frame in grafana.panel(dashboards[UID], panel_id, hour):
+        times = next(c for c in frame.columns if c.name in ("Time", "_time")).values
+        for column in frame.value_columns():
+            points += [(t, v) for t, v in zip(times, column.values, strict=True) if v is not None]
+    assert points, f"panel {panel_id} drew nothing"
+    last_time, last_value = max(points)
+    assert last_time > hour.stop_ms - hour.interval_ms and last_value == drawn
 
 
 @pytest.mark.parametrize("signal", ["double", "int", "uint", "bool", "string"])

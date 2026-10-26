@@ -25,7 +25,7 @@ def _stat(grafana, dashboard, title, window) -> float:
 
 
 def _signals_by_quality(now_ms: int) -> Telemetry:
-    t = Telemetry()
+    t = Telemetry().provider_health(now_ms - MINUTE)
     # Each signal's earlier quality differs from its latest one, so only the latest may count.
     latest = {"OK": 2, "STALE": 1, "UNAVAILABLE": 1, "FAULT": 3}
     n = 0
@@ -82,13 +82,23 @@ def test_staleness_gauge_shows_device_health_staleness(grafana, dashboards, load
 def test_signal_table_shows_a_signal_unchanged_since_before_the_range(grafana, dashboards, load, now_ms, hour):
     """Rows are written on change: a steady signal's state is its last row, however old."""
     steady, recent = now_ms - 3 * 60 * MINUTE, now_ms - 3 * MINUTE
-    load(Telemetry().signal(steady, signal="steady", value=1.0).signal(recent, signal="recent", value=2.0))
+    load(
+        Telemetry()
+        .provider_health(now_ms - MINUTE)
+        .signal(steady, signal="steady", value=1.0)
+        .signal(recent, signal="recent", value=2.0)
+    )
     table = {row["Signal"]: row["Last change"] for row in rows(grafana.panel(dashboards[UID], SIGNAL_TABLE, hour))}
     assert table == {"steady": steady, "recent": recent}
 
 
 def test_signal_table_reports_last_change_in_milliseconds(grafana, dashboards, load, now_ms, hour):
     first, second = now_ms - 7 * MINUTE, now_ms - 3 * MINUTE
-    load(Telemetry().signal(first, signal="a", value=1.0).signal(second, signal="b", value=2.0))
+    load(
+        Telemetry()
+        .provider_health(now_ms - MINUTE)
+        .signal(first, signal="a", value=1.0)
+        .signal(second, signal="b", value=2.0)
+    )
     table = {row["Signal"]: row["Last change"] for row in rows(grafana.panel(dashboards[UID], SIGNAL_TABLE, hour))}
     assert table == {"a": first, "b": second}

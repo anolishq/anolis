@@ -38,7 +38,8 @@ def test_counts_are_what_was_seen_in_range(grafana, dashboards, load, now_ms, ho
 
 def test_status_table_lists_each_signal_with_its_last_change(grafana, dashboards, load, now_ms, hour):
     first, second = now_ms - 7 * MINUTE, now_ms - 3 * MINUTE
-    t = Telemetry().signal(first, signal="a", value=1.0).signal(second, signal="b", quality="FAULT", value=2.0)
+    t = Telemetry().provider_health(now_ms - MINUTE)
+    t.signal(first, signal="a", value=1.0).signal(second, signal="b", quality="FAULT", value=2.0)
     load(t)
     table = rows(grafana.panel(dashboards[UID], STATUS_TABLE, hour))
     seen = sorted((r["Device"], r["Signal"], r["Quality"], r["Last change"]) for r in table)
@@ -47,13 +48,13 @@ def test_status_table_lists_each_signal_with_its_last_change(grafana, dashboards
 
 def test_status_table_shows_a_signal_unchanged_since_before_the_range(grafana, dashboards, load, now_ms, hour):
     steady = now_ms - 3 * 60 * MINUTE
-    load(Telemetry().signal(steady, signal="steady", value=1.0))
+    load(Telemetry().provider_health(now_ms - MINUTE).signal(steady, signal="steady", value=1.0))
     table = rows(grafana.panel(dashboards[UID], STATUS_TABLE, hour))
     assert [(r["Signal"], r["Last change"]) for r in table] == [("steady", steady)]
 
 
 def test_quality_pie_counts_latest_quality_per_signal(grafana, dashboards, load, now_ms, hour):
-    t = Telemetry()
+    t = Telemetry().provider_health(now_ms - MINUTE)
     for device, earlier, latest in (("d1", "FAULT", "OK"), ("d2", "OK", "OK"), ("d3", "OK", "FAULT")):
         t.signal(now_ms - 30 * MINUTE, device=device, quality=earlier, value=1.0)
         t.signal(now_ms - 5 * MINUTE, device=device, quality=latest, value=1.0)
