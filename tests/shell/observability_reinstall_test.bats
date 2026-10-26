@@ -179,15 +179,22 @@ _fresh_install_files() {
 
 @test "469: recovering with only the two tokens records the new Grafana password" {
     # The refusal's recovery step: the operator writes back just the tokens.
+    # Written by hand, so with whatever mode the operator's umask gave it.
     printf 'INFLUXDB_WRITE_TOKEN=%s\nINFLUXDB_READ_TOKEN=%s\n' "${WRITE_TOKEN}" "${READ_TOKEN}" >"${OBSERVABILITY_ENV_FILE}"
-    command chmod 600 "${OBSERVABILITY_ENV_FILE}"
+    command chmod 644 "${OBSERVABILITY_ENV_FILE}"
     printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    # Record how many password lines the file held when each chmod ran.
+    chmod() {
+        printf 'chmod %s (passwords: %s)\n' "$*" "$(grep -c '^GRAFANA_ADMIN_PASSWORD=' "${OBSERVABILITY_ENV_FILE}")" >>"${CALLS}"
+    }
     run _obs_setup_influx
     [ "$status" -eq 0 ]
     grep -qxF "GF_SECURITY_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${GRAFANA_ENV_FILE}"
     [ "$(grep -c '^GRAFANA_ADMIN_PASSWORD=' "${OBSERVABILITY_ENV_FILE}")" -eq 1 ]
     grep -qxF "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${OBSERVABILITY_ENV_FILE}"
     grep -qxF "INFLUXDB_WRITE_TOKEN=${WRITE_TOKEN}" "${OBSERVABILITY_ENV_FILE}"
-    [ "$(stat -c %a "${OBSERVABILITY_ENV_FILE}")" = "600" ]
+    # Locked down before the password went in.
+    grep -qxF "chmod 600 ${OBSERVABILITY_ENV_FILE} (passwords: 0)" "${CALLS}"
+    grep -qxF "chown root:root ${OBSERVABILITY_ENV_FILE}" "${CALLS}"
     [[ "${output}" != *"not-a-secret"* ]]
 }

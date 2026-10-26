@@ -1463,8 +1463,11 @@ _obs_reuse_credentials() {
     if [[ ! -f "${GRAFANA_ENV_FILE}" ]]; then
         install -m 600 -o root -g root /dev/null "${GRAFANA_ENV_FILE}" || return 1
         emit_grafana_env "${read_token}" "${grafana_pw:-${_OBS_GRAFANA_PW}}" >> "${GRAFANA_ENV_FILE}" || return 1
-        # A password made here goes where the summary says to find it.
+        # A password made here goes where the summary says to find it. The
+        # operator wrote this file by hand, so lock it down first.
         if [[ -z "${grafana_pw}" ]]; then
+            chmod 600 "${OBSERVABILITY_ENV_FILE}" || return 1
+            chown root:root "${OBSERVABILITY_ENV_FILE}" || return 1
             echo "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" >> "${OBSERVABILITY_ENV_FILE}" || return 1
         fi
         log_ok "observability: ${GRAFANA_ENV_FILE} restored from ${OBSERVABILITY_ENV_FILE}"
