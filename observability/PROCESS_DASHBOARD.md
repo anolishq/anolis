@@ -107,12 +107,25 @@ metadata:
   (`core/http/json.cpp`), which the OpenAPI `ValueType` enum does not list. The
   generator shows such a signal as not plotted.
 - A `bytes` value is written to telemetry as a string of the raw bytes.
+- The runtime already holds a per-signal freshness bound and poll rate that
+  HTTP does not report. Each signal's provider-declared `stale_after_ms` and
+  `poll_hint_hz` are kept in the device registry
+  (`core/registry/device_registry.hpp`), and bread declares 5000 ms and
+  1.0 Hz on every signal. `encode_signal_spec` (`core/http/json.cpp`) puts
+  only the id, value type, label, unit and description on HTTP, so the saved
+  inventory, and the generator, never see them.
 
-**Is more metadata justified?** Not by this evaluation. The useful panel-level
-improvements are provider fixes above. Pairing is the one thing that needs
-information nobody declares; the next experiment, if pairing is wanted, is an
-optional human-written file naming pairs for one machine, not a provider or
-contract change.
+**Is more metadata justified?** Not new metadata, by this evaluation. The
+useful panel-level improvements are provider fixes above. Pairing is the one
+thing that needs information nobody declares; the next experiment, if pairing
+is wanted, is an optional human-written file naming pairs for one machine, not
+a provider or contract change.
+
+Metadata that already exists is another matter. Providers already declare a
+freshness bound for each signal and the runtime keeps it; reporting
+`stale_after_ms` on the signal spec over HTTP is the one field between it and
+a generated dashboard that marks staleness per signal. That is a contract
+change, so it is out of scope here and would be a follow-up issue.
 
 ## Limitations
 
