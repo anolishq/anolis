@@ -16,10 +16,12 @@
 
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "runtime/config.hpp"
 #include "state/state_cache.hpp"
@@ -35,6 +37,22 @@ enum class StopChainState {
 };
 
 const char *stop_chain_state_to_string(StopChainState state);
+
+const char *stop_chain_expect_to_string(runtime::StopChainExpect expect);
+
+/** @brief "Stop not reaching <device>": a declared `expect` contradicted while in force (#484). */
+struct StopChainMismatch {
+    std::string device;  // provider/device
+    runtime::StopChainExpect expect;
+    std::string reason;      // what contradicted it
+    int64_t since_epoch_ms;  // when it was raised
+};
+
+/** @brief A mismatch raised, or resolved. */
+struct StopChainMismatchChange {
+    StopChainMismatch mismatch;
+    bool raised;
+};
 
 struct StopChainSnapshot {
     StopChainState state = StopChainState::NotConfigured;
@@ -54,6 +72,18 @@ public:
 
     StopChainSnapshot snapshot() const;
 
+    /**
+     * @brief Re-judge the devices with a declared `expect` (#484).
+     *
+     * Only while the stop has been in force for the stale bound: before that, a
+     * device that lost power may still have a fresh reading, and `estop` may lag
+     * a poll. Returns the mismatches raised and resolved since the last call.
+     */
+    std::vector<StopChainMismatchChange> update_mismatches();
+
+    /** @brief The mismatches standing now. */
+    std::vector<StopChainMismatch> mismatches() const;
+
     /** @brief True while the stop is in force or its status unknown: hold, refuse the clear. */
     bool holds() const;
 
@@ -68,6 +98,9 @@ public:
 private:
     std::pair<StopChainState, std::string> classify() const;
 
+    /** @brief Why `device_handle` contradicts `expect` now, or nullopt. */
+    std::optional<std::string> contradiction(const std::string &device_handle, runtime::StopChainExpect expect) const;
+
     const runtime::StopChainConfig &config_;
     const state::StateCache &cache_;
     const std::chrono::milliseconds stale_after_;
@@ -75,7 +108,8 @@ private:
     std::string signal_id_;
 
     mutable std::mutex mutex_;
-    StopChainSnapshot current_;  // guarded by mutex_
+    StopChainSnapshot current_;                            // guarded by mutex_
+    std::map<std::string, StopChainMismatch> mismatches_;  // by device; guarded by mutex_
 };
 
 }  // namespace control

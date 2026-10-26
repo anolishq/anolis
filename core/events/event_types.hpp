@@ -255,12 +255,29 @@ struct StopChainEvent {
 };
 
 /**
+ * @brief Stop-chain mismatch (#484): a device's declared `expect` contradicted
+ * while the stop is in force ("Stop not reaching <device>"), or no longer.
+ *
+ * `raised` is true when the mismatch begins, false when it ends: the device
+ * now behaves as expected, or the stop is no longer in force.
+ */
+struct StopChainMismatchEvent {
+    uint64_t event_id;
+    std::string device;  // provider/device
+    std::string expect;  // power_loss or reports_estop
+    bool raised;
+    std::string reason;
+    int64_t timestamp_ms;
+};
+
+/**
  * @brief Union of all event types
  *
  * Subscribers receive Event variants and can dispatch on type.
  */
-using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
-                           ParameterChangeEvent, AutomationFaultEvent, DeviceRemovedEvent, StopChainEvent>;
+using Event =
+    std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent, ParameterChangeEvent,
+                 AutomationFaultEvent, DeviceRemovedEvent, StopChainEvent, StopChainMismatchEvent>;
 
 /**
  * @brief Get event ID from any event type

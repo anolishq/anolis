@@ -14,6 +14,10 @@
 // call OK and appends device/function_id to <dir>/calls (#483). With
 // `--stop-chain-actuating`, gpio0 also has an ACTUATE function; with
 // `--stop-chain-no-hint`, chain_open carries no poll hint, so it is never polled.
+// With `--stop-chain-estop`, motor0 also publishes a polled bool `estop` that
+// reads <dir>/estop like chain_open, and while <dir>/motor0_off exists its
+// reads fail UNAVAILABLE, as a device behind a cut supply does (#484). If
+// motor0_off holds "stale", motor0 is reported instead, with stale quality.
 
 #include <array>
 #include <chrono>
@@ -79,6 +83,35 @@ void write_response(const adpp::Response &response) {
 
 const std::array<const char *, 3> kMissing = {"rlht0", "dcmt0", "dcmt1"};
 
+// The test replaces these files by rename, and on Windows an open that lands
+// mid-rename fails. Retrying for up to 50 ms hides the swap; a file removed for
+// good still reads empty.
+std::string read_word(const std::filesystem::path &path) {
+    std::string word;
+    for (int attempt = 0; attempt < 10 && word.empty(); ++attempt) {
+        if (attempt > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        std::ifstream(path) >> word;
+    }
+    return word;
+}
+
+// "1" true, "0" false, "stale" with stale quality; anything else a FAULT false.
+void set_bool_reading(adpp::SignalValue *value, const std::string &signal_id, const std::string &word) {
+    value->set_signal_id(signal_id);
+    value->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
+    value->mutable_value()->set_bool_value(word == "1");
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+    value->mutable_timestamp()->set_seconds(seconds.count());
+    value->mutable_timestamp()->set_nanos(
+        static_cast<int32_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now - seconds).count()));
+    value->set_quality(word == "1" || word == "0" ? adpp::SignalValue_Quality_QUALITY_OK
+                       : word == "stale"          ? adpp::SignalValue_Quality_QUALITY_STALE
+                                                  : adpp::SignalValue_Quality_QUALITY_FAULT);
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -94,6 +127,7 @@ int main(int argc, char **argv) {
     std::string stop_chain_dir;
     bool stop_chain_actuating = false;
     bool stop_chain_no_hint = false;
+    bool stop_chain_estop = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
@@ -107,6 +141,8 @@ int main(int argc, char **argv) {
             stop_chain_actuating = true;
         } else if (std::string(argv[i]) == "--stop-chain-no-hint") {
             stop_chain_no_hint = true;
+        } else if (std::string(argv[i]) == "--stop-chain-estop") {
+            stop_chain_estop = true;
         }
     }
     if (!exit_when.empty()) {
@@ -183,6 +219,12 @@ int main(int argc, char **argv) {
                     signal->set_poll_hint_hz(10.0);  // only hinted signals are polled
                 }
             }
+            if (id == "motor0" && stop_chain_estop) {
+                auto *signal = caps->add_signals();
+                signal->set_signal_id("estop");
+                signal->set_value_type(adpp::VALUE_TYPE_BOOL);
+                signal->set_poll_hint_hz(10.0);
+            }
             if (id == "motor0" || stop_chain_actuating) {
                 auto *fn = caps->add_functions();
                 fn->set_name("set_pwm");
@@ -196,29 +238,20 @@ int main(int argc, char **argv) {
         } else if (!stop_chain_dir.empty() && request.has_read_signals()) {
             auto *read = response.mutable_read_signals();
             read->set_device_id(request.read_signals().device_id());
+            const std::filesystem::path dir(stop_chain_dir);
             if (request.read_signals().device_id() == "gpio0") {
-                // The test replaces `chain` by rename, and on Windows an open that
-                // lands mid-rename fails. Retrying for up to 50 ms hides the swap;
-                // a file removed for good still reads empty and reports FAULT.
-                std::string chain;
-                for (int attempt = 0; attempt < 10 && chain.empty(); ++attempt) {
-                    if (attempt > 0) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                    }
-                    std::ifstream(std::filesystem::path(stop_chain_dir) / "chain") >> chain;
+                set_bool_reading(read->add_values(), "chain_open", read_word(dir / "chain"));
+            } else if (request.read_signals().device_id() == "motor0" && stop_chain_estop) {
+                const bool off = std::filesystem::exists(dir / "motor0_off");
+                if (off && read_word(dir / "motor0_off") == "stale") {
+                    set_bool_reading(read->add_values(), "estop", "stale");
+                } else if (off) {
+                    response.mutable_status()->set_code(adpp::Status_Code_CODE_UNAVAILABLE);
+                    response.mutable_status()->set_message("motor0 did not answer");
+                    response.clear_read_signals();
+                } else {
+                    set_bool_reading(read->add_values(), "estop", read_word(dir / "estop"));
                 }
-                auto *value = read->add_values();
-                value->set_signal_id("chain_open");
-                value->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
-                value->mutable_value()->set_bool_value(chain == "1");
-                const auto now = std::chrono::system_clock::now().time_since_epoch();
-                const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
-                value->mutable_timestamp()->set_seconds(seconds.count());
-                value->mutable_timestamp()->set_nanos(
-                    static_cast<int32_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now - seconds).count()));
-                value->set_quality(chain == "1" || chain == "0" ? adpp::SignalValue_Quality_QUALITY_OK
-                                   : chain == "stale"           ? adpp::SignalValue_Quality_QUALITY_STALE
-                                                                : adpp::SignalValue_Quality_QUALITY_FAULT);
             }
         } else if (!stop_chain_dir.empty() && request.has_call()) {
             std::ofstream(std::filesystem::path(stop_chain_dir) / "calls", std::ios::app)

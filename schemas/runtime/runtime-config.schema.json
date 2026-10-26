@@ -834,10 +834,35 @@
             },
             "devices": {
               "type": "array",
-              "description": "provider/device handles the stop removes power from. While the stop is in force, losing one of them is reported as the stop, not as a device fault.",
+              "description": "provider/device handles the stop removes power from. While the stop is in force, losing one of them is reported as the stop, not as a device fault. An entry is a handle, or a mapping with a handle and an optional expect.",
               "items": {
-                "type": "string",
-                "pattern": "^[^/]+/[^/]+$"
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[^/]+/[^/]+$"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "handle"
+                    ],
+                    "properties": {
+                      "handle": {
+                        "type": "string",
+                        "pattern": "^[^/]+/[^/]+$"
+                      },
+                      "expect": {
+                        "type": "string",
+                        "enum": [
+                          "power_loss",
+                          "reports_estop"
+                        ],
+                        "description": "What the device does when the stop is in force: power_loss, it goes silent; reports_estop, it stays on the bus and reports its estop signal true. Contradicted while in force, it raises \"Stop not reaching <device>\". Omitted, the device is held and no mismatch is raised."
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

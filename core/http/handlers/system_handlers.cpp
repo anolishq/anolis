@@ -121,11 +121,25 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
                 }
             }
         }
+        // Per-device expectations and "Stop not reaching <device>" (#484).
+        nlohmann::json expectations = nlohmann::json::object();
+        for (const auto &[handle, expect] : stop_chain_->config().expectations) {
+            expectations[handle] = control::stop_chain_expect_to_string(expect);
+        }
+        nlohmann::json mismatches = nlohmann::json::array();
+        for (const auto &mismatch : stop_chain_->mismatches()) {
+            mismatches.push_back({{"device", mismatch.device},
+                                  {"expect", control::stop_chain_expect_to_string(mismatch.expect)},
+                                  {"reason", mismatch.reason},
+                                  {"since_epoch_ms", mismatch.since_epoch_ms}});
+        }
         response["stop_chain"] = {{"state", control::stop_chain_state_to_string(chain.state)},
                                   {"reason", chain.reason},
                                   {"signal", stop_chain_->config().status->signal},
                                   {"devices", stop_chain_->config().devices},
-                                  {"expected_losses", expected_losses}};
+                                  {"expectations", expectations},
+                                  {"expected_losses", expected_losses},
+                                  {"mismatches", mismatches}};
         if (chain.since_epoch_ms.has_value()) {
             response["stop_chain"]["since_epoch_ms"] = *chain.since_epoch_ms;
         } else {

@@ -91,6 +91,7 @@ bool Runtime::initialize(std::string &error) {
     // synchronous and bounded by provider timeouts, so this is the bounded
     // wait: a status not readable by now reads unknown, and holds.
     warn_stop_chain_config();
+    warn_unjudgeable_expectations();
     update_stop_chain();
 
     apply_startup_outputs();
@@ -1050,33 +1051,84 @@ void Runtime::warn_stop_chain_config() const {
     }
 }
 
+void Runtime::warn_unjudgeable_expectations() const {
+    if (!stop_chain_ || !stop_chain_->configured()) {
+        return;
+    }
+    // An expectation the runtime has nothing to judge by never raises (#484).
+    // Only signals with a poll hint are polled.
+    for (const auto &[handle, expect] : config_.safety.stop_chain.expectations) {
+        const auto device = registry_->get_device_by_handle_copy(handle);
+        if (!device.has_value()) {
+            continue;  // absent at startup: judged if it registers later
+        }
+        const auto &signals = device->capabilities.signals_by_id;
+        if (expect == StopChainExpect::ReportsEstop) {
+            const auto estop = signals.find("estop");
+            if (estop == signals.end() || !estop->second.is_default ||
+                estop->second.type != anolis::deviceprovider::v1::VALUE_TYPE_BOOL) {
+                LOG_WARN("[Runtime] stop_chain: " << handle
+                                                  << " expects reports_estop but has no polled bool estop signal; "
+                                                     "a mismatch is never raised for it");
+            }
+        } else if (std::none_of(signals.begin(), signals.end(),
+                                [](const auto &entry) { return entry.second.is_default; })) {
+            LOG_WARN("[Runtime] stop_chain: " << handle
+                                              << " expects power_loss but has no polled signal, so whether it "
+                                                 "still answers cannot be seen; a mismatch is never raised for it");
+        }
+    }
+}
+
 void Runtime::update_stop_chain() {
     if (!stop_chain_ || !stop_chain_->configured()) {
         return;
     }
-    const auto change = stop_chain_->update();
-    if (!change.has_value()) {
-        return;
+    if (const auto change = stop_chain_->update(); change.has_value()) {
+        const auto &[before, after] = *change;
+        const std::string state = control::stop_chain_state_to_string(after.state);
+        if (after.state == control::StopChainState::Clear) {
+            LOG_INFO("[Runtime] Emergency stop clear: " << after.reason
+                                                        << ". A held latch stays until a deliberate clear.");
+        } else {
+            LOG_WARN("[Runtime] Emergency stop " << state << ": " << after.reason);
+        }
+        if (event_emitter_) {
+            events::StopChainEvent event;
+            event.event_id = event_emitter_->next_event_id();
+            event.previous_state = control::stop_chain_state_to_string(before.state);
+            event.new_state = state;
+            event.reason = after.reason;
+            event.timestamp_ms = after.since_epoch_ms.value_or(0);
+            event_emitter_->emit(event);
+        }
+        if (stop_chain_->holds()) {
+            safe_state_controller_->hold("emergency stop " + state + ": " + after.reason);
+        }
     }
-    const auto &[before, after] = *change;
-    const std::string state = control::stop_chain_state_to_string(after.state);
-    if (after.state == control::StopChainState::Clear) {
-        LOG_INFO("[Runtime] Emergency stop clear: " << after.reason
-                                                    << ". A held latch stays until a deliberate clear.");
-    } else {
-        LOG_WARN("[Runtime] Emergency stop " << state << ": " << after.reason);
-    }
-    if (event_emitter_) {
-        events::StopChainEvent event;
-        event.event_id = event_emitter_->next_event_id();
-        event.previous_state = control::stop_chain_state_to_string(before.state);
-        event.new_state = state;
-        event.reason = after.reason;
-        event.timestamp_ms = after.since_epoch_ms.value_or(0);
-        event_emitter_->emit(event);
-    }
-    if (stop_chain_->holds()) {
-        safe_state_controller_->hold("emergency stop " + state + ": " + after.reason);
+
+    // A declared expect contradicted while in force (#484). The hold is the
+    // same either way; this is the alarm.
+    for (const auto &change : stop_chain_->update_mismatches()) {
+        const auto &mismatch = change.mismatch;
+        const std::string expect = control::stop_chain_expect_to_string(mismatch.expect);
+        if (change.raised) {
+            LOG_WARN("[Runtime] Stop not reaching " << mismatch.device << " (expect " << expect
+                                                    << "): " << mismatch.reason);
+        } else {
+            LOG_INFO("[Runtime] Stop reaching " << mismatch.device << " again (expect " << expect
+                                                << "): " << mismatch.reason);
+        }
+        if (event_emitter_) {
+            events::StopChainMismatchEvent event;
+            event.event_id = event_emitter_->next_event_id();
+            event.device = mismatch.device;
+            event.expect = expect;
+            event.raised = change.raised;
+            event.reason = mismatch.reason;
+            event.timestamp_ms = mismatch.since_epoch_ms;
+            event_emitter_->emit(event);
+        }
     }
 }
 

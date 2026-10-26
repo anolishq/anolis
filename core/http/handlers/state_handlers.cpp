@@ -297,6 +297,16 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["reason"] = e.reason;
                 data["timestamp_ms"] = e.timestamp_ms;
 
+            } else if constexpr (std::is_same_v<T, events::StopChainMismatchEvent>) {
+                result = "event: stop_chain_mismatch\n";
+                result += "id: " + std::to_string(e.event_id) + "\n";
+
+                data["device"] = e.device;
+                data["expect"] = e.expect;
+                data["raised"] = e.raised;
+                data["reason"] = e.reason;
+                data["timestamp_ms"] = e.timestamp_ms;
+
             } else if constexpr (std::is_same_v<T, events::ParameterChangeEvent>) {
                 result = "event: parameter_change\n";
                 result += "id: " + std::to_string(e.event_id) + "\n";
