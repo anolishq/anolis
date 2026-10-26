@@ -129,6 +129,7 @@ _fresh_install_files() {
     grep -qE '^ANOLIS_API_TOKEN=[0-9a-f]{64}$' "${RUNTIME_ENV_FILE}"
     grep -qxF "INFLUX_TOKEN=${READ_TOKEN}" "${GRAFANA_ENV_FILE}"
     grep -qxF "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PW}" "${GRAFANA_ENV_FILE}"
+    [ "$(grep -c '^GRAFANA_ADMIN_PASSWORD=' "${OBSERVABILITY_ENV_FILE}")" -eq 1 ]
     grep -qxF "ANOLIS_EXPORT_INFLUX_TOKEN=${READ_TOKEN}" "${TELEMETRY_ENV_FILE}"
     [ "$(stat -c %a "${GRAFANA_ENV_FILE}")" = "600" ]
     if grep -q '^influx ' "${CALLS}"; then return 1; fi
@@ -144,6 +145,15 @@ _fresh_install_files() {
     [ "$(grep -c '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}")" -eq 1 ]
 }
 
+@test "469: a reinstall fills a blank runtime token" {
+    _fresh_install_files
+    printf 'ANOLIS_API_TOKEN=x\nINFLUXDB_TOKEN=\n' >"${RUNTIME_ENV_FILE}"
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    grep -qxF "INFLUXDB_TOKEN=${WRITE_TOKEN}" "${RUNTIME_ENV_FILE}"
+    [ "$(grep -c '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}")" -eq 1 ]
+}
+
 @test "469: an instance set up without any of its credentials is refused, with a recovery step" {
     printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
     run _obs_setup_influx
@@ -153,6 +163,10 @@ _fresh_install_files() {
     [[ "${output}" == *"${OBSERVABILITY_ENV_FILE}"* ]]
     [[ "${output}" == *"INFLUXDB_WRITE_TOKEN"* && "${output}" == *"INFLUXDB_READ_TOKEN"* ]]
     [[ "${output}" == *"influx auth create"* ]]
+    # The commands read root's influx CLI config, so each one runs as root.
+    [[ "${output}" == *'id=$(sudo -H influx bucket list '* ]]
+    [[ "${output}" == *"sudo -H influx auth create --org anolis --write-bucket"* ]]
+    [[ "${output}" == *"sudo -H influx auth create --org anolis --read-bucket"* ]]
 }
 
 @test "469: an operator-run instance with its own Grafana env file is left alone" {
@@ -161,4 +175,19 @@ _fresh_install_files() {
     run _obs_setup_influx
     [ "$status" -eq 0 ]
     grep -qxF "INFLUX_TOKEN=operator-made" "${GRAFANA_ENV_FILE}"
+}
+
+@test "469: recovering with only the two tokens records the new Grafana password" {
+    # The refusal's recovery step: the operator writes back just the tokens.
+    printf 'INFLUXDB_WRITE_TOKEN=%s\nINFLUXDB_READ_TOKEN=%s\n' "${WRITE_TOKEN}" "${READ_TOKEN}" >"${OBSERVABILITY_ENV_FILE}"
+    command chmod 600 "${OBSERVABILITY_ENV_FILE}"
+    printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    grep -qxF "GF_SECURITY_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${GRAFANA_ENV_FILE}"
+    [ "$(grep -c '^GRAFANA_ADMIN_PASSWORD=' "${OBSERVABILITY_ENV_FILE}")" -eq 1 ]
+    grep -qxF "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${OBSERVABILITY_ENV_FILE}"
+    grep -qxF "INFLUXDB_WRITE_TOKEN=${WRITE_TOKEN}" "${OBSERVABILITY_ENV_FILE}"
+    [ "$(stat -c %a "${OBSERVABILITY_ENV_FILE}")" = "600" ]
+    [[ "${output}" != *"not-a-secret"* ]]
 }
