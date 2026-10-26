@@ -1408,15 +1408,15 @@ _obs_setup_influx() {
 }
 
 # Hand the scoped tokens to their consumers. $3 = replace overwrites the
-# runtime's INFLUXDB_TOKEN; anything else sets it only when there is none, so
-# a reinstall does not undo a token the operator rotated.
+# runtime's INFLUXDB_TOKEN; anything else sets it only when it is missing or
+# blank, so a reinstall does not undo a token the operator rotated.
 _obs_wire_tokens() {
     local write_token="$1" read_token="$2" mode="${3:-}"
 
     # config.cpp reads INFLUXDB_TOKEN from the environment when the yaml
     # carries no token.
     if [[ -f "${RUNTIME_ENV_FILE}" && -n "${write_token}" ]] \
-        && { [[ "${mode}" == replace ]] || ! grep -q '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}"; }; then
+        && { [[ "${mode}" == replace ]] || ! grep -q '^INFLUXDB_TOKEN=.' "${RUNTIME_ENV_FILE}"; }; then
         sed -i '/^INFLUXDB_TOKEN=/d' "${RUNTIME_ENV_FILE}"
         echo "INFLUXDB_TOKEN=${write_token}" >> "${RUNTIME_ENV_FILE}"
         log_ok "observability: runtime write token set in ${RUNTIME_ENV_FILE}"
