@@ -60,18 +60,19 @@ std::string calls_made(const Rig &rig) {
 }
 
 anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &scope = "[bread0/motor0]",
-                                          const std::string &extra_args = "") {
+                                          const std::string &extra_args = "", const std::string &on_startup = "leave") {
     const auto path = rig.root / "config" / "runtime.yaml";
-    std::ofstream(path)
-        << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
-        << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: \"" << kHelperPath
-        << "\"\n    args: [\"--stop-chain\", \"" << rig.root.generic_string() << "\"" << extra_args
-        << "]\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 5000\n"
-           "polling:\n  interval_ms: 100\ntelemetry:\n  enabled: false\n"
-           "safety:\n  on_startup: leave\n  safe_state:\n    zero_is_safe: true\n"  // a ladder would call motor0
-           "  stop_chain:\n    status:\n      signal: bread0/gpio0/chain_open\n"
-           "    devices: "
-        << scope << "\n";
+    std::ofstream(path) << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
+                        << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: \"" << kHelperPath
+                        << "\"\n    args: [\"--stop-chain\", \"" << rig.root.generic_string() << "\"" << extra_args
+                        << "]\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 5000\n"
+                           "polling:\n  interval_ms: 100\ntelemetry:\n  enabled: false\n"
+                           "safety:\n  on_startup: "
+                        << on_startup
+                        << "\n  safe_state:\n    zero_is_safe: true\n"  // a ladder would call motor0
+                           "  stop_chain:\n    status:\n      signal: bread0/gpio0/chain_open\n"
+                           "    devices: "
+                        << scope << "\n";
     anolis::runtime::RuntimeConfig config;
     std::string error;
     EXPECT_TRUE(anolis::runtime::load_config(path.string(), config, error)) << error;
@@ -253,6 +254,43 @@ TEST(RuntimeStopChainTest, NoWarningForASeparateReadOnlyStatusSource) {
     ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
 
     EXPECT_EQ(log.find("stop_chain:"), std::string::npos) << log;
+}
+
+// safety.on_startup at boot (#483). gpio0 also has an actuating set_pwm and is
+// outside the scope; motor0 is in it. The zero rung drives both.
+
+TEST(RuntimeStopChainTest, AStartupSafeStateSkipsOnlyTheDevicesBehindAStopInForce) {
+    const auto rig = fresh_rig("anolis-483-startup-in-force");
+    set_chain(rig, "1");
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", ", \"--stop-chain-actuating\"", "safe_state"));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    const auto startup = runtime.get_safe_state().startup_report();
+    ASSERT_EQ(startup.skipped_actions.size(), 1u);
+    EXPECT_EQ(startup.skipped_actions[0].device_handle, "bread0/motor0");
+    EXPECT_EQ(startup.skipped_actions[0].reason, "stop chain in force");
+    EXPECT_EQ(calls_made(rig), "gpio0/1\n") << "the powered device outside the scope is still driven";
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+}
+
+TEST(RuntimeStopChainTest, AStartupSafeStateRunsInFullWhenTheStatusIsUnknown) {
+    // The status source may be down while the devices are powered.
+    const auto rig = fresh_rig("anolis-483-startup-unknown");
+    set_chain(rig, "");
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", ", \"--stop-chain-actuating\"", "safe_state"));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_safe_state().startup_report().skipped_actions.empty());
+    const auto calls = calls_made(rig);
+    EXPECT_NE(calls.find("gpio0/1"), std::string::npos) << calls;
+    EXPECT_NE(calls.find("motor0/1"), std::string::npos) << calls;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
 }
 
 TEST(DeviceLossLatchStopChainTest, ALossUnderAStopInForceIsReportedAsTheStop) {

@@ -249,9 +249,10 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
     };
 
     EstopResult result;
-    // A declared call to a device its provider reports missing is recorded,
-    // not issued (anolishq/anolis#461). The zero rung needs no such check: it
-    // only walks registered devices.
+    // A declared call to a device in `absent` is recorded, not issued: one its
+    // provider reports missing (anolishq/anolis#461), or one behind a stop
+    // chain in force at startup (#483). The zero rung checks too: a device
+    // behind the stop is registered, only unpowered.
     const auto run_or_skip = [&](const runtime::ModeTransitionCallConfig &call) {
         if (absent != nullptr) {
             if (const auto it = absent->find(call.device_handle); it != absent->end()) {
@@ -281,9 +282,16 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
             break;
         case SafeStateKind::Zero:
             for (const auto &[handle, spec] : actuating_functions()) {
-                if (wanted(handle)) {
-                    result.actions.push_back(run_zero_call(handle, spec));
+                if (!wanted(handle)) {
+                    continue;
                 }
+                if (absent != nullptr) {
+                    if (const auto it = absent->find(handle); it != absent->end()) {
+                        result.skipped.push_back({handle, spec.function_name, it->second});
+                        continue;
+                    }
+                }
+                result.actions.push_back(run_zero_call(handle, spec));
             }
             break;
         case SafeStateKind::None:

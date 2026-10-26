@@ -228,8 +228,14 @@ safety:
 4. A device in `devices` that goes unreachable while the stop is in force is
    logged as the stop, not as a device fault, and listed under
    `stop_chain.expected_losses` in `GET /v0/runtime/status`.
-5. At startup the runtime warns when the status device is itself in
-   `devices`, is not registered, or has actuating functions.
+5. `safety.on_startup: safe_state` with the stop in force at boot skips the
+   calls to devices in `devices`, reported in `startup_safe_state.skipped_actions`
+   with the reason `stop chain in force`, and still drives the devices outside
+   the scope, which are powered. With the status `unknown` it runs in full: the
+   status source may be down while the devices are powered.
+6. At startup the runtime warns when the status device is itself in
+   `devices`, is not registered, has actuating functions, or its signal has no
+   poll hint (it is then never polled, and the status reads `unknown`).
 
 A `status` without `signal`, or a handle of the wrong shape, fails config load.
 Per-device `expect` comes in a later increment; an entry that is not a

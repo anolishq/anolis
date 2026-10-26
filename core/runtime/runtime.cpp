@@ -1117,10 +1117,20 @@ void Runtime::apply_startup_outputs() {
         return;
     }
 
-    const auto result = safe_state_controller_->drive_safe_state(devices_reported_missing());
+    // A stop chain in force at boot (#483): the devices behind it may be
+    // unpowered, so their calls are skipped and reported; devices outside its
+    // scope are powered and still driven. An unknown status runs it all: the
+    // status source may be down while the devices are powered.
+    control::AbsentDevices skip = devices_reported_missing();
+    if (stop_chain_ != nullptr && stop_chain_->snapshot().state == control::StopChainState::InForce) {
+        for (const auto &handle : config_.safety.stop_chain.devices) {
+            skip.emplace(handle, "stop chain in force");
+        }
+    }
+    const auto result = safe_state_controller_->drive_safe_state(skip);
     for (const auto &skipped : result.skipped) {
         LOG_WARN("[Runtime] safety.on_startup=safe_state skipped " << skipped.device_handle << "/" << skipped.function
-                                                                   << ": absent at startup: " << skipped.reason);
+                                                                   << ": " << skipped.reason);
     }
     if (result.kind == control::SafeStateKind::None) {
         LOG_WARN("[Runtime] safety.on_startup=safe_state: no software safe state is declared, nothing to run");
@@ -1136,11 +1146,11 @@ void Runtime::apply_startup_outputs() {
         }
     }
     if (result.actions.empty() && !result.skipped.empty()) {
-        // Nothing failed: every call's device is absent, and was skipped above.
-        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
-                                                                   << " drove nothing; all " << result.skipped.size()
-                                                                   << " call(s) target devices absent at startup,"
-                                                                      " safe_state_achieved=false");
+        // Nothing failed: every call was skipped above, its device absent or
+        // behind a stop chain in force.
+        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder="
+                 << control::safe_state_kind_to_string(result.kind) << " drove nothing; all " << result.skipped.size()
+                 << " call(s) target devices absent at startup or behind the stop chain, safe_state_achieved=false");
     } else if (result.safe_state_achieved) {
         LOG_INFO("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
                                                                    << " actions=" << result.actions.size()
