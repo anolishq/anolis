@@ -1586,6 +1586,28 @@ TEST_F(ConfigTest, StopChainParsesStatusAndScope) {
     EXPECT_EQ(config.safety.stop_chain.devices, (std::vector<std::string>{"bread0/rlht0", "bread0/dcmt0"}));
 }
 
+TEST_F(ConfigTest, StopChainParsesPerDeviceExpectations) {
+    // #484: a bare handle has no expectation; a mapping may name one.
+    const auto path = create_config_file("stop_chain_expect.yaml", stop_chain_config(R"(    status:
+      signal: gpio0/estop/chain_open
+    devices:
+      - bread0/rlht0
+      - handle: bread0/dcmt0
+        expect: power_loss
+      - handle: bread0/dcmt1
+        expect: reports_estop
+      - handle: bread0/rlht1
+)"));
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_EQ(config.safety.stop_chain.devices,
+              (std::vector<std::string>{"bread0/rlht0", "bread0/dcmt0", "bread0/dcmt1", "bread0/rlht1"}));
+    EXPECT_EQ(config.safety.stop_chain.expectations,
+              (std::map<std::string, StopChainExpect>{{"bread0/dcmt0", StopChainExpect::PowerLoss},
+                                                      {"bread0/dcmt1", StopChainExpect::ReportsEstop}}));
+}
+
 TEST_F(ConfigTest, StopChainAbsentMeansNoChain) {
     const auto path = create_config_file("stop_chain_absent.yaml", "providers:\n  - id: bread0\n    command: /p\n");
     RuntimeConfig config;
@@ -1611,8 +1633,13 @@ TEST_F(ConfigTest, StopChainRejectsMalformedEntries) {
         {"    status:\n      signal: gpio0/chain_open\n", "must be provider/device/signal, got 'gpio0/chain_open'"},
         {"    status:\n      signal: gpio0//chain_open\n", "must be provider/device/signal"},
         {"    devices: [bread0]\n", "safety.stop_chain.devices[0] must be provider/device, got 'bread0'"},
-        {"    devices:\n      - handle: bread0/dcmt0\n        expect: power_loss\n",
-         "safety.stop_chain.devices[0] must be a provider/device handle"},
+        {"    devices:\n      - handle: bread0/dcmt0\n        expect: sometimes\n",
+         "safety.stop_chain.devices[0].expect must be power_loss or reports_estop, got 'sometimes'"},
+        {"    devices:\n      - expect: power_loss\n", "safety.stop_chain.devices[0].handle is required"},
+        {"    devices:\n      - handle: dcmt0\n",
+         "safety.stop_chain.devices[0].handle must be provider/device, got 'dcmt0'"},
+        {"    devices:\n      - [bread0/dcmt0]\n",
+         "safety.stop_chain.devices[0] must be a provider/device handle or a mapping with handle"},
     };
     for (size_t i = 0; i < cases.size(); ++i) {
         SCOPED_TRACE(cases[i].first);

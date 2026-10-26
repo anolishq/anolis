@@ -29,6 +29,16 @@ const char *stop_chain_state_to_string(StopChainState state) {
     }
 }
 
+const char *stop_chain_expect_to_string(runtime::StopChainExpect expect) {
+    switch (expect) {
+        case runtime::StopChainExpect::PowerLoss:
+            return "power_loss";
+        case runtime::StopChainExpect::ReportsEstop:
+        default:
+            return "reports_estop";
+    }
+}
+
 StopChainMonitor::StopChainMonitor(const runtime::StopChainConfig &config, const state::StateCache &cache,
                                    std::chrono::milliseconds stale_after)
     : config_(config), cache_(cache), stale_after_(stale_after) {
@@ -83,6 +93,10 @@ StopChainSnapshot StopChainMonitor::snapshot() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return current_;
 }
+
+std::vector<StopChainMismatchChange> StopChainMonitor::update_mismatches() { return {}; }
+
+std::vector<StopChainMismatch> StopChainMonitor::mismatches() const { return {}; }
 
 bool StopChainMonitor::holds() const {
     const auto state = snapshot().state;

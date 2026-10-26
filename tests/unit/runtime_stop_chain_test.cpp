@@ -58,16 +58,20 @@ void retry_briefly(const std::function<void(std::error_code &)> &step) {
     throw std::filesystem::filesystem_error("set_chain", ec);
 }
 
-// Replaced by rename, so the helper never reads a half-written file.
-void set_chain(const Rig &rig, const std::string &value) {
+// Replaced by rename, so the helper never reads a half-written file. An empty
+// value removes the file.
+void set_file(const Rig &rig, const std::string &name, const std::string &value) {
+    const auto path = rig.root / name;
     if (value.empty()) {
-        retry_briefly([&](std::error_code &ec) { std::filesystem::remove(rig.chain(), ec); });
+        retry_briefly([&](std::error_code &ec) { std::filesystem::remove(path, ec); });
         return;
     }
-    const auto tmp = rig.root / "chain.tmp";
+    const auto tmp = rig.root / (name + ".tmp");
     std::ofstream(tmp) << value;
-    retry_briefly([&](std::error_code &ec) { std::filesystem::rename(tmp, rig.chain(), ec); });
+    retry_briefly([&](std::error_code &ec) { std::filesystem::rename(tmp, path, ec); });
 }
+
+void set_chain(const Rig &rig, const std::string &value) { set_file(rig, "chain", value); }
 
 std::string calls_made(const Rig &rig) {
     std::ifstream in(rig.calls());
@@ -350,4 +354,176 @@ TEST(DeviceLossLatchStopChainTest, ALossUnderAStopInForceIsReportedAsTheStop) {
         << log;
     EXPECT_NE(log.find("bread0/rlht0 went unreachable; autonomous actuation to it is blocked"), std::string::npos)
         << log;
+}
+
+// Per-device expectations (#484). gpio0 is the status; motor0, in scope,
+// publishes `estop` from <rig>/estop and goes silent while <rig>/motor0_off
+// exists. A device is judged once the stop has been in force for the stale
+// bound, max(1000 ms, 3 x 100 ms), so a quiet check waits past it.
+
+namespace {
+
+using anolis::control::StopChainMismatch;
+using anolis::runtime::StopChainExpect;
+
+constexpr auto kPastTheGrace = std::chrono::milliseconds(2000);
+
+const char *kPowerLoss = "[{handle: bread0/motor0, expect: power_loss}]";
+const char *kReportsEstop = "[{handle: bread0/motor0, expect: reports_estop}]";
+const char *kEstopArgs = ", \"--stop-chain-estop\"";
+
+std::vector<std::string> mismatch_moves(anolis::events::Subscription &events) {
+    std::vector<std::string> moves;
+    while (auto event = events.try_pop()) {
+        if (const auto *mismatch = std::get_if<anolis::events::StopChainMismatchEvent>(&*event)) {
+            moves.push_back(std::string(mismatch->raised ? "raised " : "resolved ") + mismatch->device + " " +
+                            mismatch->expect);
+        }
+    }
+    return moves;
+}
+
+// Starts clear, presses the stop, and waits until the runtime reads it in force.
+void press_the_stop(const Rig &rig, anolis::runtime::Runtime &runtime) {
+    set_chain(rig, "1");
+    ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().snapshot().state == StopChainState::InForce; }));
+}
+
+}  // namespace
+
+TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatStillAnswersRaisesStopNotReaching) {
+    const auto rig = fresh_rig("anolis-484-power-loss-answers");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");
+    anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    {
+        MainLoop loop(runtime);
+        press_the_stop(rig, runtime);
+        EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty()) << "judged before the grace";
+
+        ASSERT_TRUE(eventually([&] { return !runtime.get_stop_chain().mismatches().empty(); }));
+        const auto standing = runtime.get_stop_chain().mismatches();
+        ASSERT_EQ(standing.size(), 1u);
+        EXPECT_EQ(standing[0].device, "bread0/motor0");
+        EXPECT_EQ(standing[0].expect, StopChainExpect::PowerLoss);
+        EXPECT_NE(standing[0].reason.find("still answers"), std::string::npos) << standing[0].reason;
+
+        set_chain(rig, "0");
+        ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().mismatches().empty(); }));
+    }
+    std::cerr.rdbuf(old);
+
+    EXPECT_NE(captured.str().find("Stop not reaching bread0/motor0"), std::string::npos) << captured.str();
+    EXPECT_EQ(mismatch_moves(*events),
+              (std::vector<std::string>{"raised bread0/motor0 power_loss", "resolved bread0/motor0 power_loss"}));
+    EXPECT_EQ(calls_made(rig), "");
+}
+
+TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatGoesSilentRaisesNothing) {
+    const auto rig = fresh_rig("anolis-484-power-loss-silent");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");
+    anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    MainLoop loop(runtime);
+    set_file(rig, "motor0_off", "1");
+    press_the_stop(rig, runtime);
+    std::this_thread::sleep_for(kPastTheGrace);
+    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    EXPECT_TRUE(mismatch_moves(*events).empty());
+}
+
+TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesStopNotReaching) {
+    const auto rig = fresh_rig("anolis-484-reports-estop-false");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");
+    anolis::runtime::Runtime runtime(config_for(rig, kReportsEstop, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    MainLoop loop(runtime);
+    press_the_stop(rig, runtime);
+    ASSERT_TRUE(eventually([&] { return !runtime.get_stop_chain().mismatches().empty(); }));
+    const auto standing = runtime.get_stop_chain().mismatches();
+    ASSERT_EQ(standing.size(), 1u);
+    EXPECT_EQ(standing[0].device, "bread0/motor0");
+    EXPECT_EQ(standing[0].expect, StopChainExpect::ReportsEstop);
+    EXPECT_NE(standing[0].reason.find("estop reads false"), std::string::npos) << standing[0].reason;
+
+    // The device starts reporting the stop: the mismatch resolves while in force.
+    set_file(rig, "estop", "1");
+    ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().mismatches().empty(); }));
+    EXPECT_EQ(mismatch_moves(*events),
+              (std::vector<std::string>{"raised bread0/motor0 reports_estop", "resolved bread0/motor0 reports_estop"}));
+}
+
+TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsTrueRaisesNothing) {
+    const auto rig = fresh_rig("anolis-484-reports-estop-true");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "1");
+    anolis::runtime::Runtime runtime(config_for(rig, kReportsEstop, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    MainLoop loop(runtime);
+    press_the_stop(rig, runtime);
+    std::this_thread::sleep_for(kPastTheGrace);
+    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+}
+
+TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWithNoFreshEstopRaisesNothing) {
+    // Only a fresh estop=false contradicts it: a FAULT reading, or none at all
+    // from a device that lost power, is not the stop failing to reach it.
+    for (const bool silent : {false, true}) {
+        SCOPED_TRACE(silent ? "motor0 silent" : "estop FAULT quality");
+        const auto rig = fresh_rig(silent ? "anolis-484-reports-estop-silent" : "anolis-484-reports-estop-fault");
+        set_chain(rig, "0");
+        set_file(rig, "estop", "0");
+        anolis::runtime::Runtime runtime(config_for(rig, kReportsEstop, kEstopArgs));
+        std::string error;
+        std::string log;
+        ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+        MainLoop loop(runtime);
+        if (silent) {
+            set_file(rig, "motor0_off", "1");
+        } else {
+            set_file(rig, "estop", "fault");
+        }
+        press_the_stop(rig, runtime);
+        std::this_thread::sleep_for(kPastTheGrace);
+        EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    }
+}
+
+TEST(RuntimeStopChainExpectTest, ADeviceWithNoExpectationNeverRaises) {
+    const auto rig = fresh_rig("anolis-484-no-expect");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");  // it answers, and does not report the stop
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    MainLoop loop(runtime);
+    press_the_stop(rig, runtime);
+    std::this_thread::sleep_for(kPastTheGrace);
+    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    EXPECT_TRUE(mismatch_moves(*events).empty());
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged()) << "held all the same";
 }

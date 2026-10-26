@@ -204,9 +204,20 @@ struct StopChainStatusConfig {
     bool active = true;  // the value meaning "stop in force"
 };
 
+/**
+ * @brief What a device in scope does when the stop is in force (#484).
+ *
+ * A device with no expectation is held and never raises a mismatch.
+ */
+enum class StopChainExpect {
+    PowerLoss,     // goes silent
+    ReportsEstop,  // stays on the bus and reports its `estop` signal true
+};
+
 struct StopChainConfig {
     std::optional<StopChainStatusConfig> status;
-    std::vector<std::string> devices;  // "provider/device" handles in scope
+    std::vector<std::string> devices;                     // "provider/device" handles in scope
+    std::map<std::string, StopChainExpect> expectations;  // by handle; a device with none is absent
 };
 
 struct SafetyConfig {
