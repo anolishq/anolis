@@ -479,6 +479,52 @@ TEST(InfluxLineProtocolTest, FormatParameterChangeWithSpecialChars) {
 }
 
 // ============================================================================
+// Runtime tag on mode and parameter events (#478): dashboards scope by it
+// ============================================================================
+
+TEST(InfluxLineProtocolTest, ModeChangeCarriesRuntimeNameTag) {
+    ModeChangeEvent event;
+    event.previous_mode = "MANUAL";
+    event.new_mode = "AUTO";
+    event.timestamp_ms = 1234567890;
+
+    EXPECT_EQ(format_mode_change_line_protocol(event, "bioreactor-1"),
+              "mode_change,runtime_name=bioreactor-1 previous_mode=\"MANUAL\",new_mode=\"AUTO\" 1234567890");
+    EXPECT_EQ(format_mode_change_line_protocol(event).rfind("mode_change,runtime_name=default ", 0), 0U);
+}
+
+TEST(InfluxLineProtocolTest, ParameterChangeCarriesRuntimeNameTag) {
+    ParameterChangeEvent event;
+    event.parameter_name = "setpoint";
+    event.old_value_str = "37.0";
+    event.new_value_str = "37.5";
+    event.timestamp_ms = 1234567890;
+
+    EXPECT_EQ(format_parameter_change_line_protocol(event, "bioreactor-1"),
+              "parameter_change,runtime_name=bioreactor-1,parameter_name=setpoint "
+              "old_value=\"37.0\",new_value=\"37.5\" 1234567890");
+    EXPECT_EQ(format_parameter_change_line_protocol(event).rfind("parameter_change,runtime_name=default,", 0), 0U);
+}
+
+TEST(InfluxLineProtocolTest, RuntimeNameTagIsEscapedOnEventRows) {
+    ModeChangeEvent mode;
+    mode.previous_mode = "IDLE";
+    mode.new_mode = "MANUAL";
+    mode.timestamp_ms = 1;
+    ParameterChangeEvent param;
+    param.parameter_name = "p";
+    param.old_value_str = "1";
+    param.new_value_str = "2";
+    param.timestamp_ms = 1;
+
+    EXPECT_EQ(format_mode_change_line_protocol(mode, "lab a,b=c").rfind("mode_change,runtime_name=lab\\ a\\,b\\=c ", 0),
+              0U);
+    EXPECT_EQ(format_parameter_change_line_protocol(param, "lab a,b=c")
+                  .rfind("parameter_change,runtime_name=lab\\ a\\,b\\=c,parameter_name=p ", 0),
+              0U);
+}
+
+// ============================================================================
 // InfluxConfig Tests
 // ============================================================================
 

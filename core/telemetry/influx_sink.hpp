@@ -227,15 +227,16 @@ inline std::string format_line_protocol(const events::StateUpdateEvent &event,
  * @brief Format ModeChangeEvent as InfluxDB line protocol
  *
  * Measurement: mode_change
- * Tags: none (system-wide event)
+ * Tags: runtime_name
  * Fields: previous_mode, new_mode
  * Timestamp: epoch milliseconds
  */
-inline std::string format_mode_change_line_protocol(const events::ModeChangeEvent &event) {
+inline std::string format_mode_change_line_protocol(const events::ModeChangeEvent &event,
+                                                    const std::string &runtime_name = "default") {
     std::ostringstream line;
 
-    // Measurement (no tags for system-wide events)
-    line << "mode_change";
+    // Measurement and tag (rows written before the tag existed have none)
+    line << "mode_change,runtime_name=" << escape_tag(runtime_name);
 
     // Field set
     line << " previous_mode=\"" << escape_field_string(event.previous_mode) << "\"";
@@ -251,15 +252,17 @@ inline std::string format_mode_change_line_protocol(const events::ModeChangeEven
  * @brief Format ParameterChangeEvent as InfluxDB line protocol
  *
  * Measurement: parameter_change
- * Tags: parameter_name
+ * Tags: runtime_name, parameter_name
  * Fields: old_value, new_value
  * Timestamp: epoch milliseconds
  */
-inline std::string format_parameter_change_line_protocol(const events::ParameterChangeEvent &event) {
+inline std::string format_parameter_change_line_protocol(const events::ParameterChangeEvent &event,
+                                                         const std::string &runtime_name = "default") {
     std::ostringstream line;
 
-    // Measurement with tag
-    line << "parameter_change,parameter_name=" << escape_tag(event.parameter_name);
+    // Measurement and tags (rows written before runtime_name existed lack it)
+    line << "parameter_change,runtime_name=" << escape_tag(runtime_name);
+    line << ",parameter_name=" << escape_tag(event.parameter_name);
 
     // Field set
     line << " old_value=\"" << escape_field_string(event.old_value_str) << "\"";
@@ -445,12 +448,12 @@ private:
                     const auto &mode_change = std::get<events::ModeChangeEvent>(*event_opt);
 
                     std::lock_guard<std::mutex> lock(batch_mutex_);
-                    batch_.push_back(format_mode_change_line_protocol(mode_change));
+                    batch_.push_back(format_mode_change_line_protocol(mode_change, config_.runtime_name));
                 } else if (std::holds_alternative<events::ParameterChangeEvent>(*event_opt)) {
                     const auto &param_change = std::get<events::ParameterChangeEvent>(*event_opt);
 
                     std::lock_guard<std::mutex> lock(batch_mutex_);
-                    batch_.push_back(format_parameter_change_line_protocol(param_change));
+                    batch_.push_back(format_parameter_change_line_protocol(param_change, config_.runtime_name));
                 }
             }
 

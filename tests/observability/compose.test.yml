@@ -1,0 +1,58 @@
+# Test-only override for observability/docker-compose.observability.yml.
+#
+# Relative paths resolve against observability/, the first file's directory.
+# The image pins stay in the dev compose file; this override only removes what
+# would collide with a dev stack on the same host (fixed container names, fixed
+# ports, named volumes), so every test run starts empty.
+#
+#   docker compose -p anolis-obs-test \
+#     -f observability/docker-compose.observability.yml \
+#     -f tests/observability/compose.test.yml up -d --wait
+#
+# The suite itself runs in the `tester` service, on the same network, so it
+# reaches the stack by service name on any host (a sandboxed shell cannot reach
+# the host's loopback). The ephemeral loopback ports are for a person looking.
+
+services:
+  tester:
+    image: ghcr.io/astral-sh/uv:0.13.5-python3.12-trixie-slim
+    profiles: [test]
+    depends_on:
+      # Grafana has no healthcheck; the suite polls /api/health itself.
+      grafana:
+        condition: service_started
+    working_dir: /src
+    volumes:
+      - ..:/src:ro
+    environment:
+      # Keep the environment and caches out of the read-only checkout.
+      - UV_PROJECT_ENVIRONMENT=/opt/venv
+      - UV_CACHE_DIR=/opt/uv-cache
+      - PYTHONDONTWRITEBYTECODE=1
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_USER=admin
+      - GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_ORG=${INFLUXDB_ORG}
+      - INFLUX_BUCKET=${INFLUXDB_BUCKET}
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN}
+    entrypoint: ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-p", "no:cacheprovider"]
+    command: ["tests/observability"]
+
+  influxdb:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1::8086"
+    volumes: !reset []
+
+  grafana:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1::3000"
+    volumes: !override
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+
+volumes: !reset {}
