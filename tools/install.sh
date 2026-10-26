@@ -1335,10 +1335,8 @@ _obs_setup_influx() {
     setup_allowed=$(curl -fsS "${INFLUX_HOST}/api/v2/setup" 2>/dev/null | grep -o '"allowed": *[a-z]*' | grep -o 'true\|false' || true)
     if [[ "${setup_allowed}" != "true" ]]; then
         log_skip "observability: influxdb already set up — bucket/tokens left alone"
-        if [[ ! -f "${GRAFANA_ENV_FILE}" ]]; then
-            log_warn "observability: no ${GRAFANA_ENV_FILE} — create a read-scoped token and write the file manually (see observability/README.md)"
-        fi
-        return 0
+        _obs_reuse_credentials
+        return
     fi
 
     local admin_pw admin_token
@@ -1400,23 +1398,81 @@ _obs_setup_influx() {
     install -m 600 -o root -g root /dev/null "${GRAFANA_ENV_FILE}"
     emit_grafana_env "${read_token}" "${_OBS_GRAFANA_PW}" >> "${GRAFANA_ENV_FILE}"
 
-    # Wire the runtime's write token (config.cpp reads INFLUXDB_TOKEN from the
-    # environment when the yaml carries no token). Unconditional on this path:
-    # we only get here after a FRESH influx bootstrap, so any pre-existing
-    # token belongs to a wiped instance and is guaranteed dead.
-    if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+    # Unconditional on this path: we only get here after a FRESH influx
+    # bootstrap, so any pre-existing runtime token belongs to a wiped instance
+    # and is guaranteed dead.
+    _obs_wire_tokens "${write_token}" "${read_token}" replace
+
+    log_ok "observability: influxdb bootstrapped (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
+    return 0
+}
+
+# Hand the scoped tokens to their consumers. $3 = replace overwrites the
+# runtime's INFLUXDB_TOKEN; anything else sets it only when it is missing or
+# blank, so a reinstall does not undo a token the operator rotated.
+_obs_wire_tokens() {
+    local write_token="$1" read_token="$2" mode="${3:-}"
+
+    # config.cpp reads INFLUXDB_TOKEN from the environment when the yaml
+    # carries no token.
+    if [[ -f "${RUNTIME_ENV_FILE}" && -n "${write_token}" ]] \
+        && { [[ "${mode}" == replace ]] || ! grep -q '^INFLUXDB_TOKEN=.' "${RUNTIME_ENV_FILE}"; }; then
         sed -i '/^INFLUXDB_TOKEN=/d' "${RUNTIME_ENV_FILE}"
         echo "INFLUXDB_TOKEN=${write_token}" >> "${RUNTIME_ENV_FILE}"
         log_ok "observability: runtime write token set in ${RUNTIME_ENV_FILE}"
     fi
 
     # Fill the telemetry-export read token if the service is installed inert.
-    if [[ -f "${TELEMETRY_ENV_FILE}" ]] && grep -qE '^ANOLIS_EXPORT_INFLUX_TOKEN=$' "${TELEMETRY_ENV_FILE}"; then
+    if [[ -f "${TELEMETRY_ENV_FILE}" && -n "${read_token}" ]] && grep -qE '^ANOLIS_EXPORT_INFLUX_TOKEN=$' "${TELEMETRY_ENV_FILE}"; then
         sed -i "s|^ANOLIS_EXPORT_INFLUX_TOKEN=$|ANOLIS_EXPORT_INFLUX_TOKEN=${read_token}|" "${TELEMETRY_ENV_FILE}"
         log_ok "observability: telemetry-export read token filled in ${TELEMETRY_ENV_FILE}"
     fi
+}
 
-    log_ok "observability: influxdb bootstrapped (org anolis, bucket anolis, retention ${OBSERVABILITY_RETENTION})"
+# The last value of $1 in observability.env, empty when absent.
+_obs_env_value() {
+    [[ -f "${OBSERVABILITY_ENV_FILE}" ]] || return 0
+    sed -n "s/^$1=//p" "${OBSERVABILITY_ENV_FILE}" | tail -n 1
+}
+
+# InfluxDB is already set up, so no token can be minted without its admin
+# token. Reuse the scoped tokens recorded when install.sh set it up, which the
+# uninstall keeps for as long as it keeps the instance (#469). An instance
+# with neither observability.env nor a Grafana env file is refused: carrying
+# on would start Grafana and the runtime with no token.
+_obs_reuse_credentials() {
+    local write_token read_token grafana_pw
+    write_token=$(_obs_env_value INFLUXDB_WRITE_TOKEN)
+    read_token=$(_obs_env_value INFLUXDB_READ_TOKEN)
+    grafana_pw=$(_obs_env_value GRAFANA_ADMIN_PASSWORD)
+
+    if [[ -z "${read_token}" ]]; then
+        # Operator-run instance: they wrote the Grafana env file themselves.
+        [[ -f "${GRAFANA_ENV_FILE}" ]] && return 0
+        log_err "observability: influxdb is already set up, but its credentials are gone (no tokens in ${OBSERVABILITY_ENV_FILE}) — Grafana not provisioned"
+        log_info "An uninstall by an earlier install.sh deleted them and kept the instance. To recover,"
+        log_info "mint two tokens as root, with the admin token that 'influx setup' left in root's influx CLI config:"
+        log_info "  id=\$(sudo -H influx bucket list --name anolis --hide-headers | cut -f1)"
+        log_info "  sudo -H influx auth create --org anolis --write-bucket \"\${id}\" --description 'anolis-runtime telemetry write'"
+        log_info "  sudo -H influx auth create --org anolis --read-bucket \"\${id}\" --description 'anolis grafana/export read'"
+        log_info "then write them to ${OBSERVABILITY_ENV_FILE} (0600 root) as INFLUXDB_WRITE_TOKEN=... and"
+        log_info "INFLUXDB_READ_TOKEN=..., and re-run this install."
+        return 1
+    fi
+
+    if [[ ! -f "${GRAFANA_ENV_FILE}" ]]; then
+        install -m 600 -o root -g root /dev/null "${GRAFANA_ENV_FILE}" || return 1
+        emit_grafana_env "${read_token}" "${grafana_pw:-${_OBS_GRAFANA_PW}}" >> "${GRAFANA_ENV_FILE}" || return 1
+        # A password made here goes where the summary says to find it. The
+        # operator wrote this file by hand, so lock it down first.
+        if [[ -z "${grafana_pw}" ]]; then
+            chmod 600 "${OBSERVABILITY_ENV_FILE}" || return 1
+            chown root:root "${OBSERVABILITY_ENV_FILE}" || return 1
+            echo "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" >> "${OBSERVABILITY_ENV_FILE}" || return 1
+        fi
+        log_ok "observability: ${GRAFANA_ENV_FILE} restored from ${OBSERVABILITY_ENV_FILE}"
+    fi
+    _obs_wire_tokens "${write_token}" "${read_token}"
     return 0
 }
 
@@ -2205,9 +2261,20 @@ do_uninstall() {
         fi
     fi
 
-    # Secrets live outside ${PREFIX}, so they survive the rm -rf above.
-    for secret in "${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}" "${WORKBENCH_TOKEN_FILE}" \
-        "${OBSERVABILITY_ENV_FILE}" "${GRAFANA_ENV_FILE}"; do
+    # Secrets live outside ${PREFIX}, so they survive the rm -rf above. The
+    # InfluxDB credentials go only when observability is not provisioned: the
+    # instance below is kept, and a reinstall cannot mint tokens for it
+    # without them (#469).
+    local secrets=("${TELEMETRY_ENV_FILE}" "${RUNTIME_ENV_FILE}" "${WORKBENCH_TOKEN_FILE}")
+    local kept_creds=() secret
+    for secret in "${OBSERVABILITY_ENV_FILE}" "${GRAFANA_ENV_FILE}"; do
+        if _obs_provisioned; then
+            [[ -f "${secret}" ]] && kept_creds+=("${secret}")
+        else
+            secrets+=("${secret}")
+        fi
+    done
+    for secret in "${secrets[@]}"; do
         if [[ -f "${secret}" ]]; then
             rm -f "${secret}"
             log_ok "removed ${secret}"
@@ -2238,6 +2305,10 @@ do_uninstall() {
         local kept_data=()
         mapfile -t kept_data < <(_observability_data_dirs)
 
+        if [[ ${#kept_creds[@]} -gt 0 ]]; then
+            log_info "Kept: the InfluxDB credentials in ${kept_creds[*]}; a reinstall reuses them"
+        fi
+
         if [[ ${#kept_data[@]} -gt 0 ]]; then
             log_info "Kept: influxdb2/grafana packages, and the recorded data in ${kept_data[*]}"
             log_info "Full purge (DESTROYS recorded data):"
@@ -2255,6 +2326,9 @@ do_uninstall() {
         log_info "  rm -f /etc/apt/keyrings/influxdata-archive.gpg /etc/apt/keyrings/grafana.gpg"
         log_info "  rm -rf /etc/influxdb /etc/grafana   # dpkg leaves these when non-empty"
         log_info "  rm -rf /var/log/grafana"
+        if [[ ${#kept_creds[@]} -gt 0 ]]; then
+            log_info "  rm -f ${kept_creds[*]}"
+        fi
     fi
 
     log_ok "uninstall complete"
