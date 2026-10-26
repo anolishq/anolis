@@ -116,8 +116,10 @@ test-py provider="":
 # starts a throwaway InfluxDB + Grafana (the dev stack's image pins, made
 # collision-free by tests/observability/compose.test.yml), runs pytest in the
 # stack's `tester` service, and always tears the stack down. Arguments go to
-# pytest, e.g. `just test-observability tests/observability/test_annotations.py`.
+# pytest as given and replace the default path, e.g.
+# `just test-observability tests/observability -k "liveness and not quiet"`.
 [doc("Run the Grafana dashboard queries against fixture telemetry (needs Docker).")]
+[positional-arguments]
 test-observability *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -125,4 +127,4 @@ test-observability *args:
         -f observability/docker-compose.observability.yml -f tests/observability/compose.test.yml)
     trap '"${compose[@]}" down -v >/dev/null 2>&1' EXIT
     "${compose[@]}" up -d --wait --quiet-pull
-    "${compose[@]}" run --rm tester {{args}}
+    "${compose[@]}" run --rm tester "$@"
