@@ -47,6 +47,8 @@ line-ending = "auto"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/integration", "tests/scenarios"]
+# The process dashboard spike is a script, not a package (#496).
+pythonpath = ["tools/process-dashboard"]
 addopts = "--strict-markers -ra"
 markers = [
   "integration: integration tests that run against runtime/provider processes",

@@ -101,6 +101,14 @@ quality **changes**, not on every poll. The panels are built around that:
   the signal ended up, not an average of its changes, which would weight each
   change rather than each second. A window with no change holds the value
   before it, so a steady signal is a flat line across the range.
+- **A runtime that stops inside the range reads as running until the stop
+  leaves the range.** The history panels hold each series' last row to the
+  end of the range, so after a stop or a crash, restarted or not, Signal
+  History draws the last value flat and Device Health's Quality Distribution
+  Over Time keeps counting the last quality, usually OK. The latest-state
+  panels show its last state too, since its health rows are still in range.
+  It drops out only once the stop is before the range
+  (anolishq/anolis#497).
 - **Rates** ("changes/sec") count change rows: they measure how often values
   change, not how often the runtime polls.
 - **Freshness** comes from the runtime's periodic health snapshots
