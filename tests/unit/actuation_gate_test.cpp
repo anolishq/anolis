@@ -3,8 +3,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <future>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
@@ -250,6 +252,95 @@ TEST_F(ActuationGateTest, EnforceInAuto_NoOpWhenAutomationDisabled) {
     automation::ModeManager mode(automation::RuntimeMode::AUTO);
     EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "test"));
     EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::AUTO);
+}
+
+// --- install_hookless_auto_gate (#239: the gate at commit) ------------------
+
+TEST_F(ActuationGateTest, InstalledGate_RefusesAutoWhenTheInventoryTurnsHooklessMidTransition) {
+    // The #239 interleaving, made deterministic. MANUAL -> AUTO starts on a
+    // read-only inventory, so the early gate passes. The before_transition
+    // hooks (a blocking callback here) hold the transition open; meanwhile a
+    // provider restart commits an actuating, hookless inventory and runs its
+    // in-AUTO re-check, a no-op because the mode is still MANUAL. AUTO must
+    // not commit.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+    automation.enabled = true;
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    runtime::install_hookless_auto_gate(mode, *registry, automation, safety);
+
+    std::promise<void> hooks_running;
+    std::promise<void> restart_done;
+    auto restart_done_future = restart_done.get_future();
+    mode.on_before_mode_change([&](automation::RuntimeMode, automation::RuntimeMode, std::string&) {
+        hooks_running.set_value();
+        restart_done_future.wait();
+        return true;
+    });
+
+    bool committed = true;
+    std::string error;
+    std::thread http([&] { committed = mode.set_mode(automation::RuntimeMode::AUTO, error); });
+
+    hooks_running.get_future().wait();
+    auto restarted = std::make_shared<StrictMock<MockProviderHandle>>();
+    restarted->_id = "sim1";
+    EXPECT_CALL(*restarted, provider_id()).WillRepeatedly(ReturnRef(restarted->_id));
+    EXPECT_CALL(*restarted, is_available()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*restarted, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("motor0");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*restarted, describe_device("motor0", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("motor0");
+            auto* fn = response.mutable_capabilities()->add_functions();
+            fn->set_name("set_pwm");
+            fn->set_function_id(1);
+            fn->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+            return true;
+        }));
+    registry->discover_provider("sim1", *restarted);
+    EXPECT_FALSE(runtime::enforce_hookless_gate_in_auto(*registry, automation, safety, mode, "restart"));
+    restart_done.set_value();
+    http.join();
+
+    EXPECT_FALSE(committed);
+    EXPECT_THAT(error, HasSubstr("refusing AUTO"));
+    EXPECT_THAT(error, HasSubstr("sim1/motor0/set_pwm"));
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::MANUAL);
+}
+
+TEST_F(ActuationGateTest, InstalledGate_RefusesBeforeTheTransitionHooksRun) {
+    // The early check stays: a refused AUTO entry issues no hook calls.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    runtime::install_hookless_auto_gate(mode, *registry, automation, safety);
+    bool hooks_ran = false;
+    mode.on_before_mode_change([&](automation::RuntimeMode, automation::RuntimeMode, std::string&) {
+        hooks_ran = true;
+        return true;
+    });
+
+    std::string error;
+    EXPECT_FALSE(mode.set_mode(automation::RuntimeMode::AUTO, error));
+    EXPECT_FALSE(hooks_ran);
+    EXPECT_THAT(error, HasSubstr("refusing AUTO"));
+}
+
+TEST_F(ActuationGateTest, InstalledGate_AdmitsAutoWithAFaultHookAndLeavesOtherTransitionsAlone) {
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    automation.mode_transition_hooks.before_transition.push_back(make_fault_hook());
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    runtime::install_hookless_auto_gate(mode, *registry, automation, safety);
+
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::AUTO, error)) << error;
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
+    EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::IDLE, error)) << error;
 }
 
 // --- #251: the predicate is now shared, so it must stay one predicate --------

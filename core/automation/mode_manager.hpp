@@ -73,6 +73,20 @@ public:
     using ModeChangeCallback = std::function<void(RuntimeMode previous_mode, RuntimeMode new_mode)>;
 
     /**
+     * Commit guard signature (#239).
+     *
+     * Same contract as BeforeModeChangeCallback, but evaluated UNDER the mode
+     * lock, immediately before the new mode is written, so its verdict is about
+     * the state the transition actually commits into. A before-callback runs
+     * with no lock held and can be outlived by a concurrent change; a guard
+     * cannot. Never consulted for FAULT, which cannot be vetoed.
+     *
+     * A guard must be fast and must not call back into this ModeManager: the
+     * mode mutex is held and is not recursive.
+     */
+    using CommitGuard = std::function<bool(RuntimeMode previous_mode, RuntimeMode new_mode, std::string& error)>;
+
+    /**
      * Construct mode manager with initial mode.
      *
      * @param initial_mode Starting mode (default: IDLE)
@@ -117,6 +131,12 @@ public:
     void on_before_mode_change(const BeforeModeChangeCallback& callback);
 
     /**
+     * Register a guard evaluated under the mode lock just before a non-FAULT
+     * transition commits. Returning false (or throwing) rejects the transition.
+     */
+    void add_commit_guard(const CommitGuard& guard);
+
+    /**
      * Register callback for mode change notifications.
      *
      * Callback is invoked AFTER mode transition with lock released.
@@ -139,6 +159,7 @@ private:
     mutable std::mutex mutex_;
     RuntimeMode current_mode_;
     std::vector<BeforeModeChangeCallback> before_callbacks_;
+    std::vector<CommitGuard> commit_guards_;
     std::vector<ModeChangeCallback> callbacks_;
 };
 

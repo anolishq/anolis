@@ -133,6 +133,24 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     return result;
 }
 
+void install_hookless_auto_gate(automation::ModeManager &mode_manager, const registry::DeviceRegistry &registry,
+                                const AutomationConfig &automation, const SafetyConfig &safety) {
+    const auto check = [&registry, &automation, &safety](automation::RuntimeMode /*prev*/, automation::RuntimeMode next,
+                                                         std::string &veto_reason) {
+        if (next != automation::RuntimeMode::AUTO) {
+            return true;
+        }
+        const auto gate = evaluate_hookless_auto_gate(registry, automation, safety);
+        if (gate.refused) {
+            veto_reason = gate.message;
+            return false;
+        }
+        return true;
+    };
+    mode_manager.on_before_mode_change(check);
+    mode_manager.add_commit_guard(check);
+}
+
 bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
                                    const SafetyConfig &safety, automation::ModeManager &mode_manager,
                                    const std::string &context) {
