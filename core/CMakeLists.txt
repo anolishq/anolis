@@ -225,6 +225,7 @@ add_library(anolis_control STATIC
     control/latch_store.cpp
     control/reissue_worker.cpp
     control/safe_state.cpp
+    control/stop_chain.cpp
 )
 
 target_include_directories(anolis_control PUBLIC

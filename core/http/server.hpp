@@ -16,6 +16,7 @@
 
 #include "anolis_build_config.hpp"
 #include "control/i_device_loss_latch.hpp"
+#include "control/stop_chain.hpp"
 #include "events/event_types.hpp"
 #include "health/health_snapshot.hpp"
 #include "provider/i_provider_handle.hpp"  // Updated include
@@ -82,6 +83,7 @@ struct HttpServerDependencies {
     runs::RunJournal *run_journal = nullptr;                       // optional: run registry
     control::SafeStateController *safe_state = nullptr;            // optional: e-stop safe-state + latch
     const control::IDeviceLossLatch *device_loss_latch = nullptr;  // optional: per-device loss latch (#285)
+    const control::StopChainMonitor *stop_chain = nullptr;         // optional: observed emergency stop (#483)
     health::StalenessPolicy staleness_policy;                      // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
@@ -171,6 +173,7 @@ private:
     runs::RunJournal *run_journal_;                       // optional: nullptr when run registry unavailable
     control::SafeStateController *safe_state_;            // optional: e-stop safe-state + latch
     const control::IDeviceLossLatch *device_loss_latch_;  // optional: per-device loss latch (#285)
+    const control::StopChainMonitor *stop_chain_;         // optional: observed emergency stop (#483)
     health::StalenessPolicy staleness_policy_;            // #220: device-liveness thresholds
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional

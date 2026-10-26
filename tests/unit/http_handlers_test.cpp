@@ -20,11 +20,13 @@
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <thread>
 #include <utility>
 
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
+#include "control/safe_state.hpp"
 #include "http/json.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
@@ -1671,6 +1673,70 @@ TEST_F(HttpHandlersTest, PostCallAcceptsAllowedValueAndUnconstrainedString) {
     EXPECT_EQ(200, res->status);
     auto json = nlohmann::json::parse(res->body);
     EXPECT_EQ("OK", json["status"]["code"]);
+}
+
+// --- POST /v0/estop/clear under a stop chain (#483) ---------------------------
+
+class HttpEstopClearTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        safe_state =
+            std::make_unique<control::SafeStateController>(*registry, *call_router, *provider_registry, safety);
+        safe_state->set_clear_guard([this]() -> std::optional<std::string> { return refusal; });
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.safe_state = safe_state.get();
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+        client->set_connection_timeout(1, 0);
+    }
+
+    void TearDown() override {
+        client.reset();
+        server->stop();
+        server.reset();
+    }
+
+    runtime::SafetyConfig safety;
+    std::optional<std::string> refusal;
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<control::SafeStateController> safe_state;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+};
+
+TEST_F(HttpEstopClearTest, RefusedClearIsFailedPreconditionAndKeepsTheLatch) {
+    safe_state->hold("emergency stop in_force: gpio0/estop/chain_open reads true");
+    refusal = "the emergency stop is in force (gpio0/estop/chain_open reads true); release it first";
+
+    auto res = client->Post("/v0/estop/clear", "", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(409, res->status);
+    const auto json = nlohmann::json::parse(res->body);
+    EXPECT_EQ("FAILED_PRECONDITION", json["status"]["code"]);
+    EXPECT_EQ(*refusal, json["status"]["message"].get<std::string>());
+    EXPECT_TRUE(safe_state->is_engaged());
+
+    refusal.reset();
+    res = client->Post("/v0/estop/clear", "", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    EXPECT_FALSE(nlohmann::json::parse(res->body)["latched"].get<bool>());
+    EXPECT_FALSE(safe_state->is_engaged());
 }
 
 #else  // ANOLIS_SKIP_HTTP_TESTS

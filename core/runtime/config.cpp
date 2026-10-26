@@ -62,6 +62,10 @@ bool ensure_mapping(const YAML::Node &node, const std::string &path, std::string
     return true;
 }
 
+// `safety.stop_chain` (#483). A malformed chain is an error, not a warning: a
+// stop the runtime cannot observe must not look configured.
+bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::string &error);
+
 bool ensure_sequence(const YAML::Node &node, const std::string &path, std::string &error) {
     if (!node || node.IsNull()) {
         return true;
@@ -197,6 +201,77 @@ bool parse_call_list(const YAML::Node &calls_node, const std::string &base_path,
         ++call_index;
     }
 
+    return true;
+}
+
+// A `provider/device` handle, or a `provider/device/signal` one: non-empty
+// parts separated by `/`, and exactly `parts` of them.
+bool is_handle(const std::string &value, size_t parts) {
+    size_t count = 1;
+    size_t start = 0;
+    for (size_t i = 0; i <= value.size(); ++i) {
+        if (i == value.size() || value[i] == '/') {
+            if (i == start) {
+                return false;
+            }
+            if (i < value.size()) {
+                ++count;
+            }
+            start = i + 1;
+        }
+    }
+    return count == parts;
+}
+
+bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::string &error) {
+    if (!ensure_mapping(node, "safety.stop_chain", error)) {
+        return false;
+    }
+    warn_unknown_keys(node, "safety.stop_chain", {"status", "devices"});
+
+    if (node["status"]) {
+        const auto &status = node["status"];
+        if (!ensure_mapping(status, "safety.stop_chain.status", error)) {
+            return false;
+        }
+        warn_unknown_keys(status, "safety.stop_chain.status", {"signal", "active"});
+        if (!status["signal"] || !status["signal"].IsScalar()) {
+            error = "safety.stop_chain.status.signal is required: the provider/device/signal that reports the stop";
+            return false;
+        }
+        StopChainStatusConfig parsed;
+        parsed.signal = status["signal"].as<std::string>();
+        if (!is_handle(parsed.signal, 3)) {
+            error =
+                std::format("safety.stop_chain.status.signal must be provider/device/signal, got '{}'", parsed.signal);
+            return false;
+        }
+        if (status["active"]) {
+            parsed.active = status["active"].as<bool>();
+        }
+        chain.status = parsed;
+    }
+
+    if (node["devices"]) {
+        if (!ensure_sequence(node["devices"], "safety.stop_chain.devices", error)) {
+            return false;
+        }
+        for (size_t i = 0; i < node["devices"].size(); ++i) {
+            const auto &entry = node["devices"][i];
+            const std::string path = std::format("safety.stop_chain.devices[{}]", i);
+            if (!entry.IsScalar()) {
+                // Per-device `expect` is the next increment (#484).
+                error = std::format("{} must be a provider/device handle", path);
+                return false;
+            }
+            const auto handle = entry.as<std::string>();
+            if (!is_handle(handle, 2)) {
+                error = std::format("{} must be provider/device, got '{}'", path, handle);
+                return false;
+            }
+            chain.devices.push_back(handle);
+        }
+    }
     return true;
 }
 
@@ -930,7 +1005,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["safety"], "safety", error)) {
                 return false;
             }
-            warn_unknown_keys(yaml["safety"], "safety", {"safe_state", "on_startup"});
+            warn_unknown_keys(yaml["safety"], "safety", {"safe_state", "on_startup", "stop_chain"});
 
             if (yaml["safety"]["on_startup"]) {
                 const auto on_startup = yaml["safety"]["on_startup"].as<std::string>();
@@ -963,6 +1038,11 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 if (safe_state_node["zero_is_safe"]) {
                     config.safety.safe_state.zero_is_safe = safe_state_node["zero_is_safe"].as<bool>();
                 }
+            }
+
+            if (yaml["safety"]["stop_chain"] &&
+                !parse_stop_chain(yaml["safety"]["stop_chain"], config.safety.stop_chain, error)) {
+                return false;
             }
         }
 

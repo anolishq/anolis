@@ -402,8 +402,14 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
     return result;
 }
 
-void SafeStateController::clear() {
+std::optional<std::string> SafeStateController::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (clear_guard_) {
+        if (auto refusal = clear_guard_()) {
+            LOG_WARN("[SafeState] E-stop latch clear refused: " << *refusal);
+            return refusal;
+        }
+    }
     latched_.store(false, std::memory_order_release);
     latched_at_ms_.reset();
     restored_reason_.reset();
@@ -414,6 +420,40 @@ void SafeStateController::clear() {
             // Fails toward held: a file left behind latches the next start.
             LOG_WARN("[SafeState] E-stop latch file not removed (" << error
                                                                    << "); the next start will come back latched");
+        }
+    }
+    return std::nullopt;
+}
+
+void SafeStateController::set_clear_guard(std::function<std::optional<std::string>()> guard) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clear_guard_ = std::move(guard);
+}
+
+void SafeStateController::hold(const std::string &reason) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (latched_.load(std::memory_order_acquire)) {
+            return;
+        }
+        latched_.store(true, std::memory_order_release);
+        latched_at_ms_ = now_epoch_ms();
+        restored_reason_.reset();
+        LOG_WARN("[SafeState] E-stop latch held: " << reason << ". No safe-state calls are sent.");
+        if (latch_store_ != nullptr) {
+            std::string error;
+            if (!latch_store_->save(*latched_at_ms_, reason, error)) {
+                LOG_ERROR("[SafeState] E-stop latch not persisted (" << error
+                                                                     << "); a restart would come back unlatched");
+            }
+        }
+    }
+    // FAULT outside mutex_: set_mode runs the -> FAULT hooks, whose actuating
+    // calls the latch now refuses; nothing here admits them.
+    if (mode_manager_ != nullptr) {
+        std::string err;
+        if (!mode_manager_->set_mode(automation::RuntimeMode::FAULT, err)) {
+            LOG_ERROR("[SafeState] E-stop hold could not enter FAULT: " << err);
         }
     }
 }

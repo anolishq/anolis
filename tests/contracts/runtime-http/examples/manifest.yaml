@@ -4,6 +4,11 @@ examples:
     status: "200"
     content_type: application/json
     file: runtime-status.200.json
+  - method: GET
+    path: /v0/runtime/status
+    status: "200"
+    content_type: application/json
+    file: runtime-status.stop-chain.200.json
   - method: POST
     path: /v0/estop
     status: "200"
@@ -14,6 +19,11 @@ examples:
     status: "200"
     content_type: application/json
     file: estop-clear.200.json
+  - method: POST
+    path: /v0/estop/clear
+    status: "409"
+    content_type: application/json
+    file: estop-clear.409.json
   - method: GET
     path: /v0/providers/health
     status: "200"

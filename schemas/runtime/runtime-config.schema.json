@@ -386,7 +386,10 @@
           "description": "Per-device signals left out of the device health rollup. Excluded signals are still polled, served over HTTP and sent to telemetry; only the device health string and its signal counts skip them. For signals a machine leaves unused, such as a disabled output or an empty input channel. Each device_handle may appear once.",
           "items": {
             "type": "object",
-            "required": ["device_handle", "signals"],
+            "required": [
+              "device_handle",
+              "signals"
+            ],
             "properties": {
               "device_handle": {
                 "type": "string",
@@ -804,6 +807,40 @@
           ],
           "default": "safe_state",
           "description": "What happens to outputs at startup. safe_state runs safety.safe_state once, after provider discovery and before the HTTP server opens. leave leaves outputs as they were."
+        },
+        "stop_chain": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Observing the emergency stop (rfcs/stop-chain.md). The runtime only observes: it never drives the chain. While the status reads in force, or cannot be read, the software stop's latch holds, AUTO is refused, and the latch cannot be cleared. Absent means no stop is observed.",
+          "properties": {
+            "status": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "signal"
+              ],
+              "properties": {
+                "signal": {
+                  "type": "string",
+                  "pattern": "^[^/]+/[^/]+/[^/]+$",
+                  "description": "provider/device/signal of a boolean signal that reports the stop chain, such as a contactor's mirror contact. Wire it so a broken wire reads as stopped."
+                },
+                "active": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "The signal value that means the stop is in force."
+                }
+              }
+            },
+            "devices": {
+              "type": "array",
+              "description": "provider/device handles the stop removes power from. While the stop is in force, losing one of them is reported as the stop, not as a device fault.",
+              "items": {
+                "type": "string",
+                "pattern": "^[^/]+/[^/]+$"
+              }
+            }
+          }
         }
       },
       "additionalProperties": true

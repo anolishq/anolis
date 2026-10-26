@@ -8,12 +8,19 @@
 // With `--allowed-values` it also lists dcmt3, reported OK, whose CONFIG set_mode takes
 // a `mode` limited to open_loop or closed_speed (anolis#467), and answers every
 // call OK.
+// With `--stop-chain <dir>` it lists gpio0, whose bool signal chain_open reads
+// <dir>/chain ("1" true, "0" false, "stale" with stale quality; missing reads
+// as a FAULT-quality false), and motor0, an ACTUATE set_pwm. It answers every
+// call OK and appends device/function_id to <dir>/calls (#483). With
+// `--stop-chain-actuating`, gpio0 also has an ACTUATE function; with
+// `--stop-chain-no-hint`, chain_open carries no poll hint, so it is never polled.
 
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -84,6 +91,9 @@ int main(int argc, char **argv) {
     std::string exit_when;
     bool mixed = false;
     bool allowed_values = false;
+    std::string stop_chain_dir;
+    bool stop_chain_actuating = false;
+    bool stop_chain_no_hint = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
@@ -91,6 +101,12 @@ int main(int argc, char **argv) {
             mixed = true;
         } else if (std::string(argv[i]) == "--allowed-values") {
             allowed_values = true;
+        } else if (std::string(argv[i]) == "--stop-chain" && i + 1 < argc) {
+            stop_chain_dir = argv[i + 1];
+        } else if (std::string(argv[i]) == "--stop-chain-actuating") {
+            stop_chain_actuating = true;
+        } else if (std::string(argv[i]) == "--stop-chain-no-hint") {
+            stop_chain_no_hint = true;
         }
     }
     if (!exit_when.empty()) {
@@ -128,6 +144,10 @@ int main(int argc, char **argv) {
             if (allowed_values) {
                 list->add_devices()->set_device_id("dcmt3");
             }
+            if (!stop_chain_dir.empty()) {
+                list->add_devices()->set_device_id("gpio0");
+                list->add_devices()->set_device_id("motor0");
+            }
         } else if (mixed && request.has_describe_device() && request.describe_device().device_id() == "rlht1") {
             auto *describe = response.mutable_describe_device();
             describe->mutable_device()->set_device_id("rlht1");
@@ -148,6 +168,54 @@ int main(int argc, char **argv) {
             mode->set_required(true);
             mode->add_allowed_values("open_loop");
             mode->add_allowed_values("closed_speed");
+        } else if (!stop_chain_dir.empty() && request.has_describe_device() &&
+                   (request.describe_device().device_id() == "gpio0" ||
+                    request.describe_device().device_id() == "motor0")) {
+            const std::string id = request.describe_device().device_id();
+            auto *describe = response.mutable_describe_device();
+            describe->mutable_device()->set_device_id(id);
+            auto *caps = describe->mutable_capabilities();
+            if (id == "gpio0") {
+                auto *signal = caps->add_signals();
+                signal->set_signal_id("chain_open");
+                signal->set_value_type(adpp::VALUE_TYPE_BOOL);
+                if (!stop_chain_no_hint) {
+                    signal->set_poll_hint_hz(10.0);  // only hinted signals are polled
+                }
+            }
+            if (id == "motor0" || stop_chain_actuating) {
+                auto *fn = caps->add_functions();
+                fn->set_name("set_pwm");
+                fn->set_function_id(1);
+                fn->mutable_policy()->set_category(adpp::FunctionPolicy_Category_CATEGORY_ACTUATE);
+                auto *pwm = fn->add_args();  // numeric, so the zero rung can drive it
+                pwm->set_name("pwm");
+                pwm->set_type(adpp::VALUE_TYPE_INT64);
+                pwm->set_required(true);
+            }
+        } else if (!stop_chain_dir.empty() && request.has_read_signals()) {
+            auto *read = response.mutable_read_signals();
+            read->set_device_id(request.read_signals().device_id());
+            if (request.read_signals().device_id() == "gpio0") {
+                std::string chain;
+                std::ifstream(std::filesystem::path(stop_chain_dir) / "chain") >> chain;
+                auto *value = read->add_values();
+                value->set_signal_id("chain_open");
+                value->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
+                value->mutable_value()->set_bool_value(chain == "1");
+                const auto now = std::chrono::system_clock::now().time_since_epoch();
+                const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+                value->mutable_timestamp()->set_seconds(seconds.count());
+                value->mutable_timestamp()->set_nanos(
+                    static_cast<int32_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now - seconds).count()));
+                value->set_quality(chain == "1" || chain == "0" ? adpp::SignalValue_Quality_QUALITY_OK
+                                   : chain == "stale"           ? adpp::SignalValue_Quality_QUALITY_STALE
+                                                                : adpp::SignalValue_Quality_QUALITY_FAULT);
+            }
+        } else if (!stop_chain_dir.empty() && request.has_call()) {
+            std::ofstream(std::filesystem::path(stop_chain_dir) / "calls", std::ios::app)
+                << request.call().device_id() << "/" << request.call().function_id() << "\n";
+            response.mutable_call();
         } else if (allowed_values && request.has_call()) {
             response.mutable_call();
         } else if (request.has_get_health()) {
@@ -166,6 +234,13 @@ int main(int argc, char **argv) {
                 auto *ok = health->add_devices();
                 ok->set_device_id("dcmt2");
                 ok->set_state(adpp::DeviceHealth::STATE_OK);
+            }
+            if (!stop_chain_dir.empty()) {
+                for (const char *id : {"gpio0", "motor0"}) {
+                    auto *device = health->add_devices();
+                    device->set_device_id(id);
+                    device->set_state(adpp::DeviceHealth::STATE_OK);
+                }
             }
             if (allowed_values) {
                 auto *enum_device = health->add_devices();

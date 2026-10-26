@@ -438,6 +438,10 @@ paths:
       description: >-
         Clear the actuation latch. Does not change the runtime mode; on an
         automation machine the operator still recovers FAULT separately.
+        Refused with FAILED_PRECONDITION while an observed emergency stop
+        (safety.stop_chain) is in force or its status is unknown: releasing
+        the stop never clears the latch, and a clear is only accepted once it
+        is released.
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
@@ -447,6 +451,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EstopClearResponse'
+        "409":
+          description: >-
+            Latch not cleared: the observed emergency stop is in force, or its
+            status is unknown. status.message says which.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "503":
           $ref: '#/components/responses/Unavailable'
   /v0/parameters:
@@ -537,7 +549,10 @@ paths:
         plus top-level streaming media type.
 
         Event types: state_update, quality_change, device_availability,
-        device_removed, mode_change, parameter_change, and automation_fault.
+        device_removed, mode_change, parameter_change, automation_fault, and
+        stop_chain_change. `stop_chain_change` carries previous_state,
+        new_state (in_force, clear or unknown), reason and timestamp_ms when
+        the observed emergency stop's state moves.
         `automation_fault` (engine-abnormal only — a generic
         `locus`, never a BT node) carries the engine fault; the former `bt_error`
         compatibility alias was removed in v0.1.26. An ordinary unsuccessful
@@ -722,6 +737,44 @@ components:
             must not cause one (ISO 13850 4.1.4). Empty when nothing is latched.
           items:
             type: string
+        stop_chain:
+          $ref: '#/components/schemas/StopChainStatus'
+    StopChainStatus:
+      type: object
+      additionalProperties: false
+      description: >-
+        The observed emergency stop, present when safety.stop_chain names a
+        status signal. The runtime only observes it. While it is in_force or
+        unknown, the software stop's latch is held and cannot be cleared.
+      required: [state, reason, signal, devices, expected_losses, since_epoch_ms]
+      properties:
+        state:
+          type: string
+          enum: [in_force, clear, unknown]
+          description: >-
+            unknown when the status signal is stale, unreadable, unregistered
+            or not a bool: an emergency stop or a power fault.
+        reason:
+          type: string
+          description: What the status reading was.
+        signal:
+          type: string
+          description: The provider/device/signal the status is read from.
+        devices:
+          type: array
+          items:
+            type: string
+          description: The provider/device handles in the stop's scope.
+        expected_losses:
+          type: array
+          items:
+            type: string
+          description: >-
+            Devices in scope that are lost while the stop is in force: the stop,
+            not a device fault. Empty otherwise.
+        since_epoch_ms:
+          type: [integer, "null"]
+          description: When the current state began.
     SoftwareSafeState:
       type: string
       description: >-

@@ -1,0 +1,283 @@
+// anolishq/anolis#483: observing the emergency stop through safety.stop_chain.
+// A real Runtime against the empty-inventory helper in --stop-chain mode:
+// gpio0/chain_open follows a file the test writes, and every device call the
+// helper receives is appended to another, so a hold can be shown to send none.
+
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <csignal>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <variant>
+
+#include "control/device_loss_latch.hpp"
+#include "events/event_types.hpp"
+#include "runtime/config.hpp"
+#include "runtime/runtime.hpp"
+#include "runtime/signal_handler.hpp"
+
+namespace {
+
+using anolis::control::StopChainState;
+
+const char *kHelperPath = PROVIDER_EMPTY_INVENTORY_HELPER_PATH;
+
+struct Rig {
+    std::filesystem::path root;
+    std::filesystem::path chain() const { return root / "chain"; }
+    std::filesystem::path calls() const { return root / "calls"; }
+};
+
+Rig fresh_rig(const std::string &name) {
+    Rig rig{std::filesystem::path(::testing::TempDir()) / name};
+    std::filesystem::remove_all(rig.root);
+    std::filesystem::create_directories(rig.root / "config");
+    return rig;
+}
+
+// Replaced by rename, so the helper never reads a half-written file.
+void set_chain(const Rig &rig, const std::string &value) {
+    if (value.empty()) {
+        std::filesystem::remove(rig.chain());
+        return;
+    }
+    const auto tmp = rig.root / "chain.tmp";
+    std::ofstream(tmp) << value;
+    std::filesystem::rename(tmp, rig.chain());
+}
+
+std::string calls_made(const Rig &rig) {
+    std::ifstream in(rig.calls());
+    std::stringstream out;
+    out << in.rdbuf();
+    return out.str();
+}
+
+anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &scope = "[bread0/motor0]",
+                                          const std::string &extra_args = "") {
+    const auto path = rig.root / "config" / "runtime.yaml";
+    std::ofstream(path)
+        << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
+        << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: \"" << kHelperPath
+        << "\"\n    args: [\"--stop-chain\", \"" << rig.root.generic_string() << "\"" << extra_args
+        << "]\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 5000\n"
+           "polling:\n  interval_ms: 100\ntelemetry:\n  enabled: false\n"
+           "safety:\n  on_startup: leave\n  safe_state:\n    zero_is_safe: true\n"  // a ladder would call motor0
+           "  stop_chain:\n    status:\n      signal: bread0/gpio0/chain_open\n"
+           "    devices: "
+        << scope << "\n";
+    anolis::runtime::RuntimeConfig config;
+    std::string error;
+    EXPECT_TRUE(anolis::runtime::load_config(path.string(), config, error)) << error;
+    return config;
+}
+
+bool initialize_capturing_log(anolis::runtime::Runtime &runtime, std::string &error, std::string &log) {
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    const bool ok = runtime.initialize(error);
+    std::cerr.rdbuf(old);
+    log = captured.str();
+    return ok;
+}
+
+bool eventually(const std::function<bool()> &condition, std::chrono::milliseconds within = std::chrono::seconds(5)) {
+    const auto deadline = std::chrono::steady_clock::now() + within;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (condition()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return condition();
+}
+
+// Runs the runtime's main loop for the test body, then stops it.
+class MainLoop {
+public:
+    explicit MainLoop(anolis::runtime::Runtime &runtime) : runtime_(runtime) {
+        anolis::runtime::SignalHandler::install();
+        thread_ = std::thread([this] { runtime_.run(); });
+    }
+    ~MainLoop() {
+        std::raise(SIGTERM);
+        thread_.join();
+        runtime_.shutdown();
+        anolis::runtime::SignalHandler::install();
+    }
+
+private:
+    anolis::runtime::Runtime &runtime_;
+    std::thread thread_;
+};
+
+}  // namespace
+
+TEST(RuntimeStopChainTest, StartsHeldWhenTheStopIsInForceAndSendsNoCalls) {
+    const auto rig = fresh_rig("anolis-483-start-in-force");
+    set_chain(rig, "1");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::InForce)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+    const auto refusal = runtime.get_safe_state().clear();
+    ASSERT_TRUE(refusal.has_value());
+    EXPECT_NE(refusal->find("the emergency stop is in force"), std::string::npos) << *refusal;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+    EXPECT_EQ(calls_made(rig), "");
+}
+
+TEST(RuntimeStopChainTest, StartsHeldWhenTheStatusCannotBeRead) {
+    const auto rig = fresh_rig("anolis-483-start-unknown");
+    set_chain(rig, "");  // the helper reports FAULT quality
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+    const auto refusal = runtime.get_safe_state().clear();
+    ASSERT_TRUE(refusal.has_value());
+    EXPECT_NE(refusal->find("status is unavailable"), std::string::npos) << *refusal;
+}
+
+TEST(RuntimeStopChainTest, StartsUnheldWhenTheStopIsClear) {
+    const auto rig = fresh_rig("anolis-483-start-clear");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Clear)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_FALSE(runtime.get_safe_state().is_engaged());
+    EXPECT_FALSE(runtime.get_safe_state().clear().has_value());
+}
+
+TEST(RuntimeStopChainTest, AStopHoldsAndReleasingItPermitsButDoesNotPerformTheClear) {
+    const auto rig = fresh_rig("anolis-483-transitions");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+    ASSERT_FALSE(runtime.get_safe_state().is_engaged());
+
+    {
+        MainLoop loop(runtime);
+        set_chain(rig, "1");
+        ASSERT_TRUE(eventually([&] { return runtime.get_safe_state().is_engaged(); }));
+        EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::InForce)
+            << runtime.get_stop_chain().snapshot().reason;
+        EXPECT_TRUE(runtime.get_safe_state().clear().has_value());
+
+        set_chain(rig, "0");
+        ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().snapshot().state == StopChainState::Clear; }));
+        EXPECT_TRUE(runtime.get_safe_state().is_engaged()) << "releasing the stop must not clear the latch";
+        EXPECT_FALSE(runtime.get_safe_state().clear().has_value());
+        EXPECT_FALSE(runtime.get_safe_state().is_engaged());
+    }
+    EXPECT_EQ(calls_made(rig), "");
+
+    std::vector<std::string> moves;
+    while (auto event = events->try_pop()) {
+        if (const auto *change = std::get_if<anolis::events::StopChainEvent>(&*event)) {
+            moves.push_back(change->previous_state + "->" + change->new_state);
+        }
+    }
+    EXPECT_EQ(moves, (std::vector<std::string>{"clear->in_force", "in_force->clear"}));
+}
+
+TEST(RuntimeStopChainTest, AStatusThatGoesStaleHolds) {
+    const auto rig = fresh_rig("anolis-483-stale");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    MainLoop loop(runtime);
+    set_chain(rig, "stale");
+    ASSERT_TRUE(eventually([&] { return runtime.get_safe_state().is_engaged(); }));
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+}
+
+TEST(RuntimeStopChainTest, WarnsWhenTheStatusSourceIsInItsOwnScopeOrCanBeDriven) {
+    const auto rig = fresh_rig("anolis-483-warnings");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/gpio0, bread0/motor0]", ", \"--stop-chain-actuating\""));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("is a device in its own scope"), std::string::npos) << log;
+    EXPECT_NE(log.find("also has actuating functions (set_pwm)"), std::string::npos) << log;
+}
+
+TEST(RuntimeStopChainTest, WarnsAndHoldsWhenTheStatusSignalIsNeverPolled) {
+    // Only signals with a poll hint are polled: one without stays unread.
+    const auto rig = fresh_rig("anolis-483-no-hint");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", ", \"--stop-chain-no-hint\""));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("has no poll hint, so it is never polled"), std::string::npos) << log;
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+}
+
+TEST(RuntimeStopChainTest, NoWarningForASeparateReadOnlyStatusSource) {
+    const auto rig = fresh_rig("anolis-483-no-warnings");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_for(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(log.find("stop_chain:"), std::string::npos) << log;
+}
+
+TEST(DeviceLossLatchStopChainTest, ALossUnderAStopInForceIsReportedAsTheStop) {
+    anolis::control::DeviceLossLatch latch;
+    latch.set_expected_loss([](const std::string &handle) -> std::optional<std::string> {
+        if (handle == "bread0/motor0") {
+            return std::string("the emergency stop in force (bread0/gpio0/chain_open)");
+        }
+        return std::nullopt;
+    });
+
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    latch.apply_reachability_edge("bread0/motor0", false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, 1);
+    latch.apply_reachability_edge("bread0/rlht0", false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, 2);
+    std::cerr.rdbuf(old);
+    const auto log = captured.str();
+
+    // Both latch either way: the stop is a hold, not a pass.
+    EXPECT_TRUE(latch.is_latched("bread0/motor0"));
+    EXPECT_TRUE(latch.is_latched("bread0/rlht0"));
+    EXPECT_NE(log.find("bread0/motor0 went unreachable under the emergency stop in force (bread0/gpio0/chain_open) "
+                       "(expected, not a device fault)"),
+              std::string::npos)
+        << log;
+    EXPECT_NE(log.find("bread0/rlht0 went unreachable; autonomous actuation to it is blocked"), std::string::npos)
+        << log;
+}

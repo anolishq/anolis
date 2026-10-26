@@ -54,7 +54,12 @@ bool DeviceLossLatch::apply_reachability_edge(const std::string &device_handle, 
         }
     }
     if (engaged) {
-        log_engaged(device_handle);
+        if (const auto expected = expected_loss_ ? expected_loss_(device_handle) : std::nullopt) {
+            LOG_INFO("[DeviceLossLatch] " << device_handle << " went unreachable under " << *expected
+                                          << " (expected, not a device fault); held until a deliberate reset");
+        } else {
+            log_engaged(device_handle);
+        }
     }
     return reissue;
 }
@@ -62,6 +67,10 @@ bool DeviceLossLatch::apply_reachability_edge(const std::string &device_handle, 
 bool DeviceLossLatch::is_latched(const std::string &device_handle) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return latched_.count(device_handle) != 0;
+}
+
+void DeviceLossLatch::set_expected_loss(std::function<std::optional<std::string>(const std::string &)> expected_loss) {
+    expected_loss_ = std::move(expected_loss);
 }
 
 std::vector<std::string> DeviceLossLatch::release_all() {

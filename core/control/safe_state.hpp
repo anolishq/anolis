@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -172,8 +173,27 @@ public:
      */
     EstopResult trigger(const std::string &reason);
 
-    /** @brief Release the latch. Does NOT change the runtime mode. */
-    void clear();
+    /**
+     * @brief Release the latch. Does NOT change the runtime mode.
+     *
+     * Refused while the clear guard objects, such as while an observed
+     * emergency stop is in force or its status unknown (#483). Returns the
+     * reason it was refused, or nullopt once the latch is released.
+     */
+    std::optional<std::string> clear();
+
+    /**
+     * @brief Hold the latch for an observed emergency stop (#483).
+     *
+     * Engages the latch, persists it, and on an automation machine enters
+     * FAULT, without running the ladder: the devices behind the stop may be
+     * unpowered, and the hardware stop is what makes them safe. The latch
+     * refuses the FAULT entry's actuating hook calls. A no-op while latched.
+     */
+    void hold(const std::string &reason);
+
+    /** @brief Consulted by clear(): a reason to refuse it, or nullopt. Set once at startup. */
+    void set_clear_guard(std::function<std::optional<std::string>()> guard);
 
     /** @brief Current latch + planned-safe-state snapshot for the status surface. */
     EstopCapability capability() const;
@@ -237,11 +257,12 @@ private:
     std::atomic<bool> latched_{false};
     // The thread running trigger()'s FAULT entry under rung none; empty otherwise.
     std::atomic<std::thread::id> fault_entry_hook_thread_{};
-    mutable std::mutex mutex_;                    // serialize trigger()/clear(); guard metadata
-    std::optional<int64_t> latched_at_ms_;        // guarded by mutex_
-    std::unique_ptr<LatchStore> latch_store_;     // optional; set once at startup
-    std::optional<std::string> restored_reason_;  // guarded by mutex_
-    StartupSafeStateReport startup_report_;       // guarded by mutex_
+    mutable std::mutex mutex_;                                 // serialize trigger()/clear(); guard metadata
+    std::optional<int64_t> latched_at_ms_;                     // guarded by mutex_
+    std::unique_ptr<LatchStore> latch_store_;                  // optional; set once at startup
+    std::optional<std::string> restored_reason_;               // guarded by mutex_
+    std::function<std::optional<std::string>()> clear_guard_;  // set once at startup
+    StartupSafeStateReport startup_report_;                    // guarded by mutex_
 };
 
 }  // namespace control
