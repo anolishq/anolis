@@ -93,6 +93,7 @@ public:
     registry::DeviceRegistry &get_registry() { return *registry_; }
     state::StateCache &get_state_cache() { return *state_cache_; }
     const control::SafeStateController &get_safe_state() const { return *safe_state_controller_; }
+    control::SafeStateController &get_safe_state() { return *safe_state_controller_; }
     control::CallRouter &get_call_router() { return *call_router_; }
     events::EventEmitter &get_event_emitter() { return *event_emitter_; }
 

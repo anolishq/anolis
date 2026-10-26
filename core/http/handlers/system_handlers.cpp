@@ -71,6 +71,9 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
         } else {
             estop["latched_at_epoch_ms"] = nullptr;
         }
+        if (cap.restored_reason.has_value()) {
+            estop["restored_reason"] = *cap.restored_reason;
+        }
         response["estop"] = estop;
 
         // What safety.on_startup did when this runtime started (#362).

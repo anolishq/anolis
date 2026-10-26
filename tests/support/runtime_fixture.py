@@ -8,7 +8,9 @@ Provides RuntimeFixture for safe, scoped process management:
 - Timeout and escalation (SIGTERM -> SIGKILL)
 """
 
+import copy
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -184,6 +186,10 @@ class RuntimeFixture:
         self.process_info: Optional[ProcessInfo] = None
         self.capture: Optional[OutputCapture] = None
         self.config_path: Optional[Path] = None
+        # The runtime's data_dir, unless config_dict sets one. Each fixture gets
+        # its own: the software stop's latch is kept there across restarts
+        # (#482), so a shared one would carry a stop from one test into the next.
+        self.data_dir: Optional[Path] = None
 
     def start(
         self,
@@ -392,6 +398,9 @@ class RuntimeFixture:
                 self.config_path.unlink()
             except OSError:
                 pass
+        if self.data_dir is not None:
+            shutil.rmtree(self.data_dir, ignore_errors=True)
+            self.data_dir = None
 
         self.process_info = None
 
@@ -420,14 +429,21 @@ class RuntimeFixture:
 
     def _create_config(self) -> bool:
         """Create temporary configuration file."""
+        if self.data_dir is None:
+            self.data_dir = Path(tempfile.mkdtemp(prefix="anolis-test-data-"))
+        data_dir_str = str(self.data_dir).replace("\\", "/")
         if self.config_dict:
             # Use custom config if provided
             import yaml
 
+            config = copy.deepcopy(self.config_dict)
+            runtime = config.get("runtime") or {}
+            runtime.setdefault("data_dir", data_dir_str)
+            config["runtime"] = runtime
             try:
                 fd, path = tempfile.mkstemp(suffix=".yaml", prefix="anolis-test-")
                 with os.fdopen(fd, "w") as f:
-                    yaml.dump(self.config_dict, f)
+                    yaml.dump(config, f)
                 self.config_path = Path(path)
                 return True
             except Exception as e:
@@ -440,7 +456,8 @@ class RuntimeFixture:
         fixture_config_str = str(fixture_config).replace("\\", "/")
 
         config_content = f"""
-runtime: {{}}
+runtime:
+  data_dir: "{data_dir_str}"
 
 http:
   enabled: true

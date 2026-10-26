@@ -225,6 +225,11 @@ struct RuntimeConfig {
     AutomationConfig automation;
     SafetyConfig safety;
     HealthConfig health;
+    // Canonical directory of the file load_config read; empty for a config
+    // built in code. The persisted software-stop latch is keyed by it: a
+    // project's variants share their config/ directory, and the latch belongs
+    // to the machine, not to one variant's runtime.name (#482).
+    std::string config_dir;
 };
 
 /**

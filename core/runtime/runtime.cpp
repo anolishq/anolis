@@ -158,6 +158,11 @@ bool Runtime::init_core_services(std::string & /*error*/) {
     safe_state_controller_ =
         std::make_unique<control::SafeStateController>(*registry_, *call_router_, provider_registry_, config_.safety);
     call_router_->set_actuation_latch(safe_state_controller_.get());
+    // The latch survives a restart: one file per machine under data_dir, keyed
+    // by the config file's directory (#482). Restored here, before providers
+    // start and long before HTTP opens.
+    safe_state_controller_->attach_latch_store(std::make_unique<control::LatchStore>(
+        config_.runtime.data_dir.empty() ? "anolis-data" : config_.runtime.data_dir, config_.config_dir));
 
     // Per-device loss latch (#285). Blocks the behaviour tree from re-commanding
     // a device that went unreachable, until an operator deliberately re-enters

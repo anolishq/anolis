@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -501,6 +502,17 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         // Start from defaults on every load so omitted sections do not retain
         // stale values from previous files.
         config = RuntimeConfig{};
+        {
+            std::error_code ec;
+            std::filesystem::path file = std::filesystem::absolute(config_path, ec);
+            if (!ec) {
+                auto canonical = std::filesystem::weakly_canonical(file, ec);
+                if (!ec) {
+                    file = canonical;
+                }
+            }
+            config.config_dir = file.parent_path().string();
+        }
 
         // Unknown keys are warned about and ignored so config evolution can be
         // rolled out without breaking older runtimes immediately.

@@ -25,6 +25,8 @@ set(ANOLIS_UNIT_TEST_SOURCES
     device_registry_concurrency_test.cpp
     device_registry_test.cpp
     runtime_preflight_test.cpp
+    latch_store_test.cpp
+    runtime_latch_persistence_test.cpp
     runtime_zero_devices_test.cpp
     event_emitter_test.cpp
     influx_sink_test.cpp

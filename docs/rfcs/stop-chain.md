@@ -130,14 +130,20 @@ only permit restarting".
 
 ### Surviving a restart
 
-- The latch is persisted to a file under `data_dir`, keyed per runtime config,
-  for example `<data_dir>/estop/<config-name>.json`. It is written with
+- The latch is persisted to a file under `data_dir`, keyed by the directory of
+  the runtime's config file: `<data_dir>/estop/<hash of the config
+  directory>.json`, with the directory stored in the file. It is written with
   write-temp, fsync and rename when the latch engages, and removed when it
   clears. If the file is present at startup, the runtime starts latched. A
-  corrupt or unreadable file also means latched.
+  corrupt or unreadable file also means latched, and so does one that names
+  another config directory.
+  - The latch belongs to the machine. A project's variants share their
+    `config/` directory, so restarting the machine in another variant comes back
+    latched; separate projects have separate directories; an install has one.
   - The key matters because the workbench starts every project it launches with
-    the same working directory. With one shared file, project A's latch would
-    hold project B.
+    the same working directory, and its template gives every project the same
+    `runtime.name`. With one shared file, or one keyed by that name, project A's
+    latch would hold project B.
   - Installs already keep `data_dir` under the install prefix, through the
     systemd unit's working directory. It must stay on persistent storage.
 - At startup the runtime also checks the stop status, after provider discovery
@@ -170,7 +176,7 @@ Each ships on its own. Without a `stop_chain` in config, none of them changes
 behaviour except steps 1 and 2, which apply to every machine.
 
 1. Refuse AUTO, with a reason, while the software stop's latch is engaged.
-2. Persist the latch, keyed per runtime config.
+2. Persist the latch, keyed by the config file's directory.
 3. `stop_chain.status`: the states, the hold, and refusing the clear. This
    changes `SafeStateController::clear()`, and the HTTP contract of
    `POST /v0/estop/clear`, which gains a FAILED_PRECONDITION reply, in the

@@ -741,6 +741,13 @@ components:
         latched_at_epoch_ms:
           type: [integer, "null"]
           description: Epoch milliseconds when the latch engaged, or null if not latched.
+        restored_reason:
+          type: string
+          description: >-
+            Present only while the latch is one this runtime started with: it
+            read the latch file under runtime.data_dir at startup, or found the
+            file present but unreadable, which also means latched. Says which.
+            Absent after a clear or a fresh software stop.
         uncovered_actuating_functions:
           type: integer
           description: >-
