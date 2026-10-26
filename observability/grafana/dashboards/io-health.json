@@ -601,7 +601,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"missing\" or r[\"_field\"] == \"excluded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == true)\n  |> map(fn: (r) => ({handle: r.provider_id + \"/\" + r.device_id}))\n  |> group()\n  |> unique(column: \"handle\")\n  |> count(column: \"handle\")",
+          "query": "from(bucket: v.defaultBucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"anolis_device_health\")\n  |> filter(fn: (r) => r[\"runtime_name\"] =~ /^${runtime_name:regex}$/)\n  |> filter(fn: (r) => r[\"_field\"] == \"missing\" or r[\"_field\"] == \"excluded\")\n  |> filter(fn: (r) => r[\"provider_id\"] =~ /^${provider_id:regex}$/)\n  |> filter(fn: (r) => r[\"device_id\"] =~ /^${device_id:regex}$/)\n  |> last()\n  |> filter(fn: (r) => r._value == true)\n  |> map(fn: (r) => ({handle: r.runtime_name + \"/\" + r.provider_id + \"/\" + r.device_id}))\n  |> group()\n  |> unique(column: \"handle\")\n  |> count(column: \"handle\")",
           "refId": "A"
         }
       ],
