@@ -111,3 +111,18 @@ test-py provider="":
         exit 1
     fi
     uv run pytest tests/integration tests/scenarios --runtime build/{{preset}}/core/anolis-runtime --provider "${sim}"
+
+# The dashboard query suite needs Docker, so `test` does not include it. It
+# starts a throwaway InfluxDB + Grafana (the dev stack's image pins, made
+# collision-free by tests/observability/compose.test.yml), runs pytest in the
+# stack's `tester` service, and always tears the stack down. Arguments go to
+# pytest, e.g. `just test-observability tests/observability/test_annotations.py`.
+[doc("Run the Grafana dashboard queries against fixture telemetry (needs Docker).")]
+test-observability *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    compose=(docker compose -p anolis-obs-test --env-file tests/observability/compose.test.env
+        -f observability/docker-compose.observability.yml -f tests/observability/compose.test.yml)
+    trap '"${compose[@]}" down -v >/dev/null 2>&1' EXIT
+    "${compose[@]}" up -d --wait --quiet-pull
+    "${compose[@]}" run --rm tester {{args}}
