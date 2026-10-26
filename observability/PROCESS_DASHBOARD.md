@@ -116,8 +116,15 @@ contract change.
 
 ## Limitations
 
-- A runtime that stops and restarts inside the range is not marked: rows are
-  written only on change, so the line runs across the gap at the held value.
+- **A runtime that stops inside the range reads as steady and OK until the
+  stop leaves the range.** Nothing is written when a runtime stops, and both
+  the value panels and the device's quality timeline hold each series' last
+  row through windows with no change (`createEmpty: true`, then
+  `fill(usePrevious: true)`). So after a stop, with or without a restart, the
+  last value and the last quality, usually OK, are drawn to the end of the
+  range, and a gap before a restart is not marked. The liveness gate drops
+  the seed only once the stop is before the range. The bundled Signal History
+  and Device Health's Quality Distribution Over Time draw a stop the same way.
 - After a quality-only row (a non-finite double), the value line holds the last
   finite value. The device's quality timeline shows the change.
 - `uint64` values above 2^53 lose precision: Grafana plots numbers as 64-bit
