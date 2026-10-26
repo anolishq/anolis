@@ -104,16 +104,17 @@ metadata:
 
 - `runtime_name` is not available over HTTP, so it is an argument.
 - The runtime reports a value type it cannot name as `unknown`
-  (`core/http/json.cpp`), which the OpenAPI `ValueType` enum does not list. The
-  generator shows such a signal as not plotted.
-- A `bytes` value is written to telemetry as a string of the raw bytes.
+  (`core/http/json.cpp`), which the OpenAPI `ValueType` enum does not list
+  (anolishq/anolis#499). The generator shows such a signal as not plotted.
+- A `bytes` value is written to telemetry as a string of the raw bytes
+  (anolishq/anolis#500).
 - The runtime already holds a per-signal freshness bound and poll rate that
   HTTP does not report. Each signal's provider-declared `stale_after_ms` and
   `poll_hint_hz` are kept in the device registry
   (`core/registry/device_registry.hpp`), and bread declares 5000 ms and
   1.0 Hz on every signal. `encode_signal_spec` (`core/http/json.cpp`) puts
   only the id, value type, label, unit and description on HTTP, so the saved
-  inventory, and the generator, never see them.
+  inventory, and the generator, never see them (anolishq/anolis#498).
 
 **Is more metadata justified?** Not new metadata, by this evaluation. The
 useful panel-level improvements are provider fixes above. Pairing is the one
@@ -125,7 +126,7 @@ Metadata that already exists is another matter. Providers already declare a
 freshness bound for each signal and the runtime keeps it; reporting
 `stale_after_ms` on the signal spec over HTTP is the one field between it and
 a generated dashboard that marks staleness per signal. That is a contract
-change, so it is out of scope here and would be a follow-up issue.
+change, so it is out of scope here; anolishq/anolis#498 tracks it.
 
 ## Limitations
 
@@ -137,7 +138,8 @@ change, so it is out of scope here and would be a follow-up issue.
   last value and the last quality, usually OK, are drawn to the end of the
   range, and a gap before a restart is not marked. The liveness gate drops
   the seed only once the stop is before the range. The bundled Signal History
-  and Device Health's Quality Distribution Over Time draw a stop the same way.
+  and Device Health's Quality Distribution Over Time draw a stop the same way
+  (anolishq/anolis#497).
 - After a quality-only row (a non-finite double), the value line holds the last
   finite value. The device's quality timeline shows the change.
 - `uint64` values above 2^53 lose precision: Grafana plots numbers as 64-bit
