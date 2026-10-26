@@ -18,6 +18,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <regex>
 #include <unordered_set>
@@ -256,6 +257,17 @@ bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::strin
         if (!ensure_sequence(node["devices"], "safety.stop_chain.devices", error)) {
             return false;
         }
+        // A handle listed twice, in either form, is refused: a second expect
+        // would otherwise win silently.
+        const auto listed_once = [&](const std::string &handle, const std::string &path) {
+            const auto first = std::find(chain.devices.begin(), chain.devices.end(), handle);
+            if (first == chain.devices.end()) {
+                return true;
+            }
+            error = std::format("{} lists {}, already listed at devices[{}]", path, handle,
+                                std::distance(chain.devices.begin(), first));
+            return false;
+        };
         for (size_t i = 0; i < node["devices"].size(); ++i) {
             const auto &entry = node["devices"][i];
             const std::string path = std::format("safety.stop_chain.devices[{}]", i);
@@ -263,6 +275,9 @@ bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::strin
                 const auto handle = entry.as<std::string>();
                 if (!is_handle(handle, 2)) {
                     error = std::format("{} must be provider/device, got '{}'", path, handle);
+                    return false;
+                }
+                if (!listed_once(handle, path)) {
                     return false;
                 }
                 chain.devices.push_back(handle);
@@ -281,6 +296,9 @@ bool parse_stop_chain(const YAML::Node &node, StopChainConfig &chain, std::strin
             const auto handle = entry["handle"].as<std::string>();
             if (!is_handle(handle, 2)) {
                 error = std::format("{}.handle must be provider/device, got '{}'", path, handle);
+                return false;
+            }
+            if (!listed_once(handle, path)) {
                 return false;
             }
             if (entry["expect"]) {
