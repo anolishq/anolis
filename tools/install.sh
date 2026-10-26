@@ -1451,10 +1451,10 @@ _obs_reuse_credentials() {
         [[ -f "${GRAFANA_ENV_FILE}" ]] && return 0
         log_err "observability: influxdb is already set up, but its credentials are gone (no tokens in ${OBSERVABILITY_ENV_FILE}) — Grafana not provisioned"
         log_info "An uninstall by an earlier install.sh deleted them and kept the instance. To recover,"
-        log_info "mint two tokens with the admin token that 'influx setup' left in root's influx CLI config:"
-        log_info "  id=\$(influx bucket list --name anolis --hide-headers | cut -f1)"
-        log_info "  influx auth create --org anolis --write-bucket \"\${id}\" --description 'anolis-runtime telemetry write'"
-        log_info "  influx auth create --org anolis --read-bucket \"\${id}\" --description 'anolis grafana/export read'"
+        log_info "mint two tokens as root, with the admin token that 'influx setup' left in root's influx CLI config:"
+        log_info "  id=\$(sudo -H influx bucket list --name anolis --hide-headers | cut -f1)"
+        log_info "  sudo -H influx auth create --org anolis --write-bucket \"\${id}\" --description 'anolis-runtime telemetry write'"
+        log_info "  sudo -H influx auth create --org anolis --read-bucket \"\${id}\" --description 'anolis grafana/export read'"
         log_info "then write them to ${OBSERVABILITY_ENV_FILE} (0600 root) as INFLUXDB_WRITE_TOKEN=... and"
         log_info "INFLUXDB_READ_TOKEN=..., and re-run this install."
         return 1
