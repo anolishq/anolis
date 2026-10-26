@@ -151,6 +151,21 @@ void install_hookless_auto_gate(automation::ModeManager &mode_manager, const reg
     mode_manager.add_commit_guard(check);
 }
 
+void install_estop_auto_gate(automation::ModeManager &mode_manager, const control::IActuationLatch &latch) {
+    const auto check = [&latch](automation::RuntimeMode /*prev*/, automation::RuntimeMode next,
+                                std::string &veto_reason) {
+        if (next != automation::RuntimeMode::AUTO || !latch.is_engaged()) {
+            return true;
+        }
+        veto_reason =
+            "refusing AUTO: the software stop's latch is engaged. Clear it (POST /v0/estop/clear) once the machine "
+            "is safe, then enter AUTO.";
+        return false;
+    };
+    mode_manager.on_before_mode_change(check);
+    mode_manager.add_commit_guard(check);
+}
+
 bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
                                    const SafetyConfig &safety, automation::ModeManager &mode_manager,
                                    const std::string &context) {
