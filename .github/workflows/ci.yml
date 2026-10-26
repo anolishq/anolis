@@ -27,6 +27,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       cpp: ${{ steps.cppfilter.outputs.cpp }}
       docs: ${{ steps.docsfilter.outputs.docs }}
+      observability: ${{ steps.obsfilter.outputs.observability }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -69,6 +70,19 @@ jobs:
               - 'docs/**'
               - '*.md'
               - '.markdownlint.jsonc'
+              - '.github/workflows/ci.yml'
+      # What the dashboard query suite exercises: the dashboards and their
+      # provisioning, the suite, and the sink whose rows it mirrors.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: obsfilter
+        with:
+          filters: |
+            observability:
+              - 'observability/**'
+              - 'tests/observability/**'
+              - 'core/telemetry/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - '.github/workflows/ci.yml'
 
   docs:
@@ -183,6 +197,37 @@ jobs:
 
       - name: BATS smoke tests
         run: bats tests/shell/
+
+  observability:
+    name: Observability (dashboard queries)
+    needs: [changes]
+    if: needs.changes.outputs.observability == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # The dev stack's image pins, with the test override from tests/observability/.
+      COMPOSE: >-
+        docker compose -p anolis-obs-test
+        --env-file tests/observability/compose.test.env
+        -f observability/docker-compose.observability.yml
+        -f tests/observability/compose.test.yml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Start InfluxDB and Grafana
+        run: $COMPOSE up -d --wait --quiet-pull
+
+      - name: Run the dashboard query suite
+        run: $COMPOSE run --rm tester
+
+      - name: Stack logs
+        if: failure()
+        run: $COMPOSE logs --no-color
+
+      - name: Stop the stack
+        if: always()
+        run: $COMPOSE down -v
 
   ui-contracts:
     name: UI and Runtime Contracts
@@ -438,6 +483,7 @@ jobs:
       - python-lint
       - python-typecheck
       - shell-tests
+      - observability
       - ui-contracts
       - core-build-test
       - anolis-provider-compat

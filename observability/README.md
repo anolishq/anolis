@@ -3,7 +3,7 @@
 This directory contains Docker configuration for the Anolis telemetry stack:
 
 - **InfluxDB 2.9**: Time-series database for signal history
-- **Grafana 13.1.0**: Visualization dashboards
+- **Grafana 13.2.4**: Visualization dashboards
 
 ## Quick Start
 
@@ -74,32 +74,86 @@ telemetry:
 
 ## Dashboards
 
-All bundled dashboards query bucket `anolis` directly (matching the
-provisioned default); if you change `INFLUXDB_BUCKET`, the datasource will
-follow but the bundled dashboard queries will not — keep the bucket named
-`anolis` unless you also edit the dashboards.
+All bundled dashboards read the datasource's default bucket
+(`v.defaultBucket`, provisioned from `INFLUX_BUCKET`), and every dashboard has
+a **Runtime** filter (`runtime_name`), so two runtimes writing the same
+provider, device and signal ids into one bucket stay apart.
+
+### How the panels read change-driven data
+
+The runtime writes an `anolis_signal` row only when a signal's value or
+quality **changes**, not on every poll. The panels are built around that:
+
+- **Latest-state panels** (status tables, quality counts, quality pie) show
+  each signal's state **as of the end of the selected range**, looking back
+  30 days for its last row. A steady signal that last changed before the
+  range is still shown. One that last changed more than 30 days before the
+  end of the range is not.
+- **Only a running runtime's state is shown.** Nothing is written when a
+  runtime stops, so its last rows would otherwise stand. The latest-state
+  panels, and the seeds of the history panels, show a runtime's signals only
+  if it wrote an `anolis_provider_health` row in the selected range. They are
+  empty with health ingestion off (`telemetry.health_interval_ms: 0`) or on a
+  runtime before 0.1.37, and can be for a range shorter than the health
+  interval (15 s by default).
+- **History panels** plot the **last value in each window** as steps, seeded
+  with each signal's last value before the range. A window's value is where
+  the signal ended up, not an average of its changes, which would weight each
+  change rather than each second. A window with no change holds the value
+  before it, so a steady signal is a flat line across the range.
+- **Rates** ("changes/sec") count change rows: they measure how often values
+  change, not how often the runtime polls.
+- **Freshness** comes from the runtime's periodic health snapshots
+  (`anolis_device_health.staleness_ms`), not from the age of a signal's last
+  change. An unchanged, healthy signal has an old last change and is fresh.
+- **"Seen in range" counts** count distinct ids with at least one row in the
+  selected range. They are not a live inventory.
 
 ### Signal History
 
-Time-series visualization of signal values:
+Signal values over time, one panel per value type:
 
-- **Double values**: Temperature, pressure, duty cycles
-- **Boolean values**: Switch states, enabled flags
-- **Integer values**: RPM, counts
+- **Double**, **Boolean** (as 0/1), and **Integer / Unsigned** values, drawn
+  as steps
+- **String** values: each string signal's latest value, as of the end of the
+  range
 
-Supports filtering by:
-
-- Provider
-- Device
-- Signal
+Supports filtering by runtime, provider, device and signal.
 
 ### Device Health
 
-Status overview of all devices:
+Per-signal quality against the locked contract (`OK`, `STALE`,
+`UNAVAILABLE`, `FAULT`):
 
-- **Quality status**: OK / STALE / ERROR counts
-- **Quality table**: Per-signal quality status
-- **Staleness gauge**: Time since last update
+- **Signals OK / STALE / UNAVAILABLE / FAULT**: signals whose latest quality
+  is each value
+- **Device Signal Status**: each signal's latest quality and last change
+- **Quality Distribution Over Time**: signals in each quality, carried forward
+  between changes
+- **Device Staleness**: the latest `staleness_ms` per device
+
+### System Overview
+
+- **Providers / Devices / Signals seen in range**
+- **Signal changes/sec**, in the last minute and per provider over time
+- **Signal Status** table and **Quality Distribution** pie, as of the end of
+  the range
+
+### Annotations
+
+Mode and parameter changes are drawn as annotations, filtered by the
+**Runtime** selection. Rows written by runtimes that predate the
+`runtime_name` tag on these measurements have no runtime and are shown under
+every selection.
+
+### Testing the dashboards
+
+`just test-observability` (needs Docker) starts a throwaway InfluxDB and
+Grafana, writes fixture telemetry, and runs every panel, annotation and
+variable query through Grafana, asserting what each panel shows. CI runs the
+same suite in the `observability` job. Template variables (`${provider_id}`
+and so on) are substituted by the suite the way Grafana's browser client
+does, since Grafana's query API does not substitute them.
 
 ### I/O & Watchdog Health
 
@@ -164,22 +218,23 @@ InfluxDB measurement: `anolis_signal`
 
 **Tags**:
 
+- `runtime_name`: Runtime instance (e.g., "default")
 - `provider_id`: Provider identifier (e.g., "sim0")
 - `device_id`: Device identifier (e.g., "tempctl-0")
 - `signal_id`: Signal identifier (e.g., "temperature")
 
-**Fields**:
+**Fields** (at most one typed value per row; none for a non-finite double):
 
-- `value_double`: Double values
-- `value_int`: Integer values
-- `value_bool`: Boolean values
-- `quality`: Signal quality ("OK", "STALE", etc.)
+- `value_double`, `value_int`, `value_uint`, `value_bool`, `value_string`
+- `quality`: `OK`, `STALE`, `UNAVAILABLE` or `FAULT`, on every row
 
 **Example line protocol**:
 
 ```flux
-anolis_signal,provider_id=sim0,device_id=tempctl-0,signal_id=temperature value_double=23.5,quality="OK" 1706960096000
+anolis_signal,runtime_name=default,provider_id=sim0,device_id=tempctl-0,signal_id=temperature value_double=23.5,quality="OK" 1706960096000
 ```
+
+The locked contract is `docs/contracts/telemetry-timeseries-baseline.md`.
 
 ## Troubleshooting
 
