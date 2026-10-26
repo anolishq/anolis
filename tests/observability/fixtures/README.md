@@ -1,6 +1,6 @@
 # Inventory fixtures
 
-Saved runtime inventories for `observability/process_dashboard.py`: the body
+Saved runtime inventories for `tools/process-dashboard/process_dashboard.py`: the body
 of `GET /v0/devices` and of each device's capabilities response, in the
 shape the generator reads. `test_process_dashboard.py` checks both against
 `schemas/http/runtime-http.openapi.v0.yaml`.

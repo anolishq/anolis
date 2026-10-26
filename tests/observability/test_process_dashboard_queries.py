@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import process_dashboard as gen
 import pytest
 
-from observability import process_dashboard as gen
 from tests.observability.harness import Dashboard, Telemetry, UInt, Window
 from tests.observability.scenarios import MINUTE
 

@@ -154,14 +154,6 @@ Mode and parameter changes are drawn as annotations, filtered by the
 `runtime_name` tag on these measurements have no runtime and are shown under
 every selection.
 
-### Process dashboard (prototype)
-
-`process_dashboard.py` generates a per-machine process dashboard from a
-runtime's saved inventory: a row per device and a panel per signal, with the
-declared units. It is not installed or provisioned; see
-[PROCESS_DASHBOARD.md](PROCESS_DASHBOARD.md) for use, and for what the
-metadata can and cannot tell it.
-
 ### Testing the dashboards
 
 `just test-observability` (needs Docker) starts a throwaway InfluxDB and

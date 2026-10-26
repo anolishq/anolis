@@ -1,5 +1,8 @@
 # Process dashboard generator (prototype)
 
+A prototype for anolishq/anolis#477 and #353, not shipped in any release:
+packaging is decided after the bench evaluation.
+
 `process_dashboard.py` turns a runtime's saved inventory into a Grafana
 dashboard for that runtime, with no per-machine code. It is a prototype
 (anolishq/anolis#477) for one question: whether the metadata providers
@@ -24,7 +27,7 @@ telemetry does (`runtime_name` in the runtime config; the HTTP API does not
 report it):
 
 ```bash
-python3 observability/process_dashboard.py inventory.json --runtime-name bioreactor -o process.json
+python3 tools/process-dashboard/process_dashboard.py inventory.json --runtime-name bioreactor -o process.json
 ```
 
 Import `process.json` in Grafana (Dashboards → New → Import). The output is
@@ -50,8 +53,8 @@ its value type and its unit, or "no unit declared".
 
 Queries pin all four identity tags exactly, so a signal id repeated on
 another device, provider or runtime never leaks in. Values are drawn as the
-bundled Signal History draws them (see README.md, "How the panels read
-change-driven data"): the last value in each window, held through windows with
+bundled Signal History draws them (see `observability/README.md`, "How the
+panels read change-driven data"): the last value in each window, held through windows with
 no change, seeded from up to 30 days before the range while the runtime
 reports health.
 

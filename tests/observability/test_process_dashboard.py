@@ -11,14 +11,13 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import process_dashboard as gen
 import pytest
 import yaml
 
-from observability import process_dashboard as gen
-
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).with_name("fixtures")
-GENERATOR = REPO / "observability" / "process_dashboard.py"
+GENERATOR = REPO / "tools" / "process-dashboard" / "process_dashboard.py"
 
 
 def inventory(name: str) -> dict[str, Any]:
