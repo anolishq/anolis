@@ -4,9 +4,12 @@
  * @file latch_store.hpp
  * @brief The software stop's latch on disk, so a restart comes back latched (#482).
  *
- * One file per runtime config: `<data_dir>/estop/<runtime.name>.json`. The
- * workbench starts every project it launches with the same working directory,
- * so a file shared between configs would let one project's latch hold another.
+ * One file per machine: `<data_dir>/estop/<hash of the config directory>.json`.
+ * A project's variants share their config/ directory, separate projects have
+ * separate ones, and an install has one. The workbench starts every project it
+ * launches with the same working directory, and its template gives every
+ * project the same runtime.name, so neither could key it. The directory is
+ * stored in the file; a file that names another directory counts as corrupt.
  *
  * The file exists exactly while the latch is engaged. It is written with
  * write-temp, fsync and rename, then the directory is synced, and removed on a
@@ -36,10 +39,11 @@ struct PersistedLatch {
 
 class LatchStore {
 public:
-    explicit LatchStore(std::filesystem::path file);
+    /** @brief The store for the runtime whose config file lives in `config_dir`. */
+    LatchStore(const std::filesystem::path &data_dir, std::string config_dir);
 
-    /** @brief `<data_dir>/estop/<name>.json`, `name` made filename-safe ("default" if empty). */
-    static std::filesystem::path path_for(const std::filesystem::path &data_dir, const std::string &runtime_name);
+    /** @brief `<data_dir>/estop/<16 hex digits of FNV-1a over config_dir>.json`. */
+    static std::filesystem::path path_for(const std::filesystem::path &data_dir, const std::string &config_dir);
 
     const std::filesystem::path &path() const { return file_; }
 
@@ -53,6 +57,7 @@ public:
 
 private:
     std::filesystem::path file_;
+    std::string config_dir_;
 };
 
 }  // namespace control

@@ -19,15 +19,20 @@ std::filesystem::path fresh_dir(const std::string &name) {
     return dir;
 }
 
+void write_raw(const LatchStore &store, const std::string &body) {
+    std::filesystem::create_directories(store.path().parent_path());
+    std::ofstream(store.path()) << body;
+}
+
 }  // namespace
 
 TEST(LatchStoreTest, NoFileMeansUnlatched) {
-    LatchStore store(LatchStore::path_for(fresh_dir("latch-absent"), "rig"));
+    LatchStore store(fresh_dir("latch-absent"), "/srv/rig/config");
     EXPECT_EQ(store.load().state, PersistedLatch::State::Absent);
 }
 
 TEST(LatchStoreTest, ASavedLatchReadsBackWithItsTime) {
-    LatchStore store(LatchStore::path_for(fresh_dir("latch-saved"), "rig"));
+    LatchStore store(fresh_dir("latch-saved"), "/srv/rig/config");
     std::string error;
     ASSERT_TRUE(store.save(1700000000123, "operator", error)) << error;
 
@@ -38,7 +43,7 @@ TEST(LatchStoreTest, ASavedLatchReadsBackWithItsTime) {
 }
 
 TEST(LatchStoreTest, RemoveLeavesNothingAndIsIdempotent) {
-    LatchStore store(LatchStore::path_for(fresh_dir("latch-removed"), "rig"));
+    LatchStore store(fresh_dir("latch-removed"), "/srv/rig/config");
     std::string error;
     EXPECT_TRUE(store.remove(error)) << error;  // nothing there yet, not even the directory
     ASSERT_TRUE(store.save(1, "operator", error)) << error;
@@ -50,9 +55,8 @@ TEST(LatchStoreTest, RemoveLeavesNothingAndIsIdempotent) {
 TEST(LatchStoreTest, ACorruptFileFailsTowardHeld) {
     for (const std::string body : {"not json", "{}", "{\"latched\": false}", "[]", ""}) {
         SCOPED_TRACE(body);
-        LatchStore store(LatchStore::path_for(fresh_dir("latch-corrupt"), "rig"));
-        std::filesystem::create_directories(store.path().parent_path());
-        std::ofstream(store.path()) << body;
+        LatchStore store(fresh_dir("latch-corrupt"), "/srv/rig/config");
+        write_raw(store, body);
 
         const auto loaded = store.load();
         EXPECT_EQ(loaded.state, PersistedLatch::State::Unreadable);
@@ -60,10 +64,20 @@ TEST(LatchStoreTest, ACorruptFileFailsTowardHeld) {
     }
 }
 
-TEST(LatchStoreTest, TwoConfigsSharingADataDirAreIndependent) {
+TEST(LatchStoreTest, AFileNamingAnotherConfigDirectoryFailsTowardHeld) {
+    // A hash collision, or a file copied between machines: never silently ours.
+    LatchStore store(fresh_dir("latch-other-dir"), "/srv/rig/config");
+    write_raw(store, R"({"schema_version": 1, "latched": true, "latched_at_epoch_ms": 5, "config_dir": "/elsewhere"})");
+
+    const auto loaded = store.load();
+    EXPECT_EQ(loaded.state, PersistedLatch::State::Unreadable);
+    EXPECT_NE(loaded.detail.find("does not name this config directory"), std::string::npos) << loaded.detail;
+}
+
+TEST(LatchStoreTest, TwoConfigDirectoriesSharingADataDirAreIndependent) {
     const auto dir = fresh_dir("latch-shared");
-    LatchStore a(LatchStore::path_for(dir, "project-a"));
-    LatchStore b(LatchStore::path_for(dir, "project-b"));
+    LatchStore a(dir, "/work/projects/a/config");
+    LatchStore b(dir, "/work/projects/b/config");
     std::string error;
     ASSERT_TRUE(a.save(1, "operator", error)) << error;
 
@@ -72,10 +86,9 @@ TEST(LatchStoreTest, TwoConfigsSharingADataDirAreIndependent) {
     EXPECT_EQ(b.load().state, PersistedLatch::State::Absent);
 }
 
-TEST(LatchStoreTest, TheNameStaysInsideTheEstopDirectory) {
-    const std::filesystem::path dir = "data";
-    EXPECT_EQ(LatchStore::path_for(dir, ""), dir / "estop" / "default.json");
-    EXPECT_EQ(LatchStore::path_for(dir, "bioreactor-v1.b3"), dir / "estop" / "bioreactor-v1.b3.json");
-    EXPECT_EQ(LatchStore::path_for(dir, "../etc/passwd"), dir / "estop" / ".._etc_passwd.json");
-    EXPECT_EQ(LatchStore::path_for(dir, ".."), dir / "estop" / "_.json");
+TEST(LatchStoreTest, TheFileNameIsAStableHashOfTheConfigDirectory) {
+    // Pinned: a build that hashed differently would not find the latch an
+    // older one left behind.
+    EXPECT_EQ(LatchStore::path_for("data", "/opt/anolis/config"),
+              std::filesystem::path("data") / "estop" / "6480874c9c5e048b.json");
 }

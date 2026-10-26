@@ -51,21 +51,17 @@ bool sync_path(const std::filesystem::path &path, bool directory) {
 
 }  // namespace
 
-LatchStore::LatchStore(std::filesystem::path file) : file_(std::move(file)) {}
+LatchStore::LatchStore(const std::filesystem::path &data_dir, std::string config_dir)
+    : file_(path_for(data_dir, config_dir)), config_dir_(std::move(config_dir)) {}
 
-std::filesystem::path LatchStore::path_for(const std::filesystem::path &data_dir, const std::string &runtime_name) {
-    std::string name = runtime_name.empty() ? "default" : runtime_name;
-    for (auto &c : name) {
-        const bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' ||
-                          c == '_' || c == '.';
-        if (!safe) {
-            c = '_';
-        }
+std::filesystem::path LatchStore::path_for(const std::filesystem::path &data_dir, const std::string &config_dir) {
+    // FNV-1a, 64-bit: stable across builds and platforms, unlike std::hash.
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (const unsigned char c : config_dir) {
+        hash ^= c;
+        hash *= 0x100000001b3ULL;
     }
-    if (name == "." || name == "..") {
-        name = "_";
-    }
-    return data_dir / "estop" / (name + ".json");
+    return data_dir / "estop" / std::format("{:016x}.json", hash);
 }
 
 PersistedLatch LatchStore::load() const {
@@ -98,6 +94,14 @@ PersistedLatch LatchStore::load() const {
         return result;
     }
 
+    if (!doc.contains("config_dir") || !doc["config_dir"].is_string() ||
+        doc["config_dir"].get<std::string>() != config_dir_) {
+        result.state = PersistedLatch::State::Unreadable;
+        result.detail =
+            std::format("the latch file {} does not name this config directory ({})", file_.string(), config_dir_);
+        return result;
+    }
+
     result.state = PersistedLatch::State::Latched;
     if (doc.contains("latched_at_epoch_ms") && doc["latched_at_epoch_ms"].is_number_integer()) {
         result.latched_at_epoch_ms = doc["latched_at_epoch_ms"].get<int64_t>();
@@ -118,6 +122,7 @@ bool LatchStore::save(int64_t latched_at_epoch_ms, const std::string &reason, st
     const nlohmann::json doc = {{"schema_version", kSchemaVersion},
                                 {"latched", true},
                                 {"latched_at_epoch_ms", latched_at_epoch_ms},
+                                {"config_dir", config_dir_},
                                 {"reason", reason}};
     auto tmp = file_;
     tmp += ".tmp";
