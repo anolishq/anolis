@@ -2,7 +2,9 @@
 # `install.sh --uninstall` removes the secrets it and its companions keep under
 # /etc/anolis, which lie outside the prefix: the runtime's runtime.env, the
 # telemetry and observability env files, and the workbench service's copy of
-# the runtime token.
+# the runtime token. With observability provisioned, the observability env
+# files are kept with the InfluxDB instance; observability_reinstall_test.bats
+# covers that.
 #
 # Every path constant under /etc/anolis and SYSTEMD_DIR is pointed into this
 # test's temp dir before install.sh is sourced. rm, rmdir, systemctl, mv,
