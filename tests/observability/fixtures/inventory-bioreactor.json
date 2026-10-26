@@ -1,0 +1,308 @@
+{
+  "devices": {
+    "status": {
+      "code": "OK",
+      "message": "ok"
+    },
+    "devices": [
+      {
+        "provider_id": "bread0",
+        "device_id": "rlht0",
+        "display_name": "Reactor Temperature Node",
+        "type": "bread.rlht"
+      },
+      {
+        "provider_id": "bread0",
+        "device_id": "dcmt0",
+        "display_name": "Reactor Sampling + Stirring (ch1 sample, ch2 stir)",
+        "type": "bread.dcmt"
+      },
+      {
+        "provider_id": "bread0",
+        "device_id": "dcmt1",
+        "display_name": "Reactor Dual Dosing (ch1 dose1, ch2 dose2)",
+        "type": "bread.dcmt"
+      },
+      {
+        "provider_id": "ezo0",
+        "device_id": "ph0",
+        "display_name": "Reactor pH",
+        "type": "sensor.ezo.ph"
+      },
+      {
+        "provider_id": "ezo0",
+        "device_id": "do0",
+        "display_name": "Reactor Dissolved Oxygen",
+        "type": "sensor.ezo.do"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "bread0",
+      "device_id": "rlht0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "mode",
+            "value_type": "string",
+            "label": "mode",
+            "description": "Current RLHT control mode."
+          },
+          {
+            "signal_id": "t1_c",
+            "value_type": "double",
+            "label": "t1_c",
+            "unit": "C",
+            "description": "Channel 1 measured temperature."
+          },
+          {
+            "signal_id": "t2_c",
+            "value_type": "double",
+            "label": "t2_c",
+            "unit": "C",
+            "description": "Channel 2 measured temperature."
+          },
+          {
+            "signal_id": "setpoint1_c",
+            "value_type": "double",
+            "label": "setpoint1_c",
+            "unit": "C",
+            "description": "Channel 1 target temperature."
+          },
+          {
+            "signal_id": "setpoint2_c",
+            "value_type": "double",
+            "label": "setpoint2_c",
+            "unit": "C",
+            "description": "Channel 2 target temperature."
+          },
+          {
+            "signal_id": "period1_ms",
+            "value_type": "uint64",
+            "label": "period1_ms",
+            "unit": "ms",
+            "description": "Relay 1 control period."
+          },
+          {
+            "signal_id": "period2_ms",
+            "value_type": "uint64",
+            "label": "period2_ms",
+            "unit": "ms",
+            "description": "Relay 2 control period."
+          },
+          {
+            "signal_id": "relay1_on",
+            "value_type": "bool",
+            "label": "relay1_on",
+            "description": "Relay 1 state derived from RLHT flags."
+          },
+          {
+            "signal_id": "relay2_on",
+            "value_type": "bool",
+            "label": "relay2_on",
+            "description": "Relay 2 state derived from RLHT flags."
+          },
+          {
+            "signal_id": "estop",
+            "value_type": "bool",
+            "label": "estop",
+            "description": "Emergency stop state derived from RLHT flags."
+          },
+          {
+            "signal_id": "estop_count",
+            "value_type": "uint64",
+            "label": "estop_count",
+            "description": "Hardware e-stop presses since boot, wrapping at 255."
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "bread0",
+      "device_id": "dcmt0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "mode",
+            "value_type": "string",
+            "label": "mode",
+            "description": "Current DCMT control mode."
+          },
+          {
+            "signal_id": "motor1_target",
+            "value_type": "int64",
+            "label": "motor1_target",
+            "description": "Motor 1 target value."
+          },
+          {
+            "signal_id": "motor2_target",
+            "value_type": "int64",
+            "label": "motor2_target",
+            "description": "Motor 2 target value."
+          },
+          {
+            "signal_id": "motor1_value",
+            "value_type": "int64",
+            "label": "motor1_value",
+            "description": "Motor 1 measured value."
+          },
+          {
+            "signal_id": "motor2_value",
+            "value_type": "int64",
+            "label": "motor2_value",
+            "description": "Motor 2 measured value."
+          },
+          {
+            "signal_id": "motor1_brake",
+            "value_type": "bool",
+            "label": "motor1_brake",
+            "description": "Motor 1 brake state."
+          },
+          {
+            "signal_id": "motor2_brake",
+            "value_type": "bool",
+            "label": "motor2_brake",
+            "description": "Motor 2 brake state."
+          },
+          {
+            "signal_id": "estop",
+            "value_type": "bool",
+            "label": "estop",
+            "description": "Emergency stop state."
+          },
+          {
+            "signal_id": "estop_count",
+            "value_type": "uint64",
+            "label": "estop_count",
+            "description": "Hardware e-stop presses since boot, wrapping at 255."
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "bread0",
+      "device_id": "dcmt1",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "mode",
+            "value_type": "string",
+            "label": "mode",
+            "description": "Current DCMT control mode."
+          },
+          {
+            "signal_id": "motor1_target",
+            "value_type": "int64",
+            "label": "motor1_target",
+            "description": "Motor 1 target value."
+          },
+          {
+            "signal_id": "motor2_target",
+            "value_type": "int64",
+            "label": "motor2_target",
+            "description": "Motor 2 target value."
+          },
+          {
+            "signal_id": "motor1_value",
+            "value_type": "int64",
+            "label": "motor1_value",
+            "description": "Motor 1 measured value."
+          },
+          {
+            "signal_id": "motor2_value",
+            "value_type": "int64",
+            "label": "motor2_value",
+            "description": "Motor 2 measured value."
+          },
+          {
+            "signal_id": "motor1_brake",
+            "value_type": "bool",
+            "label": "motor1_brake",
+            "description": "Motor 1 brake state."
+          },
+          {
+            "signal_id": "motor2_brake",
+            "value_type": "bool",
+            "label": "motor2_brake",
+            "description": "Motor 2 brake state."
+          },
+          {
+            "signal_id": "estop",
+            "value_type": "bool",
+            "label": "estop",
+            "description": "Emergency stop state."
+          },
+          {
+            "signal_id": "estop_count",
+            "value_type": "uint64",
+            "label": "estop_count",
+            "description": "Hardware e-stop presses since boot, wrapping at 255."
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "ezo0",
+      "device_id": "ph0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "ph_value",
+            "value_type": "double",
+            "label": "pH",
+            "unit": "pH",
+            "description": "Latest pH measurement"
+          }
+        ],
+        "functions": []
+      }
+    },
+    {
+      "status": {
+        "code": "OK",
+        "message": "ok"
+      },
+      "provider_id": "ezo0",
+      "device_id": "do0",
+      "capabilities": {
+        "signals": [
+          {
+            "signal_id": "do_mg_l",
+            "value_type": "double",
+            "label": "Dissolved Oxygen (mg/L)",
+            "unit": "mg/L",
+            "description": "Dissolved oxygen concentration"
+          },
+          {
+            "signal_id": "do_saturation_pct",
+            "value_type": "double",
+            "label": "Dissolved Oxygen (%)",
+            "unit": "%",
+            "description": "Dissolved oxygen percent saturation"
+          }
+        ],
+        "functions": []
+      }
+    }
+  ]
+}

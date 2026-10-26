@@ -98,6 +98,7 @@ jobs:
             observability:
               - 'observability/**'
               - 'tests/observability/**'
+              - 'tools/process-dashboard/**'
               - 'core/telemetry/**'
               - 'pyproject.toml'
               - 'uv.lock'
