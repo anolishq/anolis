@@ -191,9 +191,28 @@ enum class StartupOutputs { SafeState, Leave };
 /**
  * @brief Settings from the top-level `safety` YAML section.
  */
+/**
+ * @brief `safety.stop_chain` (#483): observing the emergency stop.
+ *
+ * `status` names a boolean signal any provider publishes,
+ * `provider/device/signal`, and the value that means the stop is in force.
+ * `devices` is the scope: what the stop removes power from. The runtime only
+ * observes; it never drives the chain. Absent means today's behaviour.
+ */
+struct StopChainStatusConfig {
+    std::string signal;  // "provider/device/signal"
+    bool active = true;  // the value meaning "stop in force"
+};
+
+struct StopChainConfig {
+    std::optional<StopChainStatusConfig> status;
+    std::vector<std::string> devices;  // "provider/device" handles in scope
+};
+
 struct SafetyConfig {
     SafeStateConfig safe_state;
     StartupOutputs on_startup = StartupOutputs::SafeState;
+    StopChainConfig stop_chain;
 };
 
 /**

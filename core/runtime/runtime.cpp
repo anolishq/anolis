@@ -9,7 +9,9 @@
 
 #include "runtime.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -84,6 +86,12 @@ bool Runtime::initialize(std::string &error) {
     if (!check_startup_deadline("state_cache.poll_once")) {
         return false;
     }
+
+    // The stop status after discovery and the first poll (#483). That poll is
+    // synchronous and bounded by provider timeouts, so this is the bounded
+    // wait: a status not readable by now reads unknown, and holds.
+    warn_stop_chain_config();
+    update_stop_chain();
 
     apply_startup_outputs();
     if (!check_startup_deadline("safety.on_startup")) {
@@ -172,6 +180,7 @@ bool Runtime::init_core_services(std::string & /*error*/) {
     device_loss_latch_ = std::make_unique<control::DeviceLossLatch>();
     call_router_->set_device_loss_latch(device_loss_latch_.get());
     wire_device_loss_latch();
+    wire_stop_chain();
 
     // Create provider supervisor
     supervisor_ = std::make_unique<provider::ProviderSupervisor>();
@@ -719,6 +728,7 @@ bool Runtime::init_http(std::string &error) {
         dependencies.safe_state = safe_state_controller_.get();
         // Latched devices are reported on GET /v0/runtime/status (#285).
         dependencies.device_loss_latch = device_loss_latch_.get();
+        dependencies.stop_chain = stop_chain_.get();
         // Device-liveness staleness thresholds (#220): derived from the poll
         // cadence + device count unless explicitly overridden.
         dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,
@@ -838,6 +848,8 @@ void Runtime::run() {
     // Main loop: polling, provider health monitoring, crash recovery
     while (running_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        update_stop_chain();
 
         // Check for shutdown signal
         if (anolis::runtime::SignalHandler::is_shutdown_requested()) {
@@ -976,6 +988,98 @@ void Runtime::wire_device_loss_latch() {
     state_cache_->set_device_reachability_sink(control::make_reachability_sink(*device_loss_latch_, *reissue_worker_));
 }
 
+void Runtime::wire_stop_chain() {
+    // A stale reading is three poll intervals old, and never under a second:
+    // a status that has stopped updating must not keep reading clear.
+    const auto stale_after = std::chrono::milliseconds(std::max(1000, 3 * config_.polling.interval_ms));
+    stop_chain_ = std::make_unique<control::StopChainMonitor>(config_.safety.stop_chain, *state_cache_, stale_after);
+    if (!config_.safety.stop_chain.status.has_value()) {
+        if (!config_.safety.stop_chain.devices.empty()) {
+            LOG_WARN("[Runtime] safety.stop_chain.devices is set without a status signal; no stop is observed");
+        }
+        return;
+    }
+    safe_state_controller_->set_clear_guard([this] { return stop_chain_->clear_refusal(); });
+    device_loss_latch_->set_expected_loss([this, signal = config_.safety.stop_chain.status->signal](
+                                              const std::string &device_handle) -> std::optional<std::string> {
+        if (stop_chain_->snapshot().state != control::StopChainState::InForce ||
+            !stop_chain_->in_scope(device_handle)) {
+            return std::nullopt;
+        }
+        return "the emergency stop in force (" + signal + ")";
+    });
+}
+
+void Runtime::warn_stop_chain_config() const {
+    if (!stop_chain_ || !config_.safety.stop_chain.status.has_value()) {
+        return;
+    }
+    const auto &signal = config_.safety.stop_chain.status->signal;
+    const std::string device_handle = signal.substr(0, signal.rfind('/'));
+    if (stop_chain_->in_scope(device_handle)) {
+        LOG_WARN("[Runtime] stop_chain: the status source "
+                 << signal
+                 << " is a device in its own scope; it goes "
+                    "silent with the stop, so a stop cannot be told from a power fault");
+    }
+    const auto device = registry_->get_device_by_handle_copy(device_handle);
+    if (!device.has_value()) {
+        LOG_WARN("[Runtime] stop_chain: the status device " << device_handle
+                                                            << " is not registered; the stop status reads unknown");
+        return;
+    }
+    const std::string signal_id = signal.substr(signal.rfind('/') + 1);
+    const auto status_signal = device->capabilities.signals_by_id.find(signal_id);
+    if (status_signal == device->capabilities.signals_by_id.end()) {
+        LOG_WARN("[Runtime] stop_chain: " << device_handle << " has no signal " << signal_id
+                                          << "; the stop status reads unknown");
+    } else if (!status_signal->second.is_default) {
+        LOG_WARN("[Runtime] stop_chain: " << signal
+                                          << " has no poll hint, so it is never polled and the stop "
+                                             "status reads unknown; its provider must set poll_hint_hz");
+    }
+    for (const auto &[name, spec] : device->capabilities.functions_by_id) {
+        (void)name;
+        if (registry::is_actuating(spec)) {
+            LOG_WARN("[Runtime] stop_chain: the status device "
+                     << device_handle << " also has actuating functions (" << spec.function_name
+                     << "); a status the runtime can drive would read a software action back "
+                        "as a stop");
+            break;
+        }
+    }
+}
+
+void Runtime::update_stop_chain() {
+    if (!stop_chain_ || !stop_chain_->configured()) {
+        return;
+    }
+    const auto change = stop_chain_->update();
+    if (!change.has_value()) {
+        return;
+    }
+    const auto &[before, after] = *change;
+    const std::string state = control::stop_chain_state_to_string(after.state);
+    if (after.state == control::StopChainState::Clear) {
+        LOG_INFO("[Runtime] Emergency stop clear: " << after.reason
+                                                    << ". A held latch stays until a deliberate clear.");
+    } else {
+        LOG_WARN("[Runtime] Emergency stop " << state << ": " << after.reason);
+    }
+    if (event_emitter_) {
+        events::StopChainEvent event;
+        event.event_id = event_emitter_->next_event_id();
+        event.previous_state = control::stop_chain_state_to_string(before.state);
+        event.new_state = state;
+        event.reason = after.reason;
+        event.timestamp_ms = after.since_epoch_ms.value_or(0);
+        event_emitter_->emit(event);
+    }
+    if (stop_chain_->holds()) {
+        safe_state_controller_->hold("emergency stop " + state + ": " + after.reason);
+    }
+}
+
 void Runtime::reissue_safe_state_for(const std::string &device_handle) {
     // The controller runs whichever rung the machine actually declares --
     // hooks, else setpoints, else zero -- filtered to this device. Walking
@@ -1016,10 +1120,20 @@ void Runtime::apply_startup_outputs() {
         return;
     }
 
-    const auto result = safe_state_controller_->drive_safe_state(devices_reported_missing());
+    // A stop chain in force at boot (#483): the devices behind it may be
+    // unpowered, so their calls are skipped and reported; devices outside its
+    // scope are powered and still driven. An unknown status runs it all: the
+    // status source may be down while the devices are powered.
+    control::AbsentDevices skip = devices_reported_missing();
+    if (stop_chain_ != nullptr && stop_chain_->snapshot().state == control::StopChainState::InForce) {
+        for (const auto &handle : config_.safety.stop_chain.devices) {
+            skip.emplace(handle, "stop chain in force");
+        }
+    }
+    const auto result = safe_state_controller_->drive_safe_state(skip);
     for (const auto &skipped : result.skipped) {
         LOG_WARN("[Runtime] safety.on_startup=safe_state skipped " << skipped.device_handle << "/" << skipped.function
-                                                                   << ": absent at startup: " << skipped.reason);
+                                                                   << ": " << skipped.reason);
     }
     if (result.kind == control::SafeStateKind::None) {
         LOG_WARN("[Runtime] safety.on_startup=safe_state: no software safe state is declared, nothing to run");
@@ -1035,11 +1149,11 @@ void Runtime::apply_startup_outputs() {
         }
     }
     if (result.actions.empty() && !result.skipped.empty()) {
-        // Nothing failed: every call's device is absent, and was skipped above.
-        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
-                                                                   << " drove nothing; all " << result.skipped.size()
-                                                                   << " call(s) target devices absent at startup,"
-                                                                      " safe_state_achieved=false");
+        // Nothing failed: every call was skipped above, its device absent or
+        // behind a stop chain in force.
+        LOG_WARN("[Runtime] safety.on_startup=safe_state: ladder="
+                 << control::safe_state_kind_to_string(result.kind) << " drove nothing; all " << result.skipped.size()
+                 << " call(s) target devices absent at startup or behind the stop chain, safe_state_achieved=false");
     } else if (result.safe_state_achieved) {
         LOG_INFO("[Runtime] safety.on_startup=safe_state: ladder=" << control::safe_state_kind_to_string(result.kind)
                                                                    << " actions=" << result.actions.size()

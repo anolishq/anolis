@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -80,12 +81,23 @@ public:
 
     std::vector<std::string> latched() const override;
 
+    /**
+     * @brief Name a loss that is not a fault (#483).
+     *
+     * Asked when a device's latch engages: a reason makes the loss an expected
+     * one, such as an emergency stop in force with the device in its scope,
+     * logged at INFO with that reason instead of as a fault. The latch engages
+     * either way. Set once, before polling starts.
+     */
+    void set_expected_loss(std::function<std::optional<std::string>(const std::string &)> expected_loss);
+
 private:
     struct AppliedEdge {
         std::uint64_t seq = 0;
         bool reachable = false;
     };
 
+    std::function<std::optional<std::string>(const std::string &)> expected_loss_;  // set before polling
     mutable std::mutex mutex_;
     std::set<std::string> latched_;
     // Newest edge applied per device. Kept across release_all(): a re-arm does

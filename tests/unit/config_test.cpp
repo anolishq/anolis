@@ -1556,3 +1556,71 @@ health:
 
     EXPECT_FALSE(load_config(config_path, config, error));
 }
+
+// --- safety.stop_chain (#483) -----------------------------------------------
+
+namespace {
+std::string stop_chain_config(const std::string& stop_chain) {
+    return std::string(R"(
+providers:
+  - id: bread0
+    command: /path/to/provider
+safety:
+  stop_chain:
+)") + stop_chain;
+}
+}  // namespace
+
+TEST_F(ConfigTest, StopChainParsesStatusAndScope) {
+    const auto path = create_config_file("stop_chain_ok.yaml", stop_chain_config(R"(    status:
+      signal: gpio0/estop/chain_open
+      active: false
+    devices: [bread0/rlht0, bread0/dcmt0]
+)"));
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    ASSERT_TRUE(config.safety.stop_chain.status.has_value());
+    EXPECT_EQ(config.safety.stop_chain.status->signal, "gpio0/estop/chain_open");
+    EXPECT_FALSE(config.safety.stop_chain.status->active);
+    EXPECT_EQ(config.safety.stop_chain.devices, (std::vector<std::string>{"bread0/rlht0", "bread0/dcmt0"}));
+}
+
+TEST_F(ConfigTest, StopChainAbsentMeansNoChain) {
+    const auto path = create_config_file("stop_chain_absent.yaml", "providers:\n  - id: bread0\n    command: /p\n");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_FALSE(config.safety.stop_chain.status.has_value());
+    EXPECT_TRUE(config.safety.stop_chain.devices.empty());
+}
+
+TEST_F(ConfigTest, StopChainActiveDefaultsToTrue) {
+    const auto path = create_config_file("stop_chain_default.yaml", stop_chain_config(R"(    status:
+      signal: gpio0/estop/chain_open
+)"));
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_TRUE(config.safety.stop_chain.status->active);
+}
+
+TEST_F(ConfigTest, StopChainRejectsMalformedEntries) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"    status: {}\n", "safety.stop_chain.status.signal is required"},
+        {"    status:\n      signal: gpio0/chain_open\n", "must be provider/device/signal, got 'gpio0/chain_open'"},
+        {"    status:\n      signal: gpio0//chain_open\n", "must be provider/device/signal"},
+        {"    devices: [bread0]\n", "safety.stop_chain.devices[0] must be provider/device, got 'bread0'"},
+        {"    devices:\n      - handle: bread0/dcmt0\n        expect: power_loss\n",
+         "safety.stop_chain.devices[0] must be a provider/device handle"},
+    };
+    for (size_t i = 0; i < cases.size(); ++i) {
+        SCOPED_TRACE(cases[i].first);
+        const auto path =
+            create_config_file("stop_chain_bad_" + std::to_string(i) + ".yaml", stop_chain_config(cases[i].first));
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_FALSE(load_config(path, config, error));
+        EXPECT_NE(error.find(cases[i].second), std::string::npos) << error;
+    }
+}

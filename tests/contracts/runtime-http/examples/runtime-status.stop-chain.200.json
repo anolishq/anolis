@@ -1,0 +1,48 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "version": "0.1.21",
+  "mode": "MANUAL",
+  "uptime_seconds": 123,
+  "polling_interval_ms": 500,
+  "providers": [
+    {
+      "provider_id": "sim0",
+      "state": "AVAILABLE",
+      "device_count": 4
+    }
+  ],
+  "device_count": 4,
+  "estop": {
+    "latched": true,
+    "software_safe_state": "hooks",
+    "latched_at_epoch_ms": 1761400000000,
+    "uncovered_actuating_functions": 0
+  },
+  "startup_safe_state": {
+    "on_startup": "safe_state",
+    "ran": true,
+    "software_safe_state": "hooks",
+    "safe_state_achieved": true,
+    "failed_actions": [],
+    "skipped_actions": []
+  },
+  "device_loss_latched": [
+    "bread0/dcmt0"
+  ],
+  "stop_chain": {
+    "state": "in_force",
+    "reason": "gpio0/estop/chain_open reads true",
+    "signal": "gpio0/estop/chain_open",
+    "devices": [
+      "bread0/rlht0",
+      "bread0/dcmt0"
+    ],
+    "expected_losses": [
+      "bread0/dcmt0"
+    ],
+    "since_epoch_ms": 1761400000000
+  }
+}

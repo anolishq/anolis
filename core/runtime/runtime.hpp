@@ -15,6 +15,7 @@
 #include "control/device_loss_latch.hpp"
 #include "control/reissue_worker.hpp"
 #include "control/safe_state.hpp"
+#include "control/stop_chain.hpp"
 #include "events/event_emitter.hpp"
 #include "http/server.hpp"
 #include "provider/i_provider_handle.hpp"  // Changed to interface
@@ -94,6 +95,7 @@ public:
     state::StateCache &get_state_cache() { return *state_cache_; }
     const control::SafeStateController &get_safe_state() const { return *safe_state_controller_; }
     control::SafeStateController &get_safe_state() { return *safe_state_controller_; }
+    const control::StopChainMonitor &get_stop_chain() const { return *stop_chain_; }
     control::CallRouter &get_call_router() { return *call_router_; }
     events::EventEmitter &get_event_emitter() { return *event_emitter_; }
 
@@ -141,6 +143,13 @@ private:
 
     /** @brief Wire StateCache's reachability sink to the device-loss latch (#285). */
     void wire_device_loss_latch();
+    // safety.stop_chain (#483): build the monitor, and install its clear guard
+    // and its expected-loss reason.
+    void wire_stop_chain();
+    // Re-read the stop status; on a move to in_force or unknown, hold.
+    void update_stop_chain();
+    // Load-time checks on the stop chain, once providers have been discovered.
+    void warn_stop_chain_config() const;
 
     /** @brief Re-assert a returning latched device's declared safe state, in any mode. */
     void reissue_safe_state_for(const std::string &device_handle);
@@ -161,6 +170,7 @@ private:
     std::unique_ptr<control::CallRouter> call_router_;
     std::unique_ptr<control::SafeStateController> safe_state_controller_;
     std::unique_ptr<control::DeviceLossLatch> device_loss_latch_;
+    std::unique_ptr<control::StopChainMonitor> stop_chain_;  // reads state_cache_ and config_
     // Runs the latch's safe-state re-asserts off the thread that delivered the
     // edge, which may hold a provider lock (#427). Declared after everything it
     // calls into, so it is joined before they are destroyed.

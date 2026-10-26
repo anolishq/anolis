@@ -242,12 +242,25 @@ struct AutomationFaultEvent {
 };
 
 /**
+ * @brief Stop-chain change (#483): the observed emergency stop's state moved.
+ *
+ * States are `in_force`, `clear` and `unknown`, as in GET /v0/runtime/status.
+ */
+struct StopChainEvent {
+    uint64_t event_id;
+    std::string previous_state;
+    std::string new_state;
+    std::string reason;
+    int64_t timestamp_ms;
+};
+
+/**
  * @brief Union of all event types
  *
  * Subscribers receive Event variants and can dispatch on type.
  */
 using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
-                           ParameterChangeEvent, AutomationFaultEvent, DeviceRemovedEvent>;
+                           ParameterChangeEvent, AutomationFaultEvent, DeviceRemovedEvent, StopChainEvent>;
 
 /**
  * @brief Get event ID from any event type

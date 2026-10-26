@@ -288,6 +288,15 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["new_mode"] = e.new_mode;
                 data["timestamp_ms"] = e.timestamp_ms;
 
+            } else if constexpr (std::is_same_v<T, events::StopChainEvent>) {
+                result = "event: stop_chain_change\n";
+                result += "id: " + std::to_string(e.event_id) + "\n";
+
+                data["previous_state"] = e.previous_state;
+                data["new_state"] = e.new_state;
+                data["reason"] = e.reason;
+                data["timestamp_ms"] = e.timestamp_ms;
+
             } else if constexpr (std::is_same_v<T, events::ParameterChangeEvent>) {
                 result = "event: parameter_change\n";
                 result += "id: " + std::to_string(e.event_id) + "\n";

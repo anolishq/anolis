@@ -109,6 +109,30 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
         response["device_loss_latched"] = device_loss_latch_->latched();
     }
 
+    // The observed emergency stop (#483), when safety.stop_chain names a status.
+    // A device in its scope lost while it is in force is the stop, not a fault.
+    if (stop_chain_ != nullptr && stop_chain_->configured()) {
+        const auto chain = stop_chain_->snapshot();
+        nlohmann::json expected_losses = nlohmann::json::array();
+        if (chain.state == control::StopChainState::InForce && device_loss_latch_ != nullptr) {
+            for (const auto &handle : device_loss_latch_->latched()) {
+                if (stop_chain_->in_scope(handle)) {
+                    expected_losses.push_back(handle);
+                }
+            }
+        }
+        response["stop_chain"] = {{"state", control::stop_chain_state_to_string(chain.state)},
+                                  {"reason", chain.reason},
+                                  {"signal", stop_chain_->config().status->signal},
+                                  {"devices", stop_chain_->config().devices},
+                                  {"expected_losses", expected_losses}};
+        if (chain.since_epoch_ms.has_value()) {
+            response["stop_chain"]["since_epoch_ms"] = *chain.since_epoch_ms;
+        } else {
+            response["stop_chain"]["since_epoch_ms"] = nullptr;
+        }
+    }
+
     send_json(res, StatusCode::OK, response);
 }
 
@@ -259,7 +283,13 @@ void HttpServer::handle_post_estop_clear(const httplib::Request &, httplib::Resp
         return;
     }
 
-    safe_state_->clear();
+    // Refused while an observed emergency stop is in force or its status is
+    // unknown (#483): releasing the stop never clears anything, and a clear is
+    // only meaningful once it is released.
+    if (const auto refusal = safe_state_->clear()) {
+        send_json(res, StatusCode::FAILED_PRECONDITION, make_error_response(StatusCode::FAILED_PRECONDITION, *refusal));
+        return;
+    }
     nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"latched", false}};
     send_json(res, StatusCode::OK, response);
 }

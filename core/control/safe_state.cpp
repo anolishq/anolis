@@ -249,9 +249,10 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
     };
 
     EstopResult result;
-    // A declared call to a device its provider reports missing is recorded,
-    // not issued (anolishq/anolis#461). The zero rung needs no such check: it
-    // only walks registered devices.
+    // A declared call to a device in `absent` is recorded, not issued: one its
+    // provider reports missing (anolishq/anolis#461), or one behind a stop
+    // chain in force at startup (#483). The zero rung checks too: a device
+    // behind the stop is registered, only unpowered.
     const auto run_or_skip = [&](const runtime::ModeTransitionCallConfig &call) {
         if (absent != nullptr) {
             if (const auto it = absent->find(call.device_handle); it != absent->end()) {
@@ -281,9 +282,16 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
             break;
         case SafeStateKind::Zero:
             for (const auto &[handle, spec] : actuating_functions()) {
-                if (wanted(handle)) {
-                    result.actions.push_back(run_zero_call(handle, spec));
+                if (!wanted(handle)) {
+                    continue;
                 }
+                if (absent != nullptr) {
+                    if (const auto it = absent->find(handle); it != absent->end()) {
+                        result.skipped.push_back({handle, spec.function_name, it->second});
+                        continue;
+                    }
+                }
+                result.actions.push_back(run_zero_call(handle, spec));
             }
             break;
         case SafeStateKind::None:
@@ -402,8 +410,14 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
     return result;
 }
 
-void SafeStateController::clear() {
+std::optional<std::string> SafeStateController::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (clear_guard_) {
+        if (auto refusal = clear_guard_()) {
+            LOG_WARN("[SafeState] E-stop latch clear refused: " << *refusal);
+            return refusal;
+        }
+    }
     latched_.store(false, std::memory_order_release);
     latched_at_ms_.reset();
     restored_reason_.reset();
@@ -414,6 +428,40 @@ void SafeStateController::clear() {
             // Fails toward held: a file left behind latches the next start.
             LOG_WARN("[SafeState] E-stop latch file not removed (" << error
                                                                    << "); the next start will come back latched");
+        }
+    }
+    return std::nullopt;
+}
+
+void SafeStateController::set_clear_guard(std::function<std::optional<std::string>()> guard) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clear_guard_ = std::move(guard);
+}
+
+void SafeStateController::hold(const std::string &reason) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (latched_.load(std::memory_order_acquire)) {
+            return;
+        }
+        latched_.store(true, std::memory_order_release);
+        latched_at_ms_ = now_epoch_ms();
+        restored_reason_.reset();
+        LOG_WARN("[SafeState] E-stop latch held: " << reason << ". No safe-state calls are sent.");
+        if (latch_store_ != nullptr) {
+            std::string error;
+            if (!latch_store_->save(*latched_at_ms_, reason, error)) {
+                LOG_ERROR("[SafeState] E-stop latch not persisted (" << error
+                                                                     << "); a restart would come back unlatched");
+            }
+        }
+    }
+    // FAULT outside mutex_: set_mode runs the -> FAULT hooks, whose actuating
+    // calls the latch now refuses; nothing here admits them.
+    if (mode_manager_ != nullptr) {
+        std::string err;
+        if (!mode_manager_->set_mode(automation::RuntimeMode::FAULT, err)) {
+            LOG_ERROR("[SafeState] E-stop hold could not enter FAULT: " << err);
         }
     }
 }

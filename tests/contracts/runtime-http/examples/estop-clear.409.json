@@ -1,0 +1,6 @@
+{
+  "status": {
+    "code": "FAILED_PRECONDITION",
+    "message": "the emergency stop is in force (gpio0/estop/chain_open reads true); release it first"
+  }
+}

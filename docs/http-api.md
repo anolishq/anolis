@@ -126,6 +126,13 @@ Notes:
    `false` for `leave` and when no safe state is declared. Runtimes before
    0.1.51 do not send `skipped_actions`.
 5. This is a software stop, not a substitute for the hardware emergency stop.
+6. With `safety.stop_chain` (see [configuration-schema.md](configuration-schema.md)),
+   `GET /v0/runtime/status` carries `stop_chain`: `state` (`in_force`, `clear`
+   or `unknown`), `reason`, `signal`, `devices`, `expected_losses` and
+   `since_epoch_ms`. A move of the state is a `stop_chain_change` event on
+   `/v0/events`. While the state is `in_force` or `unknown`,
+   `POST /v0/estop/clear` answers `409` FAILED_PRECONDITION with the reason in
+   `status.message`, and the latch stays engaged.
 
 ### Device-loss latch
 

@@ -203,6 +203,44 @@ after provider discovery and before the HTTP server opens, with the same
 ladder and verdict as `POST /v0/estop` but without engaging the latch.
 `leave` leaves outputs as they were. Any other value fails config load.
 
+`safety.stop_chain` - observing the emergency stop
+([rfcs/stop-chain.md](rfcs/stop-chain.md)). The runtime only observes it, and
+no stop's effect depends on it. Absent means no stop is observed.
+
+```yaml
+safety:
+  stop_chain:
+    status:
+      signal: gpio0/estop/chain_open  # provider/device/signal, a bool
+      active: true                    # the value meaning "stop in force" (default true)
+    devices: [bread0/rlht0, bread0/dcmt0]  # provider/device handles in scope
+```
+
+1. The status reads `in_force`, `clear` or `unknown`. A signal that is stale
+   (three poll intervals old, at least one second, or reported with non-OK
+   quality), unregistered or not a bool is `unknown`, never `clear`.
+2. On `in_force` or `unknown`, at startup after the first poll or at any
+   time after, the software stop's latch engages without running its ladder,
+   and an automation machine enters `FAULT`. No device calls are sent.
+3. While `in_force` or `unknown`, `POST /v0/estop/clear` is refused. Releasing
+   the stop never clears the latch: the operator clears it once it reads
+   `clear`.
+4. A device in `devices` that goes unreachable while the stop is in force is
+   logged as the stop, not as a device fault, and listed under
+   `stop_chain.expected_losses` in `GET /v0/runtime/status`.
+5. `safety.on_startup: safe_state` with the stop in force at boot skips the
+   calls to devices in `devices`, reported in `startup_safe_state.skipped_actions`
+   with the reason `stop chain in force`, and still drives the devices outside
+   the scope, which are powered. With the status `unknown` it runs in full: the
+   status source may be down while the devices are powered.
+6. At startup the runtime warns when the status device is itself in
+   `devices`, is not registered, has actuating functions, or its signal has no
+   poll hint (it is then never polled, and the status reads `unknown`).
+
+A `status` without `signal`, or a handle of the wrong shape, fails config load.
+Per-device `expect` comes in a later increment; an entry that is not a
+`provider/device` string fails config load until then.
+
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
 `device_handle` and a function selector. When none of the three apply, the
