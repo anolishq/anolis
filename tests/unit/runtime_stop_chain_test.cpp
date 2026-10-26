@@ -13,6 +13,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <variant>
 
@@ -41,15 +42,31 @@ Rig fresh_rig(const std::string &name) {
     return rig;
 }
 
+// Retries a filesystem step for up to a second. The helper opens `chain` for
+// a moment on every poll, and Windows refuses to replace or remove a file
+// another process has open; POSIX does not, so there the first try succeeds.
+void retry_briefly(const std::function<void(std::error_code &)> &step) {
+    std::error_code ec;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        ec.clear();
+        step(ec);
+        if (!ec) {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    throw std::filesystem::filesystem_error("set_chain", ec);
+}
+
 // Replaced by rename, so the helper never reads a half-written file.
 void set_chain(const Rig &rig, const std::string &value) {
     if (value.empty()) {
-        std::filesystem::remove(rig.chain());
+        retry_briefly([&](std::error_code &ec) { std::filesystem::remove(rig.chain(), ec); });
         return;
     }
     const auto tmp = rig.root / "chain.tmp";
     std::ofstream(tmp) << value;
-    std::filesystem::rename(tmp, rig.chain());
+    retry_briefly([&](std::error_code &ec) { std::filesystem::rename(tmp, rig.chain(), ec); });
 }
 
 std::string calls_made(const Rig &rig) {
