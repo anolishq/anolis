@@ -99,7 +99,8 @@ quality **changes**, not on every poll. The panels are built around that:
 - **History panels** plot the **last value in each window** as steps, seeded
   with each signal's last value before the range. A window's value is where
   the signal ended up, not an average of its changes, which would weight each
-  change rather than each second.
+  change rather than each second. A window with no change holds the value
+  before it, so a steady signal is a flat line across the range.
 - **Rates** ("changes/sec") count change rows: they measure how often values
   change, not how often the runtime polls.
 - **Freshness** comes from the runtime's periodic health snapshots
