@@ -5,8 +5,8 @@ Canonical machine-validated artifacts live under `schemas/` and `tests/contracts
 
 ## Source of Truth
 
-1. OpenAPI spec: [`../../schemas/http/runtime-http.openapi.v0.yaml`](../../schemas/http/runtime-http.openapi.v0.yaml)
-2. Example manifest: [`../../tests/contracts/runtime-http/examples/manifest.yaml`](../../tests/contracts/runtime-http/examples/manifest.yaml)
+1. OpenAPI spec: [`schemas/http/runtime-http.openapi.v0.yaml`](https://github.com/anolishq/anolis/blob/main/schemas/http/runtime-http.openapi.v0.yaml)
+2. Example manifest: [`tests/contracts/runtime-http/examples/manifest.yaml`](https://github.com/anolishq/anolis/blob/main/tests/contracts/runtime-http/examples/manifest.yaml)
 3. Implementation baseline: [`../contracts/runtime-http-baseline.md`](../contracts/runtime-http-baseline.md)
 4. Runtime handlers/routes:
    - `core/http/server.cpp`
