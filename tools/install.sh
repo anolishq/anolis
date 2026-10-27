@@ -2053,7 +2053,7 @@ _check_provider_liveness() {
 # skipped call. The tag is "config" for a failed call the runtime marks as one
 # the config cannot plan on these devices (#616), "run" for another failed
 # call, and "skip" for a skipped one; any "config" call makes the first line
-# "unplannable" instead of "failed". A runtime before 0.1.58 marks no call.
+# "unplannable" instead of "failed". A runtime before 0.2.0 marks no call.
 # Nothing when the body has no startup_safe_state (a runtime before 0.1.45).
 # jq and python3 agree on all of this.
 _startup_safe_state_lines() {

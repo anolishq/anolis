@@ -13,6 +13,94 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+0.2.0 is a minor release because existing configs and installs behave
+differently: the CORS default, where a default data directory lives, and an
+install over a safe state that cannot be planned.
+
+Upgrade notes for operators:
+
+- **Browser origins are refused unless listed** (#627). A browser UI that
+  calls the runtime directly from another origin must list that origin in
+  `http.cors_allowed_origins`; with no list, or `[]`, no browser origin may
+  call it, where it used to mean `*`. Configs that set an explicit list, like
+  bioreactor-v1's `http://localhost:3000` entries, keep working. A `POST` with
+  a non-JSON body, such as `curl -d` without `-H 'Content-Type:
+  application/json'`, now gets 415, and with auth off, a request whose `Host`
+  names something other than this machine gets 403.
+- **A default or relative `runtime.data_dir` is beside the config file**
+  (#631). A config run by hand or from a script without `data_dir` now keeps
+  its e-stop latch and run journal beside the config file, not in the working
+  directory; data a previous run left in `<cwd>/anolis-data` stays there, so
+  set `runtime.data_dir` to that path to keep using it. Installed hosts need
+  nothing: the upgrade names the directory they already use.
+- **An install over a config whose safe state cannot be planned now fails;
+  fix the config, then re-run** (#634). "Cannot be planned" means the runtime
+  refuses the call before it reaches the devices: the zero rung cannot build a
+  call's arguments, the call names a device or function that does not exist,
+  or an argument is out of range. It would fail the same way on every e-stop.
+  A safe state that ran and did not take stays a warning, and against a
+  runtime before 0.2.0, which gives no cause, every failure stays a warning.
+- **`EstopAction` gains `cause`** (#633), on each failed call in
+  `startup_safe_state.failed_actions[]` and the `POST /v0/estop` `actions[]`.
+  The OpenAPI object declares `additionalProperties: false`, so a client
+  validating responses against an older copy of the contract rejects the new
+  field.
+- **Providers run in their own process group** (a job object on Windows,
+  #632). Stopping or restarting a provider also ends any process it started,
+  such as a wrapper script's worker. A provider no longer receives terminal
+  signals such as Ctrl+C from the runtime's terminal; the runtime catches them
+  and stops each provider by closing its stdin, as before.
+
+### Changed
+
+- **A browser page's requests are refused before routing** (#627, Fixes
+  #540): a `POST` to `/v0/` from an origin not in `cors_allowed_origins`
+  (403), a `POST` with a body that is not JSON (415), and, with auth off, a
+  foreign `Host` (403). `cors_allowed_origins` defaults to none.
+- **A default or relative `runtime.data_dir` resolves against the config
+  file's directory** (#631, Fixes #562), and the resolved path is logged at
+  startup as `[Config] Data dir:`. `install.sh` writes `<prefix>/anolis-data`
+  into the installed config, and adds it on upgrade to a kept config that has
+  none.
+- **An install whose safe state cannot be planned exits 1** (#634, part of
+  #616), naming `safety.safe_state` and the first refused call.
+- **A provider restart runs beside the main loop** (#628, Fixes #557). The
+  stop chain, the other providers' supervision and a shutdown signal are
+  handled while a provider comes back up, which can take a minute at the
+  default timeouts. Restarts still run one at a time.
+
+### Added
+
+- **Every call a provider receives is logged at INFO** (#625, Fixes #623),
+  with its arguments, its source (`HTTP`, `behavior tree`, `hook` or
+  `safe-state`) and its result. A behaviour tree's repeated call is logged
+  only when it changes.
+- **A failed safe-state call says whether the config was the cause** (#633,
+  part of #616): `cause` is `config` or `run`.
+
+### Fixed
+
+- **A stopped provider takes everything it started with it** (#632, Fixes
+  #563), and a restart does not start the replacement while any of the old
+  one is still running: that attempt fails, and supervision retries.
+- **A data race on a provider's pid** between a provider being stopped and
+  another thread asking whether it was running (HTTP, polling), which #628
+  made reachable from the main loop too.
+
+### Docs
+
+- A quickstart that runs the released runtime with the simulator (#629).
+- `docs/safety.md` says a supervised restart of anolis-provider-bread 0.10.0
+  turns its outputs off unless its config sets
+  `provider.outputs_on_startup: leave` (#635).
+- The automation RFC names its review without linking it (#626).
+
+### CI
+
+- The install walk runs against runtime 0.1.57, upgrading from 0.1.56 (#624).
+
 ## [0.1.57] - 2026-10-27
 
 Upgrade notes for operators:

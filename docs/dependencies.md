@@ -31,6 +31,12 @@ Rules:
 
 - `anolis`, `anolis-provider-sim`, `fluxgraph`, and `anolis-protocol` version independently using **SemVer** (`MAJOR.MINOR.PATCH`).
 - Public contract/build-surface changes require version-bump decision + changelog note.
+- For anolis before 1.0: a change that makes an existing config, install or
+  client behave differently (a changed default, a refused request, a new
+  failure) is breaking and bumps MINOR (0.1.x to 0.2.0). Anything else bumps
+  PATCH, new features and fields included. From 1.0, breaking bumps MAJOR and
+  features bump MINOR. Each release's upgrade notes name what changed for
+  existing users.
 
 ## CI Lane Tiers
 
