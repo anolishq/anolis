@@ -21,7 +21,13 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <thread>
+
+#ifndef _WIN32
+#include <signal.h>
+#include <sys/types.h>
+#endif
 
 using namespace anolis::provider;
 
@@ -283,6 +289,98 @@ TEST_F(ProviderProcessTest, LastErrorClearedOnSuccessfulSpawn) {
     EXPECT_TRUE(proc2.spawn());
     EXPECT_TRUE(proc2.last_error().empty());  // Error should be cleared
 }
+
+/******************************************************************************
+ * Process group (#563)
+ ******************************************************************************/
+
+#ifndef _WIN32
+namespace {
+
+// A provider that forks a worker which ignores stdin, the shape of a wrapper
+// script that does not exec. `tail` is how the leader waits: `wait` would keep
+// it alive until the worker exits, `read` until stdin closes.
+void write_wrapper(const std::filesystem::path &script, const std::filesystem::path &pid_file,
+                   bool leader_waits_on_stdin) {
+    std::ofstream out(script);
+    out << "#!/bin/sh\n";
+    out << "sleep 300 </dev/null &\n";
+    out << "echo $! > '" << pid_file.string() << "'\n";
+    out << (leader_waits_on_stdin ? "while read line; do :; done\n" : "trap '' TERM\nwait\n");
+    out.close();
+    std::filesystem::permissions(script, std::filesystem::perms::owner_all, std::filesystem::perm_options::add);
+}
+
+pid_t read_pid(const std::filesystem::path &pid_file) {
+    for (int i = 0; i < 200; ++i) {
+        std::ifstream in(pid_file);
+        pid_t pid = 0;
+        if (in >> pid && pid > 0) {
+            return pid;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return 0;
+}
+
+// Alive and not a zombie. Once its parent dies, the worker belongs to
+// whichever process reaps orphans, which in a sandbox may never do so.
+bool process_alive(pid_t pid) {
+    std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
+    if (!stat) {
+        return false;
+    }
+    std::string line;
+    std::getline(stat, line);
+    const auto close_paren = line.rfind(')');
+    return close_paren != std::string::npos && close_paren + 2 < line.size() && line[close_paren + 2] != 'Z';
+}
+
+bool dead_within(pid_t pid, std::chrono::milliseconds limit) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (process_alive(pid)) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
+}
+
+}  // namespace
+
+TEST_F(ProviderProcessTest, AForcedShutdownAlsoKillsTheWorkerAProviderForked) {
+    const auto pid_file = test_executable_path_.string() + ".worker";
+    write_wrapper(test_executable_path_, pid_file, false);
+    ProviderProcess proc("wrapper", test_executable_path_.string(), {}, 300);
+    ASSERT_TRUE(proc.spawn());
+    const pid_t worker = read_pid(pid_file);
+    ASSERT_GT(worker, 0);
+
+    proc.shutdown();  // stdin EOF is ignored, so this is the forced path
+
+    EXPECT_FALSE(proc.is_running());
+    EXPECT_TRUE(dead_within(worker, std::chrono::milliseconds(500))) << "worker " << worker << " outlived the stop";
+    ::kill(worker, SIGKILL);
+    std::filesystem::remove(pid_file);
+}
+
+TEST_F(ProviderProcessTest, ACleanExitDoesNotLeaveAForkedWorkerRunning) {
+    const auto pid_file = test_executable_path_.string() + ".worker";
+    write_wrapper(test_executable_path_, pid_file, true);
+    ProviderProcess proc("wrapper", test_executable_path_.string(), {}, 2000);
+    ASSERT_TRUE(proc.spawn());
+    const pid_t worker = read_pid(pid_file);
+    ASSERT_GT(worker, 0);
+
+    proc.shutdown();  // the leader exits on stdin EOF; its worker would not
+
+    EXPECT_FALSE(proc.is_running());
+    EXPECT_TRUE(dead_within(worker, std::chrono::milliseconds(500))) << "worker " << worker << " outlived the stop";
+    ::kill(worker, SIGKILL);
+    std::filesystem::remove(pid_file);
+}
+#endif
 
 /******************************************************************************
  * Platform-Specific Notes
