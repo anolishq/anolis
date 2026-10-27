@@ -13,6 +13,37 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-10-27
+
+Upgrade notes for operators:
+
+- **The bundled Grafana dashboards are fixed.** `install.sh
+  --with-observability` provisions them from the release asset of the
+  installed runtime's version on every run, so the next install of 0.1.57
+  with observability replaces the broken copies. A host that stays on 0.1.55
+  or 0.1.56 keeps them. `install.sh`, the runtime and the schemas are
+  unchanged since 0.1.56.
+
+### Fixed
+
+- **Signal History's value panels and Device Health's Quality Distribution
+  Over Time no longer fail with "range found duplicate table with key"**
+  (#620, #621). Each unions a series' last value before the range with its
+  changes inside it, then called `range()` before grouping by series. A
+  series with rows on both sides of the range start had one table in each
+  stream, differing only in `_start` and `_stop`; `range()` gave both the
+  same bounds, and Flux refused the result. That is every series once
+  telemetry has run longer than the range, so the panels drew nothing. The
+  union is now grouped by series before `range()`, and the held value
+  (step-and-hold) is unchanged. The prototype process dashboard generator
+  (`tools/process-dashboard/`) builds the same query and is fixed the same
+  way.
+
+### CI
+
+- The install walk runs against runtime 0.1.56, upgrading from 0.1.55
+  (#619).
+
 ## [0.1.56] - 2026-10-27
 
 Upgrade notes for operators:
