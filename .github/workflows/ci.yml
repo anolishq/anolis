@@ -492,7 +492,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     permissions:
       contents: read
-    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@9869a5f4bee7da9c7c1dc9bae033cd0137c4801d # clang-tidy-diff
+    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@caa0816e5a643262a2bb80913c32932cfe3a3bbf # clang-tidy-diff
     with:
       configure-preset: ci-linux-release
       blocking: true
