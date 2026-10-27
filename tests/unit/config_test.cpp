@@ -532,6 +532,22 @@ logging:
     EXPECT_FALSE(config.http.cors_allow_credentials);
 }
 
+// #540: no origin is allowed unless the config names it; "*" is an opt-in.
+TEST_F(ConfigTest, CorsAllowedOriginsDefaultsToNone) {
+    EXPECT_TRUE(HttpConfig{}.cors_allowed_origins.empty());
+
+    for (const std::string origins_line : {std::string(), std::string("  cors_allowed_origins: []\n")}) {
+        SCOPED_TRACE(origins_line.empty() ? "key omitted" : "empty list");
+        const std::string config_content = "runtime:\n\nhttp:\n  enabled: true\n  port: 8080\n" + origins_line +
+                                           "\nproviders:\n  - id: test\n    command: /path/to/provider\n";
+        const std::string config_path = create_config_file("cors_default.yaml", config_content);
+        RuntimeConfig config;
+        std::string error;
+        ASSERT_TRUE(load_config(config_path, config, error)) << error;
+        EXPECT_TRUE(config.http.cors_allowed_origins.empty());
+    }
+}
+
 TEST_F(ConfigTest, CorsSpecificOriginWithCredentialsAllowed) {
     std::string config_content = R"(
 runtime:
