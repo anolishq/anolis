@@ -76,3 +76,32 @@ def test_a_value_is_drawn_to_the_end_of_the_range(grafana, dashboards, load, hou
 def test_every_panel_honours_the_signal_filter(grafana, dashboards, typed, hour, signal):
     shown = _series(grafana, dashboards[UID], hour, {"signal_id": [signal]})
     assert set(shown) == {signal}
+
+
+@pytest.mark.parametrize(
+    "panel_id, signal, before, inside, drawn_before, drawn_inside",
+    [
+        (1, "double", 1.5, 2.5, 1.5, 2.5),
+        (2, "bool", False, True, 0, 1),
+        (3, "int", 3, 4, 3.0, 4.0),
+        (3, "uint", UInt(3), UInt(4), 3.0, 4.0),
+    ],
+)
+def test_a_series_with_points_on_both_sides_of_the_range_start_is_drawn_held(
+    grafana, dashboards, load, now_ms, hour, panel_id, signal, before, inside, drawn_before, drawn_inside
+):
+    """#620: the seed and the changes are one series, not two tables with the same key, and the
+    seeded value holds until the change inside the range."""
+    t = Telemetry().provider_health(now_ms - MINUTE)
+    t.signal(hour.start_ms - 10 * MINUTE, signal=signal, value=before)
+    t.signal(hour.start_ms + 30 * MINUTE, signal=signal, value=inside)
+    load(t)
+    points = []
+    for frame in grafana.panel(dashboards[UID], panel_id, hour):
+        times = next(c for c in frame.columns if c.name in ("Time", "_time")).values
+        for column in frame.value_columns():
+            points += [(at, v) for at, v in zip(times, column.values, strict=True) if v is not None]
+    points.sort()
+    assert points, f"panel {panel_id} drew nothing"
+    assert points[0][0] <= hour.start_ms + hour.interval_ms and points[0][1] == drawn_before
+    assert points[-1][0] > hour.stop_ms - hour.interval_ms and points[-1][1] == drawn_inside

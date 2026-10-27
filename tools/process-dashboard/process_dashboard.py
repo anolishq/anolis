@@ -151,9 +151,8 @@ def _series_query(runtime: str, device: Device, field: str, signal_id: str | Non
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
         f"{selection}\n"
         "union(tables: [seed, changes])\n"
+        '  |> group(columns: ["_measurement", "_field", "runtime_name", "provider_id", "device_id", "signal_id"])\n'
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
-        '  |> group(columns: ["_start", "_stop", "_measurement", "_field", '
-        '"runtime_name", "provider_id", "device_id", "signal_id"])\n'
         '  |> sort(columns: ["_time"])\n'
         f"{convert}"
         "  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n"
