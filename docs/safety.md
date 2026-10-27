@@ -4,11 +4,16 @@ This guide defines safe operating procedures for Anolis-managed hardware systems
 
 ## Core Principles
 
-1. Startup: the runtime starts in `IDLE`, which blocks new control calls and
-   does not by itself change any output. What happens to outputs depends on
-   `safety.on_startup` (see Outputs at startup below): by default the runtime
-   runs `safety.safe_state` once before it accepts requests.
-2. Explicit control: mode transitions require operator action (`POST /v0/mode`).
+1. Startup: with `automation.enabled` the runtime starts in `IDLE`, which blocks
+   new control calls and does not by itself change any output; without
+   automation there is no mode and manual calls are not mode-gated (the
+   software-stop latch still refuses actuating calls). What happens to
+   outputs depends on `safety.on_startup` (see Outputs at startup below): by
+   default the runtime runs `safety.safe_state` once before it accepts requests.
+2. Explicit control: on automation machines an operator changes mode with
+   `POST /v0/mode`, and `POST /v0/estop` also enters `FAULT`; the runtime enters
+   `FAULT` on its own only in the cases listed under Runtime Mode Safety
+   Semantics.
 3. Controlled automation: in `AUTO`, manual calls are policy-gated (`BLOCK` or `OVERRIDE`).
 4. Visibility first: read-only diagnostics remain available across modes.
 5. Hardware safety remains external: software controls do not replace interlocks
@@ -78,8 +83,11 @@ can hurt someone or destroy a batch.
 ### Consequences that surprise people
 
 - **Under Category 0 there is nothing to read back.** Every device disappears at
-  once. That is the *success* signal, not a fault — but the runtime does not yet
-  know that, and reads it as a fleet of device failures (anolishq/anolis#284).
+  once. That is the *success* signal, not a fault. With `safety.stop_chain`
+  configured, a device in its scope that goes unreachable while the stop is in
+  force is reported as the stop (`stop_chain.expected_losses` in
+  `GET /v0/runtime/status`); without it, the runtime reads the blackout as a
+  fleet of device failures.
 - **Under Category 0 a motor coasts, by construction.** Power is gone, so an
   H-bridge cannot brake. If a coast is unacceptable for the hazard, the options
   are a power-off-engaged (spring-applied) mechanical brake, a Category 1 stop
@@ -97,8 +105,8 @@ can hurt someone or destroy a batch.
   AUTO. When it answers again, the active safe-state rung is re-run for it (under
   rung `none` that does nothing), and
   `GET /v0/runtime/status` lists it under `device_loss_latched`. The latch does
-  not hold manual calls or mode-transition hooks, and the runtime cannot yet
-  tell a stop from a fault (see the stop chain below).
+  not hold manual calls or mode-transition hooks, and the runtime tells a stop
+  from a fault only for a stop it observes (see the stop chain below).
 - **"Confirmed safe" is not always achievable.** Any reporting that claims it
   unconditionally is asserting something the system cannot observe.
 
@@ -133,11 +141,15 @@ Two gaps, and they are the reason this distinction kept getting re-litigated:
 
 Device loss can be treated as an expected stop only when the stop is *observed*,
 never on a declaration alone: a dead supply or an unplugged backplane looks the
-same as a power-cut stop. The planned model is
-[rfcs/stop-chain.md](rfcs/stop-chain.md) (anolishq/anolis#284). It replaces
-`estop_topology` with an observed stop status and a per-device scope. Until it
-lands, nothing here changes: device loss is handled as described under Runtime
-Mode Safety Semantics, whatever caused it.
+same as a power-cut stop. The model in
+[rfcs/stop-chain.md](rfcs/stop-chain.md) (anolishq/anolis#284) is the runtime
+config `safety.stop_chain` (v0.1.53): an observed stop status and a per-device
+scope. The machine profile's `estop_topology` field remains alongside it. With
+`safety.stop_chain` configured, a stop status that reads `in_force` or
+`unknown` holds the software-stop latch, and a device in its scope that goes
+unreachable while the stop is in force is reported as the stop. Without it,
+device loss is handled as described under Runtime Mode Safety Semantics,
+whatever caused it.
 
 Design work on this model is tracked in anolishq/anolis#283.
 
@@ -162,7 +174,7 @@ Transition rules:
 Note: FAULT is not globally auto-entered for every error condition in the current runtime;
 it is a defined mode and transition target with strict recovery pathing.
 
-The runtime does enter FAULT autonomously in two cases:
+The runtime does enter FAULT autonomously in three cases:
 
 - **A behaviour-tree tick raises an exception** (#279). The control logic has reached a
   state its author did not model, so autonomous actuation is halted rather than continued.
@@ -171,8 +183,13 @@ The runtime does enter FAULT autonomously in two cases:
   undefined blackboard entry throws on the first tick of a tree that loaded cleanly.
 - **A provider restart republishes an inventory that fails the refuse-hookless gate**
   while in AUTO (#233).
+- **An observed stop chain changes to `in_force` or `unknown`** after startup, on
+  an automation machine with HTTP enabled, while the software-stop latch is not
+  already held (`safety.stop_chain`, #483). The latch is held without running the
+  ladder. At startup the latch is held and the mode stays `IDLE`.
 
-In both cases the declared `*->FAULT` mode hooks run, and recovery is the ordinary
+In each case the declared `*->FAULT` mode hooks run (in the third, the held
+latch refuses their actuating calls), and recovery is the ordinary
 `FAULT -> MANUAL` path. An operator who finds a machine in FAULT should check the runtime
 log and `GET /v0/automation/status` (`execution_reason: terminal_failure` indicates the
 engine faulted rather than an operator changing mode).
@@ -220,8 +237,8 @@ restarted provider leave them.
 
 ## Standard Startup Sequence
 
-1. Start runtime (enters `IDLE`; with the default `safety.on_startup` it runs
-   the safe state before the HTTP server opens).
+1. Start runtime (with automation enabled it enters `IDLE`; with the default
+   `safety.on_startup` it runs the safe state before the HTTP server opens).
 2. Verify provider/device availability and safe initial states.
 3. Transition to `MANUAL`.
 4. Run manual verification/calibration checks.
@@ -362,7 +379,7 @@ hooks; the stop does not count them as a safe state.
 
 Development/testing:
 
-1. Runtime still starts in `IDLE`.
+1. A runtime with automation enabled still starts in `IDLE`.
 2. Faster workflows are acceptable after minimal safety verification.
 3. `OVERRIDE` may be acceptable for controlled bench testing.
 

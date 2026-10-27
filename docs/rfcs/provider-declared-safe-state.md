@@ -17,20 +17,26 @@ safety:
         args: { motor1_brake: true, motor2_brake: true }
 ```
 
-There is no concept of "stop" anywhere in the system — only a list of bus calls an
-operator hand-wrote. Everything below follows from that.
+The runtime has a stop model — an e-stop actuation latch, a safe-state ladder
+(hooks, else setpoints, else zero when `zero_is_safe`), and `safety.stop_chain` (v0.1.53), which observes the emergency
+stop — but the safe state itself is a list of bus calls an operator hand-wrote,
+apart from the zero rung, whose calls the runtime computes. Everything below
+follows from that.
 
-**It produced several competing stop paths.** `safety.safe_state` fires only on
-`POST /v0/estop`. A `*->FAULT` mode hook fires on an autonomous fault, and is the
+**It produced several competing stop paths.** `safety.safe_state` fires on
+`POST /v0/estop`, at startup unless `safety.on_startup: leave`, and again for a
+device that returns after a transport-level loss (#285). A `*->FAULT` mode hook fires on an autonomous fault, and is the
 only one the AUTO gate checks. `AUTO->MANUAL` and `MANUAL->IDLE` hooks each carry
 their own stop-shaped call lists. The device firmware may self-safe on a command
-watchdog. These disagree, and the disagreements are the open issues — six
+watchdog. These disagree, and the disagreements produced six issues, all now closed —
 symptoms of one defect (#251, #253, #255, #256, #246, #261). They have been fixed
-individually and keep reopening because the shape is wrong, not the instances.
+individually and kept reopening because the shape is wrong, not the instances.
 
 **Each declaration is written in a vocabulary that cannot express what is
 needed.** Sequencing is the operator's problem. Verification is impossible —
-a call is reported successful once the frame is written. And types are limited to
+a bread call is reported successful once the device acknowledges the command
+(GET_ACK, CRUMBS 1600 or later) or, on older firmware, once the frame is written;
+an EZO call once the frame is written; nothing checks the resulting state against the command. And types are limited to
 what YAML and the runtime's parser agree on, which is why #252 blocked a heater
 from having any expressible safe state until argument coercion shipped in v0.1.41.
 
@@ -58,7 +64,7 @@ keeps the present architecture and moves the YAML into a protobuf. The RPC is
 better because the provider can do what a call list structurally cannot:
 
 - **Sequence correctly** without an operator encoding driver semantics.
-- **Read back and confirm.** Today a call reports success on bus acknowledgement alone; a provider can re-read and distinguish *applied* from *verified*.
+- **Read back and confirm.** Today a bread call reports success on the device's acknowledgement of the command, or on the frame write alone for older firmware, an EZO call on the frame write alone, and nothing checks the resulting state against the command; a provider can re-read and distinguish *applied* from *verified*.
 - **Retry and escalate** — the missing backstop in #256.
 - **Use types the config layer cannot express.**
 
@@ -87,9 +93,11 @@ That bounds the value precisely. This makes the software stop trustworthy and
 verifiable. It does not make it the machine's emergency stop, and no amount of
 further work on it would.
 
-Two adjacent gaps are **not** addressed here and are tracked separately: the
-runtime cannot distinguish expected device-loss from a fleet fault (#284), and it
-has no reset-must-not-restart rule (#285).
+Two adjacent gaps are **not** addressed here and are tracked separately, both
+now closed: distinguishing expected device-loss from a fleet fault, which
+`safety.stop_chain` does (#284, see [stop-chain.md](stop-chain.md)), and a
+reset-must-not-restart rule (#285): a device lost and returned stays latched
+against automation until an operator re-enters AUTO.
 
 ## Staging
 

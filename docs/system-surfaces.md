@@ -14,11 +14,11 @@ Stability labels: **versioned-contract** (released, consumers pin it) ·
 
 | Surface | Contract (the file that IS it) | Owner | Stability |
 | --- | --- | --- | --- |
-| Provider protocol (ADPP) | `proto/anolis/deviceprovider/v1/*.proto` + `docs/semantics.md` + `docs/profiles/framed-stdio-v1.md` | `anolis-protocol` (v1.6.0) | versioned-contract |
-| Provider SDK | `src/anolis/provider_sdk/` headers (`DeviceAdapter<HandleT>`, `ProviderRuntime`) | `anolis-provider-sdk` (v0.1.2) | versioned-contract (young) |
+| Provider protocol (ADPP) | `proto/anolis/deviceprovider/v1/*.proto` + `docs/semantics.md` + `docs/profiles/framed-stdio-v1.md` | `anolis-protocol` (v1.8.0) | versioned-contract |
+| Provider SDK | `src/anolis/provider_sdk/` headers (`DeviceAdapter<HandleT>`, `ProviderRuntime`) | `anolis-provider-sdk` (v0.4.0) | versioned-contract (young) |
 | Device protocols | CRUMBS: `anolis-provider-bread/src/crumbs/`; EZO: `anolis-provider-ezo/docs/device-contracts-v1.md`; sim devices: `src/devices/` | provider repos (+ external `feastorg` contracts for CRUMBS wire meaning) | versioned-contract per provider |
 | Configuration | `schemas/runtime/runtime-config.schema.json`, `schemas/machine/machine-profile.schema.json` | `anolis` (released per version) | versioned-contract |
-| HTTP / OpenAPI | `schemas/http/runtime-http.openapi.v0.yaml` (`/v0`) | `anolis` | versioned-contract (auth/TLS gap — see [Divergences](#known-divergences)) |
+| HTTP / OpenAPI | `schemas/http/runtime-http.openapi.v0.yaml` (`/v0`) | `anolis` | versioned-contract |
 | Automation | `automation:` config + BT XML; `/v0/automation/*`, `/v0/mode`, `/v0/parameters`; `IAutomationEngine` seam | `anolis` `core/automation/` | versioned-contract (wire), internal-API (engine seam) |
 | Persistence / historian | `schemas/telemetry/telemetry-timeseries.schema.v1.json`; run journal JSONL | `anolis`; export service in `anolis-telemetry-export` | versioned-contract (telemetry), internal-API (journal file) |
 | CLI / process | `anolis-runtime` flags/signals/exit codes; the [executable profile](https://github.com/anolishq/anolis-protocol/blob/main/docs/profiles/anolis-executable-profile-v1.md) for providers | `anolis` / `anolis-protocol` | versioned-contract |
@@ -32,11 +32,11 @@ Stability labels: **versioned-contract** (released, consumers pin it) ·
 ## Provider protocol (ADPP)
 
 The wire schema is protobuf (`anolis-protocol/proto/anolis/deviceprovider/v1/`,
-10 files; buf module `buf.build/anolishq/anolis-protocol`); normative semantics
+10 files); normative semantics
 in `docs/semantics.md`, transport binding in `docs/profiles/framed-stdio-v1.md`
 (length-prefixed `uint32_le` frames over the provider child's stdin/stdout,
 1 MiB cap). The wire version is the literal string `"v1"` (handshake); the
-**repo** versions by SemVer (v1.6.0 today) with `buf breaking` gating and
+**repo** versions by SemVer (v1.8.0 today) with `buf breaking` gating and
 semantic tightening shipped as opt-in **conformance levels** (L1 core; L2 adds
 pre-Hello `FAILED_PRECONDITION`, `OUT_OF_RANGE` bounds, non-finite
 `INVALID_ARGUMENT`, deadlines, OK-read timestamp/quality). All three providers
@@ -46,7 +46,7 @@ compat matrix (`anolishq/.github`, weekly, report-only) crosses released
 harness × provider versions and publishes a durable verdict to the
 `adpp-compat-data` branch (`data/adpp-compat/latest.json`).
 
-This repo **consumes** ADPP via the provider SDK chain — it does not
+This repo **consumes** ADPP directly — it does not
 re-publish it. The pin is a release-tarball URL + SHA256 in
 `core/CMakeLists.txt` (v1.2.0 today; providers ride v1.6.0 via the SDK — the
 runtime's older pin is fine because the wire is `"v1"` either way).
@@ -58,8 +58,8 @@ for the provider fleet: it FetchContents the protocol (v1.6.0), re-exports
 `anolis::adpp_proto`, and provides the spine (`ProviderRuntime` run-loop:
 Hello gate, dispatch, exit codes; framed-stdio transport; config/logging) plus
 the device seam (`DeviceAdapter<HandleT>` templated over each provider's
-session handle). All three providers pin SDK v0.1.2 by tarball+SHA and no
-longer declare the protocol directly. A new provider author: implement the
+session handle). The providers pin the SDK by tarball+SHA (sim v0.2.0, ezo
+v0.3.0, bread v0.4.0) and do not declare the protocol in CMake. A new provider author: implement the
 adapter seam, write `config/conformance.toml` (+ mock `conformance.yaml`), and
 follow sim's `src/devices/` structure (the de-facto template — its README says
 "copy this structure"). Providers are launched **by the runtime**, never run
@@ -74,7 +74,7 @@ packaging rules in
 
 - **Hardware providers**: each provider's README documents its device
   protocol, its device families and the wire dependencies it pins. The
-  ecosystem map above names the repository that holds each one.
+  table above names the repository that holds each one.
 - **sim**: `Tempctl, Motorctl, Relayio, Analogsensor` + a chaos fault-injection
   device; simulation engines local/null/remote, with an optional
   **FluxGraph** adapter (gRPC to `anolishq/fluxgraph`, a standalone C++
@@ -86,7 +86,7 @@ packaging rules in
 
 Two JSON Schemas (Draft-07), released with every anolis version as artifacts:
 `schemas/runtime/runtime-config.schema.json` (sections: `runtime, http,
-providers[], polling, telemetry, logging, automation`) and
+providers[], polling, telemetry, logging, automation, safety, health`) and
 `schemas/machine/machine-profile.schema.json` (the deployment descriptor;
 `components:` pins are what `install.sh` installs and Renovate bumps).
 Authority note: the schemas are structural; the yaml-cpp loader
@@ -104,17 +104,17 @@ at its `schema-source.json` pin, sha-verified, Renovate-bumped), docs site
 
 `schemas/http/runtime-http.openapi.v0.yaml` — OpenAPI 3.1, everything under
 `/v0`: runtime/provider/telemetry status, devices + capabilities, state,
-`/v0/call`, `/v0/mode`, `/v0/parameters`, automation tree/status, runs (+ run
+`/v0/call`, `/v0/mode`, `/v0/estop`, `/v0/estop/clear`, `/v0/parameters`, automation tree/status, runs (+ run
 events), and SSE `/v0/events` (state/quality/availability/removal/mode/
-parameter/`automation_fault`). Routes register in
+parameter/`automation_fault`/`stop_chain_change`/`stop_chain_mismatch`). Routes register in
 `core/http/server.cpp`; human guide in [docs/http/README.md](http/README.md).
-**Security is real but code-defined**: Bearer auth (`core/http/auth.cpp`,
+**Security is enforced in code**: Bearer auth (`core/http/auth.cpp`,
 global pre-routing 401, loopback included unless `auth_exempt_loopback`; token via config or
 `ANOLIS_API_TOKEN`), TLS via `tls_cert_path`/`tls_key_path`
 (`httplib::SSLServer`), and startup guards that refuse non-loopback binds
-without auth (`allow_insecure_bind` opt-out). None of this appears in the
-OpenAPI file yet — operator guidance is [docs/security.md](security.md); see
-[Divergences](#known-divergences).
+without auth (`allow_insecure_bind` opt-out). The OpenAPI file declares the
+`bearerAuth` security scheme and 401 responses and describes TLS and the bind
+guard in `info.description`; operator guidance is [docs/security.md](security.md).
 
 ## Automation
 
@@ -140,10 +140,10 @@ contract `schemas/telemetry/telemetry-timeseries.schema.v1.json`
 `schemas/telemetry/telemetry-health-timeseries.schema.v1.json` — the retained
 form of the `/v0/providers/health` view (io counters, watchdog state,
 degraded/failed-device flags), both derived from one shared collector. Run identity persists in an append-only JSONL journal
-(`<data_dir>/runs/index.jsonl`, fsync-per-transition, abandoned-run recovery,
+(`<data_dir>/runs/index.jsonl`, flushed (not fsynced) per transition, abandoned-run recovery,
 one open run at a time) — an internal file format, reached externally only via
 `/v0/runs*`. Historian *export* is `anolis-telemetry-export` (separate repo,
-v0.1.0): an authenticated HTTP service (default :8091) that queries InfluxDB
+v0.1.1): an authenticated HTTP service (default :8091) that queries InfluxDB
 and serves guarded CSV/NDJSON/JSON exports; it never touches the runtime API.
 
 ## CLI / process
@@ -192,7 +192,7 @@ how the engines diverged):
 
 ## Workbench / UI
 
-`anolis-workbench` (v0.11.7): the authoring/commissioning app. Its `/api/*`
+`anolis-workbench` (v0.22.0): the authoring/commissioning app. Its `/api/*`
 HTTP surface (default :3010; compose/commission/operate/provision routes) is
 **internal-API** — a private localhost contract between the bundled frontend,
 the Tauri shell, and the sidecar (documented in
@@ -221,13 +221,11 @@ host, or natively on the device via `install.sh --with-observability`.
 
 ## Known divergences
 
-Verified 2026-07-03; each should shrink over time.
+Verified 2026-10-27; each should shrink over time.
 
 | Divergence | Where | Tracking |
 | --- | --- | --- |
-| Bearer auth + TLS enforced in code but absent from the OpenAPI contract (no `securitySchemes`, no 401s) | `core/http/auth.cpp` vs `schemas/http/runtime-http.openapi.v0.yaml` | anolishq/anolis#158 |
-| Workbench renders a telemetry-export config the service cannot load (`runtime:`+`influxdb:` vs required `server:`+`influxdb:`+`limits:`) | `anolis-workbench/anolis_workbench/core/telemetry_config.py` vs `anolis-telemetry-export/export_core/config.py` | anolishq/anolis-workbench#175 |
-| Upstream anolis contract pins advance independently (workbench: machine-profile v0.1.30 / runtime-config v0.1.5 / runtime-http v0.1.25; docs site 0.1.26; telemetry-export v0.1.24) | each consumer's lock/pin | anolishq/anolis-workbench#176 (workbench locks) |
-| SDK docs lag its shipped surface (README/CHANGELOG say "scaffold 0.1.0"; v0.1.2 spine+adapter is consumed by all providers) | `anolis-provider-sdk` | — (docs fix) |
+| Upstream anolis contract pins advance independently (workbench locks, docs site and anolis-projects: v0.1.55; telemetry-export v0.1.24) | each consumer's lock/pin | — |
+| SDK README status says v0.1.2; v0.4.0 has shipped and providers consume v0.2.0–v0.4.0 | `anolis-provider-sdk` | — (docs fix) |
 | Wire version literal `"v1"` duplicated (proto + SDK default) with no shared constant | `handshake.proto` / SDK `runtime.hpp` | — (accepted; changes with ADPP v2 only) |
 | Tauri desktop health-probe hard-depends on `/api/status` body containing `"workbench"`/`"composer"` — pinned nowhere | workbench `desktop/src-tauri/src/main.rs` | — (note here is the pin) |

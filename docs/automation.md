@@ -26,7 +26,8 @@ Automation is a consumer of kernel services, not a replacement for them.
 
 1. Reads: through `StateCache`.
 2. Writes: through `CallRouter`.
-3. Inventory/capabilities: through `ProviderRegistry`.
+3. Inventory/capabilities: not read by the BT; `CallRouter` validates each call
+   against `DeviceRegistry` and dispatches it through `ProviderRegistry`.
 4. Parameters: through `ParameterManager`.
 5. No provider-specific behavior is encoded in the BT runtime engine.
 
@@ -79,6 +80,7 @@ Example:
 automation:
   enabled: true
   behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
+  parameters:
     - name: temp_setpoint
       type: double
       default: 25.0
@@ -145,6 +147,12 @@ Use runtime capability metadata and parameter constraints to keep BT logic gener
 ## Quick Walkthrough
 
 ### 1) Start runtime with automation enabled
+
+`examples/anolis-runtime.yaml` ships with `automation.enabled: false`. Before
+starting, set `automation.enabled: true` and `behavior_tree`, and add the
+`parameters` and `mode_transition_hooks` blocks from
+[Runtime Parameters](#runtime-parameters). Without the hook, step 4 returns
+HTTP 409.
 
 ```bash
 # Linux

@@ -169,7 +169,7 @@ Good:
  * Returns false and preserves the previous registry view if rediscovery or
  * ownership validation fails.
  */
-bool restart_provider(const std::string& provider_id, std::string& error);
+bool restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config);
 ```
 
 Avoid:

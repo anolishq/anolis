@@ -243,7 +243,7 @@ curl -s -X POST http://127.0.0.1:8080/v0/call \
   -d '{
     "provider_id": "sim0",
     "device_id": "motorctl0",
-    "function_id": 10,
+    "function_id": 1,
     "args": {
       "motor_index": {"type": "int64", "int64": 1},
       "duty": {"type": "double", "double": 0.75}
@@ -281,6 +281,10 @@ Enable automation and parameters in your runtime config:
 automation:
   enabled: true
   behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
+  parameters:
+    - name: temp_setpoint
+      type: double
+      default: 25.0
 ```
 
 Machines with actuating outputs must also declare safe-state
@@ -294,10 +298,14 @@ curl -s -X POST http://127.0.0.1:8080/v0/parameters \
 
 curl -s -X POST http://127.0.0.1:8080/v0/mode \
   -H "Content-Type: application/json" \
+  -d '{"mode": "MANUAL"}' | jq
+
+curl -s -X POST http://127.0.0.1:8080/v0/mode \
+  -H "Content-Type: application/json" \
   -d '{"mode": "AUTO"}' | jq
 ```
 
-The demo behavior tree uses:
+A behavior tree reads the parameter with:
 
 ```xml
 <GetParameter param="temp_setpoint" value="{target_temp}"/>
@@ -339,7 +347,7 @@ Higher-level orchestration and UI layers build on top of this foundation.
 - **cpp-httplib** — HTTP server for REST API
 - **nlohmann-json** — JSON parsing and generation
 - **yaml-cpp** — Configuration file parsing
-- **behaviortree-cpp** (v4.6.2) — Behavior tree engine for automation
+- **behaviortree-cpp** — Behavior tree engine for automation
 
 ### Provider Implementation
 

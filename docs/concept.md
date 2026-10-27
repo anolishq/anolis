@@ -37,7 +37,9 @@ Building automation requires talking to all of them. This is tedious and fragile
 2. **Protocol-based communication** - stdio framing, protobuf messages
 3. **Single source of truth** - Core is authoritative for machine state (StateCache)
 4. **Unified control path** - All control goes through CallRouter, no bypasses
-5. **Capability-driven** - Core never hard-codes device semantics
+5. **Capability-driven** - Core has no device-type logic. Two opt-in safety settings carry a convention: a
+   `reports_estop` stop-chain expectation reads a signal named `estop`, and the `zero_is_safe` safe-state rung drives
+   required numeric arguments to 0
 
 ## What Anolis Is NOT
 

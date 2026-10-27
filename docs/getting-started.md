@@ -43,7 +43,7 @@ Install vcpkg (Windows):
 ```powershell
 git clone https://github.com/microsoft/vcpkg.git $env:USERPROFILE\vcpkg
 & "$env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat"
-[Environment]::SetEnvironmentVariable("VCPKG_ROOT", "$env:USERPROFILE\\vcpkg", "User")
+[Environment]::SetEnvironmentVariable("VCPKG_ROOT", "$env:USERPROFILE\vcpkg", "User")
 $env:VCPKG_ROOT = [Environment]::GetEnvironmentVariable("VCPKG_ROOT", "User")
 Test-Path "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 ```
@@ -55,7 +55,6 @@ Linux/macOS:
 ```bash
 git clone https://github.com/anolishq/anolis.git
 cd anolis
-git submodule update --init --recursive
 cmake --preset dev-release
 cmake --build --preset dev-release --parallel
 ctest --preset dev-release
@@ -69,7 +68,6 @@ Windows (PowerShell):
 ```powershell
 git clone https://github.com/anolishq/anolis.git
 Set-Location anolis
-git submodule update --init --recursive
 cmake --preset dev-windows-release
 cmake --build --preset dev-windows-release --parallel
 ctest --preset dev-windows-release
@@ -115,6 +113,7 @@ Enable automation in runtime config:
 automation:
   enabled: true
   behavior_tree: ./tests/integration/fixtures/behaviors/demo.xml
+  parameters:
     - name: temp_setpoint
       type: double
       default: 25.0
@@ -143,9 +142,13 @@ curl -s -X POST http://127.0.0.1:8080/v0/parameters \
   -d '{"name": "temp_setpoint", "value": 30.0}' | jq
 ```
 
-Switch to AUTO mode:
+Switch to AUTO mode. The runtime starts in `IDLE`, and `AUTO` is reachable
+only from `MANUAL`, so switch to `MANUAL` first:
 
 ```bash
+curl -s -X POST http://127.0.0.1:8080/v0/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "MANUAL"}' | jq
 curl -s -X POST http://127.0.0.1:8080/v0/mode \
   -H "Content-Type: application/json" \
   -d '{"mode": "AUTO"}' | jq
