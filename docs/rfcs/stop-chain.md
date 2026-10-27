@@ -1,8 +1,8 @@
 # RFC: observing the emergency stop (stop chain)
 
-**Status:** increments 1 to 5 implemented: 1 to 3 in v0.1.53 (#488, #489,
-#490), 4 in v0.1.55 (#503), 5 in anolishq/anolis-workbench#641 and
-anolishq/anolis-workbench#644.
+**Status:** increments 1 to 5 implemented: 1 to 3 in v0.1.53
+(#488, #489, #490), 4 in v0.1.55 (#503), 5 in
+anolishq/anolis-workbench#641 and anolishq/anolis-workbench#644.
 Increment 6, the `/v0/estop` rename, is not implemented.
 **Depends on:** the stop categories in [safety.md](../safety.md). Tracked as
 anolishq/anolis#284, part of anolishq/anolis#283.
