@@ -58,8 +58,8 @@ Fields:
 Key invariants:
 
 1. Port must be valid TCP port range.
-2. With `enabled: true`, the schema rejects an empty origins list. The runtime
-   accepts `cors_allowed_origins: []` and treats it as `"*"`.
+2. `cors_allowed_origins` defaults to none, and `[]` means none: no browser
+   origin may call the API. `"*"` allows any origin.
 3. Wildcard origin (`*`) is invalid when credentials are enabled.
 
 ## `providers`

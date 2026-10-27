@@ -5,12 +5,41 @@ The runtime exposes a REST surface (`/v0/*`) including control actions
 on loopback only, without authentication, and it **must be authenticated before
 any non-localhost exposure** (e.g. the bioreactor target under systemd).
 
-Unauthenticated loopback is not private to you. Any local process can call the
-control endpoints, and so can any web page open in a browser on that host: the
-handlers accept a JSON body of any `Content-Type`, so a cross-origin form post
-reaches them, and the default `http.cors_allowed_origins` of `["*"]` also lets
-the page read the response. Turn auth on wherever a browser or another user
-shares the host.
+Unauthenticated loopback is not private to you: any local process can call the
+control endpoints. Turn auth on wherever another user shares the host.
+
+## A browser on the host
+
+A web page open in a browser on the runtime's host can send requests to
+`127.0.0.1`. A browser sends a `text/plain` or bodyless `POST` as a CORS
+"simple" request, with no preflight, so until #540 was fixed such a page could
+clear the e-stop latch, change the mode and call devices, and with the old default
+`cors_allowed_origins: ["*"]` read every response (#540). A page can also
+re-point its own name at `127.0.0.1` (DNS rebinding) and send requests the
+browser treats as same-origin.
+
+The runtime now refuses these before routing:
+
+- **Origin.** A `POST` to `/v0/` that carries an `Origin` header is refused
+  with `403` unless that origin is in `http.cors_allowed_origins`. A browser
+  sends `Origin` on every cross-origin `POST`; `curl`, scripts and the
+  workbench's proxy send none and are not affected.
+- **Content type.** A `POST` with a body must say `Content-Type:
+  application/json`, or it is refused with `415`, so no request with a body
+  can avoid a preflight.
+- **Host.** With auth off, the `Host` header must be `localhost`, `127.0.0.1`,
+  `::1` or the bind address, or the request is refused with `403`. That stops
+  a rebound page. `http.allow_insecure_bind` turns this check off, because the
+  names a network client uses can't be known in advance.
+
+`http.cors_allowed_origins` defaults to none. List the origins of any browser
+UI that calls the runtime directly, or `*` to allow any. The workbench reaches
+the runtime through its own server, so it needs no entry.
+
+With auth on and `http.auth_exempt_loopback: true`, a rebound page's requests
+come from loopback and skip the token. The origin and content-type checks still
+refuse its `POST`s, but it can read `GET` responses. Leave
+`auth_exempt_loopback` off where a browser shares the host.
 
 ## Defaults
 
@@ -19,6 +48,7 @@ shares the host.
 | `http.bind` | `127.0.0.1` | loopback only — not reachable from the network |
 | `http.auth_enabled` | `false` | no token required |
 | `http.auth_exempt_loopback` | `false` | with auth on, requests from this host need the token too |
+| `http.cors_allowed_origins` | none | no browser origin may call the API; `*` allows any |
 | `http.tls_cert_path` / `http.tls_key_path` | unset | plain HTTP |
 
 With the defaults the API is reachable only from the same host, so local

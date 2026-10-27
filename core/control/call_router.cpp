@@ -23,6 +23,64 @@
 namespace anolis {
 namespace control {
 
+namespace {
+
+// Where a call came from, from the flags its caller sets.
+const char* call_source(const CallRequest& request) {
+    if (request.safe_state) {
+        return "safe-state";
+    }
+    if (request.is_behavior_tree) {
+        return "behavior tree";
+    }
+    if (request.is_automated) {
+        return "hook";
+    }
+    return "HTTP";
+}
+
+std::string format_value(const anolis::deviceprovider::v1::Value& value) {
+    using anolis::deviceprovider::v1::Value;
+    switch (value.kind_case()) {
+        case Value::kBoolValue:
+            return value.bool_value() ? "true" : "false";
+        case Value::kInt64Value:
+            return std::to_string(value.int64_value());
+        case Value::kUint64Value:
+            return std::to_string(value.uint64_value());
+        case Value::kDoubleValue:
+            return std::format("{}", value.double_value());
+        case Value::kStringValue:
+            return "\"" + value.string_value() + "\"";
+        case Value::kBytesValue:
+            return std::format("<{} bytes>", value.bytes_value().size());
+        default:
+            return "<unset>";
+    }
+}
+
+}  // namespace
+
+void CallRouter::log_call_record(const CallRequest& request, const std::string& function_name,
+                                 const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
+                                 const std::string& result) {
+    std::string formatted;
+    for (const auto& [name, value] : args) {
+        formatted += (formatted.empty() ? "" : ", ") + name + "=" + format_value(value);
+    }
+    const std::string record = std::format("call {} {}({}) from {}: {}", request.device_handle, function_name,
+                                           formatted, call_source(request), result);
+    if (request.is_behavior_tree) {
+        std::lock_guard<std::mutex> lock(last_tree_record_mutex_);
+        auto& last = last_tree_record_[request.device_handle + " " + function_name];
+        if (last == record) {
+            return;
+        }
+        last = record;
+    }
+    LOG_INFO("[CallRouter] " << record);
+}
+
 CallRouter::CallRouter(const registry::DeviceRegistry& registry, state::StateCache& state_cache)
     : registry_(registry), state_cache_(state_cache) {}
 
@@ -195,6 +253,8 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     if (!provider->call(device_id, func_spec->function_id, resolved_function_name, args, call_response)) {
         result.error_message = "Provider call failed: " + provider->last_error();
         result.status_code = provider->last_status_code();
+        log_call_record(request, resolved_function_name, args,
+                        anolis::deviceprovider::v1::Status_Code_Name(result.status_code));
         LOG_ERROR("[CallRouter] Call failed: " << result.error_message << " (Code: " << result.status_code << ")");
         return result;
     }
@@ -203,6 +263,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     for (const auto& [key, value] : call_response.results()) {
         result.results[key] = value;
     }
+    log_call_record(request, resolved_function_name, args, "OK");
 
     // Post-call state update: immediate poll of affected device
     state_cache_.poll_device_now(request.device_handle, provider_registry);

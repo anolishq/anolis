@@ -178,10 +178,10 @@ Anolis enforces a **safe-by-default** design. Contributions must maintain safety
 ```bash
 # Start in IDLE (enforced at startup)
 # Transition to MANUAL
-curl -X POST http://localhost:8080/v0/mode -d '{"mode": "MANUAL"}'
+curl -X POST http://localhost:8080/v0/mode -H 'Content-Type: application/json' -d '{"mode": "MANUAL"}'
 
 # Transition to AUTO (requires automation enabled)
-curl -X POST http://localhost:8080/v0/mode -d '{"mode": "AUTO"}'
+curl -X POST http://localhost:8080/v0/mode -H 'Content-Type: application/json' -d '{"mode": "AUTO"}'
 ```
 
 #### Safety Test Requirements
