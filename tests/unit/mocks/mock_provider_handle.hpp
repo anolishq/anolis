@@ -27,7 +27,7 @@ class MockProviderHandle : public provider::IProviderHandle {
 public:
     MOCK_METHOD(bool, start, (), (override));
     MOCK_METHOD(bool, is_available, (), (const, override));
-    MOCK_METHOD(void, stop, (), (override));
+    MOCK_METHOD(bool, stop, (), (override));
 
     MOCK_METHOD(bool, hello, (anolis::deviceprovider::v1::HelloResponse &), (override));
     MOCK_METHOD(bool, list_devices, (std::vector<Device> &), (override));

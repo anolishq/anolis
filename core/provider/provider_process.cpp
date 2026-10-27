@@ -10,7 +10,10 @@
 #include "provider_process.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 
 #include "logging/logger.hpp"
@@ -31,8 +34,10 @@ namespace provider {
 struct ProviderProcess::Impl {
 #ifdef _WIN32
     HANDLE process_handle = nullptr;
+    HANDLE job = nullptr;  // holds the child and anything it starts (#563)
 #else
     pid_t pid = -1;
+    pid_t pgid = -1;  // the child's own process group (#563)
     int stdin_write_fd = -1;
     int stdout_read_fd = -1;
 #endif
@@ -106,6 +111,16 @@ bool ProviderProcess::spawn_windows() {
 
     PROCESS_INFORMATION pi = {};
 
+    // A job holds the child and whatever it starts, so a forced termination
+    // ends all of it (#563). The child starts suspended so it is in the job
+    // before it can start anything.
+    HANDLE job = CreateJobObjectA(NULL, NULL);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+    }
+
     // Convert path to absolute
     std::string abs_path = std::filesystem::absolute(executable_path_).string();
 
@@ -122,7 +137,7 @@ bool ProviderProcess::spawn_windows() {
                                   NULL,                // lpProcessAttributes
                                   NULL,                // lpThreadAttributes
                                   TRUE,                // bInheritHandles
-                                  0,                   // dwCreationFlags
+                                  CREATE_SUSPENDED,    // dwCreationFlags
                                   NULL,                // lpEnvironment
                                   NULL,                // lpCurrentDirectory
                                   &si,                 // lpStartupInfo
@@ -137,14 +152,26 @@ bool ProviderProcess::spawn_windows() {
         error_ = "CreateProcess failed: " + std::to_string(GetLastError());
         CloseHandle(stdin_write_parent);
         CloseHandle(stdout_read_parent);
+        if (job) {
+            CloseHandle(job);
+        }
         return false;
     }
+
+    if (job && !AssignProcessToJobObject(job, pi.hProcess)) {
+        LOG_WARN("[" << provider_id_ << "] Could not put the provider in a job object (" << GetLastError()
+                     << "); a forced stop will end only the provider process");
+        CloseHandle(job);
+        job = nullptr;
+    }
+    ResumeThread(pi.hThread);
 
     // Close thread handle (don't need it)
     CloseHandle(pi.hThread);
 
     // Store handles
     impl_->process_handle = pi.hProcess;
+    impl_->job = job;
 
     // Give to client
     client_.set_handles(stdin_write_parent, stdout_read_parent);
@@ -182,7 +209,10 @@ bool ProviderProcess::spawn_linux() {
     }
 
     if (impl_->pid == 0) {
-        // Child process
+        // Child process. Its own process group, so a forced termination ends
+        // anything it starts as well (#563).
+        setpgid(0, 0);
+
         // Redirect stdin
         dup2(stdin_pipe[0], STDIN_FILENO);
         close(stdin_pipe[0]);
@@ -213,7 +243,10 @@ bool ProviderProcess::spawn_linux() {
         _exit(1);
     }
 
-    // Parent process
+    // Parent process. Set the group here too, so it exists before either side
+    // runs on; the call fails harmlessly once the child has exec'd.
+    setpgid(impl_->pid, impl_->pid);
+    impl_->pgid = impl_->pid;
     close(stdin_pipe[0]);   // Close read end of stdin pipe
     close(stdout_pipe[1]);  // Close write end of stdout pipe
 
@@ -260,8 +293,9 @@ bool ProviderProcess::is_running() const {
 #endif
 }
 
-void ProviderProcess::shutdown() {
+bool ProviderProcess::shutdown() {
     const bool running = is_running();
+    bool exited = true;
 
     if (running) {
         LOG_INFO("[" << provider_id_ << "] Initiating shutdown");
@@ -270,20 +304,33 @@ void ProviderProcess::shutdown() {
         // wait for a clean exit, and only then escalate to termination.
         client_.close_stdin();
 
-        bool exited = wait_for_exit(shutdown_timeout_ms_);
+        exited = wait_for_exit(shutdown_timeout_ms_);
 
         if (exited) {
             LOG_INFO("[" << provider_id_ << "] Clean shutdown");
         } else {
             LOG_WARN("[" << provider_id_ << "] Timeout - forcing termination");
             force_terminate();
-            wait_for_exit(500);
+            exited = wait_for_exit(500);
         }
     } else {
 #ifndef _WIN32
         // Normalize tracked PID state when process already exited before shutdown().
         wait_for_exit(0);
 #endif
+    }
+
+    // A provider can exit, cleanly or not, and leave behind what it started:
+    // a wrapper script's worker, say. That is ended too, so nothing of the old
+    // provider runs beside its replacement (#563).
+    if (group_alive()) {
+        LOG_WARN("[" << provider_id_ << "] Processes the provider started are still running - terminating them");
+        force_terminate();
+    }
+    const bool group_exited = wait_for_group_exit(500);
+    if (!exited || !group_exited) {
+        LOG_ERROR("[" << provider_id_ << "] " << (exited ? "Processes the provider started" : "The provider process")
+                      << " did not exit after being killed");
     }
 
     // Always release pipe handles, even if the process already exited. This
@@ -296,12 +343,22 @@ void ProviderProcess::shutdown() {
     impl_->stdout_read_fd = -1;
 #endif
 
+    // What has not exited stays tracked, so a later call can try again.
 #ifdef _WIN32
-    if (impl_->process_handle) {
+    if (impl_->process_handle && exited) {
         CloseHandle(impl_->process_handle);
         impl_->process_handle = nullptr;
     }
+    if (impl_->job && group_exited) {
+        CloseHandle(impl_->job);
+        impl_->job = nullptr;
+    }
+#else
+    if (group_exited) {
+        impl_->pgid = -1;
+    }
 #endif
+    return exited && group_exited;
 }
 
 bool ProviderProcess::wait_for_exit(int timeout_ms) {
@@ -350,14 +407,81 @@ bool ProviderProcess::wait_for_exit(int timeout_ms) {
 
 void ProviderProcess::force_terminate() {
 #ifdef _WIN32
-    if (impl_->process_handle) {
+    if (impl_->job) {
+        TerminateJobObject(impl_->job, 1);
+    } else if (impl_->process_handle) {
         TerminateProcess(impl_->process_handle, 1);
     }
 #else
-    if (impl_->pid > 0) {
+    if (impl_->pgid > 0) {
+        kill(-impl_->pgid, SIGKILL);
+    } else if (impl_->pid > 0) {
         kill(impl_->pid, SIGKILL);
     }
 #endif
+}
+
+bool ProviderProcess::group_alive() const {
+#ifdef _WIN32
+    if (!impl_->job) {
+        return false;
+    }
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info = {};
+    if (!QueryInformationJobObject(impl_->job, JobObjectBasicAccountingInformation, &info, sizeof(info), NULL)) {
+        return true;  // cannot tell; do not report it gone
+    }
+    return info.ActiveProcesses > 0;
+#else
+    if (impl_->pgid <= 0) {
+        return false;
+    }
+    if (kill(-impl_->pgid, 0) == -1 && errno == ESRCH) {
+        return false;
+    }
+#ifdef __linux__
+    // kill() also finds zombies, and an orphaned member stays one until
+    // whoever reaps orphans does so, which in a container may be never. A
+    // zombie holds no device, so only a live member counts.
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator("/proc", ec)) {
+        const std::string name = entry.path().filename().string();
+        if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos) {
+            continue;
+        }
+        std::ifstream stat(entry.path() / "stat");
+        std::string line;
+        if (!std::getline(stat, line)) {
+            continue;
+        }
+        // pid (comm) state ppid pgrp ...; comm may hold spaces and parentheses.
+        const auto close_paren = line.rfind(')');
+        if (close_paren == std::string::npos) {
+            continue;
+        }
+        char state = 0;
+        long ppid = 0;
+        long pgrp = 0;
+        if (std::sscanf(line.c_str() + close_paren + 1, " %c %ld %ld", &state, &ppid, &pgrp) == 3 &&
+            pgrp == impl_->pgid && state != 'Z') {
+            return true;
+        }
+    }
+    return ec ? true : false;  // without /proc, trust kill()
+#else
+    return true;
+#endif
+#endif
+}
+
+bool ProviderProcess::wait_for_group_exit(int timeout_ms) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (group_alive()) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
 }
 
 }  // namespace provider

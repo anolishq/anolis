@@ -27,12 +27,12 @@ ProviderHandle::ProviderHandle(const std::string &provider_id, const std::string
       hello_timeout_ms_(hello_timeout_ms),
       ready_timeout_ms_(ready_timeout_ms) {}
 
-void ProviderHandle::stop() {
+bool ProviderHandle::stop() {
     // Under mutex_ so an in-flight request finishes before its pipes close, and
     // the flag first so every later request and is_available() see it.
     std::lock_guard<std::timed_mutex> lock(mutex_);
     session_healthy_.store(false, std::memory_order_release);
-    process_.shutdown();
+    return process_.shutdown();
 }
 
 bool ProviderHandle::start() {

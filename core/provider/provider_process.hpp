@@ -25,6 +25,10 @@ namespace provider {
  * `spawn()` creates the child and wires its stdio to `FramedStdioClient`.
  * `shutdown()` closes stdin first to signal EOF, waits up to the configured
  * timeout, and then force-terminates the child if needed.
+ *
+ * The child runs in its own process group (POSIX) or job object (Windows), so
+ * a forced termination also ends anything it started, and `shutdown()` does
+ * not report success while any of it is still running (#563).
  */
 class ProviderProcess {
 public:
@@ -55,8 +59,15 @@ public:
 
     /**
      * @brief Shut down the child using EOF, wait, then force-kill escalation.
+     *
+     * Anything left in the child's process group or job after the child exits
+     * is killed too.
+     *
+     * @return true once the child and everything in its group have exited;
+     *         false if any of it is still running, in which case it is still
+     *         tracked and a later call tries again
      */
-    void shutdown();
+    bool shutdown();
 
     /** @brief Access the framed stdio client bound to this child. */
     FramedStdioClient &client() { return client_; }
@@ -85,8 +96,12 @@ private:
     bool spawn_linux();
     /** @brief Wait for the child to exit within the given timeout. */
     bool wait_for_exit(int timeout_ms);
-    /** @brief Forcefully terminate the child process after graceful shutdown fails. */
+    /** @brief Forcefully terminate the child's whole process group or job. */
     void force_terminate();
+    /** @brief Report whether anything in the child's process group or job is still running. */
+    bool group_alive() const;
+    /** @brief Wait for the child's process group or job to empty within the given timeout. */
+    bool wait_for_group_exit(int timeout_ms);
 };
 
 }  // namespace provider
