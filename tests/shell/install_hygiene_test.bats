@@ -58,6 +58,30 @@ _apt_calls() { grep '^apt-get ' "${CALLS}"; }
     [[ "${output}" == *"sudo gpasswd -d anolis <group>"* ]]
 }
 
+@test "515: a kept service user in no other group is still reported, under set -euo pipefail" {
+    # A runner's service user is in its own group only, and then the group
+    # filter matches nothing. bats `run` suspends errexit, so this runs the
+    # phase in a fresh bash that sources install.sh, which sets -euo pipefail
+    # itself, as the real install does.
+    run bash -c '
+        source "$1"
+        [[ $- == *e* && $- == *u* ]] && shopt -qo pipefail || { echo "options not set: $-"; exit 2; }
+        id() {
+            case "$*" in
+                "anolis") return 0 ;;
+                "-nG anolis") echo "anolis" ;;
+                *) return 1 ;;
+            esac
+        }
+        phase_system_user
+        echo "phase returned"
+    ' _ "${INSTALL_SH}"
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"system user: anolis already exists"* ]]
+    [[ "${output}" != *"in groups"* ]]
+    [[ "${output}" == *"phase returned"* ]]
+}
+
 @test "515: a new service user is not described by groups" {
     id() { return 1; }
     useradd() { printf 'useradd %s\n' "$*" >>"${CALLS}"; }
