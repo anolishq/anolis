@@ -85,12 +85,54 @@ setup() {
     [ ! -e "${DL}/${ASSET}.SHA256SUMS" ]
 }
 
-@test "#408 install.sh is not checked against SHA256SUMS" {
+# #508: the bundled install.sh is checked like a tarball. SHA256SUMS has listed
+# it since anolis 0.1.50 (#449); an older release that does not is a warning
+# naming the version, as anolis-workbench's release_verify.py gives it.
+
+@test "#508 an install.sh matching its SHA256SUMS entry passes" {
     printf '#!/bin/bash\n' > "${RELEASE}/install.sh"
-    run _stage_fetch anolishq/foo v1.0.0 install.sh "${DL}"
+    printf '%s  %s\n' "$(sha256sum "${RELEASE}/install.sh" | awk '{print $1}')" install.sh > "${RELEASE}/SHA256SUMS"
+    run _stage_fetch anolishq/anolis v1.0.0 install.sh "${DL}"
     [ "$status" -eq 0 ]
     [ -f "${DL}/install.sh" ]
-    ! grep -q 'SHA256SUMS' "${CURL_LOG}"
+    [[ "$output" != *"not verified"* ]]
+    grep -q '/v1.0.0/SHA256SUMS$' "${CURL_LOG}"
+}
+
+@test "#508 an install.sh not matching its SHA256SUMS entry fails, naming both hashes" {
+    local good bad
+    printf '#!/bin/bash\n' > "${RELEASE}/install.sh"
+    good=$(sha256sum "${RELEASE}/install.sh" | awk '{print $1}')
+    bad=$(printf 'other bytes' | sha256sum | awk '{print $1}')
+    printf '%s  %s\n' "${bad}" install.sh > "${RELEASE}/SHA256SUMS"
+    run _stage_fetch anolishq/anolis v1.0.0 install.sh "${DL}"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"install.sh does not match SHA256SUMS of anolishq/anolis v1.0.0: expected ${bad}, got ${good}"* ]]
+}
+
+@test "#508 an install.sh with no SHA256SUMS line warns, naming the version" {
+    printf '#!/bin/bash\n' > "${RELEASE}/install.sh"
+    printf '%s  %s\n' "${GOOD_SHA}" "${ASSET}" > "${RELEASE}/SHA256SUMS"
+    run _stage_fetch anolishq/anolis v0.1.49 install.sh "${DL}"
+    [ "$status" -eq 0 ]
+    [ -f "${DL}/install.sh" ]
+    [[ "$output" == *"install.sh not verified: anolis v0.1.49 predates install.sh in SHA256SUMS"* ]]
+}
+
+@test "#508 an install.sh from a release with no SHA256SUMS (HTTP 404) warns" {
+    printf '#!/bin/bash\n' > "${RELEASE}/install.sh"
+    run _stage_fetch anolishq/anolis v0.1.40 install.sh "${DL}"
+    [ "$status" -eq 0 ]
+    [ -f "${DL}/install.sh" ]
+    [[ "$output" == *"install.sh not verified: anolis v0.1.40 predates install.sh in SHA256SUMS"* ]]
+}
+
+@test "#508 an install.sh whose SHA256SUMS cannot be fetched fails closed" {
+    printf '#!/bin/bash\n' > "${RELEASE}/install.sh"
+    SUMS_FAIL="22 503"
+    run _stage_fetch anolishq/anolis v1.0.0 install.sh "${DL}"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not fetch SHA256SUMS for anolishq/anolis v1.0.0 (curl exit 22, HTTP 503); refusing to use install.sh unverified"* ]]
 }
 
 @test "#408 a connection failure fetching SHA256SUMS fails closed" {

@@ -61,7 +61,10 @@ works directly.
 
 **The bundle carries its own `install.sh`.** You do not need this repository on
 the target: unpack the tarball and use the copy inside it, as above. This is the
-only route that requires nothing of the target but a shell.
+only route that requires nothing of the target but a shell. `--stage` checks that
+copy against the runtime release's `SHA256SUMS`, as it does each tarball, and
+stops on a mismatch. A release before 0.1.50, whose `SHA256SUMS` has no line for
+`install.sh`, is staged with a warning that names it.
 
 **A staged bundle bakes its install prefix.** `--local` refuses an *explicit*
 `--prefix` that differs from the one it was staged with; pass none and the baked
