@@ -149,8 +149,9 @@ only permit restarting".
     the same working directory, and its template gives every project the same
     `runtime.name`. With one shared file, or one keyed by that name, project A's
     latch would hold project B.
-  - Installs already keep `data_dir` under the install prefix, through the
-    systemd unit's working directory. It must stay on persistent storage.
+  - A default or relative `data_dir` is resolved against the config file's
+    directory, not the working directory (#562). Installs name
+    `<prefix>/anolis-data` in the config. It must stay on persistent storage.
 - At startup the runtime also checks the stop status, after provider discovery
   and the first poll, with a bounded wait. If it reads `in_force` or `unknown`
   then, the runtime starts latched. That covers a stop pressed while the runtime

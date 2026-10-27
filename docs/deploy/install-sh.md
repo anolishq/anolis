@@ -186,8 +186,8 @@ The install's own health check sends the token the same way. It confirms that `/
 that `/v0/runs` answers 200, then reports provider liveness. The second matters because the run registry
 fails soft — if its data directory cannot be created, the runtime logs one
 warning at boot and then serves 503 on every run endpoint for as long as it
-runs, while status stays green. The unit starts the runtime in `<prefix>` so the
-default `anolis-data/` directory resolves somewhere the service user can write;
+runs, while status stays green. The installed config sets
+`runtime.data_dir: <prefix>/anolis-data`, somewhere the service user can write;
 an install that warns `run registry NOT available` is one where that did not
 hold.
 

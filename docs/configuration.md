@@ -78,6 +78,16 @@ automation:
 4. `FAULT` is a recovery mode with constrained transitions (`FAULT -> MANUAL` only).
 5. See [automation.md](automation.md) for full mode semantics.
 
+### Data directory
+
+1. `runtime.data_dir` holds the e-stop latch and the run journal. Without it
+   the runtime uses `anolis-data` beside the config file, and a relative path
+   is resolved against the config file's directory, never the working
+   directory, so a restart from anywhere finds the same latch (#562). The
+   resolved path is logged at startup as `[Config] Data dir:`.
+2. `install.sh` writes `<prefix>/anolis-data` into the installed config, and
+   adds it on upgrade to a kept config that has none.
+
 ### HTTP and CORS
 
 1. `http.cors_allowed_origins` lists the browser origins allowed to call the

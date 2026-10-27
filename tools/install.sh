@@ -658,6 +658,49 @@ _backup_replaced_config() {
     log_info "config: replacing ${path}; the previous file is at ${backup}"
 }
 
+# The runtime resolves a default or relative runtime.data_dir against the
+# config file's directory (#562), not the unit's WorkingDirectory. Name it in
+# the installed config as the directory WorkingDirectory=${PREFIX} gave it, so
+# an install or upgrade moves neither the e-stop latch nor the run journal: an
+# absent key becomes <prefix>/anolis-data, a relative one <prefix>/<it>, and an
+# absolute one is left alone. A one-line `runtime: {...}` is not edited.
+_pin_runtime_data_dir() {
+    local cfg="$1" how="$2"
+    local current
+    current=$(_yaml_block_value "${cfg}" runtime data_dir)
+    current=${current//[\"\']/}
+    [[ "${current}" == /* ]] && return 0
+    local want="${PREFIX}/anolis-data"
+    [[ -n "${current}" ]] && want="${PREFIX}/${current}"
+    if grep -qE '^runtime:[[:space:]]*[^[:space:]#]' "${cfg}"; then
+        log_warn "config (runtime): ${cfg} has a one-line runtime block; add runtime.data_dir: ${want} to it, or the runtime keeps its data beside the config"
+        return 0
+    fi
+    local tmp="${cfg}.data-dir.$$"
+    awk -v want="${want}" '
+        NR == FNR {
+            if (/^[^[:space:]#]/) { in_blk = ($1 == "runtime:") }
+            else if (in_blk && indent == "" && /^[[:space:]]+[^[:space:]#]/) { match($0, /^[[:space:]]+/); indent = substr($0, 1, RLENGTH) }
+            if (/^runtime:/) { has_blk = 1 }
+            next
+        }
+        FNR == 1 { if (indent == "") indent = "  "; in_blk = 0 }
+        /^[^[:space:]#]/ { in_blk = ($1 == "runtime:") }
+        in_blk && $1 == "data_dir:" { print indent "data_dir: " want; done = 1; next }
+        { print }
+        /^runtime:/ && !done && !has_dd { print indent "data_dir: " want; done = 1 }
+        END { if (!has_blk) { print "runtime:"; print indent "data_dir: " want } }
+    ' has_dd="${current:+1}" "${cfg}" has_dd="${current:+1}" "${cfg}" > "${tmp}" || { rm -f "${tmp}"; die "config (runtime): could not edit ${cfg}"; }
+    chown --reference="${cfg}" "${tmp}"
+    chmod --reference="${cfg}" "${tmp}"
+    mv "${tmp}" "${cfg}"
+    if [[ "${how}" == preserved ]]; then
+        log_info "config (runtime): set runtime.data_dir to ${want} in ${cfg}, where the runtime already kept its data"
+    else
+        log_ok "config (runtime): runtime.data_dir is ${want}"
+    fi
+}
+
 phase_config_runtime() {
     local dest="${PREFIX}/config/runtime.yaml"
     local variant="${RUNTIME_VARIANT:-manual}"
@@ -671,6 +714,7 @@ phase_config_runtime() {
         cp "${src}" "${dest}"
         chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
         log_ok "config (runtime): replaced with variant '${variant}'"
+        _pin_runtime_data_dir "${dest}" new
     elif [[ -f "${dest}" ]]; then
         # Preserve an operator-edited/activated config across upgrades; only warn
         # if it is not inert (they may have activated automation from Operate).
@@ -681,11 +725,13 @@ phase_config_runtime() {
         fi
         verify_inert_runtime_config "${dest}" warn
         warn_kept_provider_configs "${dest}"
+        _pin_runtime_data_dir "${dest}" preserved
     else
         verify_inert_runtime_config "${src}" die
         cp "${src}" "${dest}"
         chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
         log_ok "config (runtime): installed variant '${variant}'"
+        _pin_runtime_data_dir "${dest}" new
     fi
 
     preflight_runtime_config "${dest}"
@@ -2506,11 +2552,9 @@ Group=${ANOLIS_USER}
 # Injects ANOLIS_API_TOKEN. Read by systemd as root, so the secret stays out of
 # runtime.yaml (which is world-readable and preserved across upgrades).
 EnvironmentFile=${RUNTIME_ENV_FILE}
-# The runtime's default data dir (run registry, \`runtime.data_dir\` unset) is
-# the RELATIVE path anolis-data/, so the service must start somewhere the
-# service user can write. Without this it starts in / and the run registry
-# fails soft at boot -- one WARN, then 503 on /v0/runs for the life of the
-# process (#302).
+# The installed runtime.yaml names runtime.data_dir (#562), so the data dir no
+# longer depends on this. It stays so that anything else relative resolves
+# where it did, and the service never starts in / (#302).
 WorkingDirectory=${PREFIX}
 ExecStart=${PREFIX}/bin/anolis-runtime --config ${PREFIX}/config/runtime.yaml
 Restart=on-failure
