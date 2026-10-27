@@ -85,6 +85,9 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
             if (!action.error.empty()) {
                 entry["error"] = action.error;
             }
+            if (!action.success) {
+                entry["cause"] = control::failure_cause_to_string(action.cause);
+            }
             failed_actions.push_back(entry);
         }
         nlohmann::json skipped_actions = nlohmann::json::array();
@@ -268,6 +271,9 @@ void HttpServer::handle_post_estop(const httplib::Request &req, httplib::Respons
             {"device_handle", action.device_handle}, {"function", action.function}, {"success", action.success}};
         if (!action.error.empty()) {
             entry["error"] = action.error;
+        }
+        if (!action.success) {
+            entry["cause"] = control::failure_cause_to_string(action.cause);
         }
         actions.push_back(entry);
     }

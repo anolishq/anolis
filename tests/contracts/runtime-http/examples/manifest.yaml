@@ -15,6 +15,11 @@ examples:
     content_type: application/json
     file: estop.200.json
   - method: POST
+    path: /v0/estop
+    status: "200"
+    content_type: application/json
+    file: estop.unplannable.200.json
+  - method: POST
     path: /v0/estop/clear
     status: "200"
     content_type: application/json

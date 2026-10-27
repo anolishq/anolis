@@ -1012,6 +1012,17 @@ components:
           type: boolean
         error:
           type: string
+        cause:
+          type: string
+          enum: [config, run]
+          description: >-
+            Present on a call that did not succeed. config: the call could not
+            be planned from the config on these devices, and fails the same way
+            on every run (the zero rung could not build its arguments, or the
+            call was refused before reaching its provider because the device or
+            function does not exist or an argument is invalid). Fix
+            safety.safe_state. run: anything else, such as a provider that
+            failed the call.
     EstopResponse:
       type: object
       additionalProperties: false

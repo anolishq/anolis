@@ -544,6 +544,73 @@ TEST_F(SafeStateTest, StartupReportKeepsOnlyTheFailedCalls) {
     EXPECT_FALSE(report.failed_actions[0].error.empty());
 }
 
+//=============================================================================
+// Why a call failed: the config, or the run (#616)
+//=============================================================================
+
+// The zero rung cannot build a zero for a required string argument, on any
+// run: the config's safe state cannot be planned on this device.
+TEST_F(SafeStateTest, AZeroThatCannotBeBuiltIsAConfigFailure) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Config);
+}
+
+// An argument outside the function's range is refused before the provider is
+// called, which also fails the same way on every run.
+TEST_F(SafeStateTest, AnArgumentOutOfRangeIsAConfigFailure) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 1.0);  // pwm >= 1; the hook sends 0
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    // StrictMock: the provider is never called.
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_THAT(report.failed_actions[0].error, HasSubstr("below minimum"));
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Config);
+}
+
+TEST_F(SafeStateTest, ACallTheProviderFailsIsARunFailure) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("bus timeout"));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Run);
+}
+
+// A provider can reject a call's arguments itself, after it was sent: the
+// device's own state, not the config, may be why, so it is not a config
+// failure.
+TEST_F(SafeStateTest, ArgumentsTheProviderRejectsAreARunFailure) {
+    RegisterActuator();
+    safety.safe_state.hooks.push_back(make_call("sim0/heater", "set_output"));
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(Return("out of range for this board"));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT));
+
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Run);
+}
+
 TEST_F(SafeStateTest, StartupReportIsNotRunBeforeDriveOrWithNoSafeState) {
     RegisterActuator();
     auto controller = make_controller();
