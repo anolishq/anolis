@@ -303,6 +303,8 @@ jobs:
             configure_preset: ci-linux-release-strict
             test_preset: ci-linux-release-strict
             triplet: x64-linux-static
+            # The two lanes that build what release.yml ships upload it.
+            platform: linux-x86_64
           - lane: Linux Release (Core, no automation)
             os: ubuntu-24.04
             configure_preset: ci-linux-release-no-automation
@@ -313,6 +315,7 @@ jobs:
             configure_preset: ci-linux-arm64-release-strict
             test_preset: ci-linux-arm64-release-strict
             triplet: arm64-linux
+            platform: linux-arm64
           - lane: Windows Release (Core, strict)
             os: windows-2025
             configure_preset: ci-windows-release-strict
@@ -377,6 +380,39 @@ jobs:
 
       - name: Run CTest
         run: ctest --preset "${{ matrix.test_preset }}"
+
+      # An unreleased runtime to try on hardware before a tag: packed as
+      # release.yml packs it, and named for the commit built. On a pull
+      # request that is the merge of the head into the base.
+      - name: Package runtime artifact
+        id: package
+        if: matrix.platform
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PRESET: ${{ matrix.configure_preset }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          BUILT="$(git rev-parse --short=7 HEAD)"
+          NAME="anolis-${BUILT}-${PLATFORM}"
+          BINARY="build/${PRESET}/core/anolis-runtime"
+          if [ ! -f "${BINARY}" ]; then
+            echo "ERROR: binary not found at ${BINARY}" >&2
+            exit 1
+          fi
+          mkdir -p staging/bin
+          cp "${BINARY}" staging/bin/
+          tar -czf "${NAME}.tar.gz" -C staging .
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "${NAME}.tar.gz: built from $(git rev-parse HEAD) (head ${HEAD_SHA})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload runtime artifact
+        if: matrix.platform
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
   anolis-provider-compat:
     name: anolis-provider-compat
