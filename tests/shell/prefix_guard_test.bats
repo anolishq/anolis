@@ -137,8 +137,10 @@ assert_each_refused() {
     local p="${FIX}/opt/anolis"
     run main --local "${BUNDLE}" --no-start --prefix "${p}"
     [ "$status" -eq 0 ]
-    grep -qxF "install -d -m 755 ${p} ${p}/bin ${p}/config ${p}/config/providers ${p}/projects ${p}/.prev ${p}/anolis-data" "${CALLS}"
+    grep -qxF "install -d -m 755 ${p} ${p}/bin ${p}/config ${p}/projects ${p}/.prev ${p}/anolis-data" "${CALLS}"
     grep -qxF "chown anolis:anolis ${p}/bin/*" "${CALLS}"
+    # Nothing reads <prefix>/config/providers/, so no phase writes it (#515).
+    if grep -q '^phase_config_providers' "${CALLS}"; then return 1; fi
 }
 
 # Install never removes the prefix, so a prefix that is its own mount is a

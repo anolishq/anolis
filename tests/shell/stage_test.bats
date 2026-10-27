@@ -74,8 +74,11 @@ teardown() {
 
     # Bundle layout install.sh --local consumes.
     [ -f "${x}/config/runtime.yaml" ]
-    [ -f "${x}/config/providers/foo.yaml" ]
-    [ -f "${x}/config/providers/bar.yaml" ]
+    # Each provider config ships once, under projects/, where the rendered
+    # runtime config points; config/providers/ was never read (#515).
+    [ ! -e "${x}/config/providers" ]
+    [ -f "${x}/projects/stage-project/config/provider-foo.yaml" ]
+    [ -f "${x}/projects/stage-project/config/provider-bar.yaml" ]
     [ -f "${x}/systemd/anolis-runtime.service" ]
     [ -f "${x}/manifest.json" ]
     [ -f "${x}/checksums.sha256" ]

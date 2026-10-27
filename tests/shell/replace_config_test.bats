@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 # --replace-config (anolishq/anolis#470): install a project's config onto a
-# machine that already has one. An existing runtime.yaml, and each provider
-# config the bundle ships, moves to a timestamped backup next to it; the
-# selected variant is installed, still through verify_inert_runtime_config,
-# and each path is logged. Without the flag an existing config is preserved.
+# machine that already has one. An existing runtime.yaml moves to a
+# timestamped backup next to it; the selected variant is installed, still
+# through verify_inert_runtime_config, and each path is logged. Without the
+# flag an existing config is preserved. Provider configs ship under
+# projects/<name>/config/, which every install replaces (#515).
 #
 # Source install.sh (main() guarded) and run the config phases with chown
 # mocked. No root, network or systemd.
@@ -60,41 +61,19 @@ setup() {
     ! compgen -G "${PREFIX}/config/runtime.yaml.replaced-*" >/dev/null
 }
 
-@test "470: --replace-config backs up and replaces each provider config the bundle ships" {
-    REPLACE_CONFIG=1
-    printf 'from: bundle\n' > "${BUNDLE_DIR}/config/providers/bread.yaml"
-    printf 'from: operator\n' > "${PREFIX}/config/providers/bread.yaml"
-    printf 'from: operator, not in the bundle\n' > "${PREFIX}/config/providers/other.yaml"
-    run phase_config_providers
-    [ "$status" -eq 0 ]
-    grep -qx "from: operator" "${PREFIX}/config/providers/bread.yaml.replaced-20261027T120000Z"
-    grep -qx "from: bundle" "${PREFIX}/config/providers/bread.yaml"
-    grep -qx "from: operator, not in the bundle" "${PREFIX}/config/providers/other.yaml"
-    ! compgen -G "${PREFIX}/config/providers/other.yaml.replaced-*" >/dev/null
-    [[ "${output}" == *"${PREFIX}/config/providers/bread.yaml.replaced-20261027T120000Z"* ]]
-}
-
-@test "470: without --replace-config provider configs are preserved" {
-    REPLACE_CONFIG=0
-    printf 'from: bundle\n' > "${BUNDLE_DIR}/config/providers/bread.yaml"
-    printf 'from: operator\n' > "${PREFIX}/config/providers/bread.yaml"
-    run phase_config_providers
-    [ "$status" -eq 0 ]
-    grep -qx "from: operator" "${PREFIX}/config/providers/bread.yaml"
-}
-
 @test "470: --replace-config is parsed and documented" {
     parse_args --replace-config --project ./cfg
     [ "${REPLACE_CONFIG}" -eq 1 ]
     run show_help
     [[ "${output}" == *"--replace-config"* ]]
+    [[ "$(sed -n '/--replace-config/,/^  --keep-hostname/p' <<<"${output}")" != *"provider"* ]]
 }
 
 @test "470: --dry-run --replace-config says what it would back up" {
     run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --replace-config --project ./cfg
     [ "$status" -eq 0 ]
     [[ "${output}" == *"replace the runtime config"*"runtime.yaml.replaced-"* ]]
-    [[ "${output}" == *"replace provider configs"*".replaced-"* ]]
+    [[ "${output}" != *"provider configs"* ]]
     run bash "${BATS_TEST_DIRNAME}/helpers/run_as_root.sh" "${INSTALL_SH}" --dry-run --project ./cfg
     [[ "${output}" != *"replaced-"* ]]
 }
