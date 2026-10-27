@@ -454,6 +454,35 @@ TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatGoesSilentRaisesNothing) {
     }
 }
 
+// #605: on Windows a check of motor0_off can fail while the test renames it
+// into place, and the helper died of the exception. A link to itself fails
+// the same check on POSIX (ELOOP): motor0 must read as silent, and the helper
+// must keep answering, so the stop is still read in force.
+TEST(RuntimeStopChainExpectTest, AMotorOffMarkerTheHelperCannotCheckStillReadsSilent) {
+#ifdef _WIN32
+    GTEST_SKIP() << "creating a symlink needs extra privileges on Windows";
+#else
+    const auto rig = fresh_rig("anolis-605-motor0-off-unreadable");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");
+    anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    MainLoop loop(runtime);
+    std::filesystem::create_symlink("motor0_off", rig.root / "motor0_off");
+    press_the_stop(rig, runtime);
+    std::this_thread::sleep_for(kPastTheGrace);
+    // Still read fresh: a helper that had died would leave the status stale.
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::InForce)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    EXPECT_TRUE(mismatch_moves(*events).empty());
+#endif
+}
+
 TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesStopNotReaching) {
     const auto rig = fresh_rig("anolis-484-reports-estop-false");
     set_chain(rig, "0");
