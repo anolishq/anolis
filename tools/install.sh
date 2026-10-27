@@ -87,6 +87,10 @@ PREFIX_EXPLICIT=0
 # inert default `manual`. install.sh only ever installs an inert variant.
 RUNTIME_VARIANT=""
 HEALTH_FAILED=0
+# The startup safe state cannot be planned from the config on this machine's
+# devices (#616): the install fails, naming the first refused action.
+SAFE_STATE_UNPLANNABLE=0
+SAFE_STATE_REFUSED=""
 # Continue past providers' unmet host requirements (--allow-unmet-host).
 ALLOW_UNMET_HOST=0
 # Install an older runtime over a newer one (--allow-downgrade).
@@ -2045,20 +2049,25 @@ _check_provider_liveness() {
 
 # Print the startup_safe_state of a GET /v0/runtime/status body as lines the
 # report below formats: "achieved <rung>", "notrun <on_startup>", or "failed"
-# followed by one "<device> <function>: <reason>" line per failed or skipped
-# call. Nothing when the body has no startup_safe_state (a runtime before
-# 0.1.45). jq and python3 agree on all of this.
+# followed by one "<tag>|<device> <function>: <reason>" line per failed or
+# skipped call. The tag is "config" for a failed call the runtime marks as one
+# the config cannot plan on these devices (#616), "run" for another failed
+# call, and "skip" for a skipped one; any "config" call makes the first line
+# "unplannable" instead of "failed". A runtime before 0.1.58 marks no call.
+# Nothing when the body has no startup_safe_state (a runtime before 0.1.45).
+# jq and python3 agree on all of this.
 _startup_safe_state_lines() {
     local body="$1"
     if command -v jq >/dev/null 2>&1; then
         jq -r '.startup_safe_state // empty | select(type == "object")
             | if .ran != true then "notrun \(.on_startup // "")"
               elif .safe_state_achieved == true then "achieved \(.software_safe_state // "unknown")"
-              else "failed",
+              else (if any(.failed_actions // [] | .[]; type == "object" and .cause == "config")
+                    then "unplannable" else "failed" end),
                 (.failed_actions // [] | .[] | select(type == "object")
-                    | "\(.device_handle // "?") \(.function // "?"): \(.error // "failed")"),
+                    | "\(if .cause == "config" then "config" else "run" end)|\(.device_handle // "?") \(.function // "?"): \(.error // "failed")"),
                 (.skipped_actions // [] | .[] | select(type == "object")
-                    | "\(.device_handle // "?") \(.function // "?"): skipped, \(.reason // "absent")")
+                    | "skip|\(.device_handle // "?") \(.function // "?"): skipped, \(.reason // "absent")")
               end' <<< "${body}" 2>/dev/null
     elif command -v python3 >/dev/null 2>&1; then
         python3 -c 'import json, sys
@@ -2070,20 +2079,23 @@ if s.get("ran") is not True:
 elif s.get("safe_state_achieved") is True:
     print("achieved", s.get("software_safe_state") or "unknown")
 else:
-    print("failed")
-    for a in s.get("failed_actions") or []:
-        if isinstance(a, dict):
-            print("%s %s: %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("error", "failed")))
+    failed = [a for a in s.get("failed_actions") or [] if isinstance(a, dict)]
+    print("unplannable" if any(a.get("cause") == "config" for a in failed) else "failed")
+    for a in failed:
+        tag = "config" if a.get("cause") == "config" else "run"
+        print("%s|%s %s: %s" % (tag, a.get("device_handle", "?"), a.get("function", "?"), a.get("error", "failed")))
     for a in s.get("skipped_actions") or []:
         if isinstance(a, dict):
-            print("%s %s: skipped, %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("reason", "absent")))' <<< "${body}" 2>/dev/null
+            print("skip|%s %s: skipped, %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("reason", "absent")))' <<< "${body}" 2>/dev/null
     fi
 }
 
 # Every install restarts the runtime, and the restart runs safety.on_startup
 # again, so report what it did (#471). A safe state not achieved is a
 # warning, not a failed install: a board that comes up tripped after downtime
-# is an expected state the operator clears. Without a JSON parser this says
+# is an expected state the operator clears. One the config cannot plan on
+# these devices is not: it fails the same way on every restart and every
+# e-stop, so the install fails (#616). Without a JSON parser this says
 # nothing; the provider check below already names the missing parser.
 _report_startup_safe_state() {
     local url="$1" body lines first
@@ -2101,14 +2113,29 @@ _report_startup_safe_state() {
         "notrun "*)
             log_skip "health: startup safe state not run (no software safe state declared)"
             ;;
-        failed)
-            log_warn "health: startup safe state NOT achieved"
+        failed | unplannable)
+            if [[ "${first}" == unplannable ]]; then
+                local refused
+                refused=$(grep -m 1 '^config|' <<< "${lines}")
+                SAFE_STATE_REFUSED="${refused#config|}"
+                SAFE_STATE_UNPLANNABLE=1
+                log_err "health: safety.safe_state cannot run on this machine's devices: ${SAFE_STATE_REFUSED}"
+                log_info "  The runtime refuses it before it reaches the devices, on every restart and every e-stop."
+            else
+                log_warn "health: startup safe state NOT achieved"
+            fi
             local line
             while IFS= read -r line; do
-                log_info "  ${line}"
+                log_info "  ${line#*|}"
             done < <(tail -n +2 <<< "${lines}")
             ;;
     esac
+}
+
+# A crash-looping runtime is a failed install, not a warning (#172), and so
+# is a safe state the config cannot plan on these devices (#616).
+_install_failed() {
+    [[ ${HEALTH_FAILED} -eq 1 || ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]
 }
 
 phase_health() {
@@ -2212,6 +2239,11 @@ phase_summary() {
     if [[ ${HEALTH_FAILED} -eq 1 ]]; then
         echo ""
         log_err "Runtime did not come up — the install did NOT succeed."
+    fi
+    if [[ ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]; then
+        echo ""
+        log_err "safety.safe_state cannot run on this machine's devices (${SAFE_STATE_REFUSED}) — the install did NOT succeed."
+        log_info "Fix safety.safe_state in ${PREFIX}/config/runtime.yaml, then run the install again."
     fi
     echo ""
 }
@@ -3068,8 +3100,9 @@ main() {
     phase_health
     phase_summary
 
-    # A crash-looping runtime is a failed install, not a warning (#172).
-    [[ ${HEALTH_FAILED} -eq 0 ]] || exit 1
+    if _install_failed; then
+        exit 1
+    fi
 }
 
 # Run main() in every real invocation — direct (`bash install.sh`), piped

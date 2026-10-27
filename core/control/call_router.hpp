@@ -66,6 +66,9 @@ struct CallResult {
     std::string error_message;
     std::map<std::string, anolis::deviceprovider::v1::Value> results;
     anolis::deviceprovider::v1::Status_Code status_code = anolis::deviceprovider::v1::Status_Code_CODE_OK;
+    // True once the call was sent to its provider; false for a call refused
+    // before that, by resolution, argument validation or gating (#616).
+    bool dispatched = false;
 };
 
 /**
