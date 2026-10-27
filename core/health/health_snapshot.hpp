@@ -228,5 +228,22 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
 std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
                                                                   const registry::DeviceRegistry &device_registry);
 
+/**
+ * @brief Startup warnings for devices whose reported `watchdog_timeout_ms` is
+ *        under twice `polling.interval_ms` (#599).
+ *
+ * Polling is what keeps a device's firmware watchdog fed once the runtime is
+ * running, so a timeout that one late poll can outrun trips the device in
+ * ordinary running, and every later SET is refused until an operator clears
+ * it. A trip is the safe direction, so this only warns. A missing, zero or
+ * unparseable value makes no claim and stays quiet. One live GetHealth
+ * round-trip per available provider. Report-only.
+ *
+ * @return one line per device, naming it, both values and what to change.
+ */
+std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderRegistry &provider_registry,
+                                                             const registry::DeviceRegistry &device_registry,
+                                                             int polling_interval_ms);
+
 }  // namespace health
 }  // namespace anolis
