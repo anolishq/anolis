@@ -4,9 +4,12 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <functional>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -557,6 +560,94 @@ TEST_F(CallRouterTest, InvalidArgumentPropagation) {
     EXPECT_FALSE(result.success);
     EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT);
     EXPECT_THAT(result.error_message, HasSubstr("Invalid voltage"));
+}
+
+// --- #623: every call that reaches a provider leaves a record ---------------
+
+namespace {
+
+// Captures what the logger writes to std::cerr while it is alive.
+class CerrCapture {
+public:
+    CerrCapture() : old_(std::cerr.rdbuf(buffer_.rdbuf())) {}
+    ~CerrCapture() { std::cerr.rdbuf(old_); }
+    std::string text() const { return buffer_.str(); }
+    size_t count(const std::string& needle) const {
+        const std::string all = buffer_.str();
+        size_t found = 0;
+        for (size_t at = all.find(needle); at != std::string::npos; at = all.find(needle, at + 1)) {
+            ++found;
+        }
+        return found;
+    }
+
+private:
+    std::ostringstream buffer_;
+    std::streambuf* old_;
+};
+
+}  // namespace
+
+TEST_F(CallRouterTest, EachCallSourceIsLoggedWithItsArgumentsAndResult) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call("dev1", 1, "set_duty", _, _)).Times(3).WillRepeatedly(Return(true));
+
+    const std::vector<std::pair<std::string, std::function<void(control::CallRequest&)>>> sources = {
+        {"HTTP", [](control::CallRequest&) {}},
+        {"hook", [](control::CallRequest& r) { r.is_automated = true; }},
+        {"safe-state", [](control::CallRequest& r) { r.safe_state = true; }},
+    };
+    for (const auto& [source, mark] : sources) {
+        SCOPED_TRACE(source);
+        control::CallRequest req;
+        req.device_handle = "sim0/dev1";
+        req.function_name = "set_duty";
+        req.args["pct"] = Uint64Value(40);
+        mark(req);
+        CerrCapture log;
+        ASSERT_TRUE(router->execute_call(req, *provider_registry).success);
+        EXPECT_THAT(log.text(), HasSubstr("[INFO]"));
+        EXPECT_THAT(log.text(), HasSubstr("call sim0/dev1 set_duty(pct=40) from " + source + ": OK"));
+    }
+}
+
+TEST_F(CallRouterTest, AProviderFailureIsLoggedWithItsCode) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call("dev1", 1, "set_duty", _, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mock_provider, last_status_code())
+        .WillRepeatedly(Return(anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION));
+    mock_provider->_err = "brake engaged";
+    EXPECT_CALL(*mock_provider, last_error()).WillRepeatedly(ReturnPointee(&mock_provider->_err));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "set_duty";
+    req.args["pct"] = Uint64Value(40);
+    CerrCapture log;
+    EXPECT_FALSE(router->execute_call(req, *provider_registry).success);
+    EXPECT_THAT(log.text(), HasSubstr("call sim0/dev1 set_duty(pct=40) from HTTP: CODE_FAILED_PRECONDITION"));
+}
+
+TEST_F(CallRouterTest, ABehaviorTreeCallIsLoggedOnlyWhenItChanges) {
+    RegisterMockDeviceWithUnsignedArg();
+    EXPECT_CALL(*mock_provider, call("dev1", 1, "set_duty", _, _)).Times(4).WillRepeatedly(Return(true));
+
+    auto tree_call = [&](uint64_t pct) {
+        control::CallRequest req;
+        req.device_handle = "sim0/dev1";
+        req.function_name = "set_duty";
+        req.args["pct"] = Uint64Value(pct);
+        req.is_automated = true;
+        req.is_behavior_tree = true;
+        return router->execute_call(req, *provider_registry).success;
+    };
+    CerrCapture log;
+    ASSERT_TRUE(tree_call(40));
+    ASSERT_TRUE(tree_call(40));  // the tree's keepalive: same call, same result
+    ASSERT_TRUE(tree_call(40));
+    ASSERT_TRUE(tree_call(55));
+    EXPECT_EQ(log.count("set_duty(pct=40) from behavior tree: OK"), 1u) << log.text();
+    EXPECT_EQ(log.count("set_duty(pct=55) from behavior tree: OK"), 1u) << log.text();
 }
 
 // ============================================================================

@@ -157,6 +157,17 @@ private:
     std::map<std::string, ProviderLock> provider_locks_;
     std::mutex provider_locks_mutex_;
 
+    // The last record logged for each behaviour-tree call, keyed by device
+    // handle and function: the tree repeats a call every tick, so it is logged
+    // only when its arguments or result change (#623).
+    std::map<std::string, std::string> last_tree_record_;
+    std::mutex last_tree_record_mutex_;
+
+    // Log the call a provider received, with its source, arguments and result.
+    void log_call_record(const CallRequest &request, const std::string &function_name,
+                         const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
+                         const std::string &result);
+
     // Validation helpers
     bool validate_device_exists(const std::string &device_handle, std::string &error) const;
     bool validate_function_exists(const registry::RegisteredDevice &device, const std::string &function_name,
