@@ -149,10 +149,11 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-This is a minimal unit for running the runtime by hand. The runtime's default
-data directory is the relative path `anolis-data`, so `WorkingDirectory` must be
-writable by the service user; without it the run registry fails at startup and
-`/v0/runs` answers `503`. `install.sh` generates its
+This is a minimal unit for running the runtime by hand. Without
+`runtime.data_dir`, the runtime keeps its data in `anolis-data` beside the
+config file, which this unit mounts read-only, so set `runtime.data_dir:
+/var/lib/anolis` in the config; without a writable data directory the run
+registry fails at startup and `/v0/runs` answers `503`. `install.sh` generates its
 own (`User=anolis`, see [system surfaces](system-surfaces.md)). With
 `DynamicUser=yes` the runtime and its provider children have no stable user, so a
 provider that opens a device node needs a real user that the host's device groups

@@ -206,7 +206,7 @@
         },
         "data_dir": {
           "type": "string",
-          "description": "Runtime data directory (run registry JSONL, etc.). Empty/absent => ./anolis-data."
+          "description": "Runtime data directory (e-stop latch, run journal). Absent => anolis-data beside the config file. A relative path is resolved against the config file's directory, not the working directory."
         },
         "mode": false
       },

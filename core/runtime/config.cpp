@@ -1290,6 +1290,20 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
         }
 
+        // The latch and the run journal live under data_dir, so it must not
+        // depend on the directory the runtime was started from (#562). A
+        // default or relative data_dir is resolved against the config file's
+        // directory, as config_dir already is.
+        {
+            const std::filesystem::path data_dir = config.runtime.data_dir.empty()
+                                                       ? std::filesystem::path("anolis-data")
+                                                       : std::filesystem::path(config.runtime.data_dir);
+            config.runtime.data_dir =
+                (data_dir.is_absolute() ? data_dir : std::filesystem::path(config.config_dir) / data_dir)
+                    .lexically_normal()
+                    .string();
+        }
+
         // Structural YAML checks above guarantee node shape; centralized
         // validation here enforces cross-field and semantic constraints.
         if (!validate_config(config, error)) {
@@ -1319,6 +1333,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         }
         LOG_INFO(telemetry_msg.str());
 
+        LOG_INFO("[Config] Data dir: " << config.runtime.data_dir);
         LOG_INFO("[Config] Log level: " << config.logging.level);
 
         std::stringstream automation_msg;
