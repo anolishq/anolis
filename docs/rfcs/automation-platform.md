@@ -5,7 +5,8 @@
 > in v0.1.26 (#128). The text below is rev 3 of the design. Produced 2026-06-27 by a 4-phase
 > research workflow (5 investigations → 4 design proposals → 4 adversarial
 > critiques → synthesis), then hardened against **two** implementation reviews
-> (rev 2 = [the review](./automation-platform-review.md); rev 3 folds in a second deeper
+> (rev 2 = the review in `docs/rfcs/automation-platform-review.md` in the repository,
+> not published on the docs site; rev 3 folds in a second deeper
 > review — failure≠fault, run cardinality, atomic load/truthful definition,
 > the second UI retired, structured BuildInfo, RunJournal durability). Grounded in the live
 > codebase; claims are path-cited. **Tracked as epic anolishq/anolis#111**

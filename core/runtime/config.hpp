@@ -71,12 +71,12 @@ struct RuntimeModeConfig {
  * @brief HTTP adapter settings for the runtime's REST surface.
  */
 struct HttpConfig {
-    bool enabled = true;                                 // HTTP server enabled
-    std::string bind = "127.0.0.1";                      // Bind address
-    int port = 8080;                                     // HTTP port
-    std::vector<std::string> cors_allowed_origins{"*"};  // CORS allowlist ("*" = allow all)
-    bool cors_allow_credentials = false;                 // Whether to emit Access-Control-Allow-Credentials
-    int thread_pool_size = 40;                           // Worker thread pool size
+    bool enabled = true;                            // HTTP server enabled
+    std::string bind = "127.0.0.1";                 // Bind address
+    int port = 8080;                                // HTTP port
+    std::vector<std::string> cors_allowed_origins;  // Browser origins allowed; empty = none, "*" = any (#540)
+    bool cors_allow_credentials = false;            // Whether to emit Access-Control-Allow-Credentials
+    int thread_pool_size = 40;                      // Worker thread pool size
 
     // Authentication (Bearer token). Non-loopback exposure requires auth (see the
     // startup guard in validate_config). With auth on, loopback requests need the

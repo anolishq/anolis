@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <future>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -858,11 +859,38 @@ void Runtime::run() {
 
     LOG_INFO("[Runtime] Press Ctrl+C to exit");
 
+    // A restart runs on a worker thread, one at a time, so the stop chain,
+    // the other providers and the shutdown signal are still seen every
+    // iteration while it waits on a slow provider (#557). Its result is
+    // collected here, and the supervisor is only updated from this loop.
+    std::future<bool> restart;
+    std::string restarting_id;
+    bool restart_is_probe = false;
+    const auto start_restart = [&](const std::string &id, const provider::ProviderConfig &provider_config, bool probe) {
+        restarting_id = id;
+        restart_is_probe = probe;
+        restart = std::async(std::launch::async,
+                             [this, id, &provider_config] { return restart_provider(id, provider_config); });
+    };
+
     // Main loop: polling, provider health monitoring, crash recovery
     while (running_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         update_stop_chain();
+
+        if (restart.valid() && restart.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const bool restarted = restart.get();
+            if (restart_is_probe) {
+                supervisor_->record_probe_result(restarting_id, restarted);
+            } else if (restarted) {
+                LOG_INFO("[Runtime] Provider restarted successfully: " << restarting_id);
+            } else {
+                LOG_ERROR("[Runtime] Failed to restart provider: " << restarting_id);
+                // Don't mark crash detected - will retry on next iteration
+            }
+            restarting_id.clear();
+        }
 
         // Check for shutdown signal
         if (anolis::runtime::SignalHandler::is_shutdown_requested()) {
@@ -879,6 +907,9 @@ void Runtime::run() {
             if (!provider) {
                 continue;  // Provider not initialized (shouldn't happen)
             }
+            if (id == restarting_id) {
+                continue;  // its restart is still in flight
+            }
 
             // Check if provider is available
             if (!provider->is_available()) {
@@ -888,9 +919,9 @@ void Runtime::run() {
                 // probe per interval (#326), so an outage that outlasts the
                 // budget does not keep the provider down until a runtime restart.
                 if (supervisor_->is_circuit_open(id)) {
-                    if (supervisor_->should_probe(id)) {
+                    if (!restart.valid() && supervisor_->should_probe(id)) {
                         LOG_INFO("[Runtime] Circuit open; probing provider: " << id);
-                        supervisor_->record_probe_result(id, restart_provider(id, provider_config));
+                        start_restart(id, provider_config, true);
                     }
                     continue;
                 }
@@ -908,20 +939,15 @@ void Runtime::run() {
                     }
                 }
 
-                // Check if we should attempt restart (backoff period elapsed)
-                if (supervisor_->should_restart(id)) {
+                // Check if we should attempt restart (backoff period elapsed).
+                // Another provider's restart in flight makes this one wait.
+                if (!restart.valid() && supervisor_->should_restart(id)) {
                     // Clear crash detected flag before restart attempt
                     // (so next crash will be properly detected)
                     supervisor_->clear_crash_detected(id);
 
-                    // Attempt restart
                     LOG_INFO("[Runtime] Attempting to restart provider: " << id);
-                    if (restart_provider(id, provider_config)) {
-                        LOG_INFO("[Runtime] Provider restarted successfully: " << id);
-                    } else {
-                        LOG_ERROR("[Runtime] Failed to restart provider: " << id);
-                        // Don't mark crash detected - will retry on next iteration
-                    }
+                    start_restart(id, provider_config, false);
                 }
             } else {
                 // Provider is healthy: record heartbeat for timing/observability.
@@ -933,6 +959,13 @@ void Runtime::run() {
                 }
             }
         }
+    }
+
+    // The restart touches the registries shutdown() tears down, so it is
+    // waited for, within its own start and discovery timeouts.
+    if (restart.valid()) {
+        LOG_INFO("[Runtime] Waiting for the restart of provider '" << restarting_id << "' to finish");
+        restart.wait();
     }
 
     LOG_INFO("[Runtime] Shutting down");
@@ -1239,8 +1272,16 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // can be unavailable and still running -- wedged on a hung bus -- and
     // starting a second one beside it would put two processes on one bus. The
     // stopped handle stays registered, so a failed restart is retried as before.
+    // Nor beside anything it started, such as a wrapper script's worker
+    // (#563): a stop that leaves any of it running fails this attempt, and
+    // supervision retries, stopping the old provider again first.
     if (auto old_provider = provider_registry_.get_provider(provider_id)) {
-        old_provider->stop();
+        if (!old_provider->stop()) {
+            LOG_ERROR("[Runtime] Provider '" << provider_id
+                                             << "' or a process it started is still running after the stop; "
+                                                "not starting a replacement beside it");
+            return false;
+        }
     }
 
     // Start the timeout clock only now: timeout_ms bounds the new process coming

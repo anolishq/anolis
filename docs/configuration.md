@@ -90,7 +90,10 @@ automation:
 
 ### HTTP and CORS
 
-1. `http.cors_allowed_origins` should be explicit in non-dev environments.
+1. `http.cors_allowed_origins` lists the browser origins allowed to call the
+   API. It defaults to none, and `[]` means none. `*` allows any origin and is
+   an explicit opt-in. A POST to `/v0/` from a browser origin not listed is
+   refused with `403` before it is routed.
 2. Wildcard origin (`*`) cannot be combined with `cors_allow_credentials: true`.
 
 ### Providers and supervision

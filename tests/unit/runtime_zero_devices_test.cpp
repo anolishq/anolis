@@ -3,6 +3,7 @@
 // helper in the shape of bread 0.8.1 on an unpowered bus (2026-10-23): no
 // devices, and rlht0, dcmt0 and dcmt1 reported UNREACHABLE.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -16,6 +17,7 @@
 #include <string>
 #include <thread>
 
+#include "mocks/mock_provider_handle.hpp"
 #include "runtime/config.hpp"
 #include "runtime/runtime.hpp"
 #include "runtime/signal_handler.hpp"
@@ -182,4 +184,35 @@ TEST(RuntimeZeroDevicesTest, ARestartThatListsNoDevicesIsASuccessfulRestart) {
     EXPECT_TRUE(current->is_available());
     EXPECT_TRUE(runtime.get_registry().get_devices_for_provider("bread0").empty());
     EXPECT_FALSE(std::filesystem::exists(trigger)) << "the helper never saw the trigger";
+}
+
+// #563: a stop that leaves the old provider, or something it started,
+// running must not be followed by a replacement beside it.
+TEST(RuntimeZeroDevicesTest, ARestartIsRefusedWhileTheOldProviderIsStillRunning) {
+    const auto config = load(write_config("anolis-563-stuck.yaml", config_yaml("")));
+    anolis::runtime::Runtime runtime(config);
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    auto stuck = std::make_shared<::testing::NiceMock<anolis::tests::MockProviderHandle>>();
+    ON_CALL(*stuck, is_available()).WillByDefault(::testing::Return(false));
+    EXPECT_CALL(*stuck, stop()).Times(::testing::AtLeast(1)).WillRepeatedly(::testing::Return(false));
+    runtime.get_provider_registry().add_provider("bread0", stuck);
+
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    anolis::runtime::SignalHandler::install();
+    std::thread loop([&runtime] { runtime.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));  // backoff is 50 ms, so several attempts
+    std::raise(SIGTERM);
+    loop.join();
+    std::cerr.rdbuf(old);
+    const auto still_registered = runtime.get_provider_registry().get_provider("bread0");
+    runtime.shutdown();
+    anolis::runtime::SignalHandler::install();
+
+    const std::string log = captured.str();
+    EXPECT_NE(log.find("not starting a replacement beside it"), std::string::npos) << log;
+    EXPECT_EQ(log.find("[bread0] Spawning"), std::string::npos) << log;
+    EXPECT_EQ(still_registered, stuck);
 }
