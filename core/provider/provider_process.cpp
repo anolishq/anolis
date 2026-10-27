@@ -9,6 +9,7 @@
 
 #include "provider_process.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <thread>
@@ -28,11 +29,15 @@
 namespace anolis {
 namespace provider {
 
+// is_running() is called from other threads (HTTP, polling, the main loop)
+// while shutdown() runs on the one restarting the provider (#557). So the pid
+// is atomic, and the Windows process handle, set once by spawn(), is closed
+// only by the destructor.
 struct ProviderProcess::Impl {
 #ifdef _WIN32
     HANDLE process_handle = nullptr;
 #else
-    pid_t pid = -1;
+    std::atomic<pid_t> pid{-1};
     int stdin_write_fd = -1;
     int stdout_read_fd = -1;
 #endif
@@ -46,7 +51,15 @@ ProviderProcess::ProviderProcess(const std::string &provider_id, const std::stri
       shutdown_timeout_ms_(shutdown_timeout_ms),
       impl_(std::make_unique<Impl>()) {}
 
-ProviderProcess::~ProviderProcess() { shutdown(); }
+ProviderProcess::~ProviderProcess() {
+    shutdown();
+#ifdef _WIN32
+    if (impl_->process_handle) {
+        CloseHandle(impl_->process_handle);
+        impl_->process_handle = nullptr;
+    }
+#endif
+}
 
 bool ProviderProcess::spawn() {
     LOG_INFO("[" << provider_id_ << "] Spawning: " << executable_path_);
@@ -171,8 +184,8 @@ bool ProviderProcess::spawn_linux() {
         return false;
     }
 
-    impl_->pid = fork();
-    if (impl_->pid < 0) {
+    const pid_t pid = fork();
+    if (pid < 0) {
         error_ = "Fork failed";
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
@@ -181,7 +194,7 @@ bool ProviderProcess::spawn_linux() {
         return false;
     }
 
-    if (impl_->pid == 0) {
+    if (pid == 0) {
         // Child process
         // Redirect stdin
         dup2(stdin_pipe[0], STDIN_FILENO);
@@ -214,6 +227,7 @@ bool ProviderProcess::spawn_linux() {
     }
 
     // Parent process
+    impl_->pid.store(pid);
     close(stdin_pipe[0]);   // Close read end of stdin pipe
     close(stdout_pipe[1]);  // Close write end of stdout pipe
 
@@ -222,7 +236,7 @@ bool ProviderProcess::spawn_linux() {
 
     client_.set_handles(impl_->stdin_write_fd, impl_->stdout_read_fd);
 
-    LOG_INFO("[" << provider_id_ << "] Process spawned successfully (PID=" << impl_->pid << ")");
+    LOG_INFO("[" << provider_id_ << "] Process spawned successfully (PID=" << pid << ")");
     return true;
 }
 #endif
@@ -234,17 +248,18 @@ bool ProviderProcess::is_running() const {
     if (!GetExitCodeProcess(impl_->process_handle, &exit_code)) return false;
     return exit_code == STILL_ACTIVE;
 #else
-    if (impl_->pid <= 0) return false;
+    const pid_t pid = impl_->pid.load();
+    if (pid <= 0) return false;
 
     // Use waitpid(WNOHANG) for child liveness. kill(pid, 0) is not sufficient
     // because zombies still "exist" and would be misclassified as running.
     int status = 0;
     while (true) {
-        pid_t result = waitpid(impl_->pid, &status, WNOHANG);
+        pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == 0) {
             return true;  // Child still running
         }
-        if (result == impl_->pid) {
+        if (result == pid) {
             return false;  // Child exited (reaped by this call)
         }
         if (result == -1) {
@@ -295,13 +310,6 @@ void ProviderProcess::shutdown() {
     impl_->stdin_write_fd = -1;
     impl_->stdout_read_fd = -1;
 #endif
-
-#ifdef _WIN32
-    if (impl_->process_handle) {
-        CloseHandle(impl_->process_handle);
-        impl_->process_handle = nullptr;
-    }
-#endif
 }
 
 bool ProviderProcess::wait_for_exit(int timeout_ms) {
@@ -310,15 +318,16 @@ bool ProviderProcess::wait_for_exit(int timeout_ms) {
     DWORD result = WaitForSingleObject(impl_->process_handle, timeout_ms);
     return result == WAIT_OBJECT_0;
 #else
-    if (impl_->pid <= 0) {
+    const pid_t pid = impl_->pid.load();
+    if (pid <= 0) {
         return true;
     }
 
     auto start = std::chrono::steady_clock::now();
     while (true) {
         int status;
-        pid_t result = waitpid(impl_->pid, &status, WNOHANG);
-        if (result == impl_->pid) {
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) {
             // Process exited
             impl_->pid = -1;
             return true;
@@ -354,8 +363,8 @@ void ProviderProcess::force_terminate() {
         TerminateProcess(impl_->process_handle, 1);
     }
 #else
-    if (impl_->pid > 0) {
-        kill(impl_->pid, SIGKILL);
+    if (const pid_t pid = impl_->pid.load(); pid > 0) {
+        kill(pid, SIGKILL);
     }
 #endif
 }
