@@ -11,7 +11,7 @@ The surfaces above it are conveniences, not alternatives:
 
 | route | what it is | guide |
 | --- | --- | --- |
-| `install.sh` directly | Headless. Online from a config, or stage a bundle elsewhere and install it with nothing but a shell on the target. | [install-sh.md](install-sh.md) |
+| `install.sh` directly | Headless. Online from a config, or stage a bundle elsewhere and install it offline with `--local`. The target needs no network or python3, but needs root, bash, tar, sha256sum, curl and systemd. | [install-sh.md](install-sh.md) |
 | `anolis-provision` | A CLI wrapper that manages projects and adds SSH provisioning of a remote machine. Delegates the install itself. | [workbench-ssh.md](workbench-ssh.md) |
 | Workbench UI | A browser tool that authors the config and drives the same path. | [workbench-ssh.md](workbench-ssh.md) |
 | Build from source | For working on the runtime or a provider. | [developer.md](developer.md) |

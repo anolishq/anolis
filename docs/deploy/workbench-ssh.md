@@ -19,11 +19,11 @@ Both surfaces below do exactly that — neither is a separate install mechanism.
 On the **workstation**:
 
 ```bash
-pip install 'anolis-workbench[ssh]'
+pip install anolis-workbench
 ```
 
-The `[ssh]` extra matters — `paramiko` is optional, and provisioning from the
-browser UI needs it. Do not install this on the Pi.
+`paramiko`, which provisioning from the browser UI needs, is a core dependency,
+so no extra is required. The target does not need the workbench installed.
 
 The workstation also needs internet: it fetches `install.sh` from the pinned
 runtime release.
@@ -47,12 +47,13 @@ Starts a local commissioning server on `127.0.0.1:3010` and opens a browser.
 `--no-browser` and `--version`, nothing else. The work happens in the UI.
 
 It is the better surface for *building* a config, because it validates as you
-author rather than at install time. Note it cannot deploy an existing canonical
-config directory; importing one is CLI-only, via `--system` below.
+author rather than at install time. It can also deploy an existing canonical
+config directory: import it from the home screen, then deploy it from
+Commission. The CLI equivalent is `--system` below.
 
-> Running the workbench **on a Pi** changes its defaults: it binds `0.0.0.0`
-> rather than loopback and does not open a browser. That is deliberate for an
-> appliance, and worth knowing before you run it somewhere exposed.
+> Running the workbench **on a Pi** changes one default: it does not open a
+> browser. It still binds `127.0.0.1`; reach it from another machine with
+> `ssh -L 3010:127.0.0.1:3010 <user>@<pi>`.
 
 ## Option B — the CLI
 
@@ -75,7 +76,8 @@ mutually exclusive.
 | `--key`, `--port` | SSH private key; non-standard SSH port. |
 | `--install-prefix` | Match a non-default prefix on the target. |
 | `--no-start` | Install without starting the runtime. |
-| `--with-telemetry-export`, `--with-observability`, `--start-observability` | Passed through to the install. |
+| `--with-telemetry-export`, `--with-observability`, `--allow-unmet-host` | Passed through to the install. |
+| `--variant` | Runtime variant to install, a key of the project's `runtime_profiles` (passed as `install.sh --variant`; default `manual`). On anolis-workbench main, not in 0.22.0, the latest release (anolishq/anolis-workbench#648). |
 | `--force` | **Destructive, locally.** Deletes and recreates the workstation's copy of the project under `~/.anolis/systems/`. For a commissioned rig that means losing its configs, behaviours and pre-migration backup. It does not touch the target. |
 
 **`remote` has no `--dry-run`**, unlike `install`, `fleet` and `update`. There is

@@ -254,6 +254,11 @@ bool Runtime::init_providers(std::string &error) {
                                          << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
                                             "watchdog will not stop it if the runtime or its provider is lost");
     }
+    // Polling feeds those watchdogs once the runtime runs (#599).
+    for (const auto &line :
+         health::watchdog_timeouts_under_poll_margin(provider_registry_, *registry_, config_.polling.interval_ms)) {
+        LOG_WARN("[Runtime] " << line);
+    }
     return true;
 }
 
@@ -555,6 +560,13 @@ bool Runtime::init_automation(std::string &error) {
                                      << (call.function_name.empty() ? std::to_string(call.function_id)
                                                                     : call.function_name)
                                      << " - " << result.error_message;
+                            // FAULT cannot be vetoed (ModeManager commits it
+                            // anyway), so returning here would only drop the
+                            // safe-state calls after this one (#542).
+                            if (next == automation::RuntimeMode::FAULT) {
+                                LOG_ERROR("[Runtime] " << hook_msg.str());
+                                continue;
+                            }
                             if (hook.fail_on_error) {
                                 hook_error = hook_msg.str();
                                 return false;
