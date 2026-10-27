@@ -368,5 +368,11 @@ std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::Prov
     return out;
 }
 
+std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderRegistry & /*provider_registry*/,
+                                                             const registry::DeviceRegistry & /*device_registry*/,
+                                                             int /*polling_interval_ms*/) {
+    return {};
+}
+
 }  // namespace health
 }  // namespace anolis
