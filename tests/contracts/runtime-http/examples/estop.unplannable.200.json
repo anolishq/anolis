@@ -1,0 +1,23 @@
+{
+  "status": {
+    "code": "OK",
+    "message": "ok"
+  },
+  "latched": true,
+  "software_safe_state": "zero",
+  "actions": [
+    {
+      "device_handle": "sim0/motorctl0",
+      "function": "set_motor_duty",
+      "success": true
+    },
+    {
+      "device_handle": "sim0/relayio0",
+      "function": "set_relay_ch1",
+      "success": false,
+      "error": "cannot zero required non-numeric argument 'enabled'",
+      "cause": "config"
+    }
+  ],
+  "safe_state_achieved": false
+}

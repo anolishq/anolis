@@ -205,6 +205,32 @@ SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, 
 
 SafeStateKind SafeStateController::planned_kind() const { return planned_safe_state_kind(registry_, safety_); }
 
+const char *failure_cause_to_string(FailureCause cause) {
+    switch (cause) {
+        case FailureCause::Run:
+            return "run";
+        case FailureCause::Config:
+            return "config";
+    }
+    return "run";
+}
+
+namespace {
+
+// Refused before it reached the provider, for a reason the config fixes: the
+// device or function does not exist, or an argument does not validate. Gating
+// (FAILED_PRECONDITION) and an unavailable provider are the runtime's state,
+// not the config's.
+FailureCause cause_of(const CallResult &res) {
+    if (!res.dispatched && (res.status_code == anolis::deviceprovider::v1::Status_Code_CODE_NOT_FOUND ||
+                            res.status_code == anolis::deviceprovider::v1::Status_Code_CODE_INVALID_ARGUMENT)) {
+        return FailureCause::Config;
+    }
+    return FailureCause::Run;
+}
+
+}  // namespace
+
 CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfig &call) {
     const auto res = call_router_.execute_call(to_call_request(call), provider_registry_);
 
@@ -214,6 +240,7 @@ CallOutcome SafeStateController::run_call(const runtime::ModeTransitionCallConfi
     outcome.success = res.success;
     if (!res.success) {
         outcome.error = res.error_message;
+        outcome.cause = cause_of(res);
     }
     return outcome;
 }
@@ -232,6 +259,7 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     if (auto why = build_zero_args(spec, request.args); !why.empty()) {
         outcome.success = false;
         outcome.error = std::move(why);
+        outcome.cause = FailureCause::Config;
         return outcome;
     }
 
@@ -239,6 +267,7 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
     outcome.success = res.success;
     if (!res.success) {
         outcome.error = res.error_message;
+        outcome.cause = cause_of(res);
     }
     return outcome;
 }

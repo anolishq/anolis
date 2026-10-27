@@ -76,12 +76,30 @@ std::vector<std::string> uncovered_actuating_functions(const registry::DeviceReg
                                                        const CallRouter &call_router,
                                                        const std::vector<runtime::ModeTransitionCallConfig> &calls);
 
+/**
+ * @brief Why a safe-state call did not succeed (#616).
+ *
+ * `Config`: the call could not be planned from the config on these devices,
+ * and fails the same way on every run: the zero rung could not build its
+ * arguments, or the call was refused before it reached the provider because
+ * its device or function does not exist or an argument is invalid. `Run`:
+ * anything else, such as a provider that failed the call, which a later run
+ * may not repeat.
+ */
+enum class FailureCause {
+    Run,
+    Config,
+};
+
+const char *failure_cause_to_string(FailureCause cause);
+
 /** @brief Per-call outcome recorded while running the ladder. */
 struct CallOutcome {
     std::string device_handle;
     std::string function;
     bool success = false;
     std::string error;
+    FailureCause cause = FailureCause::Run;  // meaningful only when !success
 };
 
 /**
