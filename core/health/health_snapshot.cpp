@@ -10,6 +10,7 @@
 #include "../provider/provider_supervisor.hpp"
 #include "../registry/device_registry.hpp"
 #include "../state/state_cache.hpp"
+#include "../telemetry/health_line_protocol.hpp"
 
 namespace anolis {
 namespace health {
@@ -368,10 +369,34 @@ std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::Prov
     return out;
 }
 
-std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderRegistry & /*provider_registry*/,
-                                                             const registry::DeviceRegistry & /*device_registry*/,
-                                                             int /*polling_interval_ms*/) {
-    return {};
+std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderRegistry &provider_registry,
+                                                             const registry::DeviceRegistry &device_registry,
+                                                             int polling_interval_ms) {
+    std::vector<std::string> out;
+    const int64_t margin = 2 * static_cast<int64_t>(polling_interval_ms);
+    for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
+        adpp::GetHealthResponse reported;
+        if (!provider->is_available() || !provider->get_health(reported)) {
+            continue;
+        }
+        for (const auto &dh : reported.devices()) {
+            const auto found = dh.metrics().find("watchdog_timeout_ms");
+            int64_t timeout_ms = 0;
+            if (found == dh.metrics().end() || !telemetry::parse_metric_int(found->second, timeout_ms) ||
+                timeout_ms == 0 || timeout_ms >= margin) {
+                continue;
+            }
+            if (!device_registry.get_device_copy(provider_id, dh.device_id()).has_value()) {
+                continue;
+            }
+            out.push_back(std::format(
+                "preflight: {}/{} reports watchdog_timeout_ms={}, under twice polling.interval_ms={}, so a late poll "
+                "can trip its watchdog and leave every SET refused; raise the device's watchdog timeout to at least "
+                "{} ms, or lower polling.interval_ms to at most {} ms",
+                provider_id, dh.device_id(), timeout_ms, polling_interval_ms, margin, timeout_ms / 2));
+        }
+    }
+    return out;
 }
 
 }  // namespace health
