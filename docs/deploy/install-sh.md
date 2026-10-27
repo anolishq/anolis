@@ -89,8 +89,13 @@ install cannot bring a machine up already actuating.
 >   announced by one yellow line in a long log. It comes back in IDLE and runs no
 >   behaviours until an operator selects AUTO again.
 >
-> To switch variants, remove **`/opt/anolis/config/runtime.yaml`** and re-run, or
-> edit it in place. (Under `--prefix`, that is `<prefix>/config/runtime.yaml`.)
+> To switch variants, re-run with **`--replace-config`**, or edit
+> **`/opt/anolis/config/runtime.yaml`** in place. (Under `--prefix`, that is
+> `<prefix>/config/runtime.yaml`.) `--replace-config` moves the existing file to
+> `runtime.yaml.replaced-<UTC time>` beside it, and each provider config in the
+> bundle's `config/providers/` likewise, then installs the bundle's. The variant
+> must still be inert, and the check runs before anything moves. Each path is
+> logged, and `--dry-run --replace-config` says what it would replace.
 
 ## Optional components
 
@@ -116,6 +121,7 @@ Raise retention with `OBSERVABILITY_RETENTION`, but read `observability/README.m
 | `--dry-run` | Print what would happen, change nothing. Ignored by `--stage`, which builds the bundle anyway. |
 | `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
 | `--allow-downgrade` | Install even when the bundle's runtime is older than the installed one, which `bin/anolis-runtime --version` reports. Without it the install is refused before anything changes; `--rollback` is the way back to the previous install. `--dry-run --local` reports the comparison. |
+| `--replace-config` | Replace an existing runtime config, and each provider config the bundle ships, instead of preserving it. Each one moves to `<file>.replaced-<UTC time>` beside it first, and the variant must be inert. See the upgrade note above. |
 | `--keep-hostname` | Keep the host's name. By default an arm64 host with a device-tree serial is renamed `anolis-<last 8 of serial>`, and `127.0.1.1` in `/etc/hosts` is pointed at the new name. With this flag neither happens, and the printed access URL and the mDNS name (`<host>.local`) use the existing name. |
 | `--prefix <path>` | Override the install prefix (default `/opt/anolis`). Install and rollback refuse, before changing anything, a prefix that is empty, relative or a symlink, resolves to `/` or a top-level directory, or is or holds `$HOME`; so does an install that adopts a staged bundle's prefix. |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
