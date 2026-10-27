@@ -96,3 +96,47 @@ run_both_parsers() {
     phase_health >/dev/null
     [ "${HEALTH_FAILED}" -eq 0 ]
 }
+
+# #616: a safe state the config cannot express on these devices fails the
+# same way on every restart and every e-stop, so the install fails. The
+# runtime says so with cause "config" on the failed action.
+health_with() {
+    status_body "$1"
+    _runtime_port() { echo 8080; }
+    _run_registry_available() { return 0; }
+    _check_provider_liveness() { :; }
+    NO_START=0
+    HEALTH_FAILED=0
+    SAFE_STATE_UNPLANNABLE=0
+}
+
+UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"zero","safe_state_achieved":false,"failed_actions":[{"device_handle":"sim0/relayio0","function":"set_relay_ch1","success":false,"error":"cannot zero required non-numeric argument '\''enabled'\''","cause":"config"},{"device_handle":"sim0/tempctl0","function":"set_relay","success":false,"error":"cannot zero required non-numeric argument '\''state'\''","cause":"config"}],"skipped_actions":[]}}'
+
+@test "616: a safe state the config cannot plan fails the install, naming the first refused action" {
+    health_with "${UNPLANNABLE}"
+    run_both_parsers
+    [[ "${output}" == *"safety.safe_state cannot run on this machine's devices"* ]]
+    [[ "${output}" == *"sim0/relayio0 set_relay_ch1: cannot zero required non-numeric argument 'enabled'"* ]]
+    phase_health >/dev/null
+    [ "${SAFE_STATE_UNPLANNABLE}" -eq 1 ]
+    run phase_summary
+    [[ "$(sed 's/\x1b\[[0-9;]*m//g' <<< "${output}")" == *"the install did NOT succeed"*"sim0/relayio0 set_relay_ch1"* ]]
+}
+
+@test "616: a safe state that ran and failed on a tripped board stays a warning" {
+    health_with '{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
+    run_both_parsers
+    [[ "${output}" == *"health: startup safe state NOT achieved"* ]]
+    [[ "${output}" != *"cannot run on this machine"* ]]
+    phase_health >/dev/null
+    [ "${SAFE_STATE_UNPLANNABLE}" -eq 0 ]
+    [ "${HEALTH_FAILED}" -eq 0 ]
+}
+
+@test "616: a runtime that does not report a cause keeps today's warning" {
+    health_with '{"version":"0.1.57","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"zero","safe_state_achieved":false,"failed_actions":[{"device_handle":"sim0/relayio0","function":"set_relay_ch1","success":false,"error":"cannot zero required non-numeric argument '\''enabled'\''"}],"skipped_actions":[]}}'
+    run_both_parsers
+    [[ "${output}" == *"health: startup safe state NOT achieved"* ]]
+    phase_health >/dev/null
+    [ "${SAFE_STATE_UNPLANNABLE}" -eq 0 ]
+}
