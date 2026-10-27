@@ -16,9 +16,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace anolis::automation;
@@ -398,6 +400,93 @@ TEST_F(ModeManagerTest, BeforeCallbackExceptionCannotBlockFaultTransition) {
     std::string error;
     EXPECT_TRUE(mode_manager_->set_mode(RuntimeMode::FAULT, error));
     EXPECT_EQ(mode_manager_->current_mode(), RuntimeMode::FAULT);
+}
+
+/******************************************************************************
+ * Transitions that commit while a request's before-callbacks run (#528)
+ ******************************************************************************/
+
+namespace {
+
+// Runs `concurrent` on another thread from inside the first before-callback
+// for `requested`, so it commits while that request is between its two locks.
+void race_inside_before_callbacks(ModeManager &mode, RuntimeMode requested, RuntimeMode concurrent,
+                                  bool &concurrent_ok) {
+    auto raced = std::make_shared<std::atomic<bool>>(false);
+    mode.on_before_mode_change(
+        [&mode, raced, requested, concurrent, &concurrent_ok](RuntimeMode, RuntimeMode next, std::string &) {
+            if (next == requested && !raced->exchange(true)) {
+                std::thread other([&mode, concurrent, &concurrent_ok] {
+                    std::string error;
+                    concurrent_ok = mode.set_mode(concurrent, error);
+                });
+                other.join();
+            }
+            return true;
+        });
+}
+
+}  // namespace
+
+TEST(ModeManagerConcurrentCommitTest, FaultFromAutoEndsInFaultWhenAutoToManualCommitsFirst) {
+    ModeManager mode(RuntimeMode::AUTO);
+    std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
+    mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
+    bool concurrent_ok = false;
+    race_inside_before_callbacks(mode, RuntimeMode::FAULT, RuntimeMode::MANUAL, concurrent_ok);
+
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_TRUE(concurrent_ok);
+    EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
+    // The after-callbacks, and with them the -> FAULT hooks, see the real
+    // previous mode.
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::AUTO, RuntimeMode::MANUAL},
+                                                                    {RuntimeMode::MANUAL, RuntimeMode::FAULT}};
+    EXPECT_EQ(committed, expected);
+}
+
+TEST(ModeManagerConcurrentCommitTest, FaultFromManualEndsInFaultWhenManualToAutoCommitsFirst) {
+    ModeManager mode(RuntimeMode::MANUAL);
+    std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
+    mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
+    bool concurrent_ok = false;
+    race_inside_before_callbacks(mode, RuntimeMode::FAULT, RuntimeMode::AUTO, concurrent_ok);
+
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_TRUE(concurrent_ok);
+    EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::MANUAL, RuntimeMode::AUTO},
+                                                                    {RuntimeMode::AUTO, RuntimeMode::FAULT}};
+    EXPECT_EQ(committed, expected);
+}
+
+TEST(ModeManagerConcurrentCommitTest, FaultIsANoOpWhenAnotherFaultEntryCommitsFirst) {
+    ModeManager mode(RuntimeMode::AUTO);
+    std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
+    mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
+    bool concurrent_ok = false;
+    race_inside_before_callbacks(mode, RuntimeMode::FAULT, RuntimeMode::FAULT, concurrent_ok);
+
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_TRUE(concurrent_ok);
+    EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::AUTO, RuntimeMode::FAULT}};
+    EXPECT_EQ(committed, expected);  // entered once, not twice
+}
+
+TEST(ModeManagerConcurrentCommitTest, NonFaultRequestIsStillRefusedWhenAnotherTransitionCommitsFirst) {
+    ModeManager mode(RuntimeMode::MANUAL);
+    bool concurrent_ok = false;
+    race_inside_before_callbacks(mode, RuntimeMode::AUTO, RuntimeMode::IDLE, concurrent_ok);
+
+    std::string error;
+    EXPECT_FALSE(mode.set_mode(RuntimeMode::AUTO, error));
+    EXPECT_TRUE(concurrent_ok);
+    EXPECT_NE(error.find("Concurrent mode change"), std::string::npos) << error;
+    EXPECT_EQ(mode.current_mode(), RuntimeMode::IDLE);
 }
 
 /******************************************************************************
