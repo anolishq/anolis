@@ -108,7 +108,7 @@ jobs:
     name: Docs
     needs: [changes]
     if: needs.changes.outputs.docs == 'true'
-    uses: anolishq/.github/.github/workflows/docs-check.yml@260e6a2c364562a14e1f35a118dbea6e0ada9041 # v2
+    uses: anolishq/.github/.github/workflows/docs-check.yml@0199b6cc7cb73a02d58f75ec8ed763ac40e54dca # v2
 
   format-check:
     name: C++ Formatting (clang-format)
@@ -349,7 +349,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@a9b3d134acbcc7dcd6da02c1a345a1fbdca15064 # v2.4
+        uses: anolishq/.github/.github/actions/setup-vcpkg@f79b717dbf5b2153fbe5d390894dd5432af5dbe1 # v2.5
         with:
           triplet: ${{ matrix.triplet }}
 
@@ -423,7 +423,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@a9b3d134acbcc7dcd6da02c1a345a1fbdca15064 # v2.4
+        uses: anolishq/.github/.github/actions/setup-vcpkg@f79b717dbf5b2153fbe5d390894dd5432af5dbe1 # v2.5
         with:
           triplet: x64-linux-static
 
@@ -481,7 +481,7 @@ jobs:
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: anolishq/.github/.github/workflows/version-sync.yml@260e6a2c364562a14e1f35a118dbea6e0ada9041 # v2
+    uses: anolishq/.github/.github/workflows/version-sync.yml@0199b6cc7cb73a02d58f75ec8ed763ac40e54dca # v2
     with:
       python-version: '3.12'
       working-directory: '.'
@@ -492,7 +492,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     permissions:
       contents: read
-    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@caa0816e5a643262a2bb80913c32932cfe3a3bbf # clang-tidy-diff
+    uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@0199b6cc7cb73a02d58f75ec8ed763ac40e54dca # clang-tidy-diff
     with:
       configure-preset: ci-linux-release
       blocking: true
