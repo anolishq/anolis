@@ -713,7 +713,7 @@ TEST(RuntimeStopChainTest, TheStopIsHeldWhileAnotherProviderRestarts) {
     EXPECT_TRUE(eventually([&] { return runtime.get_safe_state().is_engaged(); }, std::chrono::milliseconds(1500)))
         << "the stop was not held while p2 restarted";
     EXPECT_TRUE(runtime.get_safe_state().clear().has_value()) << "a clear was accepted during the restart";
-    EXPECT_NE(runtime.get_provider_registry().get_provider("p2"), first_p2) << "the restart finished too early";
+    EXPECT_EQ(runtime.get_provider_registry().get_provider("p2"), first_p2) << "the restart finished too early";
 
     // Supervision still completes the restart.
     set_file(rig, "p2-slow", "");
