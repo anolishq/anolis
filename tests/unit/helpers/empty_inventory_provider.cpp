@@ -97,7 +97,9 @@ std::string read_word(const std::filesystem::path &path) {
     return word;
 }
 
-// "1" true, "0" false, "stale" with stale quality; anything else a FAULT false.
+// "1" true, "0" false, "stale" with stale quality; "0u" false with quality left
+// unset (UNSPECIFIED), "0x" false with a quality no enum value names (#526);
+// anything else a FAULT false.
 void set_bool_reading(adpp::SignalValue *value, const std::string &signal_id, const std::string &word) {
     value->set_signal_id(signal_id);
     value->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
@@ -107,6 +109,13 @@ void set_bool_reading(adpp::SignalValue *value, const std::string &signal_id, co
     value->mutable_timestamp()->set_seconds(seconds.count());
     value->mutable_timestamp()->set_nanos(
         static_cast<int32_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now - seconds).count()));
+    if (word == "0u") {
+        return;
+    }
+    if (word == "0x") {
+        value->set_quality(static_cast<adpp::SignalValue_Quality>(99));
+        return;
+    }
     value->set_quality(word == "1" || word == "0" ? adpp::SignalValue_Quality_QUALITY_OK
                        : word == "stale"          ? adpp::SignalValue_Quality_QUALITY_STALE
                                                   : adpp::SignalValue_Quality_QUALITY_FAULT);

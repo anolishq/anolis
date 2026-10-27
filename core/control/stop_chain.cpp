@@ -13,6 +13,18 @@ int64_t now_epoch_ms() {
         .count();
 }
 
+std::string quality_name(anolis::deviceprovider::v1::SignalValue_Quality quality) {
+    const auto &name = anolis::deviceprovider::v1::SignalValue_Quality_Name(quality);
+    return name.empty() ? std::to_string(static_cast<int>(quality)) : name;
+}
+
+// The stop chain judges only readings whose provider asserted QUALITY_OK.
+// Unlike device health, it does not treat UNSPECIFIED (a provider that never
+// sets quality) or an unrecognised value as OK (#526).
+bool is_ok(const state::CachedSignalValue &value) {
+    return value.quality == anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK;
+}
+
 }  // namespace
 
 const char *stop_chain_state_to_string(StopChainState state) {
@@ -61,9 +73,12 @@ std::pair<StopChainState, std::string> StopChainMonitor::classify() const {
         return {StopChainState::Unknown, std::format("{} has no reading (not registered, or not polled yet)", signal)};
     }
     if (value->is_stale(stale_after_)) {
+        return {StopChainState::Unknown, std::format("{} is stale ({} ms old, quality {})", signal,
+                                                     value->age().count(), quality_name(value->quality))};
+    }
+    if (!is_ok(*value)) {
         return {StopChainState::Unknown,
-                std::format("{} is stale ({} ms old, quality {})", signal, value->age().count(),
-                            anolis::deviceprovider::v1::SignalValue_Quality_Name(value->quality))};
+                std::format("{} has quality {}, not QUALITY_OK", signal, quality_name(value->quality))};
     }
     if (!value->value.has_bool_value()) {
         return {StopChainState::Unknown, std::format("{} is not a bool", signal)};
@@ -104,17 +119,17 @@ std::optional<std::string> StopChainMonitor::contradiction(const std::string &de
             return std::nullopt;
         }
         for (const auto &[signal_id, value] : device->signals) {
-            if (!value.is_stale(stale_after_)) {
+            if (is_ok(value) && !value.is_stale(stale_after_)) {
                 return std::format("{} still answers: {} read {} ms ago, after the stop", device_handle, signal_id,
                                    value.age().count());
             }
         }
         return std::nullopt;
     }
-    // reports_estop: only a fresh estop=false contradicts it. No reading, or a
-    // stale one, is a device that may have lost power, not the stop failing.
+    // reports_estop: only a fresh, OK estop=false contradicts it. No reading, or
+    // a stale one, is a device that may have lost power, not the stop failing.
     const auto estop = cache_.get_signal_value(device_handle, "estop");
-    if (estop == nullptr || estop->is_stale(stale_after_) || !estop->value.has_bool_value() ||
+    if (estop == nullptr || !is_ok(*estop) || estop->is_stale(stale_after_) || !estop->value.has_bool_value() ||
         estop->value.bool_value()) {
         return std::nullopt;
     }
