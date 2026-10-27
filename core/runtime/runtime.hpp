@@ -97,6 +97,8 @@ public:
     control::SafeStateController &get_safe_state() { return *safe_state_controller_; }
     const control::StopChainMonitor &get_stop_chain() const { return *stop_chain_; }
     control::CallRouter &get_call_router() { return *call_router_; }
+    // Null unless automation is enabled.
+    automation::ModeManager *get_mode_manager() { return mode_manager_.get(); }
     events::EventEmitter &get_event_emitter() { return *event_emitter_; }
 
     provider::ProviderRegistry &get_provider_registry() { return provider_registry_; }
