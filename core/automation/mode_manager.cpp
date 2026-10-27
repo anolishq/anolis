@@ -113,9 +113,20 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
 
         // Transition may have changed while callbacks were running.
         if (current_mode_ != previous_mode) {
-            error = "Concurrent mode change detected while processing transition callbacks";
-            LOG_ERROR("[ModeManager] " << error);
-            return false;
+            // FAULT is fail-safe: it commits from whatever mode is current now,
+            // and the after-callbacks see that mode as the previous one (#528).
+            if (new_mode == RuntimeMode::FAULT) {
+                if (current_mode_ == RuntimeMode::FAULT) {
+                    return true;  // a concurrent FAULT entry already committed
+                }
+                LOG_WARN("[ModeManager] Entering FAULT from "
+                         << mode_to_string(current_mode_) << ", which committed while FAULT's before-callbacks ran");
+                previous_mode = current_mode_;
+            } else {
+                error = "Concurrent mode change detected while processing transition callbacks";
+                LOG_ERROR("[ModeManager] " << error);
+                return false;
+            }
         }
 
         if (!is_valid_transition(current_mode_, new_mode)) {

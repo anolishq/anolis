@@ -89,8 +89,13 @@ install cannot bring a machine up already actuating.
 >   announced by one yellow line in a long log. It comes back in IDLE and runs no
 >   behaviours until an operator selects AUTO again.
 >
-> To switch variants, remove **`/opt/anolis/config/runtime.yaml`** and re-run, or
-> edit it in place. (Under `--prefix`, that is `<prefix>/config/runtime.yaml`.)
+> To switch variants, re-run with **`--replace-config`**, or edit
+> **`/opt/anolis/config/runtime.yaml`** in place. (Under `--prefix`, that is
+> `<prefix>/config/runtime.yaml`.) `--replace-config` moves the existing file to
+> `runtime.yaml.replaced-<UTC time>` beside it, and each provider config in the
+> bundle's `config/providers/` likewise, then installs the bundle's. The variant
+> must still be inert, and the check runs before anything moves. Each path is
+> logged, and `--dry-run --replace-config` says what it would replace.
 
 ## Optional components
 
@@ -116,6 +121,7 @@ Raise retention with `OBSERVABILITY_RETENTION`, but read `observability/README.m
 | `--dry-run` | Print what would happen, change nothing. Ignored by `--stage`, which builds the bundle anyway. |
 | `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
 | `--allow-downgrade` | Install even when the bundle's runtime is older than the installed one, which `bin/anolis-runtime --version` reports. Without it the install is refused before anything changes; `--rollback` is the way back to the previous install. `--dry-run --local` reports the comparison. |
+| `--replace-config` | Replace an existing runtime config, and each provider config the bundle ships, instead of preserving it. Each one moves to `<file>.replaced-<UTC time>` beside it first, and the variant must be inert. See the upgrade note above. |
 | `--keep-hostname` | Keep the host's name. By default an arm64 host with a device-tree serial is renamed `anolis-<last 8 of serial>`, and `127.0.1.1` in `/etc/hosts` is pointed at the new name. With this flag neither happens, and the printed access URL and the mDNS name (`<host>.local`) use the existing name. |
 | `--prefix <path>` | Override the install prefix (default `/opt/anolis`). Install and rollback refuse, before changing anything, a prefix that is empty, relative or a symlink, resolves to `/` or a top-level directory, or is or holds `$HOME`; so does an install that adopts a staged bundle's prefix. |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
@@ -280,3 +286,31 @@ What is **not** required:
   `anolis-provider-<kind>-<version>-config-schema-manifest.json` sidecar
   recording its sha256. Publish both if your provider's config is to be
   edited in a composer.
+
+## The install walk
+
+The shell suite (`tests/shell/`) stubs `systemctl`, `apt`, `curl` and the
+filesystem, so it can't show that a real install works. The **Install walk**
+workflow (`.github/workflows/install-walk.yml`) does that. It runs
+`tests/e2e/install-walk.sh` as root on fresh GitHub runners, x86_64 and arm64,
+with `tests/e2e/e2e-sim`: the simulator provider in place of hardware, pinned
+to released runtime and provider binaries. It runs on pull requests that touch
+`tools/install.sh` or the walk, and on release tags.
+
+Each scenario asserts on `install.sh`'s exit code, its output and the runtime's
+API:
+
+| scenario | what it walks |
+| --- | --- |
+| `fresh` | `--with-observability`, then a variant switch with `--replace-config`, a restart, and `--uninstall` and a reinstall, with telemetry reaching InfluxDB after each |
+| `recover` | an `--uninstall` by v0.1.53, which deleted the InfluxDB credentials, then a current install, which mints new ones |
+| `upgrade` | the previous release's `install.sh` and pins, then the current ones |
+| `workbench` | `anolis-provision install` from the released workbench, and what its summary shows |
+
+Each scenario ends by breaking what its last check depends on, the runtime's
+InfluxDB token or grafana-server, and requires that check to fail. A check that
+can't fail fails the walk.
+
+It's the gate the bench follows: a change to `install.sh` walks here before it
+walks on a rig. To run one scenario on a disposable host:
+`sudo tests/e2e/install-walk.sh fresh`.

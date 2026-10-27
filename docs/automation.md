@@ -117,6 +117,12 @@ automation:
             args: { motor_index: 1, duty: 0.0 }
 ```
 
+`fail_on_error` (default `true`) makes a failed `before_transition` call veto
+the transition: the runtime issues none of the remaining calls and stays in the
+current mode. On entry to `FAULT` it has no effect. FAULT cannot be vetoed, so
+every call in every matching hook is attempted, each failure is logged at error
+level, and the mode still changes to FAULT.
+
 Supported types:
 
 1. `double`

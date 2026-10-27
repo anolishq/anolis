@@ -1,0 +1,15 @@
+provider:
+  name: sim0
+startup_policy: degraded
+devices:
+- id: tempctl0
+  type: tempctl
+  initial_temp: 25.0
+- id: motorctl0
+  type: motorctl
+  max_speed: 3000.0
+- id: relayio0
+  type: relayio
+simulation:
+  mode: non_interacting
+  tick_rate_hz: 10.0

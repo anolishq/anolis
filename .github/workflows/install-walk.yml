@@ -1,0 +1,61 @@
+name: Install walk
+
+# The user path with a real install.sh on a fresh GitHub runner (#516): root,
+# systemd, the simulator provider in place of hardware, and released runtime
+# binaries. tests/e2e/install-walk.sh asserts on install.sh's exit code, its
+# output and the runtime's API, and makes each scenario's last check fail on
+# purpose to show it can. It is the gate the bench follows: a change to
+# install.sh walks here before it walks on a rig.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/install.sh
+      - tests/e2e/**
+      - .github/workflows/install-walk.yml
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: install-walk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  walk:
+    name: walk ${{ matrix.scenario }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        scenario: [fresh, recover, upgrade, workbench]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Walk
+        env:
+          # install.sh and the workbench download release assets; the token
+          # keeps them clear of the anonymous API rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+          WALK_LOGS: ${{ runner.temp }}/install-walk
+        run: sudo --preserve-env=GITHUB_TOKEN,WALK_LOGS tests/e2e/install-walk.sh "${{ matrix.scenario }}"
+
+      - name: Runtime journal
+        if: failure()
+        run: sudo journalctl -u anolis-runtime --no-pager -n 200 || true
+
+      - name: Keep the install logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: install-walk-${{ matrix.scenario }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/install-walk/*.log
+          if-no-files-found: ignore
+          retention-days: 7
