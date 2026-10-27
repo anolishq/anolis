@@ -1,6 +1,9 @@
 # Contract Validation
 
-All contract checks run automatically in CI on every push and pull request.
+Contract checks run automatically in CI on pushes to `main` and on pull requests
+that target `main`, unless the change touches only docs, Markdown files or images.
+Checks that need a runtime binary also skip changes confined to `tools/`,
+`tests/shell/`, `observability/` and `tests/observability/`.
 To run any validator locally, invoke it directly from the repo root.
 
 ## Runtime config contracts
@@ -13,7 +16,7 @@ python3 tests/contracts/runtime-config/validate-runtime-configs.py --runtime-bin
 
 Enforces:
 
-1. JSON Schema conformance across all tracked runtime YAML config files
+1. JSON Schema conformance across the runtime YAML configs matching `examples/anolis-runtime*.yaml`
 2. Runtime loader acceptance via `anolis-runtime --check-config` on each file
 3. Contract fixture sets (`valid`, `invalid/schema`, `invalid/runtime`)
 

@@ -409,6 +409,18 @@ std::vector<std::string> mismatch_moves(anolis::events::Subscription &events) {
     return moves;
 }
 
+// The main loop changes a mismatch and then emits its event, so a test that
+// has just seen the change waits for the event too (#605).
+std::vector<std::string> wait_for_moves(anolis::events::Subscription &events, size_t count) {
+    std::vector<std::string> moves;
+    eventually([&] {
+        const auto more = mismatch_moves(events);
+        moves.insert(moves.end(), more.begin(), more.end());
+        return moves.size() >= count;
+    });
+    return moves;
+}
+
 // Starts clear, presses the stop, and waits until the runtime reads it in force.
 void press_the_stop(const Rig &rig, anolis::runtime::Runtime &runtime) {
     set_chain(rig, "1");
@@ -478,6 +490,35 @@ TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatGoesSilentRaisesNothing) {
     }
 }
 
+// #605: on Windows a check of motor0_off can fail while the test renames it
+// into place, and the helper died of the exception. A link to itself fails
+// the same check on POSIX (ELOOP): motor0 must read as silent, and the helper
+// must keep answering, so the stop is still read in force.
+TEST(RuntimeStopChainExpectTest, AMotorOffMarkerTheHelperCannotCheckStillReadsSilent) {
+#ifdef _WIN32
+    GTEST_SKIP() << "creating a symlink needs extra privileges on Windows";
+#else
+    const auto rig = fresh_rig("anolis-605-motor0-off-unreadable");
+    set_chain(rig, "0");
+    set_file(rig, "estop", "0");
+    anolis::runtime::Runtime runtime(config_for(rig, kPowerLoss, kEstopArgs));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    auto events = runtime.get_event_emitter().subscribe();
+
+    MainLoop loop(runtime);
+    std::filesystem::create_symlink("motor0_off", rig.root / "motor0_off");
+    press_the_stop(rig, runtime);
+    std::this_thread::sleep_for(kPastTheGrace);
+    // Still read fresh: a helper that had died would leave the status stale.
+    EXPECT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::InForce)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    EXPECT_TRUE(mismatch_moves(*events).empty());
+#endif
+}
+
 TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesStopNotReaching) {
     const auto rig = fresh_rig("anolis-484-reports-estop-false");
     set_chain(rig, "0");
@@ -500,7 +541,7 @@ TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesSt
     // The device starts reporting the stop: the mismatch resolves while in force.
     set_file(rig, "estop", "1");
     ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().mismatches().empty(); }));
-    EXPECT_EQ(mismatch_moves(*events),
+    EXPECT_EQ(wait_for_moves(*events, 2),
               (std::vector<std::string>{"raised bread0/motor0 reports_estop", "resolved bread0/motor0 reports_estop"}));
 }
 

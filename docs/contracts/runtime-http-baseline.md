@@ -37,6 +37,15 @@ Freeze implemented `/v0` HTTP behavior so OpenAPI, examples, and conformance tes
 14. `GET /v0/events` (SSE)
 15. `OPTIONS /v0/call`
 16. `OPTIONS /v0/.*`
+17. `POST /v0/estop`
+18. `POST /v0/estop/clear`
+19. `GET /v0/telemetry/status`
+20. `POST /v0/runs`
+21. `GET /v0/runs`
+22. `GET /v0/runs/{run_id}`
+23. `POST /v0/runs/{run_id}/close`
+24. `POST /v0/runs/{run_id}/events`
+25. `GET /v0/runs/{run_id}/events`
 
 ### Semantics Anchors
 
@@ -51,10 +60,10 @@ Freeze implemented `/v0` HTTP behavior so OpenAPI, examples, and conformance tes
    the provider reports but the registry does not carry, since no descriptor
    exists for those. Bounded on ingest: at most 32 tags, keys longer than 128
    bytes dropped, and values truncated to 128 **bytes** on a UTF-8 character
-   boundary — cutting mid-codepoint would emit invalid UTF-8 and fail the whole
-   response.
+   boundary, so a truncated value is still valid UTF-8.
 6. `/v0/events` currently emits:
-   - `state_update`, `quality_change`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`, `device_removed`.
+   - `state_update`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`, `device_removed`, `stop_chain_change`, `stop_chain_mismatch`.
+   - A quality change arrives as a `state_update` carrying the new `quality`; no `quality_change` frame is emitted.
 
 ## Validation Gates
 

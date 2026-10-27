@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -97,6 +98,25 @@ std::string read_word(const std::filesystem::path &path) {
     return word;
 }
 
+// Whether the test has created `path`. On Windows the check fails while the
+// test renames the file into place, so it is retried for up to 50 ms like
+// read_word, and a check that keeps failing counts as present: the test only
+// ever creates these files (#605). Never throws, so it cannot end the helper.
+bool marker_present(const std::filesystem::path &path) {
+    std::error_code ec;
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        if (attempt > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        ec.clear();
+        const bool present = std::filesystem::exists(path, ec);
+        if (!ec) {
+            return present;
+        }
+    }
+    return true;
+}
+
 // "1" true, "0" false, "stale" with stale quality; "0u" false with quality left
 // unset (UNSPECIFIED), "0x" false with a quality no enum value names (#526);
 // anything else a FAULT false.
@@ -154,6 +174,20 @@ int main(int argc, char **argv) {
             stop_chain_estop = true;
         }
     }
+    // An exception that ends the helper says what it was on stderr, which
+    // MSVC's runtime does not do by itself (#605).
+    std::set_terminate([] {
+        if (const std::exception_ptr error = std::current_exception()) {
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception &e) {
+                std::cerr << "empty_inventory_provider: terminated by " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "empty_inventory_provider: terminated by a non-standard exception" << std::endl;
+            }
+        }
+        std::abort();
+    });
     if (!exit_when.empty()) {
         // A provider with no devices gets no requests between health checks,
         // so the trigger is watched on its own thread rather than per request.
@@ -251,7 +285,7 @@ int main(int argc, char **argv) {
             if (request.read_signals().device_id() == "gpio0") {
                 set_bool_reading(read->add_values(), "chain_open", read_word(dir / "chain"));
             } else if (request.read_signals().device_id() == "motor0" && stop_chain_estop) {
-                const bool off = std::filesystem::exists(dir / "motor0_off");
+                const bool off = marker_present(dir / "motor0_off");
                 if (off && read_word(dir / "motor0_off") == "stale") {
                     set_bool_reading(read->add_values(), "estop", "stale");
                 } else if (off) {
