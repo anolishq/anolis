@@ -133,6 +133,8 @@ void set_bool_reading(adpp::SignalValue *value, const std::string &signal_id, co
         return;
     }
     if (word == "0x") {
+        // A quality no enum value names is the point of this word.
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
         value->set_quality(static_cast<adpp::SignalValue_Quality>(99));
         return;
     }
