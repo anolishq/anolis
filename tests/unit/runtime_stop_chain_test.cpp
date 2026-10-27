@@ -585,9 +585,11 @@ TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWithNoFreshEstopRaisesNothin
     }
 }
 
-// #526: contradiction() judges only readings whose provider asserted
-// QUALITY_OK, the same rule the status signal follows.
-TEST(RuntimeStopChainExpectTest, ReadingsWithoutOkQualityRaiseNothing) {
+// #526: a power_loss device still answers with any fresh reading, whatever
+// quality it claims, so one without QUALITY_OK still raises "Stop not reaching".
+// A reports_estop device is judged by its estop value, and only an OK one is
+// trusted, so it raises nothing.
+TEST(RuntimeStopChainExpectTest, ReadingsWithoutOkQualityRaiseOnlyForPowerLoss) {
     for (const std::string expect : {kPowerLoss, kReportsEstop}) {
         for (const std::string word : {"0u", "0x"}) {
             SCOPED_TRACE(expect + " estop " + word);
@@ -602,9 +604,19 @@ TEST(RuntimeStopChainExpectTest, ReadingsWithoutOkQualityRaiseNothing) {
 
             MainLoop loop(runtime);
             press_the_stop(rig, runtime);
-            std::this_thread::sleep_for(kPastTheGrace);
-            EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
-            EXPECT_TRUE(mismatch_moves(*events).empty());
+            if (expect == kPowerLoss) {
+                EXPECT_TRUE(eventually([&] { return !runtime.get_stop_chain().mismatches().empty(); }));
+                const auto standing = runtime.get_stop_chain().mismatches();
+                EXPECT_EQ(standing.size(), 1u);
+                for (const auto &mismatch : standing) {
+                    EXPECT_EQ(mismatch.device, "bread0/motor0");
+                    EXPECT_NE(mismatch.reason.find("still answers"), std::string::npos) << mismatch.reason;
+                }
+            } else {
+                std::this_thread::sleep_for(kPastTheGrace);
+                EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+                EXPECT_TRUE(mismatch_moves(*events).empty());
+            }
         }
     }
 }
