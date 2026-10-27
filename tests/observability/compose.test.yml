@@ -15,7 +15,7 @@
 
 services:
   tester:
-    image: ghcr.io/astral-sh/uv:0.13.5-python3.12-trixie-slim
+    image: ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim
     profiles: [test]
     depends_on:
       # Grafana has no healthcheck; the suite polls /api/health itself.
