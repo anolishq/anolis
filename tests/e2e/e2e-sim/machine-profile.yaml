@@ -1,0 +1,29 @@
+# The project the install walk installs (tests/e2e/install-walk.sh, #516): the
+# simulator provider in place of hardware. components pin released artifacts,
+# which install.sh downloads. Two inert variants: manual, and telemetry, which
+# writes to the InfluxDB that --with-observability installs.
+schema_version: 1
+machine_id: e2e-sim
+display_name: e2e-sim
+runtime_profiles:
+  manual: config/anolis-runtime.manual.yaml
+  telemetry: config/anolis-runtime.telemetry.yaml
+providers:
+  sim0:
+    config: config/provider-sim.sim0.yaml
+compatibility:
+  runtime:
+    config_contract: 01-runtime-config
+    http_contract: 02-runtime-http
+  providers:
+    sim0:
+      strategy: pinned-ref
+      version: see components
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: 0.1.55
+  providers:
+    sim:
+      repo: anolishq/anolis-provider-sim
+      version: 0.2.8

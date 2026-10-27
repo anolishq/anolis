@@ -560,6 +560,13 @@ bool Runtime::init_automation(std::string &error) {
                                      << (call.function_name.empty() ? std::to_string(call.function_id)
                                                                     : call.function_name)
                                      << " - " << result.error_message;
+                            // FAULT cannot be vetoed (ModeManager commits it
+                            // anyway), so returning here would only drop the
+                            // safe-state calls after this one (#542).
+                            if (next == automation::RuntimeMode::FAULT) {
+                                LOG_ERROR("[Runtime] " << hook_msg.str());
+                                continue;
+                            }
                             if (hook.fail_on_error) {
                                 hook_error = hook_msg.str();
                                 return false;

@@ -203,7 +203,7 @@ _summary_stubs() {
     for GRAFANA_NETWORK in 0 1; do
         run phase_summary
         [[ "${output}" != *"(admin password: ${OBSERVABILITY_ENV_FILE})"* ]]
-        [[ "${output}" == *"admin password: unknown"* ]]
+        [[ "${output}" == *"(admin password: unknown, its reset failed; see the warnings above)"* ]]
     done
 }
 
