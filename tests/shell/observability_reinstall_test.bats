@@ -27,8 +27,22 @@ setup() {
         -e "s|^readonly ([A-Z_]+)=\"/etc/anolis/|readonly \\1=\"${ETC}/|" \
         -e "s|^readonly SYSTEMD_DIR=.*|readonly SYSTEMD_DIR=\"${BATS_TEST_TMPDIR}/systemd\"|" \
         -e "s|^readonly INFLUX_CLI_CONFIG=.*|readonly INFLUX_CLI_CONFIG=\"${BATS_TEST_TMPDIR}/root/.influxdbv2/configs\"|" \
+        -e "s|^readonly GRAFANA_DB=.*|readonly GRAFANA_DB=\"${BATS_TEST_TMPDIR}/grafana/grafana.db\"|" \
+        -e "s|^readonly GRAFANA_BIN=.*|readonly GRAFANA_BIN=\"${BATS_TEST_TMPDIR}/bin/grafana\"|" \
         "${INSTALL_SH}")
     CLI_CONFIG="${BATS_TEST_TMPDIR}/root/.influxdbv2/configs"
+    # A grafana binary that records its argv and stdin; GRAFANA_FAIL=1 fails it.
+    FAKE_GRAFANA_DB="${BATS_TEST_TMPDIR}/grafana/grafana.db"
+    FAKE_GRAFANA_BIN="${BATS_TEST_TMPDIR}/bin/grafana"
+    mkdir -p "${BATS_TEST_TMPDIR}/bin" "${BATS_TEST_TMPDIR}/grafana"
+    cat >"${FAKE_GRAFANA_BIN}" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"${BATS_TEST_TMPDIR}/grafana.argv"
+cat >"${BATS_TEST_TMPDIR}/grafana.stdin"
+[[ "${GRAFANA_FAIL:-0}" != 1 ]]
+STUB
+    command chmod +x "${FAKE_GRAFANA_BIN}"
+    export BATS_TEST_TMPDIR
     set +u
     [[ "${OBSERVABILITY_ENV_FILE}" == "${ETC}/observability.env" ]]
     [[ "${GRAFANA_ENV_FILE}" == "${ETC}/observability-grafana.env" ]]
@@ -236,6 +250,60 @@ _stripped_host() {
     if grep -q '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}"; then return 1; fi
     [[ "${output}" == *"influx auth create"* ]]
     [[ "${output}" != *"not-a-secret"* ]]
+}
+
+# Only with Grafana's paths in the temp tree: a test never touches the host's.
+_fake_grafana() {
+    [[ "${GRAFANA_DB}" == "${FAKE_GRAFANA_DB}" && "${GRAFANA_BIN}" == "${FAKE_GRAFANA_BIN}" ]]
+    : >"${GRAFANA_DB}"
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD on its first boot only, so a
+# password made now for a kept grafana.db would not log in until Grafana's
+# own admin password is reset to it.
+@test "514: a new password for a kept grafana.db is set in Grafana, on stdin only" {
+    _stripped_host
+    _minting_influx
+    _fake_grafana
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    [ "$(cat "${BATS_TEST_TMPDIR}/grafana.stdin")" = "${_OBS_GRAFANA_PW}" ]
+    grep -qxF "cli --homepath /usr/share/grafana --config /etc/grafana/grafana.ini admin reset-admin-password --password-from-stdin" \
+        "${BATS_TEST_TMPDIR}/grafana.argv"
+    if grep -qF "${_OBS_GRAFANA_PW}" "${BATS_TEST_TMPDIR}/grafana.argv"; then return 1; fi
+    grep -qxF "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${OBSERVABILITY_ENV_FILE}"
+    [[ "${output}" != *"not-a-secret"* ]]
+}
+
+@test "514: without a grafana.db the new password is left to Grafana's first boot" {
+    _stripped_host
+    _minting_influx
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    [[ "${GRAFANA_BIN}" == "${FAKE_GRAFANA_BIN}" ]]
+    [ ! -e "${BATS_TEST_TMPDIR}/grafana.argv" ]
+}
+
+@test "514: a recorded password is not reset" {
+    printf 'INFLUXDB_WRITE_TOKEN=%s\nINFLUXDB_READ_TOKEN=%s\nGRAFANA_ADMIN_PASSWORD=%s\n' \
+        "${WRITE_TOKEN}" "${READ_TOKEN}" "${GRAFANA_PW}" >"${OBSERVABILITY_ENV_FILE}"
+    printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    _fake_grafana
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    grep -qxF "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PW}" "${GRAFANA_ENV_FILE}"
+    [ ! -e "${BATS_TEST_TMPDIR}/grafana.argv" ]
+}
+
+@test "514: a failed reset warns, and the summary no longer points at the password" {
+    _stripped_host
+    _minting_influx
+    _fake_grafana
+    export GRAFANA_FAIL=1
+    _obs_setup_influx >"${BATS_TEST_TMPDIR}/out" 2>&1
+    grep -qF "may not log in" "${BATS_TEST_TMPDIR}/out"
+    if grep -qF "not-a-secret" "${BATS_TEST_TMPDIR}/out"; then return 1; fi
+    [ "${_OBS_GRAFANA_PW_UNKNOWN}" -eq 1 ]
 }
 
 @test "469: an operator-run instance with its own Grafana env file is left alone" {
