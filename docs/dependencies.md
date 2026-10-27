@@ -3,7 +3,7 @@
 Anolis uses:
 
 - **vcpkg** (manifest mode) for C++ dependencies
-- **pip** (`requirements*.txt`) for Python tooling/tests
+- **uv** (`pyproject.toml` `dev` extra, locked by `uv.lock`, installed with `uv sync --locked --extra dev`) for Python tooling/tests
 
 This document defines governance for dependency pinning, CI lanes, presets, and cross-repo compatibility.
 
@@ -34,10 +34,14 @@ Rules:
 
 ## CI Lane Tiers
 
-- **Required PR lanes**: CI workflow gates currently include formatting, Python lint/type/tests, UI/composer contracts,
-  and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
+- **Required PR lanes**: the `ok` job in the CI workflow gates formatting, Python lint/type, UI/runtime contracts
+  (runtime HTTP, machine profile, telemetry), shell tests, observability, docs, version-sync, clang-tidy on changed lines,
+  the provider-compat lane (which runs the Python integration and scenario tests, excluding those marked stress or slow), and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
 - **Advisory lanes**: optional non-blocking lanes may be added as needed.
-- **Nightly/periodic lanes**: heavy coverage/sanitizer/stress lanes.
+- **Extended lanes** (outside the required `ok` gate): sanitizer (ASan/UBSan/TSan), coverage, valgrind and fuzz run on
+  every PR to and push to `main` (path-filtered) through `extended.yml` and `hardening.yml`.
+- **Periodic lanes**: weekly: the restart-churn soak (Sundays), dependency-scan and metrics (Mondays); metrics also runs
+  on every push to `main`.
 
 Promotion rule:
 
@@ -58,7 +62,9 @@ Shared preset naming baseline:
 
 - `dev-debug`, `dev-release`, `ci-linux-release`, `ci-windows-release`
 - Specialized where supported: `ci-asan`, `ci-ubsan`, `ci-tsan`, `ci-coverage`
-- Architecture extension: `ci-linux-arm64-release` (ARM64 runtime portability lane).
+- Architecture extension: `ci-linux-arm64-release` (base) and `ci-linux-arm64-release-strict`, which the ARM64 CI and release lanes run.
+- Repo-specific extensions: `*-strict` and `*-no-automation` variants (core build/test matrix), `ci-linux-compat`
+  (provider compatibility lane), `ci-fuzz` (hardening fuzz lane).
 
 Rules:
 
@@ -90,10 +96,11 @@ When updating runtime/provider compatibility pins:
 | :------------------- | :-------------------------------------- |
 | **protobuf**         | Serialization format for ADPP protocol. |
 | **yaml-cpp**         | Parsing runtime/provider YAML config.   |
-| **cpp-httplib**      | Embedded HTTP server.                   |
+| **cpp-httplib**      | Embedded HTTP server and HTTP client.   |
 | **nlohmann-json**    | JSON handling.                          |
 | **behaviortree-cpp** | Automation engine.                      |
 | **gtest**            | Unit testing framework.                 |
+| **openssl**          | TLS for cpp-httplib; SHA-256 hashing.   |
 
 ## Update Workflow (Summary)
 

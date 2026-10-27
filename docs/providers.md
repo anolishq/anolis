@@ -30,7 +30,7 @@ Recommended operations:
 1. `GetHealth`
 2. `WaitReady`
 
-Schema source: `external/anolis-protocol/proto/anolis/deviceprovider/v1/envelope.proto`.
+Schema source: `proto/anolis/deviceprovider/v1/envelope.proto` in the anolis-protocol repository, fetched at configure time with CMake FetchContent (release v1.2.0, pinned in `core/CMakeLists.txt`; set `FETCHCONTENT_SOURCE_DIR_ANOLIS_PROTOCOL` to use a local clone).
 
 ## Runtime/Provider Contract
 
@@ -63,10 +63,16 @@ Behavior:
 
 1. Crash/unresponsive provider is marked unavailable.
 2. Runtime applies backoff then attempts restart. Each restart stops the old
-   process before it starts the new one, so a provider that is unresponsive but
-   still running never has a second process beside it. `timeout_ms` starts
-   once the old process has stopped, so the time a wedged process takes to stop
-   (up to `runtime.shutdown_timeout_ms` plus 500 ms) does not count against it.
+   process before it starts the new one. The stop first waits for any request
+   already in flight to the old process to finish, which can take up to twice
+   that request's timeout (one for the write, one for the response: the
+   provider's `timeout_ms`, `hello_timeout_ms` or `ready_timeout_ms`). It then closes
+   stdin, waits up to `runtime.shutdown_timeout_ms`, force-kills the provider's
+   PID and waits up to 500 ms. The new process starts after that whether or not
+   the old one has exited, so a process stuck in uninterruptible I/O, or a
+   child the provider spawned, can still be running beside it. The restart
+   policy's `timeout_ms` starts once the stop returns, so none of the stop time
+   counts against it.
 3. Device inventory is rediscovered after restart.
 4. Circuit opens after `max_attempts` consecutive failures.
 5. While the circuit is open, the runtime makes one restart attempt (a

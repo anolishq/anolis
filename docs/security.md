@@ -1,9 +1,16 @@
 # Securing the runtime HTTP API
 
 The runtime exposes a REST surface (`/v0/*`) including control actions
-(`POST /v0/call`, `POST /v0/mode`, `POST /v0/parameters`). It is **safe for
-localhost/dev by default** and **must be authenticated before any non-localhost
-exposure** (e.g. the bioreactor target under systemd).
+(`POST /v0/call`, `POST /v0/mode`, `POST /v0/parameters`). By default it listens
+on loopback only, without authentication, and it **must be authenticated before
+any non-localhost exposure** (e.g. the bioreactor target under systemd).
+
+Unauthenticated loopback is not private to you. Any local process can call the
+control endpoints, and so can any web page open in a browser on that host: the
+handlers accept a JSON body of any `Content-Type`, so a cross-origin form post
+reaches them, and the default `http.cors_allowed_origins` of `["*"]` also lets
+the page read the response. Turn auth on wherever a browser or another user
+shares the host.
 
 ## Defaults
 
@@ -55,10 +62,11 @@ sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.
   | curl -s -H @- http://127.0.0.1:8080/v0/runtime/status
 ```
 
-`install.sh`'s health check sends the token the same way. While it polls, a
-local process that has already bound the runtime's loopback port, before the
-runtime does, receives the token from the probe. That is narrower than before:
-with the old default, any local process could call the API without the token.
+`install.sh`'s health check sends the token the same way, to
+`http://localhost:<port>`, and curl tries `[::1]:<port>` before
+`127.0.0.1:<port>`. The runtime listens on IPv4 only, so a local process that
+holds `[::1]:<port>` at any time, or `127.0.0.1:<port>` before the runtime
+starts, receives the token from the probe.
 
 ### The loopback exemption
 
@@ -99,8 +107,13 @@ sudo mkdir -p /etc/anolis/tls
 sudo openssl req -x509 -newkey rsa:4096 -nodes \
   -keyout /etc/anolis/tls/key.pem -out /etc/anolis/tls/cert.pem \
   -days 365 -subj "/CN=anolis-runtime"
-sudo chmod 600 /etc/anolis/tls/key.pem
+sudo chown root:anolis /etc/anolis/tls/key.pem
+sudo chmod 640 /etc/anolis/tls/key.pem
 ```
+
+The runtime reads the key itself, as its service user, so the key must be
+readable by that user. The commands above are for the `anolis` user and group
+that `install.sh` creates.
 
 For a public hostname, use a CA-issued certificate (e.g. Let's Encrypt) instead.
 
@@ -122,9 +135,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/anolis-runtime --config /etc/anolis/anolis-runtime.yaml
+ExecStart=/opt/anolis/bin/anolis-runtime --config /etc/anolis/anolis-runtime.yaml
 EnvironmentFile=/etc/anolis/anolis.env
 DynamicUser=yes
+StateDirectory=anolis
+WorkingDirectory=/var/lib/anolis
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadOnlyPaths=/etc/anolis
@@ -134,7 +149,10 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-This is a minimal unit for running the runtime by hand. `install.sh` generates its
+This is a minimal unit for running the runtime by hand. The runtime's default
+data directory is the relative path `anolis-data`, so `WorkingDirectory` must be
+writable by the service user; without it the run registry fails at startup and
+`/v0/runs` answers `503`. `install.sh` generates its
 own (`User=anolis`, see [system surfaces](system-surfaces.md)). With
 `DynamicUser=yes` the runtime and its provider children have no stable user, so a
 provider that opens a device node needs a real user that the host's device groups
@@ -153,7 +171,7 @@ Each opens one port:
 
 | Port | Service | Bind | Authentication | Who needs it |
 | --- | --- | --- | --- | --- |
-| 8086 | InfluxDB | `127.0.0.1`, always | API token. The runtime writes with a write-scoped token and Grafana reads with a read-scoped one; the admin token is in root's influx CLI config and, as `INFLUXDB_ADMIN_TOKEN`, in `/etc/anolis/observability.env` (mode 0600, root). | The runtime and Grafana, both on the device. |
+| 8086 | InfluxDB | `127.0.0.1`, always | API token. The runtime writes with a write-scoped token, and Grafana and anolis-telemetry-export read with a read-scoped one; the admin token is in root's influx CLI config and, as `INFLUXDB_ADMIN_TOKEN`, in `/etc/anolis/observability.env` (mode 0600, root). | The runtime and Grafana, plus anolis-telemetry-export when installed with `--with-telemetry-export`, all on the device. |
 | 3000 | Grafana | `127.0.0.1`; `0.0.0.0` with `--with-grafana-network` | Anonymous **Viewer**: anyone who reaches the port sees the dashboards and the data behind them without logging in. Editing needs the `admin` login, whose first-boot password is in `/etc/anolis/observability.env`. | The operator, from a browser. |
 
 By default reach Grafana over an ssh tunnel, which the install summary prints:

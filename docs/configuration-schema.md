@@ -22,7 +22,10 @@ Supported runtime YAML sections:
 8. `safety`
 9. `health`
 
-Unknown keys are compatibility-warned and ignored.
+Unknown keys at the top level and in most sections are warned about and
+ignored. Unknown keys under `polling` and `logging` are ignored without a
+warning. The schema rejects unknown keys under `safety.stop_chain`, its
+`status` and its `devices` mappings, where the runtime only warns.
 
 ## `runtime`
 
@@ -55,7 +58,8 @@ Fields:
 Key invariants:
 
 1. Port must be valid TCP port range.
-2. Origins list cannot be empty.
+2. With `enabled: true`, the schema rejects an empty origins list. The runtime
+   accepts `cors_allowed_origins: []` and treats it as `"*"`.
 3. Wildcard origin (`*`) is invalid when credentials are enabled.
 
 ## `providers`
@@ -111,7 +115,8 @@ Fields:
    a live provider GetHealth round-trip (a provider may answer with a live
    device query per device), so raise/lower deliberately.
 
-Compatibility aliases (deprecated but accepted):
+Deprecated keys (accepted and logged as deprecated; their values are ignored,
+only `telemetry.influxdb.*` is applied):
 
 1. Flat keys under `telemetry.*`:
    - `influx_url`, `influx_org`, `influx_bucket`, `influx_token`
@@ -222,11 +227,15 @@ safety:
 ```
 
 1. The status reads `in_force`, `clear` or `unknown`. A signal that is stale
-   (three poll intervals old, at least one second, or reported with non-OK
-   quality), unregistered or not a bool is `unknown`, never `clear`.
+   (three poll intervals old, at least one second, or reported with `STALE`,
+   `FAULT` or `UNKNOWN` quality), unregistered or not a bool is `unknown`,
+   never `clear`. A fresh reading with `UNSPECIFIED` quality is read by its
+   value.
 2. On `in_force` or `unknown`, at startup after the first poll or at any
-   time after, the software stop's latch engages without running its ladder,
-   and an automation machine enters `FAULT`. No device calls are sent.
+   time after, the software stop's latch engages without running its ladder.
+   After startup, an automation machine with HTTP enabled also enters `FAULT`;
+   the latch refuses the actuating calls of its `-> FAULT` hooks. At startup
+   the mode stays `IDLE` and `AUTO` is refused while the latch holds.
 3. While `in_force` or `unknown`, `POST /v0/estop/clear` is refused. Releasing
    the stop never clears the latch: the operator clears it once it reads
    `clear`.
@@ -266,8 +275,10 @@ handle listed twice in `devices`, in either form, fails config load.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
-`device_handle` and a function selector. When none of the three apply, the
-runtime reports `software_safe_state: "none"` and latches without actuating.
+`device_handle` and a function selector. When none of the three apply,
+`POST /v0/estop` reports `software_safe_state: "none"` and latches without
+running a ladder. On an automation machine its `FAULT` entry still runs the
+`-> FAULT` mode-transition hooks, actuating calls included.
 
 ## Validation Model
 
@@ -280,7 +291,7 @@ Example commands:
 
 ```bash
 python3 tests/contracts/runtime-config/validate-runtime-configs.py
-anolis-runtime --check-config --config examples/anolis-runtime.yaml
+anolis-runtime --check-config examples/anolis-runtime.yaml
 ```
 
 ## Change Rule

@@ -25,8 +25,8 @@ absent. None of these is *the* path.
 This is the test to apply to any proposed change. It is not aspirational — it
 holds today, and it is cheap to re-check:
 
-- **The runtime contains no workbench references at all.** `grep -ri workbench core/ src/` returns nothing.
-- **`install.sh` mentions the workbench only in comments**, describing what it replaces or mirrors. No code path depends on it.
+- **The runtime has no functional workbench dependency.** `grep -ri workbench core/` finds two prose mentions only: a warning string in `core/runtime/config.cpp` and a comment in `core/control/latch_store.hpp`.
+- **`install.sh` mentions the workbench mostly in comments**, describing what it replaces or mirrors. One code path names it: `--uninstall` removes the workbench's copy of the runtime token (`/etc/anolis/workbench-runtime-token`) if present. No install or run path depends on it.
 - **The standing operator control surface is the runtime's `/v0` HTTP API.** The workbench proxies it; it does not extend it. An operator with `curl` can do what the UI does.
 
 A workbench *surface* is therefore additive, never load-bearing. The distinction
@@ -50,14 +50,18 @@ either.
 
 Critically, **no-internet is not no-network.** A facility typically has an
 internal LAN, and the `/v0` API is fully functional over it. So three operate
-topologies are first-class and composable; the system supports all three and
-crowns none:
+topologies are first-class and composable; the system supports all three. The
+installer renders every bundle, staged ones included, for the LAN topology: an
+unquoted `bind: 127.0.0.1` becomes `bind: 0.0.0.0`, and `auth_enabled: true` is
+added unless the config already sets `auth_enabled`. To keep a loopback bind,
+leave `bind` out (the runtime default is `127.0.0.1`) or edit `runtime.yaml`
+after install:
 
 | Topology | Bind and auth | Deploy artifact |
 | --- | --- | --- |
-| **Loopback on-device** | `127.0.0.1`; with auth on, local clients send the token | `--project` online, or `--local` offline |
+| **Loopback on-device** | `127.0.0.1` (the runtime default); with auth on, local clients send the token | `--project` online, or `--local` offline |
 | **LAN with auth** | non-loopback with a generated token | either |
-| **Fully air-gapped** | loopback | staged bundle, carried to the target |
+| **Fully air-gapped** | loopback | staged bundle (`--stage`), carried to the target and installed with `--local` |
 
 ### The LAN topology is guarded at two layers
 

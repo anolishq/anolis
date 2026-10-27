@@ -31,7 +31,7 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 3. [providers.md](providers.md) - Provider model and runtime interaction rules.
 4. [safety.md](safety.md) - Safety boundaries and operational expectations.
 5. [rfcs/provider-declared-safe-state.md](rfcs/provider-declared-safe-state.md) - Accepted-with-revisions design for provider-owned safe state.
-6. [rfcs/stop-chain.md](rfcs/stop-chain.md) - Proposed: observing the emergency stop, and the reset that follows it.
+6. [rfcs/stop-chain.md](rfcs/stop-chain.md) - Increments 1 to 5 of 6 implemented (1 to 4 in v0.1.53 and v0.1.55, 5 in anolis-workbench; the `/v0/estop` rename is not): observing the emergency stop, and the reset that follows it.
 
 ## Contributor Reference
 

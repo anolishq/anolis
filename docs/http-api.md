@@ -64,7 +64,10 @@ Notes:
    probe for the mode machine. With automation enabled it is the mode
    machine's current mode. With `automation.enabled: false` there is no mode
    machine and `mode` is always `MANUAL`, which is accurate: manual
-   `POST /v0/call` is permitted and nothing actuates on its own.
+   `POST /v0/call` is permitted and no behaviour tree or mode machine drives
+   outputs. The runtime still issues safe-state calls on its own: once at
+   startup (`safety.on_startup: safe_state`, the default), and when a latched
+   device returns, to re-assert its safe state.
 2. To tell whether a mode machine exists, call `GET /v0/mode`. On an
    automation-disabled runtime it returns `503 UNAVAILABLE`
    (`Automation layer not enabled`), as do `POST /v0/mode`,
@@ -120,9 +123,13 @@ Notes:
    `startup_safe_state` in `GET /v0/runtime/status`: `on_startup`, `ran`,
    `software_safe_state`, `safe_state_achieved` (the same verdict) and
    `failed_actions` (same shape as the `/v0/estop` actions), and
-   `skipped_actions`: calls not issued because their provider reported the
-   device `UNREACHABLE` and it is not registered, each with
-   `device_handle`, `function` and the provider's `reason`. `ran` is
+   `skipped_actions`: calls not issued, each with `device_handle`,
+   `function` and `reason`. A call is skipped when its provider reported the
+   device `UNREACHABLE` and it is not registered (`reason` is the provider's
+   message, or `reported unreachable by its provider` when it gives none), or
+   when the device is in `safety.stop_chain.devices` and the stop chain was
+   `in_force` at startup (`reason`: `stop chain in force`). A device that meets
+   both conditions carries the provider-derived `reason`. `ran` is
    `false` for `leave` and when no safe state is declared. Runtimes before
    0.1.51 do not send `skipped_actions`.
 5. This is a software stop, not a substitute for the hardware emergency stop.
@@ -158,7 +165,10 @@ Notes:
    with `FAILED_PRECONDITION`. Manual `POST /v0/call`, mode-transition hooks and
    safe-state calls are unaffected — an operator commanding a device they can
    see is the deliberate action that "permit restarting" means.
-2. Latches clear on a `MANUAL -> AUTO` transition, and on nothing else. Releasing
+2. Latches clear on a `MANUAL -> AUTO` transition, and on nothing else while
+   the runtime runs. They are held in memory, so a restarted runtime starts
+   with none, in `IDLE`, and automation still needs a deliberate
+   `MANUAL -> AUTO`. Releasing
    an emergency stop must not restart the machine (ISO 13850 §4.1.4).
 3. The array is always present and always an array, empty when nothing is
    latched.
@@ -184,13 +194,18 @@ Optional query filters:
 
 Current event names:
 
-1. `state_update`
-2. `quality_change`
-3. `device_availability`
-4. `mode_change`
-5. `parameter_change`
-6. `automation_fault`
-7. `device_removed`
+1. `state_update` (sent when a signal's value or quality changes; carries
+   `quality`)
+2. `device_availability`
+3. `mode_change`
+4. `parameter_change`
+5. `automation_fault`
+6. `device_removed`
+7. `stop_chain_change`
+8. `stop_chain_mismatch`
+
+`quality_change` is defined in the wire format, but the runtime does not emit
+it.
 
 Provider health is not streamed. Read `GET /v0/providers/health` for it.
 

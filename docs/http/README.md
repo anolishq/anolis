@@ -15,7 +15,7 @@ Canonical machine-validated artifacts live under `schemas/` and `tests/contracts
 ## Contract Policy
 
 1. Config schema and HTTP contract are separate layers.
-2. Shared concepts (mode enums, status code semantics, parameter value shapes) are parity-checked.
+2. Shared concepts (mode enums, parameter value shapes) are defined in parallel in the config schema and the HTTP contract. No automated check compares them. Status code semantics are defined only in the HTTP contract.
 3. Shared cross-contract schema fragments are deferred to a later follow-up after HTTP contract stabilization (tracked in #103).
 
 ## Validation
@@ -53,7 +53,7 @@ Live conformance checks:
 
 1. Starts runtime with provider-sim via fixture process management.
 2. Exercises all required `/v0` operations.
-3. Validates each observed response against the OpenAPI schema declared for that status code.
+3. Validates each JSON response body against the OpenAPI schema declared for its status code. A `200` from `/v0/events` is checked for status and `text/event-stream` Content-Type only; the stream body is not read. The run open and close calls are not schema-validated.
 4. Enforces deterministic non-200 checks for `400`, `404`, and `503` responses.
 5. Optionally captures live response payloads to support example refresh workflows.
 

@@ -22,9 +22,12 @@ a dev config can point straight at sibling build trees. This is the fastest loop
 and the one to use while changing code.
 
 **That trick is dev-only.** The runtime `execv`s a provider — there is no `PATH`
-lookup — and the installed unit sets no `WorkingDirectory`, so systemd's CWD is
-`/`. A relative provider path copied from a dev config into an installed
-`runtime.yaml` will not resolve.
+lookup — and the installed unit sets `WorkingDirectory=<prefix>`, so a relative
+provider path resolves against the install prefix. A sibling-build-tree path
+copied from a dev config into an installed `runtime.yaml` points at nothing; use
+absolute `<prefix>/bin/` paths. `install.sh --project` rewrites the standard
+`../anolis-provider-<name>/build/<preset>/anolis-provider-<name>` path to
+`<prefix>/bin/anolis-provider-<name>` when it assembles the config.
 
 **Install it like a real deployment.** When you need to test the deployed shape —
 systemd, the `anolis` user, the install prefix, log routing — use
