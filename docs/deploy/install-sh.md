@@ -137,8 +137,12 @@ the last *different* install.
 > data, packages and the system user. With observability installed, the InfluxDB
 > credentials in `/etc/anolis/observability.env` and
 > `/etc/anolis/observability-grafana.env` are kept with the instance they
-> unlock, and a later `--with-observability` install reuses them. The uninstall
-> prints the purge command for what it kept. Back up your config directory first if it is not also held
+> unlock, and a later `--with-observability` install reuses them. On a host an
+> uninstall before 0.1.54 stripped of them, that install mints new tokens with
+> the admin token in root's influx CLI config (`/root/.influxdbv2/configs`,
+> also kept) and records them; with no CLI config it stops and names it. A
+> Grafana admin password it makes then is also set in the kept `grafana.db`. The
+> uninstall prints the purge command for what it kept. Back up your config directory first if it is not also held
 > elsewhere.
 >
 > Before it stops anything, the uninstall checks the prefix and refuses one that
