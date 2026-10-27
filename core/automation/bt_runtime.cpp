@@ -344,11 +344,11 @@ void BTRuntime::tick_loop() {
             }
 
             // What matters for safety is only whether we are out of AUTO, so
-            // report on that rather than on the call's return value. Any -> FAULT
-            // is always valid and a before-hook can neither veto it nor abort it
-            // by throwing, so a false return means a concurrent transition
-            // already moved us -- in which case the gate at the top of this loop
-            // has stopped ticking and actuation is halted regardless.
+            // report on that rather than on the call's return value. A FAULT
+            // request always ends in FAULT: a before-hook can neither veto it nor
+            // abort it by throwing, and a transition that commits meanwhile only
+            // changes the mode it is entered from (#528). AUTO here would mean an
+            // operator went FAULT -> MANUAL -> AUTO since.
             if (mode_after == RuntimeMode::AUTO) {
                 LOG_ERROR(
                     "[BTRuntime] Still in AUTO after a tick exception; autonomous actuation may still be "
