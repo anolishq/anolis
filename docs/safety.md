@@ -213,7 +213,13 @@ unless every call was skipped for an absent device (below); the runtime still
 starts and does not latch. `GET /v0/runtime/status` reports the
 outcome in `startup_safe_state` (`on_startup`, `ran`, `software_safe_state`,
 `safe_state_achieved`, `failed_actions`, `skipped_actions`); `ran` is `false`
-for `leave` and for no declared safe state. Set `leave` only on a machine
+for `leave` and for no declared safe state. Each failed action carries a
+`cause` (#616). `config` means the call could not be planned from the config on
+these devices: the zero rung could not build its arguments, or the call was
+refused before it reached its provider because its device or function does not
+exist or an argument is invalid. It fails the same way on every run, and on
+every `POST /v0/estop`, until `safety.safe_state` is fixed. `run` is anything
+else, such as a provider that failed the call or a board that came up tripped. Set `leave` only on a machine
 where a restart must not interrupt a running process, such as a culture that
 must keep its heater on.
 

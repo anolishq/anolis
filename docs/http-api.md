@@ -133,7 +133,9 @@ Notes:
 4. What `safety.on_startup` did at startup is surfaced under
    `startup_safe_state` in `GET /v0/runtime/status`: `on_startup`, `ran`,
    `software_safe_state`, `safe_state_achieved` (the same verdict) and
-   `failed_actions` (same shape as the `/v0/estop` actions), and
+   `failed_actions` (same shape as the `/v0/estop` actions; a failed one
+   carries `cause`, `config` or `run`, see
+   [safety.md](safety.md#outputs-at-startup)), and
    `skipped_actions`: calls not issued, each with `device_handle`,
    `function` and `reason`. A call is skipped when its provider reported the
    device `UNREACHABLE` and it is not registered (`reason` is the provider's
