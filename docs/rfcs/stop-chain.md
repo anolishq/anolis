@@ -1,6 +1,9 @@
 # RFC: observing the emergency stop (stop chain)
 
-**Status:** proposed, not implemented.
+**Status:** increments 1 to 5 implemented: 1 to 3 in v0.1.53 (#488, #489,
+#490), 4 in v0.1.55 (#503), 5 in anolishq/anolis-workbench#641 and
+anolishq/anolis-workbench#644.
+Increment 6, the `/v0/estop` rename, is not implemented.
 **Depends on:** the stop categories in [safety.md](../safety.md). Tracked as
 anolishq/anolis#284, part of anolishq/anolis#283.
 
@@ -8,22 +11,24 @@ anolishq/anolis#284, part of anolishq/anolis#283.
 
 When a machine's emergency stop removes power from devices, every device behind
 the cut goes silent at once while the providers, which run on the controller,
-stay up. The runtime reads that as a fleet of device faults. It cannot tell an
+stay up. Unless `safety.stop_chain` lists those devices and its `status` signal
+already reads `in_force` when they go silent, the runtime reads that as a fleet
+of device faults. It cannot tell an
 intended stop from a fault that looks the same: a dead supply, an unplugged
 backplane, a blown fuse.
 
 The runtime already does the safety-relevant part, whatever the cause. A lost
 device is latched, the behaviour tree may not actuate it until an operator
-re-enters AUTO, and the active safe-state rung is re-run for it when it returns. What's
-missing is:
+re-enters AUTO, and the active safe-state rung is re-run for it when it returns. What
+this RFC adds is:
 
 - **classification:** saying "emergency stop in force" instead of "fault", and
   not churning through fault handling for a stop;
 - **a reset that covers manual calls:** the device-loss latch holds only the
   behaviour tree, so after power returns an operator's manual call reaches the
   actuator with no reset step in between;
-- **surviving a restart:** the software stop's latch is in memory only, so a
-  redeploy drops it.
+- **surviving a restart:** persisting the software stop's latch, so a
+  redeploy keeps it.
 
 ## Terms
 
@@ -117,14 +122,14 @@ only permit restarting".
   - the FAULT-entry hook that a software stop with no declared safe state lets
     through for its own FAULT entry (#251).
 - AUTO entry is refused, with the reason, while the latch is engaged or the
-  status is `in_force` or `unknown`. Today a software stop also enters FAULT, and
-  FAULT can only exit to MANUAL. But MANUAL -> AUTO is not refused while the
-  latch is still engaged, nor after a FAULT entry that failed. In those cases the
-  behaviour tree's calls are refused one by one.
+  status is `in_force` or `unknown`. A software stop also enters FAULT, and
+  FAULT can only exit to MANUAL. MANUAL -> AUTO is refused while the latch is
+  still engaged, including after a FAULT entry that failed (#488). The latch's
+  refusal of each actuating call stays as a backstop.
 - Clearing the latch is refused while the status is `in_force` or `unknown`.
   `SafeStateController::clear()` returns a reason instead of `void`, so every
   caller gets the check. `POST /v0/estop/clear` answers it as FAILED_PRECONDITION
-  rather than its current unconditional 200 `{latched: false}`.
+  and with 200 `{latched: false}` otherwise.
 - Once the stop is released, one deliberate clear by the operator permits a
   restart. Releasing the stop never clears anything.
 
@@ -176,15 +181,19 @@ Each ships on its own. Without a `stop_chain` in config, none of them changes
 behaviour except steps 1 and 2, which apply to every machine.
 
 1. Refuse AUTO, with a reason, while the software stop's latch is engaged.
-2. Persist the latch, keyed by the config file's directory.
+   Done in #488 (v0.1.53).
+2. Persist the latch, keyed by the config file's directory. Done in #489
+   (v0.1.53).
 3. `stop_chain.status`: the states, the hold, and refusing the clear. This
    changes `SafeStateController::clear()`, and the HTTP contract of
    `POST /v0/estop/clear`, which gains a FAILED_PRECONDITION reply, in the
    OpenAPI file. The workbench's clear handling has to change with it: its
    epoch logic (anolishq/anolis-workbench#617) reads `latched` from the reply.
+   Done in #490 (v0.1.53).
 4. `devices` and `expect`, with the mismatch alarm. The runtime then reads
-   devices' `estop` signals, which nothing does today.
-5. Workbench: show the stop status and a guided reset (anolishq/anolis-workbench#572).
+   devices' `estop` signals. Done in #503 (v0.1.55).
+5. Workbench: show the stop status and a guided reset. Done in
+   anolishq/anolis-workbench#641 and anolishq/anolis-workbench#644.
 6. The `/v0/estop` rename.
 
 ## Example: one rig, two arrangements

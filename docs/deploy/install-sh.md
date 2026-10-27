@@ -60,8 +60,8 @@ Verify before installing — the sidecar is standard `sha256sum` output, so `-c`
 works directly.
 
 **The bundle carries its own `install.sh`.** You do not need this repository on
-the target: unpack the tarball and use the copy inside it, as above. This is the
-only route that requires nothing of the target but a shell. `--stage` checks that
+the target: unpack the tarball and use the copy inside it, as above. This route
+needs no internet and no `python3` on the target. `--stage` checks that
 copy against the runtime release's `SHA256SUMS`, as it does each tarball, and
 stops on a mismatch. A release before 0.1.50, whose `SHA256SUMS` has no line for
 `install.sh`, is staged with a warning that names it.
@@ -85,8 +85,9 @@ install cannot bring a machine up already actuating.
 >
 > - Passing `--variant full` to an upgrade does nothing except log a warning.
 > - The inert check drops to **warn-only** on upgrade. If automation was activated
->   from Operate, upgrading restarts the machine still actuating, announced by one
->   yellow line in a long log.
+>   from Operate, upgrading restarts the runtime with automation still enabled,
+>   announced by one yellow line in a long log. It comes back in IDLE and runs no
+>   behaviours until an operator selects AUTO again.
 >
 > To switch variants, remove **`/opt/anolis/config/runtime.yaml`** and re-run, or
 > edit it in place. (Under `--prefix`, that is `<prefix>/config/runtime.yaml`.)
@@ -100,22 +101,22 @@ install cannot bring a machine up already actuating.
 | `--with-grafana-network` | With `--with-observability`, opens Grafana (:3000) to the network. Without it Grafana binds `127.0.0.1` and the summary prints the ssh tunnel to reach it; InfluxDB always binds `127.0.0.1`. See [Observability](../security.md#observability) in the security notes. |
 
 Two things about observability that surprise people. Its services **start
-immediately** — `--no-start` gates only the runtime. And if the vendor apt repos
+immediately** — `--no-start` does not gate them. And if the vendor apt repos
 are unreachable it **warns and skips** rather than failing: the runtime install
 still succeeds, and you can re-run with the flag later once online.
 
-Raise retention with `OBSERVABILITY_RETENTION`, but read the observability README
-at the repo root on the trade-offs first.
+Raise retention with `OBSERVABILITY_RETENTION`, but read `observability/README.md`
+("Data Retention") on the trade-offs first.
 
 ## Other flags
 
 | flag | effect |
 | --- | --- |
 | `--no-start` | Install without starting the runtime. Does not gate observability. |
-| `--dry-run` | Print what would happen, change nothing. |
+| `--dry-run` | Print what would happen, change nothing. Ignored by `--stage`, which builds the bundle anyway. |
 | `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
 | `--allow-downgrade` | Install even when the bundle's runtime is older than the installed one, which `bin/anolis-runtime --version` reports. Without it the install is refused before anything changes; `--rollback` is the way back to the previous install. `--dry-run --local` reports the comparison. |
-| `--keep-hostname` | Keep the host's name. By default an arm64 host with a device-tree serial is renamed `anolis-<last 8 of serial>`, and `127.0.1.1` in `/etc/hosts` is pointed at the new name. With this flag neither happens, and the printed access URL, the mDNS name (`<host>.local`) and the telemetry host tags use the existing name. |
+| `--keep-hostname` | Keep the host's name. By default an arm64 host with a device-tree serial is renamed `anolis-<last 8 of serial>`, and `127.0.1.1` in `/etc/hosts` is pointed at the new name. With this flag neither happens, and the printed access URL and the mDNS name (`<host>.local`) use the existing name. |
 | `--prefix <path>` | Override the install prefix (default `/opt/anolis`). Install and rollback refuse, before changing anything, a prefix that is empty, relative or a symlink, resolves to `/` or a top-level directory, or is or holds `$HOME`; so does an install that adopts a staged bundle's prefix. |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
 | `--uninstall` | See the warning below. |
@@ -146,9 +147,11 @@ the last *different* install.
 > elsewhere.
 >
 > Before it stops anything, the uninstall checks the prefix and refuses one that
-> is not an absolute path to an anolis install (it must hold `bin/anolis-runtime`),
-> is a symlink, resolves to `/` or a top-level directory, is or holds `$HOME`, or
-> has anything mounted at or below it. A refusal changes nothing. If the run
+> is not an absolute path, is a symlink, resolves to `/` or a top-level directory,
+> or is or holds `$HOME`. A prefix that exists must also be an anolis install (it
+> must hold `bin/anolis-runtime`) and have nothing mounted at or below it. A prefix
+> that does not exist passes, and the uninstall still removes the `anolis-*` units
+> and the environment files. A refusal changes nothing. If the run
 > journal is on its own mount, unmount it first.
 
 ## After installing
@@ -200,7 +203,7 @@ or type-check. It reports; it never refuses to start. Read it — but know its
 limits:
 
 - It checks `automation.mode_transition_hooks` **only when `automation.enabled` is
-  true**. An install is always inert, so on a freshly installed machine that half
+  true**. A fresh install is always inert, so on a freshly installed machine that half
   does not run. **Re-check the log after activating automation from Operate** —
   that is the first moment those hooks are examined.
 - It runs at the end of provider initialisation, so **a provider that fails to
@@ -252,7 +255,7 @@ For an entry with key `<kind>`, `repo` and `version`:
 | --- | --- |
 | a GitHub release tagged `v<version>` | `version` is written without the `v`, e.g. `version: 0.4.1` downloads tag `v0.4.1`. |
 | an asset named `anolis-provider-<kind>-<version>-linux-<arch>.tar.gz` | `<arch>` is `arm64` or `x86_64`: the names `install.sh` derives from the host (it maps `aarch64` to `arm64`) and the values `--arch` documents. Name the asset `arm64`, not `aarch64` or `amd64`. Publish one asset per architecture you support. |
-| a `SHA256SUMS` asset listing every tarball | standard `sha256sum` output with bare file names, one line per `.tar.gz` asset, every architecture included. `install.sh` checks each downloaded tarball against it, and stops when the hash does not match, when the release has no `SHA256SUMS` (HTTP 404), when it has no line for the tarball, or when `SHA256SUMS` cannot be fetched (a refused connection, a 5xx). Nothing is installed unverified. |
+| a `SHA256SUMS` asset listing every tarball | standard `sha256sum` output with bare file names, one line per `.tar.gz` asset, every architecture included. `install.sh` checks each downloaded tarball against it, and stops when the hash does not match, when the release has no `SHA256SUMS` (HTTP 404), when it has no line for the tarball, or when `SHA256SUMS` cannot be fetched (a refused connection, a 5xx). No downloaded tarball is used unverified. |
 | the archive holds `bin/anolis-provider-<kind>` | at the archive root, with no top-level directory. It is the only file `install.sh` copies out. |
 | `<kind>` uses `a-z`, `0-9` and `-` only | the runtime configs refer to the binary as `<prefix>/bin/anolis-provider-<kind>`, and staging refuses a config whose provider command does not resolve to a pinned kind. |
 | `--version` exits `0` | the host preflight runs it as the service user, and a binary that cannot run stops the install. |
