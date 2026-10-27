@@ -171,3 +171,17 @@ def test_annotations_show_this_runtime_and_untagged_rows(grafana, dashboard, loa
     assert modes == ["Mode: AUTO -> IDLE", "Mode: IDLE -> MANUAL"]
     params = [v for f in grafana.annotation(dashboard, "Parameter Changes", hour) for v in f.column("text").values]
     assert params == ["rate: 1 -> 2"]
+
+
+def test_a_series_with_points_on_both_sides_of_the_range_start_is_drawn_held(grafana, dashboard, load, now_ms, hour):
+    """#620: the seed and the changes are one series, not two tables with the same key."""
+    t = live(now_ms)
+    t.signal(hour.start_ms - 10 * MINUTE, provider="p1", device="d1", signal="x", value=1.5)
+    t.signal(hour.start_ms + 30 * MINUTE, provider="p1", device="d1", signal="x", value=2.5, quality="FAULT")
+    load(t)
+    points = _points(grafana, dashboard, signal("d1", "x"), hour)
+    assert points, "nothing drawn"
+    assert points[0][0] <= hour.start_ms + hour.interval_ms and points[0][1] == 1.5
+    assert points[-1][0] > hour.stop_ms - hour.interval_ms and points[-1][1] == 2.5
+    series = _series(grafana, dashboard, quality("d1"), hour)
+    assert series["x"][0] == "OK" and series["x"][-1] == "FAULT"

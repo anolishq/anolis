@@ -102,3 +102,22 @@ def test_signal_table_reports_last_change_in_milliseconds(grafana, dashboards, l
     )
     table = {row["Signal"]: row["Last change"] for row in rows(grafana.panel(dashboards[UID], SIGNAL_TABLE, hour))}
     assert table == {"a": first, "b": second}
+
+
+def test_quality_over_time_with_a_signal_seen_on_both_sides_of_the_range_start(grafana, dashboards, load, now_ms, hour):
+    """#620: a signal with a quality before the range and a change inside it is one series, held
+    from the range start until the change."""
+    t = Telemetry().provider_health(now_ms - MINUTE)
+    t.signal(hour.start_ms - 10 * MINUTE, quality="OK", value=1.0)
+    t.signal(hour.start_ms + 30 * MINUTE, quality="FAULT", value=1.0)
+    load(t)
+    points = []
+    for frame in grafana.panel(dashboards[UID], QUALITY_OVER_TIME, hour):
+        times = next(c for c in frame.columns if c.name in ("Time", "_time")).values
+        for column in frame.value_columns():
+            label = column.labels.get("quality", column.name)
+            points += [(at, label, v) for at, v in zip(times, column.values, strict=True) if v is not None]
+    points.sort()
+    assert points, "nothing drawn"
+    assert points[0][0] <= hour.start_ms + hour.interval_ms and points[0][1:] == ("OK", 1)
+    assert points[-1][0] > hour.stop_ms - hour.interval_ms and points[-1][1:] == ("FAULT", 1)
