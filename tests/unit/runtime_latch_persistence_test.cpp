@@ -43,6 +43,37 @@ anolis::runtime::RuntimeConfig config_at(const std::filesystem::path &config_dir
     return config;
 }
 
+// The same, with `data_line` in place of the data_dir line (#562).
+anolis::runtime::RuntimeConfig config_with_data_line(const std::filesystem::path &config_dir,
+                                                     const std::string &data_line) {
+    std::filesystem::create_directories(config_dir);
+    const auto path = config_dir / "runtime.yaml";
+    std::ofstream(path) << "runtime:\n  name: rig\n"
+                        << data_line << "http:\n  enabled: false\nproviders:\n"
+                        << "  - id: bread0\n    command: \"" << kHelperPath
+                        << "\"\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 5000\n"
+                           "polling:\n  interval_ms: 200\ntelemetry:\n  enabled: false\n";
+    anolis::runtime::RuntimeConfig config;
+    std::string error;
+    EXPECT_TRUE(anolis::runtime::load_config(path.string(), config, error)) << error;
+    return config;
+}
+
+// Runs the body with the process in `cwd`, and puts it back.
+class InDirectory {
+public:
+    explicit InDirectory(const std::filesystem::path &cwd) : saved_(std::filesystem::current_path()) {
+        std::filesystem::create_directories(cwd);
+        std::filesystem::current_path(cwd);
+    }
+    ~InDirectory() { std::filesystem::current_path(saved_); }
+    InDirectory(const InDirectory &) = delete;
+    InDirectory &operator=(const InDirectory &) = delete;
+
+private:
+    std::filesystem::path saved_;
+};
+
 bool initialize_quietly(anolis::runtime::Runtime &runtime, std::string &error) {
     std::ostringstream captured;
     std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
@@ -156,4 +187,41 @@ TEST(RuntimeLatchPersistenceTest, TwoProjectsWithTheSameRuntimeNameKeepTheirOwnL
     anolis::runtime::Runtime a_again(config_at(root / "a" / "config", "runtime.yaml", root / "data", "anolis-main"));
     ASSERT_TRUE(initialize_quietly(a_again, error)) << error;
     EXPECT_TRUE(a_again.get_safe_state().is_engaged());
+}
+
+// #562: with no runtime.data_dir, the data dir was ./anolis-data in whatever
+// directory the runtime started from, so a restart from elsewhere came back
+// unlatched. It is now beside the config file.
+TEST(RuntimeLatchPersistenceTest, ARestartFromAnotherDirectoryComesBackLatched) {
+    const auto root = fresh_dir("anolis-562-cwd");
+    {
+        const InDirectory in(root / "cwd-a");
+        anolis::runtime::Runtime runtime(config_with_data_line(root / "config", ""));
+        std::string error;
+        ASSERT_TRUE(initialize_quietly(runtime, error)) << error;
+        runtime.get_safe_state().trigger("operator");
+    }
+    EXPECT_FALSE(latch_dir_is_empty(root / "config" / "anolis-data"));
+    EXPECT_FALSE(std::filesystem::exists(root / "cwd-a" / "anolis-data"));
+
+    const InDirectory in(root / "cwd-b");
+    anolis::runtime::Runtime restarted(config_with_data_line(root / "config", ""));
+    std::string error;
+    ASSERT_TRUE(initialize_quietly(restarted, error)) << error;
+    EXPECT_TRUE(restarted.get_safe_state().is_engaged());
+}
+
+TEST(RuntimeLatchPersistenceTest, ARelativeDataDirIsBesideTheConfigFile) {
+    const auto root = fresh_dir("anolis-562-relative");
+    const InDirectory in(root / "cwd");
+    const auto config = config_with_data_line(root / "config", "  data_dir: state/data\n");
+    EXPECT_EQ(std::filesystem::path(config.runtime.data_dir), root / "config" / "state" / "data");
+    {
+        anolis::runtime::Runtime runtime(config);
+        std::string error;
+        ASSERT_TRUE(initialize_quietly(runtime, error)) << error;
+        runtime.get_safe_state().trigger("operator");
+    }
+    EXPECT_FALSE(latch_dir_is_empty(root / "config" / "state" / "data"));
+    EXPECT_FALSE(std::filesystem::exists(root / "cwd" / "state"));
 }
