@@ -422,8 +422,10 @@ phase_system_user() {
         # A user kept from an earlier install keeps the groups it was given
         # then (dialout and gpio, before #318): name them, since install.sh
         # neither grants nor revokes any (#515).
+        # A user in its own group only leaves grep nothing to print, and its
+        # exit 1 would end the install under pipefail.
         local groups
-        groups=$(id -nG "${ANOLIS_USER}" 2>/dev/null | tr ' ' '\n' | grep -vxF "${ANOLIS_USER}" | paste -sd ' ' -)
+        groups=$(id -nG "${ANOLIS_USER}" 2>/dev/null | tr ' ' '\n' | { grep -vxF "${ANOLIS_USER}" || true; } | paste -sd ' ' -)
         if [[ -n "${groups}" ]]; then
             log_skip "system user: ${ANOLIS_USER} already exists, in groups: ${groups}"
             log_info "install.sh grants no groups; device access is host prep's. To drop one: sudo gpasswd -d ${ANOLIS_USER} <group>"
