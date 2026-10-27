@@ -536,7 +536,7 @@ logging:
 TEST_F(ConfigTest, CorsAllowedOriginsDefaultsToNone) {
     EXPECT_TRUE(HttpConfig{}.cors_allowed_origins.empty());
 
-    for (const std::string origins_line : {std::string(), std::string("  cors_allowed_origins: []\n")}) {
+    for (const std::string& origins_line : {std::string(), std::string("  cors_allowed_origins: []\n")}) {
         SCOPED_TRACE(origins_line.empty() ? "key omitted" : "empty list");
         const std::string config_content = "runtime:\n\nhttp:\n  enabled: true\n  port: 8080\n" + origins_line +
                                            "\nproviders:\n  - id: test\n    command: /path/to/provider\n";

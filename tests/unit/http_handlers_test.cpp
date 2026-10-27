@@ -1895,7 +1895,7 @@ TEST_F(HttpBrowserGuardTest, AToolOrProxyWithoutAnOriginStillClearsTheLatch) {
     // curl, scripts and the workbench's proxy send no Origin; the workbench
     // posts /v0/estop/clear with no body and no Content-Type.
     start(runtime::HttpConfig{});
-    for (const std::string name : {"localhost", "127.0.0.1"}) {
+    for (const std::string& name : {std::string("localhost"), std::string("127.0.0.1")}) {
         SCOPED_TRACE(name);
         safe_state->hold("emergency stop in_force: test");
         const httplib::Headers headers = {{"Host", host(name)}};
