@@ -207,7 +207,7 @@ function that does not exist, or an argument out of range), and it fails the
 same way on every restart and every e-stop. The install logs `health:
 safety.safe_state cannot run on this machine's devices: <first refused call>`,
 and the summary says the install did not succeed. Fix `safety.safe_state` and
-run the install again (#616). A runtime before 0.1.58 marks no call, so
+run the install again (#616). A runtime before 0.2.0 marks no call, so
 against one every failure stays a warning.
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s

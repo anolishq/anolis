@@ -110,7 +110,7 @@ health_with() {
     SAFE_STATE_UNPLANNABLE=0
 }
 
-UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"zero","safe_state_achieved":false,"failed_actions":[{"device_handle":"sim0/relayio0","function":"set_relay_ch1","success":false,"error":"cannot zero required non-numeric argument '\''enabled'\''","cause":"config"},{"device_handle":"sim0/tempctl0","function":"set_relay","success":false,"error":"cannot zero required non-numeric argument '\''state'\''","cause":"config"}],"skipped_actions":[]}}'
+UNPLANNABLE='{"version":"0.2.0","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"zero","safe_state_achieved":false,"failed_actions":[{"device_handle":"sim0/relayio0","function":"set_relay_ch1","success":false,"error":"cannot zero required non-numeric argument '\''enabled'\''","cause":"config"},{"device_handle":"sim0/tempctl0","function":"set_relay","success":false,"error":"cannot zero required non-numeric argument '\''state'\''","cause":"config"}],"skipped_actions":[]}}'
 
 @test "616: a safe state the config cannot plan fails the install, naming the first refused action" {
     health_with "${UNPLANNABLE}"
@@ -126,7 +126,7 @@ UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state"
 }
 
 @test "616: a safe state that ran and failed on a tripped board stays a warning" {
-    health_with '{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
+    health_with '{"version":"0.2.0","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
     run_both_parsers
     [[ "${output}" == *"health: startup safe state NOT achieved"* ]]
     [[ "${output}" != *"cannot run on this machine"* ]]
@@ -147,7 +147,7 @@ UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state"
     health_with "${UNPLANNABLE}"
     phase_health >/dev/null
     _install_failed
-    health_with '{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
+    health_with '{"version":"0.2.0","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
     phase_health >/dev/null
     ! _install_failed
     grep -q '^    if _install_failed; then$' "${INSTALL_SH}"  # main() decides the exit with it
