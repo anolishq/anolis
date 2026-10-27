@@ -18,6 +18,8 @@
 // reads <dir>/estop like chain_open, and while <dir>/motor0_off exists its
 // reads fail UNAVAILABLE, as a device behind a cut supply does (#484). If
 // motor0_off holds "stale", motor0 is reported instead, with stale quality.
+// With `--slow-ready-when <path>`, while that file exists it waits 6 s before
+// answering WaitReady, so a test can hold a restart in flight (#557).
 
 #include <array>
 #include <chrono>
@@ -153,6 +155,7 @@ int main(int argc, char **argv) {
 #endif
 
     std::string exit_when;
+    std::string slow_ready_when;
     bool mixed = false;
     bool allowed_values = false;
     std::string stop_chain_dir;
@@ -162,6 +165,8 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
+        } else if (std::string(argv[i]) == "--slow-ready-when" && i + 1 < argc) {
+            slow_ready_when = argv[i + 1];
         } else if (std::string(argv[i]) == "--mixed") {
             mixed = true;
         } else if (std::string(argv[i]) == "--allowed-values") {
@@ -216,6 +221,10 @@ int main(int argc, char **argv) {
             hello->set_provider_version("0.0.1");
             (*hello->mutable_metadata())["supports_wait_ready"] = "true";
         } else if (request.has_wait_ready()) {
+            std::error_code ec;
+            if (!slow_ready_when.empty() && std::filesystem::exists(slow_ready_when, ec)) {
+                std::this_thread::sleep_for(std::chrono::seconds(6));
+            }
             (*response.mutable_wait_ready()->mutable_diagnostics())["device_count"] = "0";
         } else if (request.has_list_devices()) {
             auto *list = response.mutable_list_devices();

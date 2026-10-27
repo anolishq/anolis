@@ -427,6 +427,30 @@ void press_the_stop(const Rig &rig, anolis::runtime::Runtime &runtime) {
     ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().snapshot().state == StopChainState::InForce; }));
 }
 
+// #557: a second provider, p2, whose restart is held in WaitReady for 6 s.
+anolis::runtime::RuntimeConfig config_with_slow_restarting_provider(const Rig &rig) {
+    const auto path = rig.root / "config" / "runtime.yaml";
+    const std::string helper = std::string("\"") + kHelperPath + "\"";
+    std::ofstream(path) << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
+                        << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: " << helper
+                        << "\n    args: [\"--stop-chain\", \"" << rig.root.generic_string() << "\"]"
+                        << "\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 5000\n"
+                        << "  - id: p2\n    command: " << helper << "\n    args: [\"--exit-when\", \""
+                        << (rig.root / "p2-exit").generic_string() << "\", \"--slow-ready-when\", \""
+                        << (rig.root / "p2-slow").generic_string() << "\"]"
+                        << "\n    timeout_ms: 2000\n    hello_timeout_ms: 2000\n    ready_timeout_ms: 10000\n"
+                           "    restart_policy:\n      enabled: true\n      max_attempts: 3\n"
+                           "      backoff_ms: [50, 50, 50]\n      timeout_ms: 20000\n      success_reset_ms: 100\n"
+                           "polling:\n  interval_ms: 100\ntelemetry:\n  enabled: false\n"
+                           "safety:\n  on_startup: leave\n  safe_state:\n    zero_is_safe: true\n"
+                           "  stop_chain:\n    status:\n      signal: bread0/gpio0/chain_open\n"
+                           "    devices: [bread0/motor0]\n";
+    anolis::runtime::RuntimeConfig config;
+    std::string error;
+    EXPECT_TRUE(anolis::runtime::load_config(path.string(), config, error)) << error;
+    return config;
+}
+
 }  // namespace
 
 TEST(RuntimeStopChainExpectTest, APowerLossDeviceThatStillAnswersRaisesStopNotReaching) {
@@ -663,4 +687,40 @@ TEST(RuntimeStopChainExpectTest, WarnsWhenAnExpectationHasNothingToJudgeItBy) {
             EXPECT_NE(log.find(warning), std::string::npos) << log;
         }
     }
+}
+
+TEST(RuntimeStopChainTest, TheStopIsHeldWhileAnotherProviderRestarts) {
+    const auto rig = fresh_rig("anolis-557-slow-restart");
+    set_chain(rig, "0");
+    anolis::runtime::Runtime runtime(config_with_slow_restarting_provider(rig));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    const auto first_p2 = runtime.get_provider_registry().get_provider("p2");
+    ASSERT_NE(first_p2, nullptr);
+
+    MainLoop loop(runtime);
+    ASSERT_FALSE(runtime.get_safe_state().is_engaged());
+
+    // p2 exits; its replacement waits 6 s in WaitReady.
+    set_file(rig, "p2-slow", "1");
+    set_file(rig, "p2-exit", "1");
+    ASSERT_TRUE(eventually([&] { return !std::filesystem::exists(rig.root / "p2-exit"); }));
+    ASSERT_TRUE(eventually([&] { return !first_p2->is_available(); }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));  // the restart is in flight
+
+    set_chain(rig, "1");
+    EXPECT_TRUE(eventually([&] { return runtime.get_safe_state().is_engaged(); }, std::chrono::milliseconds(1500)))
+        << "the stop was not held while p2 restarted";
+    EXPECT_TRUE(runtime.get_safe_state().clear().has_value()) << "a clear was accepted during the restart";
+    EXPECT_NE(runtime.get_provider_registry().get_provider("p2"), first_p2) << "the restart finished too early";
+
+    // Supervision still completes the restart.
+    set_file(rig, "p2-slow", "");
+    EXPECT_TRUE(eventually(
+        [&] {
+            const auto current = runtime.get_provider_registry().get_provider("p2");
+            return current != nullptr && current != first_p2 && current->is_available();
+        },
+        std::chrono::seconds(15)));
 }
