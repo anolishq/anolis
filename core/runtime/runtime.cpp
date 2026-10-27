@@ -1272,8 +1272,16 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // can be unavailable and still running -- wedged on a hung bus -- and
     // starting a second one beside it would put two processes on one bus. The
     // stopped handle stays registered, so a failed restart is retried as before.
+    // Nor beside anything it started, such as a wrapper script's worker
+    // (#563): a stop that leaves any of it running fails this attempt, and
+    // supervision retries, stopping the old provider again first.
     if (auto old_provider = provider_registry_.get_provider(provider_id)) {
-        old_provider->stop();
+        if (!old_provider->stop()) {
+            LOG_ERROR("[Runtime] Provider '" << provider_id
+                                             << "' or a process it started is still running after the stop; "
+                                                "not starting a replacement beside it");
+            return false;
+        }
     }
 
     // Start the timeout clock only now: timeout_ms bounds the new process coming

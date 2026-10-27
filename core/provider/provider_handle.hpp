@@ -59,7 +59,7 @@ public:
     }
 
     /** @brief Close the session and shut the process down; waits for any in-flight request. */
-    void stop() override;
+    bool stop() override;
 
     /** @brief Issue the ADPP `Hello` handshake. */
     bool hello(anolis::deviceprovider::v1::HelloResponse &response) override;
