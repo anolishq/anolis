@@ -140,7 +140,8 @@ the last *different* install.
 > unlock, and a later `--with-observability` install reuses them. On a host an
 > uninstall before 0.1.54 stripped of them, that install mints new tokens with
 > the admin token in root's influx CLI config (`/root/.influxdbv2/configs`,
-> also kept) and records them; with no CLI config it stops and names it. The
+> also kept) and records them; with no CLI config it stops and names it. A
+> Grafana admin password it makes then is also set in the kept `grafana.db`. The
 > uninstall prints the purge command for what it kept. Back up your config directory first if it is not also held
 > elsewhere.
 >

@@ -54,6 +54,10 @@ readonly INFLUX_HOST="http://127.0.0.1:8086"
 # The influx CLI's config, which `influx setup` writes with the admin token in
 # it. An uninstall keeps it with the instance (#514).
 readonly INFLUX_CLI_CONFIG="/root/.influxdbv2/configs"
+# Grafana's database, which keeps the admin password it was first booted
+# with, and its binary by full path: /usr/sbin is not always on PATH (#514).
+readonly GRAFANA_DB="/var/lib/grafana/grafana.db"
+readonly GRAFANA_BIN="/usr/sbin/grafana"
 # Co-located Pi bucket retention (30 d). Raising it is a real trade-off (SD
 # wear, disk growth, query cost) — see observability/README.md "Data
 # Retention". Override via the environment at install time if you must.
@@ -69,6 +73,7 @@ WITH_OBSERVABILITY=0
 GRAFANA_NETWORK=0
 _OBS_GRAFANA_WAS_NETWORK=0
 _OBS_GRAFANA_BIND_APPLIED=0
+_OBS_GRAFANA_PW_UNKNOWN=0
 NO_START=0
 UNINSTALL=0
 ROLLBACK=0
@@ -1513,11 +1518,28 @@ _obs_reuse_credentials() {
             chmod 600 "${OBSERVABILITY_ENV_FILE}" || return 1
             chown root:root "${OBSERVABILITY_ENV_FILE}" || return 1
             echo "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" >> "${OBSERVABILITY_ENV_FILE}" || return 1
+            _obs_reset_grafana_admin_pw "${_OBS_GRAFANA_PW}"
         fi
         log_ok "observability: ${GRAFANA_ENV_FILE} restored from ${OBSERVABILITY_ENV_FILE}"
     fi
     _obs_wire_tokens "${write_token}" "${read_token}"
     return 0
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD on its first boot only, so a
+# password made now for a grafana.db that survived is set in the database too
+# (#514). It goes on stdin, never on a command line. grafana-server is
+# restarted after this, as on every observability run.
+_obs_reset_grafana_admin_pw() {
+    local pw="$1"
+    [[ -f "${GRAFANA_DB}" ]] || return 0
+    if printf '%s' "${pw}" | "${GRAFANA_BIN}" cli --homepath /usr/share/grafana --config /etc/grafana/grafana.ini \
+        admin reset-admin-password --password-from-stdin >/dev/null 2>&1; then
+        log_ok "observability: Grafana's admin password set to the one recorded in ${OBSERVABILITY_ENV_FILE}"
+    else
+        _OBS_GRAFANA_PW_UNKNOWN=1
+        log_warn "observability: could not reset Grafana's admin password; GRAFANA_ADMIN_PASSWORD in ${OBSERVABILITY_ENV_FILE} may not log in"
+    fi
 }
 
 # Install dashboards + provisioning from the release observability asset at
@@ -2092,18 +2114,22 @@ phase_summary() {
     if [[ ${WITH_OBSERVABILITY} -eq 1 ]]; then
         # Paths only, never secrets — installs are routinely piped through tee.
         local grafana_host="localhost"
+        local pw_note="admin password: ${OBSERVABILITY_ENV_FILE}"
+        if [[ ${_OBS_GRAFANA_PW_UNKNOWN} -eq 1 ]]; then
+            pw_note="admin password: unknown, its reset failed (see the warnings above)"
+        fi
         if [[ "${ARCH}" != "x86_64" ]]; then
             grafana_host="$(hostname 2>/dev/null || echo localhost).local"
         fi
         if [[ ${_OBS_GRAFANA_BIND_APPLIED} -eq 0 ]]; then
             log_info "Grafana bind unchanged: the observability step did not finish (see the warnings above)"
         elif [[ ${GRAFANA_NETWORK} -eq 1 ]]; then
-            log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
+            log_info "Grafana:   http://${grafana_host}:3000 (${pw_note})"
         else
             if [[ ${_OBS_GRAFANA_WAS_NETWORK} -eq 1 ]]; then
                 log_info "Grafana:   now bound to 127.0.0.1 — no longer on the network (re-run with --with-grafana-network to open it)"
             fi
-            log_info "Grafana:   127.0.0.1:3000 on this machine (admin password: ${OBSERVABILITY_ENV_FILE})"
+            log_info "Grafana:   127.0.0.1:3000 on this machine (${pw_note})"
             local tunnel_host="${grafana_host}"
             [[ "${tunnel_host}" == "localhost" ]] && tunnel_host="<host>"
             log_info "  from another machine: ssh -L 3000:127.0.0.1:3000 ${SUDO_USER:-<user>}@${tunnel_host}, then http://localhost:3000"
