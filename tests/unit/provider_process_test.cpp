@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -381,6 +382,31 @@ TEST_F(ProviderProcessTest, ACleanExitDoesNotLeaveAForkedWorkerRunning) {
     std::filesystem::remove(pid_file);
 }
 #endif
+
+/******************************************************************************
+ * Concurrency (#557)
+ ******************************************************************************/
+
+// A restart stops the old provider on its own thread while the main loop, HTTP
+// and polling threads ask whether it is running. Run under ThreadSanitizer,
+// this is the pair it must see no race in.
+TEST_F(ProviderProcessTest, IsRunningIsSafeWhileAnotherThreadShutsDown) {
+    CreateLongRunningTestExecutable();
+    ProviderProcess proc("test_provider", test_executable_path_.string(), {}, 300);
+    ASSERT_TRUE(proc.spawn());
+
+    std::atomic<bool> done{false};
+    std::thread reader([&] {
+        while (!done.load()) {
+            (void)proc.is_running();
+        }
+    });
+    proc.shutdown();
+    done.store(true);
+    reader.join();
+
+    EXPECT_FALSE(proc.is_running());
+}
 
 /******************************************************************************
  * Platform-Specific Notes

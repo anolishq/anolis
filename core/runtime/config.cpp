@@ -341,10 +341,6 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
             error = "HTTP thread_pool_size must be at least 1";
             return false;
         }
-        if (config.http.cors_allowed_origins.empty()) {
-            error = "http.cors_allowed_origins must not be empty";
-            return false;
-        }
         // CORS spec violation: wildcard origin cannot be used with credentials
         if (config.http.cors_allow_credentials) {
             for (const auto &origin : config.http.cors_allowed_origins) {
@@ -713,10 +709,6 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 } else {
                     error = "'http.cors_allowed_origins' must be a string or sequence";
                     return false;
-                }
-
-                if (config.http.cors_allowed_origins.empty()) {
-                    config.http.cors_allowed_origins.push_back("*");
                 }
             }
             if (yaml["http"]["cors_allow_credentials"]) {

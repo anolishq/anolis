@@ -43,7 +43,11 @@ Practical consequences:
 1. Provider crashes isolate to that provider.
 2. Runtime can keep operating other providers.
 3. Recovery behavior is driven by restart policy and supervision state.
-4. Each provider runs in its own process group (a job object on Windows).
+4. A restart runs beside the runtime's main loop, so the stop chain, the
+   other providers and a shutdown signal are still handled while a provider
+   comes back up. Restarts run one at a time: a second provider that is down
+   waits for the first restart to finish.
+5. Each provider runs in its own process group (a job object on Windows).
    Stopping a provider ends anything it started too, such as a wrapper
    script's worker, and a restart does not start the replacement while any
    of the old one is still running: that attempt fails, and supervision
