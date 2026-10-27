@@ -2455,10 +2455,13 @@ _stage_fetch() {
         log_info "Fully offline? Build a bundle elsewhere with --stage and install it here with --local."
         exit 1
     fi
-    # Release tarballs are checked against the release's SHA256SUMS (#408).
-    # install.sh is never listed there.
+    # Release tarballs (#408) and the bundled install.sh (#508) are checked
+    # against the release's SHA256SUMS. install.sh is listed there from
+    # anolis 0.1.50 (#449); an older release gets a warning, not a refusal.
     if [[ "${asset}" == *.tar.gz ]]; then
         _stage_verify_sha256 "${repo}" "${tag}" "${asset}" "${dir}"
+    elif [[ "${asset}" == install.sh ]]; then
+        _stage_verify_sha256 "${repo}" "${tag}" "${asset}" "${dir}" warn-unlisted
     fi
 }
 
@@ -2468,8 +2471,15 @@ _stage_fetch() {
 # (#408). Every release the current pins name publishes complete sums; an
 # older release that does not cannot be staged online. An air-gapped install
 # uses --local with a bundle staged elsewhere, which does not download.
+#
+# With $5 = warn-unlisted (install.sh, #508), a release with no SHA256SUMS
+# or no line for the asset warns, naming the version, and the asset is used:
+# releases through anolis 0.1.49 do not list install.sh. anolis-workbench's
+# release_verify.py does the same, and anolis-workbench#533 tracks refusing.
+# A mismatch, or any other failure to fetch SHA256SUMS, is still fatal.
 _stage_verify_sha256() {
-    local repo="$1" tag="$2" asset="$3" dir="$4"
+    local repo="$1" tag="$2" asset="$3" dir="$4" unlisted="${5:-die}"
+    local unverified="${asset} not verified: ${repo##*/} ${tag} predates ${asset} in SHA256SUMS"
     local sums="${dir}/${asset}.SHA256SUMS" expected actual code rc=0
     local auth=()
     [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
@@ -2478,6 +2488,10 @@ _stage_verify_sha256() {
     if [[ "${rc}" -ne 0 ]]; then
         rm -f "${sums}"
         if [[ "${code}" == "404" ]]; then
+            if [[ "${unlisted}" == warn-unlisted ]]; then
+                log_warn "stage: ${unverified}"
+                return 0
+            fi
             die "stage: ${repo} ${tag} publishes no SHA256SUMS; refusing to use ${asset} unverified"
         fi
         die "stage: could not fetch SHA256SUMS for ${repo} ${tag} (curl exit ${rc}, HTTP ${code:-000}); refusing to use ${asset} unverified"
@@ -2485,6 +2499,10 @@ _stage_verify_sha256() {
     expected=$(awk -v a="${asset}" '$2 == a || $2 == "*" a { print $1; exit }' "${sums}")
     rm -f "${sums}"
     if [[ -z "${expected}" ]]; then
+        if [[ "${unlisted}" == warn-unlisted ]]; then
+            log_warn "stage: ${unverified}"
+            return 0
+        fi
         die "stage: SHA256SUMS of ${repo} ${tag} has no entry for ${asset}; refusing to use it unverified"
     fi
     actual=$(sha256sum "${dir}/${asset}" | awk '{print $1}')
