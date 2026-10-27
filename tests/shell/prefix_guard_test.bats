@@ -40,7 +40,7 @@ setup() {
     _stub_cmd chown chmod rm rmdir install cp mv systemctl useradd runuser
     _stub_cmd phase_root_check phase_detect phase_verify preflight_variant_selection \
         phase_system_user phase_backup phase_config_project phase_config_runtime \
-        phase_runtime_auth phase_config_providers phase_host_preflight phase_manifest \
+        phase_runtime_auth phase_host_preflight phase_manifest \
         phase_systemd phase_telemetry_export phase_observability phase_hostname \
         phase_start phase_health phase_summary do_stage
 

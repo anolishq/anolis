@@ -171,10 +171,10 @@ Common:
                          the installed one. Without it, the install is refused
                          before anything changes; --rollback is the way back
                          to the previous install.
-  --replace-config       Replace an existing runtime config, and each provider
-                         config the bundle ships, instead of preserving it. Each
-                         replaced file is moved to <file>.replaced-<UTC time>
-                         beside it first. The variant must still be inert.
+  --replace-config       Replace an existing runtime config instead of
+                         preserving it. It is moved to
+                         runtime.yaml.replaced-<UTC time> beside it first. The
+                         variant must still be inert.
   --keep-hostname        Keep this host's name. By default an arm64 host with
                          a device-tree serial is renamed anolis-<last 8 of
                          serial>; with this flag the printed URL, mDNS and
@@ -434,7 +434,7 @@ phase_directories() {
     # Explicit modes — mkdir -p inherits the caller's umask, and a permissive
     # caller left bin/ world-writable (777) on CI (#154).
     install -d -m 755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/config" \
-        "${PREFIX}/config/providers" "${PREFIX}/projects" "${PREFIX}/.prev" \
+        "${PREFIX}/projects" "${PREFIX}/.prev" \
         "${PREFIX}/anolis-data"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
@@ -758,45 +758,6 @@ _generate_api_token() {
 
     [[ "${token}" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf '%s' "${token}"
-}
-
-# =============================================================================
-# Phase 14: Config (providers) — skip each if exists
-# =============================================================================
-
-phase_config_providers() {
-    local src_dir="${BUNDLE_DIR}/config/providers"
-    if [[ ! -d "${src_dir}" ]]; then
-        log_skip "config (providers): no config/providers/ in bundle"
-        return
-    fi
-
-    local installed=0 skipped=0
-    for src_file in "${src_dir}"/*.yaml; do
-        [[ -f "${src_file}" ]] || continue
-        local filename
-        filename=$(basename "${src_file}")
-        local dest="${PREFIX}/config/providers/${filename}"
-
-        if [[ -f "${dest}" && ${REPLACE_CONFIG} -eq 1 ]]; then
-            _backup_replaced_config "${dest}"
-            cp "${src_file}" "${dest}"
-            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-            installed=$((installed + 1))
-        elif [[ -f "${dest}" ]]; then
-            skipped=$((skipped + 1))
-        else
-            cp "${src_file}" "${dest}"
-            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-            installed=$((installed + 1))
-        fi
-    done
-
-    if [[ ${skipped} -gt 0 ]]; then
-        log_skip "config (providers): ${skipped} preserved, ${installed} written"
-    else
-        log_ok "config (providers): ${installed} written"
-    fi
 }
 
 # =============================================================================
@@ -2730,7 +2691,7 @@ def render(c):
     return re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
 
 
-(out / "config" / "providers").mkdir(parents=True, exist_ok=True)
+(out / "config").mkdir(parents=True, exist_ok=True)
 pcfg = out / "projects" / profile / "config"
 pcfg.mkdir(parents=True, exist_ok=True)
 beh = pd / "behaviors"
@@ -2792,9 +2753,9 @@ _auto = (yaml.safe_load(default_src.read_text()) or {}).get("automation") or {}
 if _auto.get("enabled") or "mode_transition_hooks" in _auto:
     sys.exit(f"the 'manual' variant is not inert (automation enabled or hooks present): {default_src}")
 (out / "config" / "runtime.yaml").write_text(render(default_src.read_text()))
+# Provider configs ship once, under projects/, where the rendered runtime
+# configs point. A config/providers/ copy was written and never read (#515).
 for pc in sorted(cfg.glob("provider-*.yaml")):
-    name = pc.stem.removeprefix("provider-").split(".")[0]
-    (out / "config" / "providers" / f"{name}.yaml").write_text(render(pc.read_text()))
     (pcfg / pc.name).write_text(render(pc.read_text()))
 mp = pd / "machine-profile.yaml"
 if mp.exists():
@@ -3004,11 +2965,6 @@ main() {
             dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
         fi
         dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
-        if [[ ${REPLACE_CONFIG} -eq 1 ]]; then
-            dry_run_phase "replace provider configs the bundle ships (each existing one moves to <file>.replaced-<UTC time>)"
-        else
-            dry_run_phase "install provider configs (skip each if exists)"
-        fi
         dry_run_phase "host preflight: run each binary and each provider's --check-host as ${ANOLIS_USER}"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
@@ -3038,7 +2994,6 @@ main() {
     phase_config_project
     phase_config_runtime
     phase_runtime_auth
-    phase_config_providers
     phase_host_preflight
     phase_manifest
     phase_systemd
