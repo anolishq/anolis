@@ -233,7 +233,7 @@ restart (a provider crash, then the runtime starting it again) runs nothing:
 the runtime does not run the safe state, and provider loss is not reported as
 device loss, so the device-loss latch does not engage and nothing is
 re-asserted when the devices come back. Outputs stay as the devices and the
-restarted provider leave them. anolis-provider-bread from 0.9.4 drives its
+restarted provider leave them. anolis-provider-bread from 0.10.0 drives its
 outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
 open loop at PWM 0, RLHTs to setpoints 0, open loop and duty 0. So a supervised
 restart of bread turns those outputs off, unless its config sets
