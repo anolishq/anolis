@@ -13,6 +13,109 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-10-27
+
+Upgrade notes for operators:
+
+- **The stop chain's status signal is judged only with `QUALITY_OK`.** A
+  status reading with any other quality, including one whose provider never
+  sets quality, now reads `unknown`, and `unknown` holds the stop, where a
+  fresh `false` used to read `clear`. A provider that leaves quality unset on
+  its stop-chain status signal now keeps the stop held. provider-sim's and
+  bread's signal helpers set `QUALITY_OK` by default.
+- **`install.sh` no longer writes `config/providers/`.** Provider configs ship
+  once, under `projects/<profile>/config/`, where the rendered runtime
+  configs point. Nothing on a machine is deleted: an existing
+  `<prefix>/config/providers/` stays, and a `runtime.yaml` kept from before
+  #144 that still points into it keeps working.
+- **`--replace-config` replaces an existing `runtime.yaml`.** It is moved to
+  `runtime.yaml.replaced-<UTC time>` beside it first, and the variant must
+  still be inert. Without the flag, an existing `runtime.yaml` is preserved,
+  as before.
+- **A bundle's `install.sh` is verified against the release's `SHA256SUMS`.**
+  A mismatch stops the stage, as a mismatched tarball does.
+
+### Added
+
+- **`install.sh --replace-config`** (#470, #610). It is the supported way to
+  put a project's config onto a machine that already has one, which before
+  meant deleting `runtime.yaml` and re-running. The log names the file and
+  where the previous one went.
+- **A startup warning for a device watchdog under twice the poll
+  interval** (#599, #602). Polling is what feeds each device's firmware
+  watchdog once the runtime runs, so a watchdog shorter than two poll
+  intervals can trip on one late poll and leave every SET refused. The
+  runtime now logs, per device, `preflight: <device> reports
+  watchdog_timeout_ms=<n>, under twice polling.interval_ms=<m>, …` with
+  the values that would fix it. It stays a warning: a trip is the safe
+  direction.
+
+### Fixed
+
+- **A stripped host's InfluxDB tokens are minted by `install.sh` itself**
+  (#514, #517). On a host whose credentials an uninstall before 0.1.54
+  deleted, while it kept the InfluxDB instance, `--with-observability`
+  refused and printed root commands to run. It now mints the write and read
+  tokens with the influx CLI config the uninstall keeps, records them in
+  `observability.env` (0600 root), and logs `observability: minted new
+  write and read tokens`. Without that config it refuses and names it.
+- **The bundled `install.sh` is verified against `SHA256SUMS`** (#508,
+  #510). Stage checked only the tarballs, so the `install.sh` a bundle
+  carries for a later `--local` was used unverified. A mismatch is now
+  fatal, and so is a `SHA256SUMS` that can't be fetched for a reason other
+  than a 404. A release before 0.1.50, whose `SHA256SUMS` has no
+  `install.sh` line, warns and keeps it.
+- **Every FAULT before-hook call is issued when one fails** (#542, #601). A
+  failed call with `fail_on_error` (the default) stopped that hook and every
+  later matching hook, though FAULT commits whatever the hooks return. On a
+  transition into FAULT, a failed call is now logged at error level and the
+  rest are still issued. Other target modes keep the veto.
+- **A FAULT request always ends in FAULT** (#528, #603). A transition that
+  committed while FAULT's before-callbacks ran made the request fail with
+  "Concurrent mode change detected", so the runtime could stay in MANUAL or
+  AUTO with the FAULT hooks, event and journal entry skipped. FAULT now
+  commits from whatever mode it finds.
+- **The stop chain reads `unknown` unless the reading is `QUALITY_OK`**
+  (#526, #604). Its status signal was judged by age alone, so a fresh
+  `false` with unset or unrecognised quality read `clear`, the only state
+  that lets `POST /v0/estop/clear` through. Now any other quality reads
+  `unknown`, and the reason names it. A `reports_estop` device's `estop` is
+  trusted the same way. A `power_loss` device still counts as answering
+  with any fresh reading, whatever its quality.
+- **`install.sh`'s output and leftovers** (#515, #613):
+  - it no longer writes `config/providers/`, which nothing read;
+  - apt runs with `DEBIAN_FRONTEND=noninteractive`, so
+    `--with-observability` no longer prints debconf's `unable to initialize
+    frontend`;
+  - a service user kept from an earlier install is named with its groups,
+    which `install.sh` neither grants nor revokes, with the command to drop
+    one.
+- **The Grafana password note after a failed reset** reads
+  `(admin password: unknown, its reset failed; see the warnings above)`,
+  without nested parentheses (#611).
+
+### Changed
+
+- The observability dev stack's Grafana image is 13.3.0 (#609).
+- Docs: statements the source contradicted are corrected across the
+  site-published docs and the README (#600); references to non-public
+  material are removed (#598); the HTTP doc links the OpenAPI spec and
+  example manifest by URL (#615); the e-stop latch's comment says it
+  refuses CONFIG calls too (#608).
+
+### CI
+
+- **The install walk** (#516, #614): `tests/e2e/install-walk.sh` runs this
+  checkout's `install.sh` as root on fresh x86_64 and arm64 runners against
+  a simulator project, for a fresh install with a variant switch, restart,
+  uninstall and reinstall; recovery after v0.1.53's uninstall; an upgrade
+  from the previous release; and the workbench's `anolis-provision
+  install`. It runs on pull requests that touch `install.sh` or the walk,
+  and on release tags.
+- The release lanes' runtime builds are uploaded as artifacts (#607); the
+  flaky stop-chain expectation tests are fixed (#605, #606); routine
+  dependency maintenance.
+
 ## [0.1.55] - 2026-10-26
 
 Upgrade notes for operators:
