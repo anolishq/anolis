@@ -18,8 +18,8 @@ std::string quality_name(anolis::deviceprovider::v1::SignalValue_Quality quality
     return name.empty() ? std::to_string(static_cast<int>(quality)) : name;
 }
 
-// The stop chain judges only readings whose provider asserted QUALITY_OK.
-// Unlike device health, it does not treat UNSPECIFIED (a provider that never
+// The status signal and a reports_estop device's estop are judged only when
+// their provider asserted QUALITY_OK. Unlike device health, it does not treat UNSPECIFIED (a provider that never
 // sets quality) or an unrecognised value as OK (#526).
 bool is_ok(const state::CachedSignalValue &value) {
     return value.quality == anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK;
@@ -114,12 +114,15 @@ std::optional<std::string> StopChainMonitor::contradiction(const std::string &de
     // Judged only once the stop has been in force for the stale bound, so a
     // reading still fresh now was taken after the stop began.
     if (expect == runtime::StopChainExpect::PowerLoss) {
+        // Any fresh reading is a device that still answers, whatever quality
+        // its provider claims: only STALE, FAULT or UNKNOWN quality, or age,
+        // makes it silent. QUALITY_OK is not required here (#526).
         const auto device = cache_.get_device_state(device_handle);
         if (device == nullptr) {
             return std::nullopt;
         }
         for (const auto &[signal_id, value] : device->signals) {
-            if (is_ok(value) && !value.is_stale(stale_after_)) {
+            if (!value.is_stale(stale_after_)) {
                 return std::format("{} still answers: {} read {} ms ago, after the stop", device_handle, signal_id,
                                    value.age().count());
             }
