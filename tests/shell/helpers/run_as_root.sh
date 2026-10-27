@@ -15,5 +15,9 @@ unset ANOLIS_INSTALL_SH_NO_MAIN
 
 # Sed the script to replace the root check with a no-op, then execute.
 # This avoids needing to source a script that calls main "$@" at the end.
+# The patched copy is run from a file, not passed to `bash -c`: Linux caps one
+# argument at 128 KiB (MAX_ARG_STRLEN), and install.sh has grown past it.
+patched=$(mktemp "${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/install-as-root.XXXXXX")
 # shellcheck disable=SC2016  # single quotes intentional: match the literal $EUID
-exec bash -c "$(sed 's/\$EUID -ne 0/0 -ne 0/' "${SCRIPT}")" -- "$@"
+sed 's/\$EUID -ne 0/0 -ne 0/' "${SCRIPT}" > "${patched}"
+exec bash "${patched}" "$@"
