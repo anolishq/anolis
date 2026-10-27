@@ -116,6 +116,11 @@ public:
      * - FAULT -> AUTO: blocked (must go thru MANUAL)
      * - FAULT -> IDLE: blocked (must go thru MANUAL)
      *
+     * A request for FAULT always ends in FAULT. If another transition commits
+     * while its before-callbacks run, FAULT commits from that mode instead,
+     * and the after-callbacks receive it as the previous mode. Any other
+     * request is refused in that case.
+     *
      * @param new_mode Requested mode
      * @param error Output error message if transition fails
      * @return true if transition succeeded, false if blocked
