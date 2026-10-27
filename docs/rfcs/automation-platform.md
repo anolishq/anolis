@@ -26,7 +26,7 @@
 > - `POST /v0/runs` is not idempotent: a second open is rejected while a run is open. `tag_scope` is stored as supplied.
 > - The run event categories are `run_opened`, `run_closed`, `mode_change`, `parameter_change`, `automation_fault` and `annotation`. Operator markers use `annotation` with an open `type` and `payload`.
 > - There is no `BuildInfo`, `ANOLIS_GIT_SHA` or `ANOLIS_BUILD_ID`. A run records `runtime_version` = `ANOLIS_VERSION`, and `/v0/runtime/status` carries a `version` string.
-> - `runtime.data_dir` defaults to `./anolis-data`, relative to the working directory, for every deployment.
+> - `runtime.data_dir` defaults to `anolis-data` beside the config file, and a relative one resolves against the config file's directory (#562); `install.sh` writes `<prefix>/anolis-data`.
 > - `RunJournal` appends and calls `std::ofstream::flush`; it does not `fdatasync`. Run open/close are flushed to the OS before the HTTP response, which does not make them durable against power loss.
 > - There is no run-log size warning and no size setting.
 >

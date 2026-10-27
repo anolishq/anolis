@@ -207,7 +207,9 @@ _kept_runtime_yaml() {  # <project of bread0 and ezo0>
     [[ "${output}" == *"provider 'ezo0' still reads ${PREFIX}/projects/old-proj/config/provider-ezo.yaml"*"${PREFIX}/projects/proj/config/provider-ezo.yaml"* ]]
     [[ "${output}" != *"'sim0'"* ]]
     [[ "${output}" != *"'foo0'"* ]]
-    cmp "${TMP}/before.yaml" "${PREFIX}/config/runtime.yaml"  # unchanged
+    # unchanged, but for the data dir an upgrade names (#562)
+    printf 'runtime:\n  data_dir: %s/anolis-data\n' "${PREFIX}" >> "${TMP}/before.yaml"
+    cmp "${TMP}/before.yaml" "${PREFIX}/config/runtime.yaml"
 }
 
 @test "phase_config_runtime: no provider warning when the kept --config paths are this project's" {

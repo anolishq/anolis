@@ -69,6 +69,18 @@ eventually() {
     pass "${what}"
 }
 
+# api_post <path> [json body]: POST with the runtime's token, as api does.
+api_post() {
+    local body=()
+    [[ $# -lt 2 ]] || body=(-H 'Content-Type: application/json' --data "$2")
+    sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env |
+        curl -fsS -X POST -H @- "${body[@]}" "${API}$1"
+}
+
+runtime_answers() { api /v0/runtime/status >/dev/null; }
+estop_latched() { api /v0/runtime/status | jq -e '.estop.latched == true'; }
+run_listed() { api /v0/runs | jq -e --arg id "$1" 'any(.runs[]; .run_id == $id)'; }
+
 runtime_ok() { api /v0/runtime/status | jq -e '.status.code == "OK"'; }
 safe_state_achieved() { api /v0/runtime/status | jq -e '.startup_safe_state.safe_state_achieved == true'; }
 runtime_version_is() { api /v0/runtime/status | jq -e --arg v "$1" '.version == $v'; }
@@ -178,7 +190,23 @@ scenario_upgrade() {
     check_runtime
     eventually 30 "the runtime is v${previous}" runtime_version_is "${previous}"
 
+    # The latch and the run journal are in the data dir, which the upgrade
+    # names in the kept runtime.yaml where it already was (#562).
+    local run_id
+    run_id="$(api_post /v0/runs '{"experiment_label":"install-walk upgrade"}' | jq -er '.run.run_id')" ||
+        fail "could not open a run on v${previous}"
+    api_post /v0/estop >/dev/null || fail "could not latch the e-stop on v${previous}"
+    pass "v${previous}: run ${run_id} open and the e-stop latched"
+
     run_install upgrade "${INSTALL_SH}" --project "${PROJECT}" --variant telemetry --with-observability --keep-hostname
+    expect_log upgrade "set runtime.data_dir to /opt/anolis/anolis-data"
+    grep -qx '  data_dir: /opt/anolis/anolis-data' /opt/anolis/config/runtime.yaml ||
+        fail "the kept runtime.yaml does not name /opt/anolis/anolis-data"
+    pass "the kept runtime.yaml names /opt/anolis/anolis-data"
+    eventually 60 "the upgraded runtime answers" runtime_answers
+    eventually 30 "the e-stop is still latched after the upgrade" estop_latched
+    eventually 30 "run ${run_id} is still in the journal after the upgrade" run_listed "${run_id}"
+    api_post /v0/estop/clear >/dev/null || fail "could not clear the e-stop after the upgrade"
     check_runtime
     eventually 30 "the runtime is v${current}" runtime_version_is "${current}"
     check_observability
