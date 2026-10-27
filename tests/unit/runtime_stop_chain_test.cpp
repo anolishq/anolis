@@ -385,6 +385,18 @@ std::vector<std::string> mismatch_moves(anolis::events::Subscription &events) {
     return moves;
 }
 
+// The main loop changes a mismatch and then emits its event, so a test that
+// has just seen the change waits for the event too (#605).
+std::vector<std::string> wait_for_moves(anolis::events::Subscription &events, size_t count) {
+    std::vector<std::string> moves;
+    eventually([&] {
+        const auto more = mismatch_moves(events);
+        moves.insert(moves.end(), more.begin(), more.end());
+        return moves.size() >= count;
+    });
+    return moves;
+}
+
 // Starts clear, presses the stop, and waits until the runtime reads it in force.
 void press_the_stop(const Rig &rig, anolis::runtime::Runtime &runtime) {
     set_chain(rig, "1");
@@ -505,7 +517,7 @@ TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWhoseEstopReadsFalseRaisesSt
     // The device starts reporting the stop: the mismatch resolves while in force.
     set_file(rig, "estop", "1");
     ASSERT_TRUE(eventually([&] { return runtime.get_stop_chain().mismatches().empty(); }));
-    EXPECT_EQ(mismatch_moves(*events),
+    EXPECT_EQ(wait_for_moves(*events, 2),
               (std::vector<std::string>{"raised bread0/motor0 reports_estop", "resolved bread0/motor0 reports_estop"}));
 }
 
