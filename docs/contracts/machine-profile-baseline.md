@@ -19,13 +19,14 @@ Define machine profile manifest structure and lock manifest behavior for validat
 2. Manifest file is `machine-profile.yaml`.
 3. Manifest declares:
    - identity (`schema_version`, `machine_id`, `display_name`)
-   - runtime profile entrypoints (`manual` required; optional `telemetry`, `automation`, `full`)
+   - runtime profile entrypoints (`manual` required; optional `telemetry`, `automation`, `full`; any other variant name is also accepted)
    - provider config references
    - optional behavior asset references
    - runtime contract references and compatibility notes
-   - optional pinned component versions (`components`: runtime/provider/optional
-     artifact `repo`+`version` pairs, read by `tools/install.sh` and auto-bumped
-     by Renovate)
+   - optional pinned component versions (`components`: runtime/provider
+     `repo`+`version` pairs and optional artifact `package`+`version` pairs,
+     read by `tools/install.sh`; Renovate in `anolis-projects` opens PRs for the
+     `repo`+`version` pairs only)
    - optional informational safety facts (`safety.estop_topology:
      power_cut | signal` — how the physical e-stop is wired, so operators and
      monitoring can interpret an e-stop event's software signature: `power_cut`

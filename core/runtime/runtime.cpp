@@ -254,6 +254,11 @@ bool Runtime::init_providers(std::string &error) {
                                          << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
                                             "watchdog will not stop it if the runtime or its provider is lost");
     }
+    // Polling feeds those watchdogs once the runtime runs (#599).
+    for (const auto &line :
+         health::watchdog_timeouts_under_poll_margin(provider_registry_, *registry_, config_.polling.interval_ms)) {
+        LOG_WARN("[Runtime] " << line);
+    }
     return true;
 }
 

@@ -93,6 +93,11 @@ ALLOW_UNMET_HOST=0
 ALLOW_DOWNGRADE=0
 # Keep the host's own name instead of renaming it (--keep-hostname).
 KEEP_HOSTNAME=0
+# --replace-config (#470): back up and replace an existing runtime.yaml and the
+# provider configs the bundle ships, instead of preserving them. REPLACE_STAMP
+# names every backup of one run alike.
+REPLACE_CONFIG=0
+REPLACE_STAMP=""
 
 # Stage mode (build an offline bundle from a local config; dev-side, no root)
 STAGE_DIR=""
@@ -166,6 +171,10 @@ Common:
                          the installed one. Without it, the install is refused
                          before anything changes; --rollback is the way back
                          to the previous install.
+  --replace-config       Replace an existing runtime config, and each provider
+                         config the bundle ships, instead of preserving it. Each
+                         replaced file is moved to <file>.replaced-<UTC time>
+                         beside it first. The variant must still be inert.
   --keep-hostname        Keep this host's name. By default an arm64 host with
                          a device-tree serial is renamed anolis-<last 8 of
                          serial>; with this flag the printed URL, mDNS and
@@ -212,6 +221,7 @@ parse_args() {
             --allow-unmet-host) ALLOW_UNMET_HOST=1; shift ;;
             --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
             --keep-hostname) KEEP_HOSTNAME=1; shift ;;
+            --replace-config) REPLACE_CONFIG=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --rollback)  ROLLBACK=1; shift ;;
             --dry-run)   DRY_RUN=1; shift ;;
@@ -614,9 +624,22 @@ preflight_variant_selection() {
     profile_dir=$(find "${BUNDLE_DIR}/projects" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
     [[ -n "${profile_dir}" ]] || die "config (runtime): no projects/ in bundle"
     _resolve_variant_src "${profile_dir}"
-    # A fresh install must select an inert variant; an existing (operator-edited)
-    # config is preserved and only warned on in phase_config_runtime.
-    [[ -f "${PREFIX}/config/runtime.yaml" ]] || verify_inert_runtime_config "${RESOLVED_VARIANT_SRC}" die
+    # A fresh install must select an inert variant, and so must a replace; an
+    # existing (operator-edited) config is otherwise preserved and only warned
+    # on in phase_config_runtime.
+    if [[ ! -f "${PREFIX}/config/runtime.yaml" || ${REPLACE_CONFIG} -eq 1 ]]; then
+        verify_inert_runtime_config "${RESOLVED_VARIANT_SRC}" die
+    fi
+}
+
+# Move an existing config aside for --replace-config, beside it, and log both
+# paths (#470).
+_backup_replaced_config() {
+    local path="$1"
+    [[ -n "${REPLACE_STAMP}" ]] || REPLACE_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+    local backup="${path}.replaced-${REPLACE_STAMP}"
+    mv "${path}" "${backup}" || die "config: could not back up ${path} to ${backup}"
+    log_info "config: replacing ${path}; the previous file is at ${backup}"
 }
 
 phase_config_runtime() {
@@ -626,13 +649,19 @@ phase_config_runtime() {
     _resolve_variant_src "${BUNDLE_DIR}/projects/${INSTALLED_PROFILE:-}"
     local src="${RESOLVED_VARIANT_SRC}"
 
-    if [[ -f "${dest}" ]]; then
+    if [[ -f "${dest}" && ${REPLACE_CONFIG} -eq 1 ]]; then
+        verify_inert_runtime_config "${src}" die
+        _backup_replaced_config "${dest}"
+        cp "${src}" "${dest}"
+        chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
+        log_ok "config (runtime): replaced with variant '${variant}'"
+    elif [[ -f "${dest}" ]]; then
         # Preserve an operator-edited/activated config across upgrades; only warn
         # if it is not inert (they may have activated automation from Operate).
         log_skip "config (runtime): ${dest} exists (preserved)"
         if [[ -n "${RUNTIME_VARIANT}" ]]; then
             log_warn "config (runtime): --variant '${RUNTIME_VARIANT}' NOT applied; ${dest} is preserved."
-            log_info "To switch variants, remove ${dest} and re-run, or edit it directly."
+            log_info "To switch variants, re-run with --replace-config, which backs ${dest} up first, or edit it directly."
         fi
         verify_inert_runtime_config "${dest}" warn
         warn_kept_provider_configs "${dest}"
@@ -660,7 +689,7 @@ warn_kept_provider_configs() {
         rel="${conf#"${root}"}"
         project="${rel%%/*}"
         [[ "${project}" != "${INSTALLED_PROFILE}" ]] || continue
-        log_warn "config (runtime): provider '${id}' still reads ${conf} from project '${project}', not ${root}${INSTALLED_PROFILE}/${rel#*/}; ${cfg} is preserved, edit it to switch."
+        log_warn "config (runtime): provider '${id}' still reads ${conf} from project '${project}', not ${root}${INSTALLED_PROFILE}/${rel#*/}; ${cfg} is preserved; re-run with --replace-config, or edit it, to switch."
     done < <(_runtime_providers "${cfg}")
 }
 
@@ -749,7 +778,12 @@ phase_config_providers() {
         filename=$(basename "${src_file}")
         local dest="${PREFIX}/config/providers/${filename}"
 
-        if [[ -f "${dest}" ]]; then
+        if [[ -f "${dest}" && ${REPLACE_CONFIG} -eq 1 ]]; then
+            _backup_replaced_config "${dest}"
+            cp "${src_file}" "${dest}"
+            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
+            installed=$((installed + 1))
+        elif [[ -f "${dest}" ]]; then
             skipped=$((skipped + 1))
         else
             cp "${src_file}" "${dest}"
@@ -2964,9 +2998,17 @@ main() {
         dry_run_phase "backup existing binaries"
         dry_run_phase "install binaries to ${PREFIX}/bin/"
         dry_run_phase "install project config"
-        dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
+        if [[ ${REPLACE_CONFIG} -eq 1 ]]; then
+            dry_run_phase "replace the runtime config with variant '${RUNTIME_VARIANT:-manual}' (verify inert; an existing ${PREFIX}/config/runtime.yaml moves to runtime.yaml.replaced-<UTC time>)"
+        else
+            dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
+        fi
         dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
-        dry_run_phase "install provider configs (skip each if exists)"
+        if [[ ${REPLACE_CONFIG} -eq 1 ]]; then
+            dry_run_phase "replace provider configs the bundle ships (each existing one moves to <file>.replaced-<UTC time>)"
+        else
+            dry_run_phase "install provider configs (skip each if exists)"
+        fi
         dry_run_phase "host preflight: run each binary and each provider's --check-host as ${ANOLIS_USER}"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"

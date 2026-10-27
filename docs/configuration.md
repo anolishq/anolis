@@ -30,7 +30,7 @@ Out of scope for this contract:
 3. Validate schema fixtures:
    - `python3 tests/contracts/runtime-config/validate-runtime-configs.py`
 4. Validate runtime semantics:
-   - `anolis-runtime --check-config --config <path>`
+   - `anolis-runtime --check-config <path>`
 5. Run runtime normally after both checks pass.
 
 ## Minimal Runtime Skeleton
@@ -46,7 +46,8 @@ http:
 
 providers:
   - id: sim0
-    command: ./build/dev-release/anolis-provider-sim
+    command: ../anolis-provider-sim/build/dev-release/anolis-provider-sim
+    args: ["--config", "../anolis-provider-sim/config/minimal.yaml"]
 
 polling:
   interval_ms: 500
@@ -65,7 +66,9 @@ automation:
 
 ### Runtime modes
 
-1. Startup mode is always `IDLE` (not YAML-configurable).
+1. With `automation.enabled: true`, startup mode is always `IDLE` (not YAML-configurable).
+   With automation disabled (the default) there is no mode machine: manual
+   control is permitted from startup, and `/v0/mode` returns `503`.
 2. Mode changes happen at runtime via `POST /v0/mode`.
 3. `IDLE` blocks control operations; `AUTO` applies manual-call gating policy.
    `IDLE` does not change outputs. At startup, `safety.on_startup` does:
@@ -90,7 +93,8 @@ automation:
 
 1. Telemetry is off by default.
 2. Use nested `telemetry.influxdb.*` settings.
-3. Flat `telemetry.influx_*` keys remain accepted for compatibility, but are deprecated.
+3. Flat `telemetry.influx_*`, `telemetry.batch_size` and `telemetry.flush_interval_ms`
+   keys load without error and log a deprecation warning, but their values are ignored.
 4. When telemetry is enabled, provider/device health is also ingested every
    `telemetry.health_interval_ms` (default 15000; `0` disables).
 
@@ -157,7 +161,9 @@ declare, since such an entry excludes nothing.
 
 ### Compatibility behavior
 
-1. Unknown keys are warn-and-ignore for forward compatibility.
+1. Unknown keys are ignored for forward compatibility, and most sections log a warning.
+   Unknown keys under `polling` and `logging` are ignored with no warning, and the
+   JSON schema rejects unknown keys under `safety.stop_chain`.
 2. `automation.behavior_tree_path` is an accepted alias for `automation.behavior_tree`.
 3. `runtime.mode` in YAML is rejected.
 

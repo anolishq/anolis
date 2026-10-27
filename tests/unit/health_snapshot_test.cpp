@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -601,4 +602,55 @@ TEST_F(WatchdogPreflightTest, ArmedWatchdogIsSilent) {
 TEST_F(WatchdogPreflightTest, NoReportedHealthIsSilent) {
     ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
     EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+}
+
+// ---------------------------------------------------------------------------
+// watchdog_timeouts_under_poll_margin — startup preflight (#599). Polling
+// feeds the firmware watchdog, so a timeout under twice polling.interval_ms
+// trips in ordinary running (2000 ms at 2500 ms on the reference rig).
+// ---------------------------------------------------------------------------
+
+class WatchdogMarginTest : public WatchdogPreflightTest {
+protected:
+    // Reports each device's watchdog_timeout_ms as given; a device left out
+    // reports no key, and "ghost" is a device the registry does not know.
+    void ReportWatchdogTimeouts(std::map<std::string, std::string> timeouts) {
+        ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([timeouts](GetHealthResponse &response) {
+            for (const auto &[id, timeout] : timeouts) {
+                auto *dh = response.add_devices();
+                dh->set_device_id(id);
+                dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_OK);
+                (*dh->mutable_metrics())["watchdog_timeout_ms"] = timeout;
+            }
+            return true;
+        }));
+    }
+};
+
+TEST_F(WatchdogMarginTest, WarnsForATimeoutUnderTwiceThePollingInterval) {
+    ReportWatchdogTimeouts({{"drive", "2000"}, {"sensor", "5000"}});
+    const auto lines = health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0],
+              "preflight: sim0/drive reports watchdog_timeout_ms=2000, under twice polling.interval_ms=2500, so a "
+              "late poll can trip its watchdog and leave every SET refused; raise the device's watchdog timeout to at "
+              "least 5000 ms, or lower polling.interval_ms to at most 1000 ms");
+}
+
+TEST_F(WatchdogMarginTest, TwiceTheIntervalIsEnough) {
+    ReportWatchdogTimeouts({{"drive", "5000"}, {"sensor", "4999"}});
+    const auto lines = health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_NE(lines[0].find("sim0/sensor reports watchdog_timeout_ms=4999"), std::string::npos) << lines[0];
+}
+
+TEST_F(WatchdogMarginTest, NoClaimIsSilent) {
+    // Zero is a watchdog that never arms, and a value that does not parse is
+    // not a timeout; neither, nor an unknown device, nor an absent key warns.
+    ReportWatchdogTimeouts({{"drive", "0"}, {"sensor", "soon"}, {"ghost", "100"}});
+    EXPECT_TRUE(health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500).empty());
+    ReportWatchdogArmed("true");
+    EXPECT_TRUE(health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500).empty());
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
+    EXPECT_TRUE(health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500).empty());
 }

@@ -59,8 +59,9 @@ so they cannot drift.
    series on every firmware change, orphaning exactly the history they exist to
    connect. The provider's wider descriptor tag map is deliberately *not*
    written here — those keys are provider-chosen and unbounded, and line
-   protocol keys must not be. It is available in full on
-   `GET /v0/providers/health`.
+   protocol keys must not be. It is served on `GET /v0/providers/health`,
+   bounded: at most 32 tags, keys over 128 bytes dropped, and values truncated
+   to 128 bytes on a UTF-8 boundary.
 6. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,
@@ -69,14 +70,14 @@ so they cannot drift.
    - booleans: `watchdog_armed`, `watchdog_tripped`, `missing`, `excluded`
    - identity strings: `startup_firmware`, `startup_product_code`,
      `firmware_version` — non-empty, truncated to 128 bytes, omitted when
-     absent or empty. Note these three are not in the SDK's reserved-key
-     vocabulary yet, unlike the counters above. `anolishq/anolis-provider-sdk#38`
-     reserves `firmware_version`; `startup_firmware` and
+     absent or empty. `firmware_version` is in the SDK's reserved-key
+     vocabulary (`docs/metrics.md`, Identity strings); `startup_firmware` and
      `startup_product_code` are unreserved, with no decision on them yet.
 7. Every provider-supplied string is escaped for line protocol — **tag values
-   as well as string fields**, since `provider_id`, `device_id` and `signal_id`
-   are provider-chosen and unvalidated. In field values `"` and `\` are
-   backslash-escaped; in tag values `,`, `=`, space and `\` are. In both, `\n`,
+   as well as string fields**, since `device_id` and `signal_id` are
+   provider-chosen and unvalidated, and `provider_id` (runtime config
+   `providers[].id`) is checked only for being non-empty and unique. In field
+   values `"` and `\` are backslash-escaped; in tag values `,`, `=`, space and `\` are. In both, `\n`,
    `\r` and `\t` are rewritten to their two-character forms and other C0/DEL
    bytes are dropped: line protocol is newline-delimited, so a raw newline
    would split one row into two malformed ones and cost the whole batch, and a

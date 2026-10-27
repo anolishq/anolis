@@ -21,7 +21,7 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
 ### Scope
 
 1. Applies to runtime YAML consumed by `anolis-runtime`.
-2. Targets `anolis-runtime*.yaml` under `config/`.
+2. Targets `examples/anolis-runtime*.yaml` and `config/**/anolis-runtime*.yaml`.
 3. Excludes provider-local YAML and telemetry-export YAML.
 
 ### Supported Top-Level Sections
@@ -82,7 +82,7 @@ Run both layers:
 1. Schema and fixture validation:
    - `python3 tests/contracts/runtime-config/validate-runtime-configs.py`
 2. Runtime semantic validation:
-   - `anolis-runtime --check-config --config <runtime-yaml>`
+   - `anolis-runtime --check-config <runtime-yaml>`
 
 CI must keep these green together.
 
