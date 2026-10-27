@@ -113,10 +113,10 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     }
 
     // Refuse actuating calls while the e-stop latch is engaged. Fail closed:
-    // an unclassified function is treated as actuating. Safe-state actions and
-    // read-only/config functions are unaffected, and so is a FAULT-entry hook
-    // while the latch admits one (the e-stop's own FAULT entry under rung
-    // none, #251).
+    // only a function declared READ passes (registry::is_actuating), so CONFIG
+    // and unclassified functions are refused too. Safe-state actions are
+    // unaffected, and so is a FAULT-entry hook while the latch admits one (the
+    // e-stop's own FAULT entry under rung none, #251).
     if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
         registry::is_actuating(*func_spec) &&
         !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks())) {
