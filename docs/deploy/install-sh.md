@@ -92,10 +92,12 @@ install cannot bring a machine up already actuating.
 > To switch variants, re-run with **`--replace-config`**, or edit
 > **`/opt/anolis/config/runtime.yaml`** in place. (Under `--prefix`, that is
 > `<prefix>/config/runtime.yaml`.) `--replace-config` moves the existing file to
-> `runtime.yaml.replaced-<UTC time>` beside it, and each provider config in the
-> bundle's `config/providers/` likewise, then installs the bundle's. The variant
-> must still be inert, and the check runs before anything moves. Each path is
-> logged, and `--dry-run --replace-config` says what it would replace.
+> `runtime.yaml.replaced-<UTC time>` beside it, then installs the bundle's. The
+> variant must still be inert, and the check runs before anything moves. Both
+> paths are logged, and `--dry-run --replace-config` says what it would
+> replace. Provider configs need no flag: they live in
+> `<prefix>/projects/<project>/config/`, which every install replaces, and the
+> runtime config points there.
 
 ## Optional components
 
@@ -121,7 +123,7 @@ Raise retention with `OBSERVABILITY_RETENTION`, but read `observability/README.m
 | `--dry-run` | Print what would happen, change nothing. Ignored by `--stage`, which builds the bundle anyway. |
 | `--allow-unmet-host` | Install even when a provider reports unmet host requirements. See [Host requirements](#host-requirements). |
 | `--allow-downgrade` | Install even when the bundle's runtime is older than the installed one, which `bin/anolis-runtime --version` reports. Without it the install is refused before anything changes; `--rollback` is the way back to the previous install. `--dry-run --local` reports the comparison. |
-| `--replace-config` | Replace an existing runtime config, and each provider config the bundle ships, instead of preserving it. Each one moves to `<file>.replaced-<UTC time>` beside it first, and the variant must be inert. See the upgrade note above. |
+| `--replace-config` | Replace an existing runtime config instead of preserving it. It moves to `runtime.yaml.replaced-<UTC time>` beside it first, and the variant must be inert. See the upgrade note above. |
 | `--keep-hostname` | Keep the host's name. By default an arm64 host with a device-tree serial is renamed `anolis-<last 8 of serial>`, and `127.0.1.1` in `/etc/hosts` is pointed at the new name. With this flag neither happens, and the printed access URL and the mDNS name (`<host>.local`) use the existing name. |
 | `--prefix <path>` | Override the install prefix (default `/opt/anolis`). Install and rollback refuse, before changing anything, a prefix that is empty, relative or a symlink, resolves to `/` or a top-level directory, or is or holds `$HOME`; so does an install that adopts a staged bundle's prefix. |
 | `--rollback` | Restore the previous binaries from `<prefix>/.prev` and restart. |
@@ -227,7 +229,11 @@ limits:
 `anolis` user access to device nodes belong to the project's host prep for its
 platform, run first: host prep, then any reboot it asks for, then `install.sh`. The
 `anolis` system user is a contract between the two: host prep may create it, and
-`install.sh` accepts an existing one.
+`install.sh` accepts an existing one. `install.sh` never grants or revokes its
+groups, so a user kept by `--uninstall` keeps the ones an earlier install or host
+prep gave it, such as `dialout` and `gpio` from before #318. An install over an
+existing user names its groups, and how to drop one:
+`sudo gpasswd -d anolis <group>`.
 
 Before anything starts, `install.sh` checks the result. As `anolis`, from the
 install prefix, it runs:

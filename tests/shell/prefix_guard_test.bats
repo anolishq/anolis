@@ -40,7 +40,7 @@ setup() {
     _stub_cmd chown chmod rm rmdir install cp mv systemctl useradd runuser
     _stub_cmd phase_root_check phase_detect phase_verify preflight_variant_selection \
         phase_system_user phase_backup phase_config_project phase_config_runtime \
-        phase_runtime_auth phase_config_providers phase_host_preflight phase_manifest \
+        phase_runtime_auth phase_host_preflight phase_manifest \
         phase_systemd phase_telemetry_export phase_observability phase_hostname \
         phase_start phase_health phase_summary do_stage
 
@@ -137,8 +137,10 @@ assert_each_refused() {
     local p="${FIX}/opt/anolis"
     run main --local "${BUNDLE}" --no-start --prefix "${p}"
     [ "$status" -eq 0 ]
-    grep -qxF "install -d -m 755 ${p} ${p}/bin ${p}/config ${p}/config/providers ${p}/projects ${p}/.prev ${p}/anolis-data" "${CALLS}"
+    grep -qxF "install -d -m 755 ${p} ${p}/bin ${p}/config ${p}/projects ${p}/.prev ${p}/anolis-data" "${CALLS}"
     grep -qxF "chown anolis:anolis ${p}/bin/*" "${CALLS}"
+    # Nothing reads <prefix>/config/providers/, so no phase writes it (#515).
+    if grep -q '^phase_config_providers' "${CALLS}"; then return 1; fi
 }
 
 # Install never removes the prefix, so a prefix that is its own mount is a

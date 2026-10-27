@@ -126,6 +126,10 @@ log_info() { printf  "  %s\n" "$*"; }
 
 die() { log_err "$*"; exit 1; }
 
+# apt with no terminal to ask on. Without it debconf warns "unable to
+# initialize frontend" on every package (#515).
+_apt() { DEBIAN_FRONTEND=noninteractive apt-get "$@"; }
+
 # =============================================================================
 # Argument parsing
 # =============================================================================
@@ -171,10 +175,10 @@ Common:
                          the installed one. Without it, the install is refused
                          before anything changes; --rollback is the way back
                          to the previous install.
-  --replace-config       Replace an existing runtime config, and each provider
-                         config the bundle ships, instead of preserving it. Each
-                         replaced file is moved to <file>.replaced-<UTC time>
-                         beside it first. The variant must still be inert.
+  --replace-config       Replace an existing runtime config instead of
+                         preserving it. It is moved to
+                         runtime.yaml.replaced-<UTC time> beside it first. The
+                         variant must still be inert.
   --keep-hostname        Keep this host's name. By default an arm64 host with
                          a device-tree serial is renamed anolis-<last 8 of
                          serial>; with this flag the printed URL, mDNS and
@@ -415,7 +419,19 @@ phase_version_check() {
 # the platform's business, not install.sh's). install.sh only ensures it exists.
 phase_system_user() {
     if id "${ANOLIS_USER}" &>/dev/null; then
-        log_skip "system user: ${ANOLIS_USER} already exists"
+        # A user kept from an earlier install keeps the groups it was given
+        # then (dialout and gpio, before #318): name them, since install.sh
+        # neither grants nor revokes any (#515).
+        # A user in its own group only leaves grep nothing to print, and its
+        # exit 1 would end the install under pipefail.
+        local groups
+        groups=$(id -nG "${ANOLIS_USER}" 2>/dev/null | tr ' ' '\n' | { grep -vxF "${ANOLIS_USER}" || true; } | paste -sd ' ' -)
+        if [[ -n "${groups}" ]]; then
+            log_skip "system user: ${ANOLIS_USER} already exists, in groups: ${groups}"
+            log_info "install.sh grants no groups; device access is host prep's. To drop one: sudo gpasswd -d ${ANOLIS_USER} <group>"
+        else
+            log_skip "system user: ${ANOLIS_USER} already exists"
+        fi
     else
         # No --create-home: it copies /etc/skel into ${PREFIX}, polluting the
         # install tree (found by the workbench deploy-parity gate). The prefix
@@ -434,7 +450,7 @@ phase_directories() {
     # Explicit modes — mkdir -p inherits the caller's umask, and a permissive
     # caller left bin/ world-writable (777) on CI (#154).
     install -d -m 755 "${PREFIX}" "${PREFIX}/bin" "${PREFIX}/config" \
-        "${PREFIX}/config/providers" "${PREFIX}/projects" "${PREFIX}/.prev" \
+        "${PREFIX}/projects" "${PREFIX}/.prev" \
         "${PREFIX}/anolis-data"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
@@ -758,45 +774,6 @@ _generate_api_token() {
 
     [[ "${token}" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf '%s' "${token}"
-}
-
-# =============================================================================
-# Phase 14: Config (providers) — skip each if exists
-# =============================================================================
-
-phase_config_providers() {
-    local src_dir="${BUNDLE_DIR}/config/providers"
-    if [[ ! -d "${src_dir}" ]]; then
-        log_skip "config (providers): no config/providers/ in bundle"
-        return
-    fi
-
-    local installed=0 skipped=0
-    for src_file in "${src_dir}"/*.yaml; do
-        [[ -f "${src_file}" ]] || continue
-        local filename
-        filename=$(basename "${src_file}")
-        local dest="${PREFIX}/config/providers/${filename}"
-
-        if [[ -f "${dest}" && ${REPLACE_CONFIG} -eq 1 ]]; then
-            _backup_replaced_config "${dest}"
-            cp "${src_file}" "${dest}"
-            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-            installed=$((installed + 1))
-        elif [[ -f "${dest}" ]]; then
-            skipped=$((skipped + 1))
-        else
-            cp "${src_file}" "${dest}"
-            chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
-            installed=$((installed + 1))
-        fi
-    done
-
-    if [[ ${skipped} -gt 0 ]]; then
-        log_skip "config (providers): ${skipped} preserved, ${installed} written"
-    else
-        log_ok "config (providers): ${installed} written"
-    fi
 }
 
 # =============================================================================
@@ -1182,7 +1159,7 @@ phase_telemetry_export() {
     # python3 -m venv needs the python3-venv package (ensurepip), which install.sh
     # does not otherwise need. Non-fatal — skip the feature if it fails.
     if ! dpkg -s python3-venv &>/dev/null 2>&1; then
-        if ! { apt-get update -qq && apt-get install -y -qq python3-venv; }; then
+        if ! { _apt update -qq && _apt install -y -qq python3-venv; }; then
             log_warn "telemetry-export: could not install python3-venv — skipped"
             return
         fi
@@ -1329,7 +1306,7 @@ EOF
 # Add the InfluxData + Grafana apt repos with dearmored keyrings. Idempotent.
 _obs_apt_repos() {
     if ! command -v gpg &>/dev/null; then
-        apt-get install -y -qq gnupg || return 1
+        _apt install -y -qq gnupg || return 1
     fi
     install -d -m 755 /etc/apt/keyrings || return 1
     # Keyrings are written via temp+mv: a mid-stream curl failure must not
@@ -1659,7 +1636,7 @@ phase_observability() {
     if ! dpkg -s influxdb2 &>/dev/null || ! dpkg -s influxdb2-cli &>/dev/null || ! dpkg -s grafana &>/dev/null; then
         log_info "observability: installing influxdb2 + grafana (this can take a few minutes)"
         # shellcheck disable=SC2015  # intentional: error handler covers both failures
-        apt-get update -qq && apt-get install -y -qq influxdb2 influxdb2-cli grafana || {
+        _apt update -qq && _apt install -y -qq influxdb2 influxdb2-cli grafana || {
             log_warn "observability: package install failed — skipped"
             return 0
         }
@@ -2730,7 +2707,7 @@ def render(c):
     return re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
 
 
-(out / "config" / "providers").mkdir(parents=True, exist_ok=True)
+(out / "config").mkdir(parents=True, exist_ok=True)
 pcfg = out / "projects" / profile / "config"
 pcfg.mkdir(parents=True, exist_ok=True)
 beh = pd / "behaviors"
@@ -2792,9 +2769,9 @@ _auto = (yaml.safe_load(default_src.read_text()) or {}).get("automation") or {}
 if _auto.get("enabled") or "mode_transition_hooks" in _auto:
     sys.exit(f"the 'manual' variant is not inert (automation enabled or hooks present): {default_src}")
 (out / "config" / "runtime.yaml").write_text(render(default_src.read_text()))
+# Provider configs ship once, under projects/, where the rendered runtime
+# configs point. A config/providers/ copy was written and never read (#515).
 for pc in sorted(cfg.glob("provider-*.yaml")):
-    name = pc.stem.removeprefix("provider-").split(".")[0]
-    (out / "config" / "providers" / f"{name}.yaml").write_text(render(pc.read_text()))
     (pcfg / pc.name).write_text(render(pc.read_text()))
 mp = pd / "machine-profile.yaml"
 if mp.exists():
@@ -3004,11 +2981,6 @@ main() {
             dry_run_phase "install runtime config, variant '${RUNTIME_VARIANT:-manual}' (verify inert; skip if exists)"
         fi
         dry_run_phase "generate runtime API token at ${RUNTIME_ENV_FILE} (reuse if exists)"
-        if [[ ${REPLACE_CONFIG} -eq 1 ]]; then
-            dry_run_phase "replace provider configs the bundle ships (each existing one moves to <file>.replaced-<UTC time>)"
-        else
-            dry_run_phase "install provider configs (skip each if exists)"
-        fi
         dry_run_phase "host preflight: run each binary and each provider's --check-host as ${ANOLIS_USER}"
         dry_run_phase "write manifest.json"
         dry_run_phase "install systemd units"
@@ -3038,7 +3010,6 @@ main() {
     phase_config_project
     phase_config_runtime
     phase_runtime_auth
-    phase_config_providers
     phase_host_preflight
     phase_manifest
     phase_systemd
