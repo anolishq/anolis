@@ -40,7 +40,11 @@ using namespace anolis::provider;
 class ProviderProcessTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        test_executable_path_ = std::filesystem::current_path() / "test_helper_executable";
+        // One script per test: ctest runs each test as its own process, in
+        // parallel, and a shared name let one test's TearDown delete the
+        // script another had just written.
+        const auto *info = ::testing::UnitTest::GetInstance()->current_test_info();
+        test_executable_path_ = std::filesystem::current_path() / (std::string("test_helper_") + info->name());
 #ifdef _WIN32
         test_executable_path_ += ".bat";
 #endif
