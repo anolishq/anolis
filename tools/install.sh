@@ -419,7 +419,17 @@ phase_version_check() {
 # the platform's business, not install.sh's). install.sh only ensures it exists.
 phase_system_user() {
     if id "${ANOLIS_USER}" &>/dev/null; then
-        log_skip "system user: ${ANOLIS_USER} already exists"
+        # A user kept from an earlier install keeps the groups it was given
+        # then (dialout and gpio, before #318): name them, since install.sh
+        # neither grants nor revokes any (#515).
+        local groups
+        groups=$(id -nG "${ANOLIS_USER}" 2>/dev/null | tr ' ' '\n' | grep -vxF "${ANOLIS_USER}" | paste -sd ' ' -)
+        if [[ -n "${groups}" ]]; then
+            log_skip "system user: ${ANOLIS_USER} already exists, in groups: ${groups}"
+            log_info "install.sh grants no groups; device access is host prep's. To drop one: sudo gpasswd -d ${ANOLIS_USER} <group>"
+        else
+            log_skip "system user: ${ANOLIS_USER} already exists"
+        fi
     else
         # No --create-home: it copies /etc/skel into ${PREFIX}, polluting the
         # install tree (found by the workbench deploy-parity gate). The prefix

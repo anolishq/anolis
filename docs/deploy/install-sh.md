@@ -229,7 +229,11 @@ limits:
 `anolis` user access to device nodes belong to the project's host prep for its
 platform, run first: host prep, then any reboot it asks for, then `install.sh`. The
 `anolis` system user is a contract between the two: host prep may create it, and
-`install.sh` accepts an existing one.
+`install.sh` accepts an existing one. `install.sh` never grants or revokes its
+groups, so a user kept by `--uninstall` keeps the ones an earlier install or host
+prep gave it, such as `dialout` and `gpio` from before #318. An install over an
+existing user names its groups, and how to drop one:
+`sudo gpasswd -d anolis <group>`.
 
 Before anything starts, `install.sh` checks the result. As `anolis`, from the
 install prefix, it runs:
