@@ -126,6 +126,10 @@ log_info() { printf  "  %s\n" "$*"; }
 
 die() { log_err "$*"; exit 1; }
 
+# apt with no terminal to ask on. Without it debconf warns "unable to
+# initialize frontend" on every package (#515).
+_apt() { DEBIAN_FRONTEND=noninteractive apt-get "$@"; }
+
 # =============================================================================
 # Argument parsing
 # =============================================================================
@@ -1143,7 +1147,7 @@ phase_telemetry_export() {
     # python3 -m venv needs the python3-venv package (ensurepip), which install.sh
     # does not otherwise need. Non-fatal — skip the feature if it fails.
     if ! dpkg -s python3-venv &>/dev/null 2>&1; then
-        if ! { apt-get update -qq && apt-get install -y -qq python3-venv; }; then
+        if ! { _apt update -qq && _apt install -y -qq python3-venv; }; then
             log_warn "telemetry-export: could not install python3-venv — skipped"
             return
         fi
@@ -1290,7 +1294,7 @@ EOF
 # Add the InfluxData + Grafana apt repos with dearmored keyrings. Idempotent.
 _obs_apt_repos() {
     if ! command -v gpg &>/dev/null; then
-        apt-get install -y -qq gnupg || return 1
+        _apt install -y -qq gnupg || return 1
     fi
     install -d -m 755 /etc/apt/keyrings || return 1
     # Keyrings are written via temp+mv: a mid-stream curl failure must not
@@ -1620,7 +1624,7 @@ phase_observability() {
     if ! dpkg -s influxdb2 &>/dev/null || ! dpkg -s influxdb2-cli &>/dev/null || ! dpkg -s grafana &>/dev/null; then
         log_info "observability: installing influxdb2 + grafana (this can take a few minutes)"
         # shellcheck disable=SC2015  # intentional: error handler covers both failures
-        apt-get update -qq && apt-get install -y -qq influxdb2 influxdb2-cli grafana || {
+        _apt update -qq && _apt install -y -qq influxdb2 influxdb2-cli grafana || {
             log_warn "observability: package install failed — skipped"
             return 0
         }
