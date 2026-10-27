@@ -2,15 +2,9 @@
 
 Reviewed: 2026-06-27
 
-Primary artifact: `working/automation-platform-rfc.md`
-
-Associated artifacts reviewed:
-
-- `working/automation-platform-rfc/*.md`
-- `working/backlog-research/06-automation-engine-seam.md`
-- `working/backlog-research/07-tag-experiments-runs-time-markers.md`
-- Runtime code/docs/contracts in `anolis/`
-- Consumer touchpoints in `anolis-workbench/`, `anolis-operator-ui/`, and `anolis-telemetry-export/`
+Reviewed: [the automation platform RFC](./automation-platform.md), with the
+runtime code, docs and contracts in `anolis/` and the consumer touchpoints in
+`anolis-workbench/` and `anolis-telemetry-export/`.
 
 ## Executive Verdict
 
@@ -42,9 +36,6 @@ The biggest risk is not conceptual. The biggest risk is that implementation team
 
 7. **Runtime version belongs in run provenance.**
    The final RFC correctly adds this. Behavior is not only XML bytes; it also depends on compiled BT node implementations and runtime version.
-
-8. **Operator UI sync correction is included.**
-   The final RFC correctly notes that workbench has a lock-file release-artifact path, while operator-ui is manually maintained (`js/contracts.js` plus fixtures).
 
 ## Required Revisions Before Implementation
 
@@ -220,10 +211,6 @@ Recommendation: operator-supplied in v1, with optional runtime validation that r
 
 Recommendation: first release may document operator-owned cleanup, but the runtime should have a data directory and a startup warning when run logs exceed a configurable size. Do not leave the storage path implicit.
 
-### Operator UI lock mechanism
-
-Recommendation: do not block the RFC on bringing operator-ui under the workbench lock mechanism, but make the manual edits an explicit checklist item in every wire phase. A separate follow-up to add lock/sync to operator-ui is worthwhile.
-
 ### Boundary granularity
 
 Recommendation: accept the ~2s ambiguity for the first historian use case. Document it in the run API and exporter docs. If point-exact attribution becomes required, use a non-indexed field or a separate annotation measurement, never a tag on `anolis_signal`.
@@ -275,7 +262,7 @@ Add tests:
 
 - C++ enum/string mapping to OpenAPI enum.
 - Example fixtures for both old and new fields.
-- Consumer fixture updates for workbench and operator-ui.
+- Consumer fixture updates for workbench.
 
 ### Phase 2: Run registry
 
@@ -314,7 +301,6 @@ Avoid hard-coding bioprocess terms like `inoculation`, `feed`, and `sample` into
 Make this contingent on real consumer migration evidence:
 
 - workbench updated and pinned.
-- operator-ui updated manually or given lock sync.
 - contract examples updated.
 - old SSE alias tested during the compatibility window.
 
@@ -335,7 +321,7 @@ These are not necessarily RFC blockers, but they matter for execution:
 
 If I were tightening the RFC before issue creation, I would rewrite the implementation thesis as:
 
-> Extract a minimal internal automation-engine interface around the existing private-threaded BT runtime, preserving current behavior. Add a neutral additive HTTP status view and a truthful automation version record. Introduce explicit operator-opened runs persisted as append-only JSONL, with optional AUTO convenience, run windows correlated to telemetry by time and tag scope, and no change to `anolis_signal` tags. Use OpenAPI as the wire source of truth; update workbench via lock repin and operator-ui manually. Defer engine registry, capabilities, generic definition envelope, pause/cancel, live reload, and policy until a second engine, reload endpoint, or governance requirement actually lands.
+> Extract a minimal internal automation-engine interface around the existing private-threaded BT runtime, preserving current behavior. Add a neutral additive HTTP status view and a truthful automation version record. Introduce explicit operator-opened runs persisted as append-only JSONL, with optional AUTO convenience, run windows correlated to telemetry by time and tag scope, and no change to `anolis_signal` tags. Use OpenAPI as the wire source of truth; update workbench via lock repin. Defer engine registry, capabilities, generic definition envelope, pause/cancel, live reload, and policy until a second engine, reload endpoint, or governance requirement actually lands.
 
 That keeps the spirit of the RFC while making the first implementation smaller and harder to misuse.
 

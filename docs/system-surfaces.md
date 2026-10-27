@@ -205,8 +205,6 @@ configs + behaviors + provenance + checksums, secret-redaction enforced
 Upstream anolis contracts are consumed via byte-locks
 (`contracts/upstream/anolis/*.lock.json`). Desktop distribution: Tauri 2 app
 (msi/deb/appimage/dmg + PyPI wheel), sidecar frozen via PyInstaller.
-`anolis-operator-ui` is **retired** (archived; superseded by Workbench
-Operate).
 
 ## Observability
 
