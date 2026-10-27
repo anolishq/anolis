@@ -286,3 +286,31 @@ What is **not** required:
   `anolis-provider-<kind>-<version>-config-schema-manifest.json` sidecar
   recording its sha256. Publish both if your provider's config is to be
   edited in a composer.
+
+## The install walk
+
+The shell suite (`tests/shell/`) stubs `systemctl`, `apt`, `curl` and the
+filesystem, so it can't show that a real install works. The **Install walk**
+workflow (`.github/workflows/install-walk.yml`) does that. It runs
+`tests/e2e/install-walk.sh` as root on fresh GitHub runners, x86_64 and arm64,
+with `tests/e2e/e2e-sim`: the simulator provider in place of hardware, pinned
+to released runtime and provider binaries. It runs on pull requests that touch
+`tools/install.sh` or the walk, and on release tags.
+
+Each scenario asserts on `install.sh`'s exit code, its output and the runtime's
+API:
+
+| scenario | what it walks |
+| --- | --- |
+| `fresh` | `--with-observability`, then a variant switch with `--replace-config`, a restart, and `--uninstall` and a reinstall, with telemetry reaching InfluxDB after each |
+| `recover` | an `--uninstall` by v0.1.53, which deleted the InfluxDB credentials, then a current install, which mints new ones |
+| `upgrade` | the previous release's `install.sh` and pins, then the current ones |
+| `workbench` | `anolis-provision install` from the released workbench, and what its summary shows |
+
+Each scenario ends by breaking what its last check depends on, the runtime's
+InfluxDB token or grafana-server, and requires that check to fail. A check that
+can't fail fails the walk.
+
+It's the gate the bench follows: a change to `install.sh` walks here before it
+walks on a rig. To run one scenario on a disposable host:
+`sudo tests/e2e/install-walk.sh fresh`.
