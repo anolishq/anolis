@@ -51,6 +51,13 @@ readonly GRAFANA_ENV_FILE="/etc/anolis/observability-grafana.env"
 readonly GRAFANA_DROPIN_DIR="/etc/systemd/system/grafana-server.service.d"
 readonly INFLUX_DROPIN_DIR="/etc/systemd/system/influxdb.service.d"
 readonly INFLUX_HOST="http://127.0.0.1:8086"
+# The influx CLI's config, which `influx setup` writes with the admin token in
+# it. An uninstall keeps it with the instance (#514).
+readonly INFLUX_CLI_CONFIG="/root/.influxdbv2/configs"
+# Grafana's database, which keeps the admin password it was first booted
+# with, and its binary by full path: /usr/sbin is not always on PATH (#514).
+readonly GRAFANA_DB="/var/lib/grafana/grafana.db"
+readonly GRAFANA_BIN="/usr/sbin/grafana"
 # Co-located Pi bucket retention (30 d). Raising it is a real trade-off (SD
 # wear, disk growth, query cost) — see observability/README.md "Data
 # Retention". Override via the environment at install time if you must.
@@ -66,6 +73,7 @@ WITH_OBSERVABILITY=0
 GRAFANA_NETWORK=0
 _OBS_GRAFANA_WAS_NETWORK=0
 _OBS_GRAFANA_BIND_APPLIED=0
+_OBS_GRAFANA_PW_UNKNOWN=0
 NO_START=0
 UNINSTALL=0
 ROLLBACK=0
@@ -1435,6 +1443,51 @@ _obs_env_value() {
     sed -n "s/^$1=//p" "${OBSERVABILITY_ENV_FILE}" | tail -n 1
 }
 
+# Mint a write and a read token for an instance whose recorded tokens are gone,
+# with the admin token in root's influx CLI config, and record them in
+# observability.env. The CLI reads that token from the config itself
+# (--configs-path), so it is never on a command line, and nothing the CLI
+# prints is repeated. Fails, naming what is missing, without the config.
+_obs_mint_from_cli_config() {
+    local bucket_id write_token read_token
+    if [[ ! -f "${INFLUX_CLI_CONFIG}" ]]; then
+        log_err "observability: influxdb is already set up, but its tokens are gone (none in ${OBSERVABILITY_ENV_FILE}) and there is no influx CLI config at ${INFLUX_CLI_CONFIG} to mint new ones with — Grafana not provisioned"
+        log_info "That config holds the instance's admin token; without it, new tokens need the instance's admin credentials."
+        return 1
+    fi
+    log_info "observability: influxdb is set up but its tokens are gone; minting new ones with ${INFLUX_CLI_CONFIG}"
+    bucket_id=$(influx bucket list --configs-path "${INFLUX_CLI_CONFIG}" --host "${INFLUX_HOST}" \
+        --name anolis --hide-headers 2>/dev/null | awk '{print $1}') || bucket_id=""
+    if [[ -z "${bucket_id}" ]]; then
+        log_err "observability: could not find the anolis bucket with ${INFLUX_CLI_CONFIG} — Grafana not provisioned"
+        return 1
+    fi
+    write_token=$(influx auth create --configs-path "${INFLUX_CLI_CONFIG}" --host "${INFLUX_HOST}" --org anolis \
+        --write-bucket "${bucket_id}" --description "anolis-runtime telemetry write" --json 2>/dev/null \
+        | grep -o '"token": *"[^"]*"' | cut -d'"' -f4) || write_token=""
+    read_token=$(influx auth create --configs-path "${INFLUX_CLI_CONFIG}" --host "${INFLUX_HOST}" --org anolis \
+        --read-bucket "${bucket_id}" --description "anolis grafana/export read" --json 2>/dev/null \
+        | grep -o '"token": *"[^"]*"' | cut -d'"' -f4) || read_token=""
+    if [[ -z "${write_token}" || -z "${read_token}" ]]; then
+        log_err "observability: influx auth create failed with ${INFLUX_CLI_CONFIG} — Grafana not provisioned"
+        return 1
+    fi
+
+    # Created 0600 before the secrets land, or locked down if one is there.
+    if [[ -f "${OBSERVABILITY_ENV_FILE}" ]]; then
+        chmod 600 "${OBSERVABILITY_ENV_FILE}" && chown root:root "${OBSERVABILITY_ENV_FILE}" || return 1
+    else
+        install -m 600 -o root -g root /dev/null "${OBSERVABILITY_ENV_FILE}" || return 1
+    fi
+    {
+        echo "# Scoped tokens minted by install.sh from ${INFLUX_CLI_CONFIG} (#514)."
+        echo "# The runtime uses the write token; Grafana/telemetry-export the read token."
+        echo "INFLUXDB_WRITE_TOKEN=${write_token}"
+        echo "INFLUXDB_READ_TOKEN=${read_token}"
+    } >> "${OBSERVABILITY_ENV_FILE}" || return 1
+    log_ok "observability: minted new write and read tokens, recorded in ${OBSERVABILITY_ENV_FILE}"
+}
+
 # InfluxDB is already set up, so no token can be minted without its admin
 # token. Reuse the scoped tokens recorded when install.sh set it up, which the
 # uninstall keeps for as long as it keeps the instance (#469). An instance
@@ -1449,15 +1502,11 @@ _obs_reuse_credentials() {
     if [[ -z "${read_token}" ]]; then
         # Operator-run instance: they wrote the Grafana env file themselves.
         [[ -f "${GRAFANA_ENV_FILE}" ]] && return 0
-        log_err "observability: influxdb is already set up, but its credentials are gone (no tokens in ${OBSERVABILITY_ENV_FILE}) — Grafana not provisioned"
-        log_info "An uninstall by an earlier install.sh deleted them and kept the instance. To recover,"
-        log_info "mint two tokens as root, with the admin token that 'influx setup' left in root's influx CLI config:"
-        log_info "  id=\$(sudo -H influx bucket list --name anolis --hide-headers | cut -f1)"
-        log_info "  sudo -H influx auth create --org anolis --write-bucket \"\${id}\" --description 'anolis-runtime telemetry write'"
-        log_info "  sudo -H influx auth create --org anolis --read-bucket \"\${id}\" --description 'anolis grafana/export read'"
-        log_info "then write them to ${OBSERVABILITY_ENV_FILE} (0600 root) as INFLUXDB_WRITE_TOKEN=... and"
-        log_info "INFLUXDB_READ_TOKEN=..., and re-run this install."
-        return 1
+        # An uninstall by an earlier install.sh deleted them and kept the
+        # instance, and the CLI config with it: mint new ones (#514).
+        _obs_mint_from_cli_config || return 1
+        write_token=$(_obs_env_value INFLUXDB_WRITE_TOKEN)
+        read_token=$(_obs_env_value INFLUXDB_READ_TOKEN)
     fi
 
     if [[ ! -f "${GRAFANA_ENV_FILE}" ]]; then
@@ -1469,11 +1518,28 @@ _obs_reuse_credentials() {
             chmod 600 "${OBSERVABILITY_ENV_FILE}" || return 1
             chown root:root "${OBSERVABILITY_ENV_FILE}" || return 1
             echo "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" >> "${OBSERVABILITY_ENV_FILE}" || return 1
+            _obs_reset_grafana_admin_pw "${_OBS_GRAFANA_PW}"
         fi
         log_ok "observability: ${GRAFANA_ENV_FILE} restored from ${OBSERVABILITY_ENV_FILE}"
     fi
     _obs_wire_tokens "${write_token}" "${read_token}"
     return 0
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD on its first boot only, so a
+# password made now for a grafana.db that survived is set in the database too
+# (#514). It goes on stdin, never on a command line. grafana-server is
+# restarted after this, as on every observability run.
+_obs_reset_grafana_admin_pw() {
+    local pw="$1"
+    [[ -f "${GRAFANA_DB}" ]] || return 0
+    if printf '%s' "${pw}" | "${GRAFANA_BIN}" cli --homepath /usr/share/grafana --config /etc/grafana/grafana.ini \
+        admin reset-admin-password --password-from-stdin >/dev/null 2>&1; then
+        log_ok "observability: Grafana's admin password set to the one recorded in ${OBSERVABILITY_ENV_FILE}"
+    else
+        _OBS_GRAFANA_PW_UNKNOWN=1
+        log_warn "observability: could not reset Grafana's admin password; GRAFANA_ADMIN_PASSWORD in ${OBSERVABILITY_ENV_FILE} may not log in"
+    fi
 }
 
 # Install dashboards + provisioning from the release observability asset at
@@ -2048,18 +2114,22 @@ phase_summary() {
     if [[ ${WITH_OBSERVABILITY} -eq 1 ]]; then
         # Paths only, never secrets — installs are routinely piped through tee.
         local grafana_host="localhost"
+        local pw_note="admin password: ${OBSERVABILITY_ENV_FILE}"
+        if [[ ${_OBS_GRAFANA_PW_UNKNOWN} -eq 1 ]]; then
+            pw_note="admin password: unknown, its reset failed (see the warnings above)"
+        fi
         if [[ "${ARCH}" != "x86_64" ]]; then
             grafana_host="$(hostname 2>/dev/null || echo localhost).local"
         fi
         if [[ ${_OBS_GRAFANA_BIND_APPLIED} -eq 0 ]]; then
             log_info "Grafana bind unchanged: the observability step did not finish (see the warnings above)"
         elif [[ ${GRAFANA_NETWORK} -eq 1 ]]; then
-            log_info "Grafana:   http://${grafana_host}:3000 (admin password: ${OBSERVABILITY_ENV_FILE})"
+            log_info "Grafana:   http://${grafana_host}:3000 (${pw_note})"
         else
             if [[ ${_OBS_GRAFANA_WAS_NETWORK} -eq 1 ]]; then
                 log_info "Grafana:   now bound to 127.0.0.1 — no longer on the network (re-run with --with-grafana-network to open it)"
             fi
-            log_info "Grafana:   127.0.0.1:3000 on this machine (admin password: ${OBSERVABILITY_ENV_FILE})"
+            log_info "Grafana:   127.0.0.1:3000 on this machine (${pw_note})"
             local tunnel_host="${grafana_host}"
             [[ "${tunnel_host}" == "localhost" ]] && tunnel_host="<host>"
             log_info "  from another machine: ssh -L 3000:127.0.0.1:3000 ${SUDO_USER:-<user>}@${tunnel_host}, then http://localhost:3000"

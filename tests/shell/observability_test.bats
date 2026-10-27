@@ -196,6 +196,17 @@ _summary_stubs() {
     [[ "${output}" != *"http://pi-test.local:3000"* ]]
 }
 
+@test "514: after a failed admin password reset the summary does not point at the password" {
+    _summary_stubs
+    _OBS_GRAFANA_BIND_APPLIED=1
+    _OBS_GRAFANA_PW_UNKNOWN=1
+    for GRAFANA_NETWORK in 0 1; do
+        run phase_summary
+        [[ "${output}" != *"(admin password: ${OBSERVABILITY_ENV_FILE})"* ]]
+        [[ "${output}" == *"admin password: unknown"* ]]
+    done
+}
+
 @test "351: with --with-grafana-network the summary prints Grafana's network address" {
     _summary_stubs
     _OBS_GRAFANA_BIND_APPLIED=1

@@ -26,7 +26,23 @@ setup() {
     source <(sed -E \
         -e "s|^readonly ([A-Z_]+)=\"/etc/anolis/|readonly \\1=\"${ETC}/|" \
         -e "s|^readonly SYSTEMD_DIR=.*|readonly SYSTEMD_DIR=\"${BATS_TEST_TMPDIR}/systemd\"|" \
+        -e "s|^readonly INFLUX_CLI_CONFIG=.*|readonly INFLUX_CLI_CONFIG=\"${BATS_TEST_TMPDIR}/root/.influxdbv2/configs\"|" \
+        -e "s|^readonly GRAFANA_DB=.*|readonly GRAFANA_DB=\"${BATS_TEST_TMPDIR}/grafana/grafana.db\"|" \
+        -e "s|^readonly GRAFANA_BIN=.*|readonly GRAFANA_BIN=\"${BATS_TEST_TMPDIR}/bin/grafana\"|" \
         "${INSTALL_SH}")
+    CLI_CONFIG="${BATS_TEST_TMPDIR}/root/.influxdbv2/configs"
+    # A grafana binary that records its argv and stdin; GRAFANA_FAIL=1 fails it.
+    FAKE_GRAFANA_DB="${BATS_TEST_TMPDIR}/grafana/grafana.db"
+    FAKE_GRAFANA_BIN="${BATS_TEST_TMPDIR}/bin/grafana"
+    mkdir -p "${BATS_TEST_TMPDIR}/bin" "${BATS_TEST_TMPDIR}/grafana"
+    cat >"${FAKE_GRAFANA_BIN}" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"${BATS_TEST_TMPDIR}/grafana.argv"
+cat >"${BATS_TEST_TMPDIR}/grafana.stdin"
+[[ "${GRAFANA_FAIL:-0}" != 1 ]]
+STUB
+    command chmod +x "${FAKE_GRAFANA_BIN}"
+    export BATS_TEST_TMPDIR
     set +u
     [[ "${OBSERVABILITY_ENV_FILE}" == "${ETC}/observability.env" ]]
     [[ "${GRAFANA_ENV_FILE}" == "${ETC}/observability-grafana.env" ]]
@@ -154,19 +170,140 @@ _fresh_install_files() {
     [ "$(grep -c '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}")" -eq 1 ]
 }
 
-@test "469: an instance set up without any of its credentials is refused, with a recovery step" {
+# #514: on a host an earlier uninstall stripped, install.sh mints the tokens
+# itself with the admin token in root's influx CLI config, which that
+# uninstall kept. Only a host with no CLI config is refused.
+
+# An influx that mints: the bucket id, then a token per `auth create`, whose
+# flags pick which. AUTH_FAIL=1 makes `auth create` fail, saying a token on
+# stderr as a CLI error might.
+MINT_WRITE="fake-minted-write-not-a-secret"
+MINT_READ="fake-minted-read-not-a-secret"
+_minting_influx() {
+    influx() {
+        printf 'influx %s\n' "$*" >>"${CALLS}"
+        case "$1 $2" in
+            "bucket list") printf 'b0cket1d\tanolis\t720h0m0s\n' ;;
+            "auth create")
+                if [[ "${AUTH_FAIL:-0}" == 1 ]]; then
+                    echo "Error: failed to create authorization (token fake-leak-not-a-secret)" >&2
+                    return 1
+                fi
+                if [[ "$*" == *--write-bucket* ]]; then
+                    printf '{\n\t"id": "0a1b",\n\t"token": "%s",\n\t"status": "active"\n}\n' "${MINT_WRITE}"
+                else
+                    printf '{\n\t"id": "0a1c",\n\t"token": "%s",\n\t"status": "active"\n}\n' "${MINT_READ}"
+                fi
+                ;;
+        esac
+    }
+}
+
+_stripped_host() {
+    mkdir -p "$(dirname "${CLI_CONFIG}")"
+    printf '[default]\n  url = "http://localhost:8086"\n  active = true\n' >"${CLI_CONFIG}"
     printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    printf 'ANOLIS_EXPORT_INFLUX_TOKEN=\n' >"${TELEMETRY_ENV_FILE}"
+}
+
+@test "514: a stripped host's tokens are minted from root's influx CLI config" {
+    _stripped_host
+    _minting_influx
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    grep -qxF "INFLUXDB_WRITE_TOKEN=${MINT_WRITE}" "${OBSERVABILITY_ENV_FILE}"
+    grep -qxF "INFLUXDB_READ_TOKEN=${MINT_READ}" "${OBSERVABILITY_ENV_FILE}"
+    grep -qxF "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${OBSERVABILITY_ENV_FILE}"
+    [ "$(stat -c %a "${OBSERVABILITY_ENV_FILE}")" = "600" ]
+    grep -qxF "install -m 600 -o root -g root /dev/null ${OBSERVABILITY_ENV_FILE}" "${CALLS}"
+    grep -qxF "INFLUX_TOKEN=${MINT_READ}" "${GRAFANA_ENV_FILE}"
+    grep -qxF "INFLUXDB_TOKEN=${MINT_WRITE}" "${RUNTIME_ENV_FILE}"
+    grep -qxF "ANOLIS_EXPORT_INFLUX_TOKEN=${MINT_READ}" "${TELEMETRY_ENV_FILE}"
+    # Through the CLI config, scoped to the anolis bucket; the admin token is
+    # never put on a command line.
+    grep -q "^influx auth create .*--configs-path ${CLI_CONFIG}.*--write-bucket b0cket1d" "${CALLS}"
+    grep -q "^influx auth create .*--configs-path ${CLI_CONFIG}.*--read-bucket b0cket1d" "${CALLS}"
+    if grep -q '^influx .*--token' "${CALLS}"; then return 1; fi
+    [[ "${output}" != *"not-a-secret"* ]]
+}
+
+@test "514: without root's influx CLI config, the refusal names it" {
+    printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    _minting_influx
     run _obs_setup_influx
     [ "$status" -ne 0 ]
     [ ! -e "${GRAFANA_ENV_FILE}" ]
-    [[ "${output}" == *"credentials"* ]]
-    [[ "${output}" == *"${OBSERVABILITY_ENV_FILE}"* ]]
-    [[ "${output}" == *"INFLUXDB_WRITE_TOKEN"* && "${output}" == *"INFLUXDB_READ_TOKEN"* ]]
+    [ ! -e "${OBSERVABILITY_ENV_FILE}" ]
+    [[ "${output}" == *"no influx CLI config at ${CLI_CONFIG}"* ]]
+    if grep -q '^influx auth create' "${CALLS}"; then return 1; fi
+    [[ "${output}" != *"not-a-secret"* ]]
+}
+
+@test "514: a failing auth create refuses, records nothing and prints no token" {
+    _stripped_host
+    _minting_influx
+    AUTH_FAIL=1
+    run _obs_setup_influx
+    [ "$status" -ne 0 ]
+    [ ! -e "${GRAFANA_ENV_FILE}" ]
+    if grep -q '_TOKEN=' "${OBSERVABILITY_ENV_FILE}" 2>/dev/null; then return 1; fi
+    if grep -q '^INFLUXDB_TOKEN=' "${RUNTIME_ENV_FILE}"; then return 1; fi
     [[ "${output}" == *"influx auth create"* ]]
-    # The commands read root's influx CLI config, so each one runs as root.
-    [[ "${output}" == *'id=$(sudo -H influx bucket list '* ]]
-    [[ "${output}" == *"sudo -H influx auth create --org anolis --write-bucket"* ]]
-    [[ "${output}" == *"sudo -H influx auth create --org anolis --read-bucket"* ]]
+    [[ "${output}" != *"not-a-secret"* ]]
+}
+
+# Only with Grafana's paths in the temp tree: a test never touches the host's.
+_fake_grafana() {
+    [[ "${GRAFANA_DB}" == "${FAKE_GRAFANA_DB}" && "${GRAFANA_BIN}" == "${FAKE_GRAFANA_BIN}" ]]
+    : >"${GRAFANA_DB}"
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD on its first boot only, so a
+# password made now for a kept grafana.db would not log in until Grafana's
+# own admin password is reset to it.
+@test "514: a new password for a kept grafana.db is set in Grafana, on stdin only" {
+    _stripped_host
+    _minting_influx
+    _fake_grafana
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    [ "$(cat "${BATS_TEST_TMPDIR}/grafana.stdin")" = "${_OBS_GRAFANA_PW}" ]
+    grep -qxF "cli --homepath /usr/share/grafana --config /etc/grafana/grafana.ini admin reset-admin-password --password-from-stdin" \
+        "${BATS_TEST_TMPDIR}/grafana.argv"
+    if grep -qF "${_OBS_GRAFANA_PW}" "${BATS_TEST_TMPDIR}/grafana.argv"; then return 1; fi
+    grep -qxF "GRAFANA_ADMIN_PASSWORD=${_OBS_GRAFANA_PW}" "${OBSERVABILITY_ENV_FILE}"
+    [[ "${output}" != *"not-a-secret"* ]]
+}
+
+@test "514: without a grafana.db the new password is left to Grafana's first boot" {
+    _stripped_host
+    _minting_influx
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    [[ "${GRAFANA_BIN}" == "${FAKE_GRAFANA_BIN}" ]]
+    [ ! -e "${BATS_TEST_TMPDIR}/grafana.argv" ]
+}
+
+@test "514: a recorded password is not reset" {
+    printf 'INFLUXDB_WRITE_TOKEN=%s\nINFLUXDB_READ_TOKEN=%s\nGRAFANA_ADMIN_PASSWORD=%s\n' \
+        "${WRITE_TOKEN}" "${READ_TOKEN}" "${GRAFANA_PW}" >"${OBSERVABILITY_ENV_FILE}"
+    printf 'ANOLIS_API_TOKEN=x\n' >"${RUNTIME_ENV_FILE}"
+    _fake_grafana
+    run _obs_setup_influx
+    [ "$status" -eq 0 ]
+    grep -qxF "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PW}" "${GRAFANA_ENV_FILE}"
+    [ ! -e "${BATS_TEST_TMPDIR}/grafana.argv" ]
+}
+
+@test "514: a failed reset warns, and the summary no longer points at the password" {
+    _stripped_host
+    _minting_influx
+    _fake_grafana
+    export GRAFANA_FAIL=1
+    _obs_setup_influx >"${BATS_TEST_TMPDIR}/out" 2>&1
+    grep -qF "may not log in" "${BATS_TEST_TMPDIR}/out"
+    if grep -qF "not-a-secret" "${BATS_TEST_TMPDIR}/out"; then return 1; fi
+    [ "${_OBS_GRAFANA_PW_UNKNOWN}" -eq 1 ]
 }
 
 @test "469: an operator-run instance with its own Grafana env file is left alone" {
