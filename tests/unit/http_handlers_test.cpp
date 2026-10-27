@@ -1783,6 +1783,141 @@ TEST_F(HttpEstopClearTest, RefusedClearIsFailedPreconditionAndKeepsTheLatch) {
     EXPECT_FALSE(safe_state->is_engaged());
 }
 
+// --- #540: a web page in a browser on the host must not drive the runtime ---
+//
+// A browser sends a text/plain or bodyless POST as a CORS "simple" request,
+// with no preflight, and the runtime executed it before deciding on CORS
+// headers. These requests carry what a browser would send.
+class HttpBrowserGuardTest : public Test {
+protected:
+    void start(runtime::HttpConfig http_config) {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        safe_state =
+            std::make_unique<control::SafeStateController>(*registry, *call_router, *provider_registry, safety);
+        safe_state->hold("emergency stop in_force: test");
+
+        http_config.enabled = true;
+        http_config.port = 0;
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.safe_state = safe_state.get();
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+        client->set_connection_timeout(1, 0);
+    }
+
+    void TearDown() override {
+        client.reset();
+        if (server) {
+            server->stop();
+        }
+        server.reset();
+    }
+
+    std::string host(const std::string& name) const { return name + ":" + std::to_string(server->get_port()); }
+
+    runtime::SafetyConfig safety;
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<control::SafeStateController> safe_state;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+};
+
+TEST_F(HttpBrowserGuardTest, ACrossOriginTextPlainClearIsRefusedAndTheLatchHolds) {
+    start(runtime::HttpConfig{});
+    const httplib::Headers headers = {{"Origin", "https://evil.example"}};
+    auto res = client->Post("/v0/estop/clear", headers, "{}", "text/plain;charset=UTF-8");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+    EXPECT_TRUE(safe_state->is_engaged());
+}
+
+TEST_F(HttpBrowserGuardTest, ACrossOriginBodylessClearIsRefused) {
+    // fetch(url, {method: "POST"}) sends no body and no Content-Type, and is
+    // a simple request too; the Origin it carries is what refuses it.
+    start(runtime::HttpConfig{});
+    const httplib::Headers headers = {{"Origin", "https://evil.example"}};
+    auto res = client->Post("/v0/estop/clear", headers, "", "");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+    EXPECT_TRUE(safe_state->is_engaged());
+}
+
+TEST_F(HttpBrowserGuardTest, ACrossOriginCallIsRefusedBeforeItIsRouted) {
+    start(runtime::HttpConfig{});
+    const httplib::Headers headers = {{"Origin", "https://evil.example"}};
+    auto res = client->Post(
+        "/v0/call", headers,
+        R"({"provider_id":"sim0","device_id":"tempctl0","function_id":2,"args":{"value":{"type":"double","double":399.0}}})",
+        "text/plain;charset=UTF-8");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+}
+
+TEST_F(HttpBrowserGuardTest, AnOriginOutsideAConfiguredListIsRefused) {
+    runtime::HttpConfig config;
+    config.cors_allowed_origins = {"http://localhost:3000"};
+    start(config);
+    const httplib::Headers headers = {{"Origin", "https://evil.example"}};
+    auto res = client->Post("/v0/estop/clear", headers, "{}", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+    EXPECT_TRUE(safe_state->is_engaged());
+}
+
+TEST_F(HttpBrowserGuardTest, ABodyThatIsNotJsonIsRefused) {
+    start(runtime::HttpConfig{});
+    auto res = client->Post("/v0/estop/clear", "{}", "text/plain;charset=UTF-8");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(415, res->status) << res->body;
+    EXPECT_TRUE(safe_state->is_engaged());
+}
+
+TEST_F(HttpBrowserGuardTest, AForeignHostIsRefusedWithAuthOff) {
+    // DNS rebinding: the page's own origin resolves to 127.0.0.1, so the
+    // request arrives with the attacker's name in Host.
+    start(runtime::HttpConfig{});
+    const httplib::Headers headers = {{"Host", host("attacker.rebind.example")}};
+    auto res = client->Get("/v0/runtime/status", headers);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+}
+
+TEST_F(HttpBrowserGuardTest, AToolOrProxyWithoutAnOriginStillClearsTheLatch) {
+    // curl, scripts and the workbench's proxy send no Origin; the workbench
+    // posts /v0/estop/clear with no body and no Content-Type.
+    start(runtime::HttpConfig{});
+    for (const std::string& name : {std::string("localhost"), std::string("127.0.0.1")}) {
+        SCOPED_TRACE(name);
+        safe_state->hold("emergency stop in_force: test");
+        const httplib::Headers headers = {{"Host", host(name)}};
+        auto res = client->Post("/v0/estop/clear", headers, "", "");
+        ASSERT_TRUE(res);
+        EXPECT_EQ(200, res->status) << res->body;
+        EXPECT_FALSE(safe_state->is_engaged());
+    }
+}
+
+TEST_F(HttpBrowserGuardTest, AConfiguredOriginWithAJsonBodyStillWorks) {
+    runtime::HttpConfig config;
+    config.cors_allowed_origins = {"http://localhost:3000"};
+    start(config);
+    const httplib::Headers headers = {{"Origin", "http://localhost:3000"}};
+    auto res = client->Post("/v0/estop/clear", headers, "{}", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status) << res->body;
+    EXPECT_EQ("http://localhost:3000", res->get_header_value("Access-Control-Allow-Origin"));
+    EXPECT_FALSE(safe_state->is_engaged());
+}
+
 #else  // ANOLIS_SKIP_HTTP_TESTS
 TEST(HttpHandlersTest, DISABLED_SkippedUnderThreadSanitizer) {
     // This test exists to document that HttpHandlersTest suite is disabled
