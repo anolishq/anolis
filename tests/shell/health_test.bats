@@ -120,7 +120,9 @@ UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state"
     phase_health >/dev/null
     [ "${SAFE_STATE_UNPLANNABLE}" -eq 1 ]
     run phase_summary
-    [[ "$(sed 's/\x1b\[[0-9;]*m//g' <<< "${output}")" == *"the install did NOT succeed"*"sim0/relayio0 set_relay_ch1"* ]]
+    summary=$(sed 's/\x1b\[[0-9;]*m//g' <<< "${output}")
+    [[ "${summary}" == *"sim0/relayio0 set_relay_ch1"*"the install did NOT succeed"* ]]
+    [[ "${summary}" == *"Fix safety.safe_state in"* ]]
 }
 
 @test "616: a safe state that ran and failed on a tripped board stays a warning" {
@@ -139,4 +141,14 @@ UNPLANNABLE='{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state"
     [[ "${output}" == *"health: startup safe state NOT achieved"* ]]
     phase_health >/dev/null
     [ "${SAFE_STATE_UNPLANNABLE}" -eq 0 ]
+}
+
+@test "616: the install exits non-zero for a safe state that cannot be planned, and only then" {
+    health_with "${UNPLANNABLE}"
+    phase_health >/dev/null
+    _install_failed
+    health_with '{"version":"0.1.58","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"hooks","safe_state_achieved":false,"failed_actions":[{"device_handle":"bread0/dcmt0","function":"set_mode","success":false,"error":"SET command refused: WATCHDOG_TRIP","cause":"run"}],"skipped_actions":[]}}'
+    phase_health >/dev/null
+    ! _install_failed
+    grep -q '^    if _install_failed; then$' "${INSTALL_SH}"  # main() decides the exit with it
 }
