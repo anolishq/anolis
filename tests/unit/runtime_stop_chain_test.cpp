@@ -177,6 +177,30 @@ TEST(RuntimeStopChainTest, StartsHeldWhenTheStatusCannotBeRead) {
     EXPECT_NE(refusal->find("status is unavailable"), std::string::npos) << *refusal;
 }
 
+// #526: a fresh false reading is clear only if its provider asserted
+// QUALITY_OK. Unset (UNSPECIFIED) and unrecognised quality read unknown.
+TEST(RuntimeStopChainTest, StartsHeldWhenTheStatusQualityIsNotOk) {
+    const std::vector<std::pair<std::string, std::string>> cases = {{"0u", "QUALITY_UNSPECIFIED"}, {"0x", "99"}};
+    for (const auto &[word, quality] : cases) {
+        SCOPED_TRACE(word);
+        const auto rig = fresh_rig("anolis-526-start-" + word);
+        set_chain(rig, word);
+        anolis::runtime::Runtime runtime(config_for(rig));
+        std::string error;
+        std::string log;
+        ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+        const auto snapshot = runtime.get_stop_chain().snapshot();
+        EXPECT_EQ(snapshot.state, StopChainState::Unknown) << snapshot.reason;
+        EXPECT_NE(snapshot.reason.find("has quality " + quality + ", not QUALITY_OK"), std::string::npos)
+            << snapshot.reason;
+        EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+        const auto refusal = runtime.get_safe_state().clear();
+        ASSERT_TRUE(refusal.has_value());
+        EXPECT_NE(refusal->find("status is unavailable"), std::string::npos) << *refusal;
+    }
+}
+
 TEST(RuntimeStopChainTest, StartsUnheldWhenTheStopIsClear) {
     const auto rig = fresh_rig("anolis-483-start-clear");
     set_chain(rig, "0");
@@ -558,6 +582,42 @@ TEST(RuntimeStopChainExpectTest, AReportsEstopDeviceWithNoFreshEstopRaisesNothin
         press_the_stop(rig, runtime);
         std::this_thread::sleep_for(kPastTheGrace);
         EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+    }
+}
+
+// #526: a power_loss device still answers with any fresh reading, whatever
+// quality it claims, so one without QUALITY_OK still raises "Stop not reaching".
+// A reports_estop device is judged by its estop value, and only an OK one is
+// trusted, so it raises nothing.
+TEST(RuntimeStopChainExpectTest, ReadingsWithoutOkQualityRaiseOnlyForPowerLoss) {
+    for (const std::string expect : {kPowerLoss, kReportsEstop}) {
+        for (const std::string word : {"0u", "0x"}) {
+            SCOPED_TRACE(expect + " estop " + word);
+            const auto rig = fresh_rig("anolis-526-expect-" + std::string(expect == kPowerLoss ? "pl-" : "re-") + word);
+            set_chain(rig, "0");
+            set_file(rig, "estop", word);  // fresh, false, and not QUALITY_OK
+            anolis::runtime::Runtime runtime(config_for(rig, expect, kEstopArgs));
+            std::string error;
+            std::string log;
+            ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+            auto events = runtime.get_event_emitter().subscribe();
+
+            MainLoop loop(runtime);
+            press_the_stop(rig, runtime);
+            if (expect == kPowerLoss) {
+                EXPECT_TRUE(eventually([&] { return !runtime.get_stop_chain().mismatches().empty(); }));
+                const auto standing = runtime.get_stop_chain().mismatches();
+                EXPECT_EQ(standing.size(), 1u);
+                for (const auto &mismatch : standing) {
+                    EXPECT_EQ(mismatch.device, "bread0/motor0");
+                    EXPECT_NE(mismatch.reason.find("still answers"), std::string::npos) << mismatch.reason;
+                }
+            } else {
+                std::this_thread::sleep_for(kPastTheGrace);
+                EXPECT_TRUE(runtime.get_stop_chain().mismatches().empty());
+                EXPECT_TRUE(mismatch_moves(*events).empty());
+            }
+        }
     }
 }
 

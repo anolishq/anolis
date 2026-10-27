@@ -258,13 +258,16 @@ safety:
    relay paths stays on the bus and reports `estop`.
    Once the stop has been in force for the status signal's stale bound, a
    `power_loss` device that still has a fresh reading of any signal, or a
-   `reports_estop` device whose `estop` signal reads a fresh `false`, raises
+   `reports_estop` device whose `estop` signal reads a fresh `false` with
+   `QUALITY_OK`, raises
    "Stop not reaching *device*": a WARN in the log, an entry in
    `stop_chain.mismatches` in `GET /v0/runtime/status`, and a
    `stop_chain_mismatch` event. It is resolved, with another event, when the
    device behaves as expected or the stop is released. The hold is the same
-   either way. A `reports_estop` device with no fresh `estop` reading does not
-   raise it: it may have lost power. A device with no `expect` never raises
+   either way. For `power_loss`, a reading with STALE, FAULT or UNKNOWN
+   quality is not fresh; any other quality, unset included, is. A
+   `reports_estop` device with no fresh, OK `estop` reading does not raise it:
+   it may have lost power. A device with no `expect` never raises
    it. At startup the runtime warns when a registered `reports_estop` device
    has no polled bool `estop` signal, or a `power_loss` device has no polled
    signal: a mismatch is then never raised for it.

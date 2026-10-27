@@ -2127,7 +2127,7 @@ phase_summary() {
         local grafana_host="localhost"
         local pw_note="admin password: ${OBSERVABILITY_ENV_FILE}"
         if [[ ${_OBS_GRAFANA_PW_UNKNOWN} -eq 1 ]]; then
-            pw_note="admin password: unknown, its reset failed (see the warnings above)"
+            pw_note="admin password: unknown, its reset failed; see the warnings above"
         fi
         if [[ "${ARCH}" != "x86_64" ]]; then
             grafana_host="$(hostname 2>/dev/null || echo localhost).local"
