@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 
 #include "control/latch_store.hpp"
 #include "runtime/config.hpp"
@@ -215,7 +216,16 @@ TEST(RuntimeLatchPersistenceTest, ARelativeDataDirIsBesideTheConfigFile) {
     const auto root = fresh_dir("anolis-562-relative");
     const InDirectory in(root / "cwd");
     const auto config = config_with_data_line(root / "config", "  data_dir: state/data\n");
-    EXPECT_EQ(std::filesystem::path(config.runtime.data_dir), root / "config" / "state" / "data");
+    // config_dir is canonical, and on Windows TempDir() can be an 8.3 short
+    // name for the same directory, so compare the directories, not strings.
+    const std::filesystem::path data_dir(config.runtime.data_dir);
+    EXPECT_TRUE(data_dir.is_absolute()) << data_dir;
+    EXPECT_EQ(data_dir.filename(), "data");
+    EXPECT_EQ(data_dir.parent_path().filename(), "state");
+    std::filesystem::create_directories(root / "config" / "state");
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::equivalent(data_dir.parent_path(), root / "config" / "state", ec))
+        << data_dir << " " << ec.message();
     {
         anolis::runtime::Runtime runtime(config);
         std::string error;
