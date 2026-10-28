@@ -13,6 +13,64 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+0.3.0 is a minor release because one kind of kept config resolves its data
+directory somewhere else (`docs/dependencies.md`: before 1.0, a change that
+makes an existing config behave differently bumps MINOR).
+
+Upgrade notes for operators:
+
+- **`install.sh` resolves a relative `runtime.data_dir` against the config's
+  directory**, as the runtime does (#649). It used to write `<prefix>/<x>`.
+  The case that changes: an upgrade keeps a `runtime.yaml` naming a relative
+  `data_dir`, and neither place holds a latch file (`estop/*.json`) or a
+  non-empty `runs/index.jsonl`, or both do. That config now gets
+  `<prefix>/config/<x>`, where it used to get `<prefix>/<x>`. A kept config
+  whose latch or run journal is only at `<prefix>/<x>` keeps it there. A variant
+  installed fresh or with `--replace-config` also resolves against the config's
+  directory, so `data_dir: ../anolis-data` gives `<prefix>/anolis-data`; before
+  this release no anolis-projects variant named a relative `data_dir`. An absent
+  key still becomes `<prefix>/anolis-data`, and an absolute one is left alone.
+- **A failed install's banner reads "Anolis installed, but NOT ready — see the
+  end of this summary"** (#651), where it read "Anolis installation complete".
+  A script that greps install output for "Anolis installation complete" now
+  matches only installs that exit 0. The exit code and the last line, which
+  says why the install did NOT succeed, are unchanged.
+
+### Changed
+
+- **A relative `runtime.data_dir` keeps its place through a hand copy of a
+  variant** (#649, part of #643). A project variant can name
+  `data_dir: ../anolis-data`, which is `<prefix>/anolis-data` installed and
+  stays so when the variant is copied over `runtime.yaml`, as bioreactor-v1's
+  quickstart does to activate automation.
+- **An install that exits 1 says it is not ready** (#651, Fixes #616), above
+  the summary, which keeps the prefix, profile, port and token path.
+
+### Docs
+
+- Command-line and telemetry references, `docs/cli.md` and
+  `docs/observability.md` (#630).
+- The concept page, three RFCs and the observability README rewritten to the
+  docs style guide (#638). `docs/configuration-schema.md` now says any stop-chain
+  reading whose quality is not `OK` is `unknown`, as it has been since #604.
+- Stale workbench version notes dropped, and the simulator quickstart says to
+  start the runtime from inside `anolis-try` (#644).
+- The pins row in `docs/system-surfaces.md` names no version numbers (#642).
+- The YAML and JSON examples in the docs are validated against their schemas
+  (#645).
+
+### CI
+
+- The install walk runs against runtime 0.2.0, upgrading from 0.1.57, and
+  covers an install whose safe state fails at run time and one that cannot be
+  planned (#641).
+- The install walk's `handcopy` scenario copies a variant over `runtime.yaml`,
+  restarts, and requires the same data directory and a latched e-stop that
+  still holds (#649).
+- anolishq/.github's shared workflows move to v2.6 (#650).
+
 ## [0.2.0] - 2026-10-27
 
 0.2.0 is a minor release because existing configs and installs behave
