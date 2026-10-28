@@ -182,7 +182,7 @@ scenario_recover() {
 }
 
 scenario_upgrade() {
-    local previous=0.1.56 current old project
+    local previous=0.1.57 current old project
     current="$(sed -n '/^  runtime:/,/^  [a-z]/ s/^    version: //p' "${PROJECT}/machine-profile.yaml")"
     old="$(release_install_sh "${previous}")"
     project="$(project_pinned_to "${previous}")"
