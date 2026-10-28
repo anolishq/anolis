@@ -115,7 +115,8 @@ runtime_version_is() { api /v0/runtime/status | jq -e --arg v "$1" '.version == 
 data_dir_is() {
     local logged
     logged="$(journalctl -u anolis-runtime -o cat -n 400 | grep -F '[Config] Data dir: ' | tail -1)"
-    [[ "${logged}" == "[Config] Data dir: $1" ]] || fail "the runtime's data dir is not $1: ${logged:-not logged}"
+    # The line carries the logger's timestamp and level before it.
+    [[ "${logged}" == *"[Config] Data dir: $1" ]] || fail "the runtime's data dir is not $1: ${logged:-not logged}"
     pass "the runtime's data dir is $1"
 }
 telemetry_writing() { api /v0/telemetry/status | jq -e '.enabled and .connected and .total_written > 0'; }
