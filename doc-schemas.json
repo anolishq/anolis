@@ -1,0 +1,9 @@
+{
+  "schemas": {
+    "runtime-config": { "path": "schemas/runtime/runtime-config.schema.json" },
+    "sim-config": {
+      "url": "https://github.com/anolishq/anolis-provider-sim/releases/download/v0.2.8/anolis-provider-sim-0.2.8-config-schema.json",
+      "pointer": "/schema"
+    }
+  }
+}

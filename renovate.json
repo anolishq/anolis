@@ -1,12 +1,32 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>anolishq/renovate-config"],
+  "extends": [
+    "local>anolishq/renovate-config"
+  ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "Bump the simulator release the quickstart downloads",
-      "managerFilePatterns": ["/^docs/quickstart-simulator\\.md$/"],
-      "matchStrings": ["\\nSIM=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\n"],
+      "managerFilePatterns": [
+        "/^docs/quickstart-simulator\\.md$/"
+      ],
+      "matchStrings": [
+        "\\nSIM=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\n"
+      ],
+      "depNameTemplate": "anolishq/anolis-provider-sim",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Bump the simulator release whose config schema validates the docs' simulator examples",
+      "managerFilePatterns": [
+        "/^doc-schemas\\.json$/"
+      ],
+      "matchStrings": [
+        "anolis-provider-sim/releases/download/v(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)/anolis-provider-sim-[0-9]+\\.[0-9]+\\.[0-9]+-config-schema\\.json"
+      ],
+      "autoReplaceStringTemplate": "anolis-provider-sim/releases/download/v{{{newValue}}}/anolis-provider-sim-{{{newValue}}}-config-schema.json",
       "depNameTemplate": "anolishq/anolis-provider-sim",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"

@@ -38,6 +38,8 @@ Both checks print `OK`, and `bin/` now holds `anolis-runtime` and
 The provider's config declares the simulated devices. Save it as
 `provider-sim.yaml`:
 
+<!-- validate: sim-config -->
+
 ```yaml
 devices:
   - id: tempctl0
@@ -53,6 +55,8 @@ simulation:
 
 The runtime's config starts that provider and serves the HTTP API on this
 machine only. Save it as `anolis-runtime.yaml`:
+
+<!-- validate: runtime-config -->
 
 ```yaml
 http:

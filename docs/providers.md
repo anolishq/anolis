@@ -58,6 +58,8 @@ Practical consequences:
 
 Configure per provider:
 
+<!-- validate: runtime-config -->
+
 ```yaml
 providers:
   - id: hardware0
@@ -123,6 +125,8 @@ Recommended quality bar:
 ## Testing a Provider
 
 Use runtime with a provider entry in runtime YAML:
+
+<!-- validate: runtime-config -->
 
 ```yaml
 providers:

@@ -76,6 +76,8 @@ reverted on restart takes effect only once an operator re-enters `AUTO`.
 
 Example:
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 automation:
   enabled: true
@@ -104,6 +106,8 @@ to a safe value:
 > (except in IDLE, where the IDLE gate refuses `before_transition` calls) and
 > reports `safe_state_achieved: false`. Once `safety.safe_state` declares a rung,
 > the stop's latch refuses this hook and the rung alone drives the outputs.
+
+<!-- validate: runtime-config fragment -->
 
 ```yaml
 automation:

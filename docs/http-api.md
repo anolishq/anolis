@@ -41,6 +41,8 @@ CORS response headers come from runtime config (`http.cors_*`).
 
 All JSON responses include `status`:
 
+<!-- validate: none -->
+
 ```json
 {
   "status": {
@@ -345,6 +347,8 @@ curl -N http://127.0.0.1:8080/v0/events
 ## Error Payload
 
 Example:
+
+<!-- validate: none -->
 
 ```json
 {

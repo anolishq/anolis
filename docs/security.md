@@ -65,6 +65,8 @@ network with `http.allow_insecure_bind: true` (not recommended).
 
 ## Authentication (Bearer token)
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 http:
   bind: 0.0.0.0
@@ -123,6 +125,8 @@ startup whenever it is on with auth enabled.
 A Bearer token sent over plain HTTP is sniffable on the network, so serve over
 TLS (or terminate TLS at a reverse proxy) whenever the API is network-exposed.
 The runtime starts an HTTPS server when both paths are set:
+
+<!-- validate: runtime-config fragment -->
 
 ```yaml
 http:
