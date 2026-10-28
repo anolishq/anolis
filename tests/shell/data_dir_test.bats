@@ -142,6 +142,16 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
 }
 
+@test "643: a run journal alone, with no latch, is data" {
+    # A runtime before 0.2.0 that was never stopped still kept its runs at <prefix>/x.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/runs"
+    printf '{"run_id":"r1"}\n' > "${PREFIX}/state/runs/index.jsonl"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
+}
+
 @test "643: a preserved relative data_dir with no data yet resolves against the config" {
     printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
     run phase_config_runtime

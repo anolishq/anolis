@@ -669,18 +669,23 @@ _backup_replaced_config() {
 # WorkingDirectory=${PREFIX} put it, a relative one is resolved by
 # _relative_data_dir, and an absolute one is left alone. A one-line
 # `runtime: {...}` is not edited.
+# A latch file or a non-empty run index: the runtime creates runs/ at every
+# start, so a directory alone says only that a runtime started there.
+_holds_runtime_data() {
+    compgen -G "$1/estop/*.json" >/dev/null || [[ -s "$1/runs/index.jsonl" ]]
+}
+
 # A relative runtime.data_dir means what the runtime makes of it: the config's
 # directory, so a variant can name ../anolis-data and keep it through a copy
 # over runtime.yaml (#643). A preserved one may have been written for a runtime
 # before 0.2.0, which resolved it against WorkingDirectory=<prefix>: keep that
-# place if it holds the latch or the journal and the config's does not.
+# place if it holds a latch or a run journal and the config's does not.
 _relative_data_dir() {
     local cfg="$1" rel="$2" how="$3"
     local beside old
     beside=$(realpath -m -s -- "$(dirname "${cfg}")/${rel}")
     old=$(realpath -m -s -- "${PREFIX}/${rel}")
-    if [[ "${how}" == preserved && ! -d "${beside}/estop" && ! -d "${beside}/runs" ]] &&
-        [[ -d "${old}/estop" || -d "${old}/runs" ]]; then
+    if [[ "${how}" == preserved ]] && ! _holds_runtime_data "${beside}" && _holds_runtime_data "${old}"; then
         printf '%s' "${old}"
     else
         printf '%s' "${beside}"
