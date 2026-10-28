@@ -1,0 +1,32 @@
+runtime:
+  name: e2e-sim
+  shutdown_timeout_ms: 2000
+  startup_timeout_ms: 30000
+http:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8080
+providers:
+- id: sim0
+  command: ../anolis-provider-sim/build/dev-release/anolis-provider-sim
+  args:
+  - --config
+  - ../anolis-projects/projects/e2e-sim/config/provider-sim.sim0.yaml
+  timeout_ms: 5000
+  hello_timeout_ms: 2000
+  ready_timeout_ms: 10000
+polling:
+  interval_ms: 500
+telemetry:
+  enabled: false
+logging:
+  level: info
+automation:
+  enabled: false
+# A safe state the runtime cannot plan on the sim (#616): zero_is_safe, whose
+# zeroes the sim refuses before any call is sent (its motor and relay indexes
+# start at 1, its relay states are booleans, and chaos_control's functions
+# take a device id). The install must fail.
+safety:
+  safe_state:
+    zero_is_safe: true

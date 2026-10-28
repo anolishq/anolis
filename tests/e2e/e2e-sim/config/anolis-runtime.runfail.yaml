@@ -1,0 +1,42 @@
+runtime:
+  name: e2e-sim
+  shutdown_timeout_ms: 2000
+  startup_timeout_ms: 30000
+http:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8080
+providers:
+- id: sim0
+  command: ../anolis-provider-sim/build/dev-release/anolis-provider-sim
+  args:
+  - --config
+  - ../anolis-projects/projects/e2e-sim/config/provider-sim.sim0.yaml
+  timeout_ms: 5000
+  hello_timeout_ms: 2000
+  ready_timeout_ms: 10000
+polling:
+  interval_ms: 500
+telemetry:
+  enabled: false
+logging:
+  level: info
+automation:
+  enabled: false
+# A safe state that runs and fails at the provider, as on a board that comes
+# up tripped (#616): the first hook makes the sim report motorctl0
+# unavailable for a minute, so the second, which the runtime plans and sends,
+# fails there. The install must warn and still exit 0.
+safety:
+  safe_state:
+    hooks:
+      - device_handle: sim0/chaos_control
+        function_name: inject_device_unavailable
+        args:
+          device_id: motorctl0
+          duration_ms: 60000
+      - device_handle: sim0/motorctl0
+        function_name: set_motor_duty
+        args:
+          motor_index: 1
+          duty: 0.0
