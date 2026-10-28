@@ -1,291 +1,206 @@
 # Anolis Observability Stack
 
-This directory contains Docker configuration for the Anolis telemetry stack:
+A Docker Compose stack of InfluxDB 2.9 and Grafana 13.3.0 with the Anolis
+dashboards provisioned. Use it for development, or on a separate monitoring
+host. It ships as the release asset `anolis-<version>-observability.tar.gz`
+and lives in `observability/` in the anolis repository.
 
-- **InfluxDB 2.9**: Time-series database for signal history
-- **Grafana 13.2.4**: Visualization dashboards
+The default credentials are for local development only. Grafana also lets
+anyone who can reach it view the dashboards without logging in (anonymous
+Viewer role).
 
-## Quick Start
+On a runtime host, `install.sh --with-observability` installs InfluxDB and
+Grafana as native packages, with the same dashboards, instead. See
+[Deploy with `install.sh`](https://github.com/anolishq/anolis/blob/main/docs/deploy/install-sh.md).
 
-### 1. Start the Stack
+## Start the stack
+
+Run these from the directory that holds `docker-compose.observability.yml`:
 
 ```bash
-# Create .env from template (optional - defaults work for local dev)
-cp .env.example .env
-
-# Start containers
-docker-compose -f docker-compose.observability.yml up -d
-
-# Verify containers are running
-docker-compose -f docker-compose.observability.yml ps
+cp .env.example .env    # optional: change the defaults below
+docker compose -f docker-compose.observability.yml up -d
+docker compose -f docker-compose.observability.yml ps
 ```
 
-### 2. Access Services
+Grafana waits until InfluxDB passes its health check.
 
-| Service  | URL                     | Credentials       |
+| Service  | URL                     | Login             |
 | -------- | ----------------------- | ----------------- |
 | InfluxDB | <http://localhost:8086> | admin / anolis123 |
 | Grafana  | <http://localhost:3001> | admin / anolis123 |
 
-### 3. Run Anolis with Telemetry
+The dashboards are in the **Anolis** folder in Grafana. Signal History is the
+home dashboard.
 
-```bash
-# From anolis root directory
-./build/core/Release/anolis-runtime.exe anolis-runtime-telemetry.yaml
-```
+## Settings
 
-### 4. View Dashboards
+`.env` sets these variables. Each one defaults to the value shown.
 
-1. Open <http://localhost:3001> (Grafana)
-2. Login with admin / anolis123
-3. Navigate to **Dashboards** → **Anolis**
-4. Select **Signal History** or **Device Health**
+| Variable            | Default     | Used for                                     |
+| ------------------- | ----------- | -------------------------------------------- |
+| `INFLUXDB_USERNAME` | `admin`     | InfluxDB admin user                          |
+| `INFLUXDB_PASSWORD` | `anolis123` | InfluxDB admin password                      |
+| `INFLUXDB_ORG`      | `anolis`    | InfluxDB organization                        |
+| `INFLUXDB_BUCKET`   | `anolis`    | Bucket the runtime writes and Grafana reads  |
+| `INFLUXDB_TOKEN`    | `dev-token` | Admin token, used by the runtime and Grafana |
+| `GRAFANA_PASSWORD`  | `anolis123` | Grafana admin password                       |
 
-## Configuration
+InfluxDB applies its values only on first start, when the `influxdb-data`
+volume is empty. To change them later, remove the volumes (see
+[Stop and clean up](#stop-and-clean-up)) and start again.
 
-### Environment Variables
+## Point the runtime at it
 
-Copy `.env.example` to `.env` and customize:
+Set `telemetry.enabled: true` and point `telemetry.influxdb` at
+`http://localhost:8086` with the org, bucket and token above.
+[`examples/anolis-runtime-telemetry.yaml`](https://github.com/anolishq/anolis/blob/main/examples/anolis-runtime-telemetry.yaml)
+already matches the defaults. The other telemetry keys, including
+`health_interval_ms`, are in the
+[configuration schema](https://github.com/anolishq/anolis/blob/main/docs/configuration-schema.md#telemetry).
 
-| Variable          | Default   | Description             |
-| ----------------- | --------- | ----------------------- |
-| INFLUXDB_USERNAME | admin     | InfluxDB admin user     |
-| INFLUXDB_PASSWORD | anolis123 | InfluxDB admin password |
-| INFLUXDB_ORG      | anolis    | InfluxDB organization   |
-| INFLUXDB_BUCKET   | anolis    | InfluxDB bucket name    |
-| INFLUXDB_TOKEN    | dev-token | API token for writes    |
-| GRAFANA_PASSWORD  | anolis123 | Grafana admin password  |
+With the runtime on another host, use this host's address in place of
+`localhost`.
 
-### Runtime Config
+## How the panels read change-only data
 
-In your `anolis-runtime.yaml`, enable telemetry:
+Every dashboard reads the datasource's default bucket and has a **Runtime**
+filter, so several runtimes can write the same provider, device and signal
+ids into one bucket.
 
-```yaml
-telemetry:
-  enabled: true
-  influxdb:
-    url: http://localhost:8086
-    org: anolis
-    bucket: anolis
-    token: dev-token # Or use INFLUXDB_TOKEN env var
-    batch_size: 100
-    flush_interval_ms: 1000
-```
+The runtime writes an `anolis_signal` row only when a signal's value or
+quality changes, not on every poll. The panels are built around that:
+
+- Latest-state panels (status tables, quality counts, the quality pie) show
+  each signal's state as of the end of the selected range. They look back 30
+  days for its last row, so a steady signal that last changed before the range
+  is still shown. One that last changed more than 30 days before the end of
+  the range is not.
+- Nothing is written when a runtime stops, so its last rows would otherwise
+  stand. Latest-state panels, and the starting values of the history panels,
+  show a runtime only if it wrote an `anolis_provider_health` row in the
+  range. They are empty when health snapshots are off
+  (`telemetry.health_interval_ms: 0`), and can be empty for a range shorter
+  than the health interval (15 s by default).
+- History panels start each series at its last value before the range, then
+  plot the last value in each window as steps. A window with no change holds
+  the previous value, so a steady signal is a flat line.
+- A runtime that stops inside the range still reads as running. Its last
+  value and quality are held to the end of the range, and the latest-state
+  panels still show it, until the stop falls before the range
+  (anolishq/anolis#497).
+- Rates ("changes/sec") count change rows. They show how often values change,
+  not how often the runtime polls.
+- Freshness comes from the health snapshots
+  (`anolis_device_health.staleness_ms`), not from the age of a signal's last
+  change. An unchanged, healthy signal is fresh.
+- "Seen in range" counts are distinct ids with at least one row in the range,
+  not a live inventory.
 
 ## Dashboards
 
-All bundled dashboards read the datasource's default bucket
-(`v.defaultBucket`, provisioned from `INFLUX_BUCKET`), and every dashboard has
-a **Runtime** filter (`runtime_name`), so two runtimes writing the same
-provider, device and signal ids into one bucket stay apart.
+- **Signal History**: double, boolean (as 0/1) and integer/unsigned values as
+  steps, and a table of each string signal's latest value. Filters by
+  runtime, provider, device and signal.
+- **Device Health**: counts of signals whose latest quality is `OK`, `STALE`,
+  `UNAVAILABLE` or `FAULT`, a per-signal status table, quality distribution
+  over time, and the latest `staleness_ms` per device.
+- **System Overview**: providers, devices and signals seen in range, signal
+  changes per second, and a status table and quality pie as of the end of the
+  range.
+- **I/O & Watchdog Health**: per-device I/O counters, watchdog state and
+  missing or excluded flags; I/O failure rate; retried-attempts slope, which
+  rises before `io_failed` does when retries are hiding a failing bus;
+  watchdog trip count, with an annotation at each health snapshot where a
+  device's trip count rose; and provider degraded and failed-device counts.
+  These panels need health snapshots. For how each kind of e-stop shows up
+  here, see
+  [Safety](https://github.com/anolishq/anolis/blob/main/docs/safety.md#the-machine-profile-already-names-this).
 
-### How the panels read change-driven data
+Mode changes are drawn as annotations on every dashboard, and parameter
+changes on all but I/O & Watchdog Health, which draws watchdog trips instead.
+Annotations follow the Runtime selection.
 
-The runtime writes an `anolis_signal` row only when a signal's value or
-quality **changes**, not on every poll. The panels are built around that:
+## Data
 
-- **Latest-state panels** (status tables, quality counts, quality pie) show
-  each signal's state **as of the end of the selected range**, looking back
-  30 days for its last row. A steady signal that last changed before the
-  range is still shown. One that last changed more than 30 days before the
-  end of the range is not.
-- **Only a running runtime's state is shown.** Nothing is written when a
-  runtime stops, so its last rows would otherwise stand. The latest-state
-  panels, and the seeds of the history panels, show a runtime's signals only
-  if it wrote an `anolis_provider_health` row in the selected range. They are
-  empty with health ingestion off (`telemetry.health_interval_ms: 0`) or on a
-  runtime before 0.1.37, and can be for a range shorter than the health
-  interval (15 s by default).
-- **History panels** plot the **last value in each window** as steps, seeded
-  with each signal's last value before the range. A window's value is where
-  the signal ended up, not an average of its changes, which would weight each
-  change rather than each second. A window with no change holds the value
-  before it, so a steady signal is a flat line across the range.
-- **A runtime that stops inside the range reads as running until the stop
-  leaves the range.** The history panels hold each series' last row to the
-  end of the range, so after a stop or a crash, restarted or not, Signal
-  History draws the last value flat and Device Health's Quality Distribution
-  Over Time keeps counting the last quality, usually OK. The latest-state
-  panels show its last state too, since its health rows are still in range.
-  It drops out only once the stop is before the range
-  (anolishq/anolis#497).
-- **Rates** ("changes/sec") count change rows: they measure how often values
-  change, not how often the runtime polls.
-- **Freshness** comes from the runtime's periodic health snapshots
-  (`anolis_device_health.staleness_ms`), not from the age of a signal's last
-  change. An unchanged, healthy signal has an old last change and is fresh.
-- **"Seen in range" counts** count distinct ids with at least one row in the
-  selected range. They are not a live inventory.
+The runtime writes these measurements:
 
-### Signal History
+- `anolis_signal`, tagged `runtime_name`, `provider_id`, `device_id` and
+  `signal_id`. Each row has a `quality` field and at most one typed value
+  field (`value_double`, `value_int`, `value_uint`, `value_bool` or
+  `value_string`).
+- `anolis_device_health` and `anolis_provider_health`, the periodic health
+  snapshots.
+- `mode_change` and `parameter_change`, tagged `runtime_name`, which the
+  annotations read.
 
-Signal values over time, one panel per value type:
+The formats are fixed by the
+[telemetry contracts](https://github.com/anolishq/anolis/blob/main/docs/contracts/README.md).
 
-- **Double**, **Boolean** (as 0/1), and **Integer / Unsigned** values, drawn
-  as steps
-- **String** values: each string signal's latest value, as of the end of the
-  range
+## Data retention
 
-Supports filtering by runtime, provider, device and signal.
+The compose stack creates its bucket with InfluxDB's default retention, which
+keeps data forever. `install.sh --with-observability` sets 30 days instead,
+from `OBSERVABILITY_RETENTION` at install time.
 
-### Device Health
-
-Per-signal quality against the locked contract (`OK`, `STALE`,
-`UNAVAILABLE`, `FAULT`):
-
-- **Signals OK / STALE / UNAVAILABLE / FAULT**: signals whose latest quality
-  is each value
-- **Device Signal Status**: each signal's latest quality and last change
-- **Quality Distribution Over Time**: signals in each quality, carried forward
-  between changes
-- **Device Staleness**: the latest `staleness_ms` per device
-
-### System Overview
-
-- **Providers / Devices / Signals seen in range**
-- **Signal changes/sec**, in the last minute and per provider over time
-- **Signal Status** table and **Quality Distribution** pie, as of the end of
-  the range
-
-### Annotations
-
-Mode and parameter changes are drawn as annotations, filtered by the
-**Runtime** selection. Rows written by runtimes that predate the
-`runtime_name` tag on these measurements have no runtime and are shown under
-every selection.
-
-### Testing the dashboards
-
-`just test-observability` (needs Docker) starts a throwaway InfluxDB and
-Grafana, writes fixture telemetry, and runs every panel, annotation and
-variable query through Grafana, asserting what each panel shows. CI runs the
-same suite in the `observability` job. Template variables (`${provider_id}`
-and so on) are substituted by the suite the way Grafana's browser client
-does, since Grafana's query API does not substitute them.
-
-### I/O & Watchdog Health
-
-Transport and safety-layer health from the runtime's health ingestion
-(`telemetry.health_interval_ms`, anolis 0.1.37+; the panels are empty on
-older runtimes or with ingestion disabled):
-
-- **Status table**: latest io counters, watchdog state, missing/excluded
-  flags per device
-- **I/O failure rate** and **retried-attempts slope** per device — the
-  retried-attempts slope is the leading indicator for bus degradation
-  (rising retries while `io_failed` stays flat means the retry budget is
-  masking a failing bus)
-- **Watchdog**: armed state, cumulative trip count, and per-trip
-  annotations derived from `watchdog_trip_count` steps
-- **Provider degraded / failed-device count** — the alerting primitive for
-  silent device loss
-- E-stop signatures: a power-cut e-stop shows as `io_failed` accrual and
-  device blackout; a signal-wired e-stop keeps the bus alive (see the
-  machine-profile `safety.estop_topology` docs)
-
-## Data Retention
-
-The compose stack creates the `anolis` bucket with **infinite retention**
-(InfluxDB's default). The native co-located install (`install.sh
---with-observability`) defaults to **30 days** (`OBSERVABILITY_RETENTION`
-env at install time). To change retention afterwards (the `update`
-subcommand selects by `--id`; `--name` there means *rename*):
+To change retention on an existing bucket, select it by id. In
+`influx bucket update`, `--name` renames the bucket.
 
 ```bash
 influx bucket update \
   --id "$(influx bucket list --name anolis --hide-headers | cut -f1)" \
-  --retention 30d   # or 90d, 0 (infinite), ...
+  --retention 30d
 ```
 
-Raising retention is a deliberate trade-off, not a free knob:
+`--retention 0` keeps data forever.
 
-- **Disk growth and (on a Pi) SD-card wear**: the TSM engine compacts
-  continuously; more retained data means more storage and more write
-  amplification on flash.
-- **Query cost**: long-window Flux queries over months of data get slow on
-  small hosts; dashboards default to bounded windows for a reason.
-- **The real fix for long experiments**: if you need months of history,
-  prefer the separate-host topology (run this stack on a monitoring host
-  and point the runtime's `telemetry.influxdb.url` at it) or add a
-  downsampling task, rather than growing the co-located Pi bucket
-  unboundedly.
+Longer retention costs disk and, on a Raspberry Pi, SD-card wear, and long
+queries get slow on a small host. For months of history, run this stack on a
+separate monitoring host and point the runtime's `telemetry.influxdb.url` at
+it, or downsample, rather than growing a bucket on the device.
 
-Shortening retention deletes data older than the new window at the next
-retention enforcement pass — export anything you need first
-(`anolis-telemetry-export`).
-
-## Data Schema
-
-Health measurements (`anolis_provider_health`, `anolis_device_health`) are
-documented in `docs/contracts/telemetry-health-timeseries-baseline.md` in
-the anolis repository (also shipped in the
-`anolis-<version>-telemetry-schema.tar.gz` release artifact — not inside
-this observability tarball); the signal measurement is below.
-
-InfluxDB measurement: `anolis_signal`
-
-**Tags**:
-
-- `runtime_name`: Runtime instance (e.g., "default")
-- `provider_id`: Provider identifier (e.g., "sim0")
-- `device_id`: Device identifier (e.g., "tempctl-0")
-- `signal_id`: Signal identifier (e.g., "temperature")
-
-**Fields** (at most one typed value per row; none for a non-finite double):
-
-- `value_double`, `value_int`, `value_uint`, `value_bool`, `value_string`
-- `quality`: `OK`, `STALE`, `UNAVAILABLE` or `FAULT`, on every row
-
-**Example line protocol**:
-
-```flux
-anolis_signal,runtime_name=default,provider_id=sim0,device_id=tempctl-0,signal_id=temperature value_double=23.5,quality="OK" 1706960096000
-```
-
-The locked contract is `docs/contracts/telemetry-timeseries-baseline.md`.
+Shortening retention deletes data older than the new window. Export what you
+need first with
+[anolis-telemetry-export](https://github.com/anolishq/anolis-telemetry-export).
 
 ## Troubleshooting
 
-### InfluxDB Not Starting
-
-Check health status:
+If InfluxDB does not start, read its log:
 
 ```bash
-docker-compose -f docker-compose.observability.yml logs influxdb
+docker compose -f docker-compose.observability.yml logs influxdb
 ```
 
-### No Data in Grafana
+If Grafana shows no data:
 
-1. Verify runtime is writing to InfluxDB:
+1. Check that the runtime logs
+   `[InfluxSink] Started, writing to <url>/<bucket>`, then look for
+   `[InfluxSink] HTTP error` or `[InfluxSink] Connection error`.
+   The `Written <n> events` line appears only when the running total is an
+   exact multiple of 1000, so its absence does not mean writes are failing.
+2. In InfluxDB's Data Explorer (<http://localhost:8086>), query the
+   `anolis_signal` measurement in the bucket.
+3. In Grafana, open the InfluxDB data source and run its test.
 
-   ```text
-   [InfluxSink] Written 1000 events to InfluxDB
-   ```
-
-2. Check InfluxDB data explorer:
-   - Open <http://localhost:8086>
-   - Go to Data Explorer
-   - Query `anolis_signal` measurement
-
-3. Verify Grafana datasource connection:
-   - Settings → Data Sources → InfluxDB
-   - Click "Test" button
-
-### Dashboards Not Appearing
-
-Dashboards are auto-provisioned from `../grafana/dashboards/`.
-If not appearing:
+Grafana loads dashboards from `grafana/dashboards/` and rescans it every 30
+seconds. If they still do not appear, restart Grafana:
 
 ```bash
-docker-compose -f docker-compose.observability.yml restart grafana
+docker compose -f docker-compose.observability.yml restart grafana
 ```
 
-## Cleanup
+## Stop and clean up
 
 ```bash
-# Stop containers
-docker-compose -f docker-compose.observability.yml down
-
-# Remove volumes (deletes all data)
-docker-compose -f docker-compose.observability.yml down -v
+docker compose -f docker-compose.observability.yml down     # keep data
+docker compose -f docker-compose.observability.yml down -v  # delete data
 ```
+
+## Testing the dashboards
+
+In the anolis repository, `just test-observability` (needs Docker) starts a
+throwaway InfluxDB and Grafana, writes fixture telemetry, and runs every
+panel, annotation and variable query through Grafana, failing on any query
+error. It also checks the values most panels show; on I/O & Watchdog Health it
+checks only the missing or excluded count. CI runs it in the `observability`
+job.
