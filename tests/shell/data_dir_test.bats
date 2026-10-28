@@ -71,6 +71,7 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
     # and its data is there.
     printf 'runtime:\n  data_dir: state\n  name: kept\n' > "$(dest)"
     mkdir -p "${PREFIX}/state/estop"
+    printf '{"latched":true}\n' > "${PREFIX}/state/estop/0123456789abcdef.json"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
@@ -104,6 +105,7 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
     # which keeps its data at <prefix>/config/../anolis-data.
     printf 'runtime:\n  name: kept\n  data_dir: ../anolis-data\n' > "$(dest)"
     mkdir -p "${PREFIX}/anolis-data/estop"
+    printf '{"latched":true}\n' > "${PREFIX}/anolis-data/estop/0123456789abcdef.json"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
@@ -112,6 +114,7 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
 @test "643: a preserved relative data_dir with data beside the config resolves there" {
     printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
     mkdir -p "${PREFIX}/config/state/runs"
+    printf '{"run_id":"r1"}\n' > "${PREFIX}/config/state/runs/index.jsonl"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
@@ -121,9 +124,22 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
     # Runtime 0.2.0 has run on it since an older one did: its data is current.
     printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
     mkdir -p "${PREFIX}/state/estop" "${PREFIX}/config/state/estop"
+    printf '{"latched":true}\n' | tee "${PREFIX}/state/estop/a.json" > "${PREFIX}/config/state/estop/a.json"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
+}
+
+@test "643: directories a runtime only started in are not data" {
+    # Runtime 0.2.0 creates runs/ at every start, so a config it read once
+    # without data_dir leaves <config dir>/x/runs/ behind, empty.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/config/state/runs" "${PREFIX}/config/state/estop" "${PREFIX}/state/estop"
+    : > "${PREFIX}/config/state/runs/index.jsonl"
+    printf '{"latched":true}\n' > "${PREFIX}/state/estop/0123456789abcdef.json"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
 }
 
 @test "643: a preserved relative data_dir with no data yet resolves against the config" {
