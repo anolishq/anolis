@@ -4,6 +4,8 @@
 # so the installed runtime.yaml names <prefix>/anolis-data, where the unit's
 # WorkingDirectory used to put it: a fresh install writes the key, and an
 # upgrade adds it to a preserved config that lacks it. Nothing on disk moves.
+# A relative data_dir in a variant means what the runtime makes of it, the
+# config's directory (#643); a preserved one keeps the place its data is in.
 #
 # Source install.sh (main() guarded) and run the config phase with chown
 # mocked. No root, network or systemd.
@@ -65,11 +67,61 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
 }
 
 @test "562: a preserved relative data_dir is pinned to where it resolved before" {
+    # A runtime before 0.2.0 resolved it against WorkingDirectory=<prefix>,
+    # and its data is there.
     printf 'runtime:\n  data_dir: state\n  name: kept\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/estop"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
     [ "$(_yaml_block_value "$(dest)" runtime name)" = "kept" ]
+}
+
+@test "643: a fresh install of a variant naming ../anolis-data names <prefix>/anolis-data" {
+    printf 'runtime:\n  name: rig\n  data_dir: ../anolis-data\nautomation:\n  enabled: false\n' \
+        > "${BUNDLE_DIR}/projects/proj/config/anolis-runtime.manual.yaml"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+    [ "$(grep -c data_dir "$(dest)")" -eq 1 ]
+}
+
+@test "643: --replace-config with a variant naming ../anolis-data names <prefix>/anolis-data" {
+    printf 'runtime:\n  name: old\n  data_dir: %s/anolis-data\n' "${PREFIX}" > "$(dest)"
+    printf 'runtime:\n  name: rig\n  data_dir: ../anolis-data\nautomation:\n  enabled: false\n' \
+        > "${BUNDLE_DIR}/projects/proj/config/anolis-runtime.manual.yaml"
+    REPLACE_CONFIG=1
+    REPLACE_STAMP=test
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+    [ "$(_yaml_block_value "$(dest)" runtime name)" = "rig" ]
+    [ "$(grep -c data_dir "$(dest)")" -eq 1 ]
+}
+
+@test "643: a preserved ../anolis-data copied in by hand stays at <prefix>/anolis-data" {
+    # A quickstart's cp of a variant over runtime.yaml, run by runtime 0.2.0,
+    # which keeps its data at <prefix>/config/../anolis-data.
+    printf 'runtime:\n  name: kept\n  data_dir: ../anolis-data\n' > "$(dest)"
+    mkdir -p "${PREFIX}/anolis-data/estop"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+}
+
+@test "643: a preserved relative data_dir with data beside the config resolves there" {
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/config/state/runs"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
+}
+
+@test "643: a preserved relative data_dir with no data yet resolves against the config" {
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
 }
 
 @test "562: a flow-style runtime block is left as it is, with a warning" {

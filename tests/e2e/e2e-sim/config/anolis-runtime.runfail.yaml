@@ -1,4 +1,7 @@
 runtime:
+  # Beside the config's directory, so a copy of this file anywhere keeps it
+  # where install.sh put it: <prefix>/config/../anolis-data (#643).
+  data_dir: ../anolis-data
   name: e2e-sim
   shutdown_timeout_ms: 2000
   startup_timeout_ms: 30000
