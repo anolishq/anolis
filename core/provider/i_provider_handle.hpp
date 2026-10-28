@@ -52,8 +52,11 @@ public:
      *
      * Idempotent. Used before a restart so a wedged process is gone before its
      * replacement starts (#326).
+     *
+     * @return true once the process and everything it started have exited;
+     *         false if any of it is still running (#563)
      */
-    virtual void stop() = 0;
+    virtual bool stop() = 0;
 
     /**
      * @brief Execute the ADPP `Hello` handshake.

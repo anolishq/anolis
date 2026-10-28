@@ -4,12 +4,13 @@ Welcome to the Anolis documentation! Use this file as the canonical documentatio
 
 ## Start Here
 
-1. [getting-started.md](getting-started.md) - Build, run, and first validation.
-2. [architecture.md](architecture.md) - Runtime architecture and subsystem boundaries.
-3. [decoupling.md](decoupling.md) - The ecosystem model and the invariant every change is tested against.
-4. [system-surfaces.md](system-surfaces.md) - Boundary & ownership map of every external surface (org-wide).
-5. [configuration.md](configuration.md) - How to author and validate runtime YAML.
-6. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
+1. [quickstart-simulator.md](quickstart-simulator.md) - Run the released runtime with simulated devices and control one over HTTP.
+2. [getting-started.md](getting-started.md) - Build, run, and first validation.
+3. [architecture.md](architecture.md) - Runtime architecture and subsystem boundaries.
+4. [decoupling.md](decoupling.md) - The ecosystem model and the invariant every change is tested against.
+5. [system-surfaces.md](system-surfaces.md) - Boundary & ownership map of every external surface (org-wide).
+6. [configuration.md](configuration.md) - How to author and validate runtime YAML.
+7. [http-api.md](http-api.md) - Human guide for runtime `/v0` HTTP usage.
 
 ## Deployment
 

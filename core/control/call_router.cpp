@@ -250,6 +250,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
 
     // Forward call to provider
     anolis::deviceprovider::v1::CallResponse call_response;
+    result.dispatched = true;
     if (!provider->call(device_id, func_spec->function_id, resolved_function_name, args, call_response)) {
         result.error_message = "Provider call failed: " + provider->last_error();
         result.status_code = provider->last_status_code();

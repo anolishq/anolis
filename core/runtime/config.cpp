@@ -341,10 +341,6 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
             error = "HTTP thread_pool_size must be at least 1";
             return false;
         }
-        if (config.http.cors_allowed_origins.empty()) {
-            error = "http.cors_allowed_origins must not be empty";
-            return false;
-        }
         // CORS spec violation: wildcard origin cannot be used with credentials
         if (config.http.cors_allow_credentials) {
             for (const auto &origin : config.http.cors_allowed_origins) {
@@ -713,10 +709,6 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 } else {
                     error = "'http.cors_allowed_origins' must be a string or sequence";
                     return false;
-                }
-
-                if (config.http.cors_allowed_origins.empty()) {
-                    config.http.cors_allowed_origins.push_back("*");
                 }
             }
             if (yaml["http"]["cors_allow_credentials"]) {
@@ -1290,6 +1282,20 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
         }
 
+        // The latch and the run journal live under data_dir, so it must not
+        // depend on the directory the runtime was started from (#562). A
+        // default or relative data_dir is resolved against the config file's
+        // directory, as config_dir already is.
+        {
+            const std::filesystem::path data_dir = config.runtime.data_dir.empty()
+                                                       ? std::filesystem::path("anolis-data")
+                                                       : std::filesystem::path(config.runtime.data_dir);
+            config.runtime.data_dir =
+                (data_dir.is_absolute() ? data_dir : std::filesystem::path(config.config_dir) / data_dir)
+                    .lexically_normal()
+                    .string();
+        }
+
         // Structural YAML checks above guarantee node shape; centralized
         // validation here enforces cross-field and semantic constraints.
         if (!validate_config(config, error)) {
@@ -1319,6 +1325,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         }
         LOG_INFO(telemetry_msg.str());
 
+        LOG_INFO("[Config] Data dir: " << config.runtime.data_dir);
         LOG_INFO("[Config] Log level: " << config.logging.level);
 
         std::stringstream automation_msg;

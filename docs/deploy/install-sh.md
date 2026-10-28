@@ -186,8 +186,8 @@ The install's own health check sends the token the same way. It confirms that `/
 that `/v0/runs` answers 200, then reports provider liveness. The second matters because the run registry
 fails soft — if its data directory cannot be created, the runtime logs one
 warning at boot and then serves 503 on every run endpoint for as long as it
-runs, while status stays green. The unit starts the runtime in `<prefix>` so the
-default `anolis-data/` directory resolves somewhere the service user can write;
+runs, while status stays green. The installed config sets
+`runtime.data_dir: <prefix>/anolis-data`, somewhere the service user can write;
 an install that warns `run registry NOT available` is one where that did not
 hold.
 
@@ -196,6 +196,19 @@ For providers it reads `/v0/providers/health` until every provider is
 `providers: N of M running` and one warning per provider that is not running,
 with its id and lifecycle state. Like the run registry, a shortfall is a
 warning and does not fail the install. It counts providers, not devices.
+
+It also reports what `safety.on_startup` did at the runtime's restart. A safe
+state that ran and did not take, such as on a board that came up tripped, is a
+warning: `health: startup safe state NOT achieved`, then each failed and
+skipped call. A safe state the config cannot express on this machine's devices
+fails the install, with exit 1: the runtime marks such a call `cause: config`
+(the zero rung cannot build its arguments, or the call names a device or
+function that does not exist, or an argument out of range), and it fails the
+same way on every restart and every e-stop. The install logs `health:
+safety.safe_state cannot run on this machine's devices: <first refused call>`,
+and the summary says the install did not succeed. Fix `safety.safe_state` and
+run the install again (#616). A runtime before 0.2.0 marks no call, so
+against one every failure stays a warning.
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is

@@ -44,6 +44,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Runtime status
           content:
@@ -58,6 +60,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Provider health summary
           content:
@@ -72,6 +76,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Telemetry sink health
           content:
@@ -89,6 +95,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: A page of runs
           content:
@@ -108,6 +116,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: The opened run
           content:
@@ -130,6 +142,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: The run
           content:
@@ -158,6 +172,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: The closed run
           content:
@@ -188,6 +206,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: A page of run events
           content:
@@ -220,6 +240,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: The persisted event
           content:
@@ -252,6 +276,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Device inventory
           content:
@@ -269,6 +295,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Device capabilities
           content:
@@ -287,6 +315,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Aggregated device state
           content:
@@ -314,6 +344,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Device state snapshot
           content:
@@ -340,6 +372,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: Call accepted/executed
           content:
@@ -366,6 +402,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Current mode
           content:
@@ -387,6 +425,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: Mode set
           content:
@@ -422,6 +464,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: Safe-state engaged
           content:
@@ -445,6 +491,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: Latch released
           content:
@@ -469,6 +519,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Parameter inventory
           content:
@@ -490,6 +542,10 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "415":
+          $ref: '#/components/responses/UnsupportedMediaType'
         "200":
           description: Parameter updated
           content:
@@ -510,6 +566,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Behavior tree content
           content:
@@ -530,6 +588,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: Automation status
           content:
@@ -580,6 +640,8 @@ paths:
       responses:
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "200":
           description: SSE stream
           content:
@@ -635,6 +697,39 @@ components:
               error:
                 type: string
                 const: unauthorized
+    Forbidden:
+      description: |
+        Refused before routing (#540). With auth off, the Host header must name
+        this machine: localhost, 127.0.0.1, ::1 or the bind address, unless
+        http.allow_insecure_bind is set (`host not allowed`). A POST to /v0/
+        that carries an Origin header must come from an origin in
+        http.cors_allowed_origins (`origin not allowed`). The body is a flat
+        error string, not the Status-shaped ErrorResponse.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error]
+            properties:
+              error:
+                type: string
+                enum: [host not allowed, origin not allowed]
+    UnsupportedMediaType:
+      description: |
+        A POST with a body whose Content-Type is not application/json, refused
+        before routing (#540). A bodyless POST needs no Content-Type. The body
+        is a flat error string, not the Status-shaped ErrorResponse.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: a request body must be application/json
     BadRequest:
       description: Invalid argument or malformed payload
       content:
@@ -917,6 +1012,17 @@ components:
           type: boolean
         error:
           type: string
+        cause:
+          type: string
+          enum: [config, run]
+          description: >-
+            Present on a call that did not succeed. config: the call could not
+            be planned from the config on these devices, and fails the same way
+            on every run (the zero rung could not build its arguments, or the
+            call was refused before reaching its provider because the device or
+            function does not exist or an argument is invalid). Fix
+            safety.safe_state. run: anything else, such as a provider that
+            failed the call.
     EstopResponse:
       type: object
       additionalProperties: false

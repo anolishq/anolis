@@ -63,19 +63,20 @@ struct RuntimeModeConfig {
     std::string name;                // Instance identifier (optional, for multi-runtime deployments)
     int shutdown_timeout_ms = 2000;  // Provider graceful shutdown timeout (500-30000ms)
     int startup_timeout_ms = 30000;  // Overall startup timeout for fail-fast (5000-300000ms)
-    std::string data_dir;            // Runtime data directory (run registry JSONL, etc.); empty => ./anolis-data
+    std::string data_dir;            // Runtime data directory (latch, run journal); load_config resolves a
+                                     // default (anolis-data) or relative one against config_dir (#562)
 };
 
 /**
  * @brief HTTP adapter settings for the runtime's REST surface.
  */
 struct HttpConfig {
-    bool enabled = true;                                 // HTTP server enabled
-    std::string bind = "127.0.0.1";                      // Bind address
-    int port = 8080;                                     // HTTP port
-    std::vector<std::string> cors_allowed_origins{"*"};  // CORS allowlist ("*" = allow all)
-    bool cors_allow_credentials = false;                 // Whether to emit Access-Control-Allow-Credentials
-    int thread_pool_size = 40;                           // Worker thread pool size
+    bool enabled = true;                            // HTTP server enabled
+    std::string bind = "127.0.0.1";                 // Bind address
+    int port = 8080;                                // HTTP port
+    std::vector<std::string> cors_allowed_origins;  // Browser origins allowed; empty = none, "*" = any (#540)
+    bool cors_allow_credentials = false;            // Whether to emit Access-Control-Allow-Credentials
+    int thread_pool_size = 40;                      // Worker thread pool size
 
     // Authentication (Bearer token). Non-loopback exposure requires auth (see the
     // startup guard in validate_config). With auth on, loopback requests need the

@@ -24,7 +24,18 @@ Use this file for operational semantics and practical examples.
    envelope below. `install.sh` generates the token into
    `/etc/anolis/runtime.env`. See [security.md](security.md).
 
-CORS behavior comes from runtime config (`http.cors_*`).
+5. Request checks, before routing and before authentication (#540):
+   - with auth off, the `Host` header must name this machine (`localhost`,
+     `127.0.0.1`, `::1` or the bind address), or the reply is `403`
+     `{"error":"host not allowed"}`. `http.allow_insecure_bind` turns this
+     check off;
+   - a `POST` to `/v0/` that carries an `Origin` header must come from an
+     origin in `http.cors_allowed_origins`, or the reply is `403`
+     `{"error":"origin not allowed"}`. Tools such as `curl` send no `Origin`;
+   - a `POST` with a body must send `Content-Type: application/json`, or the
+     reply is `415`. A bodyless `POST`, such as `/v0/estop`, needs none.
+
+CORS response headers come from runtime config (`http.cors_*`).
 
 ## Common Response Envelope
 
@@ -122,7 +133,9 @@ Notes:
 4. What `safety.on_startup` did at startup is surfaced under
    `startup_safe_state` in `GET /v0/runtime/status`: `on_startup`, `ran`,
    `software_safe_state`, `safe_state_achieved` (the same verdict) and
-   `failed_actions` (same shape as the `/v0/estop` actions), and
+   `failed_actions` (same shape as the `/v0/estop` actions; a failed one
+   carries `cause`, `config` or `run`, see
+   [safety.md](safety.md#outputs-at-startup)), and
    `skipped_actions`: calls not issued, each with `device_handle`,
    `function` and `reason`. A call is skipped when its provider reported the
    device `UNREACHABLE` and it is not registered (`reason` is the provider's

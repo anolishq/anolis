@@ -87,6 +87,10 @@ PREFIX_EXPLICIT=0
 # inert default `manual`. install.sh only ever installs an inert variant.
 RUNTIME_VARIANT=""
 HEALTH_FAILED=0
+# The startup safe state cannot be planned from the config on this machine's
+# devices (#616): the install fails, naming the first refused action.
+SAFE_STATE_UNPLANNABLE=0
+SAFE_STATE_REFUSED=""
 # Continue past providers' unmet host requirements (--allow-unmet-host).
 ALLOW_UNMET_HOST=0
 # Install an older runtime over a newer one (--allow-downgrade).
@@ -658,6 +662,49 @@ _backup_replaced_config() {
     log_info "config: replacing ${path}; the previous file is at ${backup}"
 }
 
+# The runtime resolves a default or relative runtime.data_dir against the
+# config file's directory (#562), not the unit's WorkingDirectory. Name it in
+# the installed config as the directory WorkingDirectory=${PREFIX} gave it, so
+# an install or upgrade moves neither the e-stop latch nor the run journal: an
+# absent key becomes <prefix>/anolis-data, a relative one <prefix>/<it>, and an
+# absolute one is left alone. A one-line `runtime: {...}` is not edited.
+_pin_runtime_data_dir() {
+    local cfg="$1" how="$2"
+    local current
+    current=$(_yaml_block_value "${cfg}" runtime data_dir)
+    current=${current//[\"\']/}
+    [[ "${current}" == /* ]] && return 0
+    local want="${PREFIX}/anolis-data"
+    [[ -n "${current}" ]] && want="${PREFIX}/${current}"
+    if grep -qE '^runtime:[[:space:]]*[^[:space:]#]' "${cfg}"; then
+        log_warn "config (runtime): ${cfg} has a one-line runtime block; add runtime.data_dir: ${want} to it, or the runtime keeps its data beside the config"
+        return 0
+    fi
+    local tmp="${cfg}.data-dir.$$"
+    awk -v want="${want}" '
+        NR == FNR {
+            if (/^[^[:space:]#]/) { in_blk = ($1 == "runtime:") }
+            else if (in_blk && indent == "" && /^[[:space:]]+[^[:space:]#]/) { match($0, /^[[:space:]]+/); indent = substr($0, 1, RLENGTH) }
+            if (/^runtime:/) { has_blk = 1 }
+            next
+        }
+        FNR == 1 { if (indent == "") indent = "  "; in_blk = 0 }
+        /^[^[:space:]#]/ { in_blk = ($1 == "runtime:") }
+        in_blk && $1 == "data_dir:" { print indent "data_dir: " want; done = 1; next }
+        { print }
+        /^runtime:/ && !done && !has_dd { print indent "data_dir: " want; done = 1 }
+        END { if (!has_blk) { print "runtime:"; print indent "data_dir: " want } }
+    ' has_dd="${current:+1}" "${cfg}" has_dd="${current:+1}" "${cfg}" > "${tmp}" || { rm -f "${tmp}"; die "config (runtime): could not edit ${cfg}"; }
+    chown --reference="${cfg}" "${tmp}"
+    chmod --reference="${cfg}" "${tmp}"
+    mv "${tmp}" "${cfg}"
+    if [[ "${how}" == preserved ]]; then
+        log_info "config (runtime): set runtime.data_dir to ${want} in ${cfg}, where the runtime already kept its data"
+    else
+        log_ok "config (runtime): runtime.data_dir is ${want}"
+    fi
+}
+
 phase_config_runtime() {
     local dest="${PREFIX}/config/runtime.yaml"
     local variant="${RUNTIME_VARIANT:-manual}"
@@ -671,6 +718,7 @@ phase_config_runtime() {
         cp "${src}" "${dest}"
         chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
         log_ok "config (runtime): replaced with variant '${variant}'"
+        _pin_runtime_data_dir "${dest}" new
     elif [[ -f "${dest}" ]]; then
         # Preserve an operator-edited/activated config across upgrades; only warn
         # if it is not inert (they may have activated automation from Operate).
@@ -681,11 +729,13 @@ phase_config_runtime() {
         fi
         verify_inert_runtime_config "${dest}" warn
         warn_kept_provider_configs "${dest}"
+        _pin_runtime_data_dir "${dest}" preserved
     else
         verify_inert_runtime_config "${src}" die
         cp "${src}" "${dest}"
         chown "${ANOLIS_USER}:${ANOLIS_USER}" "${dest}"
         log_ok "config (runtime): installed variant '${variant}'"
+        _pin_runtime_data_dir "${dest}" new
     fi
 
     preflight_runtime_config "${dest}"
@@ -1999,20 +2049,25 @@ _check_provider_liveness() {
 
 # Print the startup_safe_state of a GET /v0/runtime/status body as lines the
 # report below formats: "achieved <rung>", "notrun <on_startup>", or "failed"
-# followed by one "<device> <function>: <reason>" line per failed or skipped
-# call. Nothing when the body has no startup_safe_state (a runtime before
-# 0.1.45). jq and python3 agree on all of this.
+# followed by one "<tag>|<device> <function>: <reason>" line per failed or
+# skipped call. The tag is "config" for a failed call the runtime marks as one
+# the config cannot plan on these devices (#616), "run" for another failed
+# call, and "skip" for a skipped one; any "config" call makes the first line
+# "unplannable" instead of "failed". A runtime before 0.2.0 marks no call.
+# Nothing when the body has no startup_safe_state (a runtime before 0.1.45).
+# jq and python3 agree on all of this.
 _startup_safe_state_lines() {
     local body="$1"
     if command -v jq >/dev/null 2>&1; then
         jq -r '.startup_safe_state // empty | select(type == "object")
             | if .ran != true then "notrun \(.on_startup // "")"
               elif .safe_state_achieved == true then "achieved \(.software_safe_state // "unknown")"
-              else "failed",
+              else (if any(.failed_actions // [] | .[]; type == "object" and .cause == "config")
+                    then "unplannable" else "failed" end),
                 (.failed_actions // [] | .[] | select(type == "object")
-                    | "\(.device_handle // "?") \(.function // "?"): \(.error // "failed")"),
+                    | "\(if .cause == "config" then "config" else "run" end)|\(.device_handle // "?") \(.function // "?"): \(.error // "failed")"),
                 (.skipped_actions // [] | .[] | select(type == "object")
-                    | "\(.device_handle // "?") \(.function // "?"): skipped, \(.reason // "absent")")
+                    | "skip|\(.device_handle // "?") \(.function // "?"): skipped, \(.reason // "absent")")
               end' <<< "${body}" 2>/dev/null
     elif command -v python3 >/dev/null 2>&1; then
         python3 -c 'import json, sys
@@ -2024,20 +2079,23 @@ if s.get("ran") is not True:
 elif s.get("safe_state_achieved") is True:
     print("achieved", s.get("software_safe_state") or "unknown")
 else:
-    print("failed")
-    for a in s.get("failed_actions") or []:
-        if isinstance(a, dict):
-            print("%s %s: %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("error", "failed")))
+    failed = [a for a in s.get("failed_actions") or [] if isinstance(a, dict)]
+    print("unplannable" if any(a.get("cause") == "config" for a in failed) else "failed")
+    for a in failed:
+        tag = "config" if a.get("cause") == "config" else "run"
+        print("%s|%s %s: %s" % (tag, a.get("device_handle", "?"), a.get("function", "?"), a.get("error", "failed")))
     for a in s.get("skipped_actions") or []:
         if isinstance(a, dict):
-            print("%s %s: skipped, %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("reason", "absent")))' <<< "${body}" 2>/dev/null
+            print("skip|%s %s: skipped, %s" % (a.get("device_handle", "?"), a.get("function", "?"), a.get("reason", "absent")))' <<< "${body}" 2>/dev/null
     fi
 }
 
 # Every install restarts the runtime, and the restart runs safety.on_startup
 # again, so report what it did (#471). A safe state not achieved is a
 # warning, not a failed install: a board that comes up tripped after downtime
-# is an expected state the operator clears. Without a JSON parser this says
+# is an expected state the operator clears. One the config cannot plan on
+# these devices is not: it fails the same way on every restart and every
+# e-stop, so the install fails (#616). Without a JSON parser this says
 # nothing; the provider check below already names the missing parser.
 _report_startup_safe_state() {
     local url="$1" body lines first
@@ -2055,14 +2113,29 @@ _report_startup_safe_state() {
         "notrun "*)
             log_skip "health: startup safe state not run (no software safe state declared)"
             ;;
-        failed)
-            log_warn "health: startup safe state NOT achieved"
+        failed | unplannable)
+            if [[ "${first}" == unplannable ]]; then
+                local refused
+                refused=$(grep -m 1 '^config|' <<< "${lines}")
+                SAFE_STATE_REFUSED="${refused#config|}"
+                SAFE_STATE_UNPLANNABLE=1
+                log_err "health: safety.safe_state cannot run on this machine's devices: ${SAFE_STATE_REFUSED}"
+                log_info "  The runtime refuses it before it reaches the devices, on every restart and every e-stop."
+            else
+                log_warn "health: startup safe state NOT achieved"
+            fi
             local line
             while IFS= read -r line; do
-                log_info "  ${line}"
+                log_info "  ${line#*|}"
             done < <(tail -n +2 <<< "${lines}")
             ;;
     esac
+}
+
+# A crash-looping runtime is a failed install, not a warning (#172), and so
+# is a safe state the config cannot plan on these devices (#616).
+_install_failed() {
+    [[ ${HEALTH_FAILED} -eq 1 || ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]
 }
 
 phase_health() {
@@ -2166,6 +2239,11 @@ phase_summary() {
     if [[ ${HEALTH_FAILED} -eq 1 ]]; then
         echo ""
         log_err "Runtime did not come up — the install did NOT succeed."
+    fi
+    if [[ ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]; then
+        echo ""
+        log_err "safety.safe_state cannot run on this machine's devices (${SAFE_STATE_REFUSED}) — the install did NOT succeed."
+        log_info "Fix safety.safe_state in ${PREFIX}/config/runtime.yaml, then run the install again."
     fi
     echo ""
 }
@@ -2506,11 +2584,9 @@ Group=${ANOLIS_USER}
 # Injects ANOLIS_API_TOKEN. Read by systemd as root, so the secret stays out of
 # runtime.yaml (which is world-readable and preserved across upgrades).
 EnvironmentFile=${RUNTIME_ENV_FILE}
-# The runtime's default data dir (run registry, \`runtime.data_dir\` unset) is
-# the RELATIVE path anolis-data/, so the service must start somewhere the
-# service user can write. Without this it starts in / and the run registry
-# fails soft at boot -- one WARN, then 503 on /v0/runs for the life of the
-# process (#302).
+# The installed runtime.yaml names runtime.data_dir (#562), so the data dir no
+# longer depends on this. It stays so that anything else relative resolves
+# where it did, and the service never starts in / (#302).
 WorkingDirectory=${PREFIX}
 ExecStart=${PREFIX}/bin/anolis-runtime --config ${PREFIX}/config/runtime.yaml
 Restart=on-failure
@@ -3024,8 +3100,9 @@ main() {
     phase_health
     phase_summary
 
-    # A crash-looping runtime is a failed install, not a warning (#172).
-    [[ ${HEALTH_FAILED} -eq 0 ]] || exit 1
+    if _install_failed; then
+        exit 1
+    fi
 }
 
 # Run main() in every real invocation — direct (`bash install.sh`), piped
