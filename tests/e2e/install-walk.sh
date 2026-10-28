@@ -287,8 +287,13 @@ scenario_handcopy() {
     api_post /v0/estop >/dev/null || fail "could not latch the e-stop"
     eventually 30 "the e-stop is latched" estop_latched
 
-    step "cp the manual variant over runtime.yaml; systemctl restart anolis-runtime"
-    cp "${PROJECT}/config/anolis-runtime.manual.yaml" /opt/anolis/config/runtime.yaml
+    # As the quickstart does: the installed project's copy, whose provider
+    # paths install.sh rendered for this host.
+    local variant=/opt/anolis/projects/e2e-sim/config/anolis-runtime.manual.yaml
+    [[ -f "${variant}" ]] || fail "no installed variant at ${variant}"
+    grep -qx '  data_dir: ../anolis-data' "${variant}" || fail "${variant} does not name ../anolis-data"
+    step "cp ${variant} over runtime.yaml; systemctl restart anolis-runtime"
+    cp "${variant}" /opt/anolis/config/runtime.yaml
     systemctl restart anolis-runtime
     eventually 60 "the runtime answers after the copy" runtime_answers
     data_dir_is /opt/anolis/anolis-data
@@ -297,7 +302,7 @@ scenario_handcopy() {
     # The check-the-check: the same copy without the variant's data_dir moves
     # the data dir beside the config, and the latch is left behind.
     step "self-test: a copied variant without data_dir must move the data dir"
-    sed '/^  data_dir:/d' "${PROJECT}/config/anolis-runtime.manual.yaml" >/opt/anolis/config/runtime.yaml
+    sed '/^  data_dir:/d' "${variant}" >/opt/anolis/config/runtime.yaml
     systemctl restart anolis-runtime
     eventually 60 "the runtime answers after the copy without data_dir" runtime_answers
     if (data_dir_is /opt/anolis/anolis-data) >/dev/null 2>&1; then
