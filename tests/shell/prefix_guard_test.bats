@@ -4,9 +4,10 @@
 # All three modes run as root and act on ${PREFIX}: install chowns the prefix
 # recursively and every file in ${PREFIX}/bin, rollback the files in
 # ${PREFIX}/bin. With an empty prefix or `/`, that is the system /bin.
-# Uninstall stops and deletes every anolis unit and the secrets in
-# /etc/anolis whatever the prefix, so a prefix that names no install must
-# stop it before it starts.
+# Uninstall stops and deletes install.sh's units and the secrets in
+# /etc/anolis, which are the host's, not the prefix's, so a prefix that names
+# no install must stop it before it starts (and see uninstall_prefix_test.bats
+# for a prefix the units do not run from, #544).
 #
 # main runs in-process. Every command that changes the host -- chown, chmod,
 # rm, rmdir, install, cp, mv, systemctl, useradd, runuser -- is a stub that

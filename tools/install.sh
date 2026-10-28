@@ -2414,6 +2414,29 @@ _remove_prefix_keeping_data() {
     printf '%s' "${data}"
 }
 
+# The units install.sh writes. An uninstall acts on these and on no other
+# anolis-*.service: the workbench's anolis-workbench.service is not ours (#544).
+readonly INSTALL_UNITS=(anolis-runtime.service anolis-telemetry-export.service)
+
+# _unit_prefix <unit file>: the install prefix the unit runs from, from its
+# WorkingDirectory or, failing that, the binary in its ExecStart, as
+# phase_systemd and the telemetry-export unit write them. Non-zero when neither
+# names one.
+_unit_prefix() {
+    local unit="$1" value exe
+    value=$(sed -n 's/^WorkingDirectory=//p' "${unit}" | head -n 1)
+    if [[ -z "${value}" ]]; then
+        exe=$(sed -n 's/^ExecStart=//p' "${unit}" | head -n 1)
+        exe=${exe%% *}
+        case "${exe}" in
+            */bin/anolis-runtime) value=${exe%/bin/anolis-runtime} ;;
+            */telemetry-export/*) value=${exe%%/telemetry-export/*} ;;
+        esac
+    fi
+    [[ "${value}" == /* ]] || return 1
+    realpath -m -s -- "${value}"
+}
+
 do_uninstall() {
     log_info "Uninstalling anolis from ${PREFIX}..."
 
@@ -2424,16 +2447,36 @@ do_uninstall() {
             || die "uninstall: ${PREFIX} is not a removable install prefix; nothing was changed"
     fi
 
-    # Stop and disable services
-    for unit in "${SYSTEMD_DIR}"/anolis-*.service; do
+    # The units and the secrets are the host's, not the prefix's. Refuse when
+    # an install.sh unit runs from another prefix, so a typo for a live
+    # install's prefix stops nothing and deletes no token (#544). A prefix that
+    # no longer exists but that its units name is still uninstalled (#339).
+    local want name unit owner
+    want=$(realpath -m -s -- "${PREFIX}")
+    for name in "${INSTALL_UNITS[@]}"; do
+        unit="${SYSTEMD_DIR}/${name}"
         [[ -f "${unit}" ]] || continue
-        local name
-        name=$(basename "${unit}")
+        owner=$(_unit_prefix "${unit}") \
+            || die "uninstall: cannot tell which prefix ${unit} runs from; nothing was changed"
+        [[ "${owner}" == "${want}" ]] \
+            || die "uninstall: ${name} runs the install at ${owner}, not ${PREFIX}; nothing was changed (to remove that install: --uninstall --prefix ${owner})"
+    done
+
+    # Stop and disable services
+    for name in "${INSTALL_UNITS[@]}"; do
+        unit="${SYSTEMD_DIR}/${name}"
+        [[ -f "${unit}" ]] || continue
         systemctl stop "${name}" 2>/dev/null || true
         systemctl disable "${name}" 2>/dev/null || true
         rm -f "${unit}"
     done
     systemctl daemon-reload 2>/dev/null || true
+    for unit in "${SYSTEMD_DIR}"/anolis-*.service; do
+        [[ -f "${unit}" ]] || continue
+        name=$(basename "${unit}")
+        log_info "Kept: ${name}, which install.sh did not write. To remove it:"
+        log_info "  systemctl disable --now ${name} && rm ${unit} && systemctl daemon-reload"
+    done
 
     # Remove installation directory, keeping the run journal (#304).
     if [[ -d "${PREFIX}" ]]; then
@@ -3005,9 +3048,9 @@ main() {
     parse_args "$@"
 
     # Stage runs on another machine than the one the prefix names. Uninstall
-    # also checks an existing prefix with the stricter _removable_prefix, but
-    # stops units and removes secrets whatever the prefix, so it needs this
-    # check for a prefix that does not exist.
+    # also checks an existing prefix with the stricter _removable_prefix, and
+    # refuses one its units do not run from (#544), but a prefix that does not
+    # exist and that no unit names still gets only this check.
     if [[ -z "${STAGE_DIR}" ]]; then
         check_prefix "refusing --prefix '${PREFIX}'"
     fi
