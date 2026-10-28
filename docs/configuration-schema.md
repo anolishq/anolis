@@ -227,10 +227,9 @@ safety:
 ```
 
 1. The status reads `in_force`, `clear` or `unknown`. A signal that is stale
-   (three poll intervals old, at least one second, or reported with `STALE`,
-   `FAULT` or `UNKNOWN` quality), unregistered or not a bool is `unknown`,
-   never `clear`. A fresh reading with `UNSPECIFIED` quality is read by its
-   value.
+   (three poll intervals old, at least one second), reported with any quality
+   other than `OK` (including `UNSPECIFIED`), unregistered or not a bool is
+   `unknown`, never `clear`.
 2. On `in_force` or `unknown`, at startup after the first poll or at any
    time after, the software stop's latch engages without running its ladder.
    After startup, an automation machine with HTTP enabled also enters `FAULT`;
