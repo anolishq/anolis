@@ -11,7 +11,7 @@ permissions:
 jobs:
   metrics:
     name: Collect metrics
-    uses: anolishq/.github/.github/workflows/metrics.yml@0199b6cc7cb73a02d58f75ec8ed763ac40e54dca # v2
+    uses: anolishq/.github/.github/workflows/metrics.yml@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2
     with:
       tag: ${{ github.ref_name }}
 
@@ -46,7 +46,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@f79b717dbf5b2153fbe5d390894dd5432af5dbe1 # v2.5
+        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
         with:
           triplet: x64-linux-static
 
@@ -142,7 +142,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@f79b717dbf5b2153fbe5d390894dd5432af5dbe1 # v2.5
+        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
         with:
           triplet: arm64-linux
 
