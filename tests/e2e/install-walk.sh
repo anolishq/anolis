@@ -13,6 +13,8 @@
 #                              then this one's
 #   install-walk.sh workbench  anolis-provision install from the released
 #                              workbench, and what its summary shows
+#   install-walk.sh safestate  a safe state that fails at run time warns; one
+#                              the runtime cannot plan fails the install
 #
 # Each scenario ends by breaking what its last check depends on and requiring
 # that check to fail, so a check that cannot fail fails the walk.
@@ -43,6 +45,29 @@ run_install() {
         fail "${name}: install.sh $* exited non-zero (log: ${log})"
     fi
     pass "${name}: exit 0"
+}
+
+# run_install_failing <log name> <install.sh> <args...>: as run_install, but
+# the install must exit non-zero.
+run_install_failing() {
+    local name="$1" script="$2"
+    shift 2
+    local log="${LOGS}/${name}.log"
+    step "install.sh $* (${name}, must fail)"
+    if bash "${script}" "$@" >"${log}" 2>&1; then
+        tail -40 "${log}" >&2
+        fail "${name}: install.sh $* exited 0 (log: ${log})"
+    fi
+    pass "${name}: exit non-zero"
+}
+
+# refute_log <log name> <fixed text>: the install's output does not carry it.
+refute_log() {
+    if grep -qF -- "$2" "${LOGS}/$1.log"; then
+        tail -40 "${LOGS}/$1.log" >&2
+        fail "$1: output has: $2"
+    fi
+    pass "$1: does not say '$2'"
 }
 
 # expect_log <log name> <fixed text>: the install's output carries it.
@@ -215,6 +240,28 @@ scenario_upgrade() {
     selftest_telemetry
 }
 
+# A safe state that ran and failed is a warning, and one the runtime cannot
+# plan on these devices fails the install (#616).
+scenario_safestate() {
+    run_install manual "${INSTALL_SH}" --project "${PROJECT}" --variant manual --keep-hostname
+    check_runtime
+
+    run_install runfail "${INSTALL_SH}" --project "${PROJECT}" --variant runfail --replace-config --keep-hostname
+    expect_log runfail "health: startup safe state NOT achieved"
+    expect_log runfail "sim0/motorctl0 set_motor_duty"
+    refute_log runfail "cannot run on this machine's devices"
+
+    run_install_failing unplannable "${INSTALL_SH}" --project "${PROJECT}" --variant unplannable --replace-config --keep-hostname
+    expect_log unplannable "health: safety.safe_state cannot run on this machine's devices: sim0/"
+    expect_log unplannable "the install did NOT succeed"
+
+    # The check-the-check: the same install over a plannable safe state
+    # exits 0, so the failure above is the safe state's.
+    step "self-test: an install over a plannable safe state must exit 0"
+    run_install replanned "${INSTALL_SH}" --project "${PROJECT}" --variant manual --replace-config --keep-hostname
+    expect_log replanned "health: startup safe state achieved"
+}
+
 # The workbench's own route: it fetches the install.sh of the runtime the
 # project pins and runs it, so this checks the released install.sh behind it.
 scenario_workbench() {
@@ -252,6 +299,7 @@ case "${1:-}" in
     recover) scenario_recover ;;
     upgrade) scenario_upgrade ;;
     workbench) scenario_workbench ;;
-    *) fail "usage: $0 fresh|recover|upgrade|workbench" ;;
+    safestate) scenario_safestate ;;
+    *) fail "usage: $0 fresh|recover|upgrade|workbench|safestate" ;;
 esac
 printf '\nWALK PASSED: %s\n' "$1"

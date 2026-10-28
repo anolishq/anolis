@@ -325,10 +325,12 @@ API:
 | `recover` | an `--uninstall` by v0.1.53, which deleted the InfluxDB credentials, then a current install, which mints new ones |
 | `upgrade` | the previous release's `install.sh` and pins, then the current ones |
 | `workbench` | `anolis-provision install` from the released workbench, and what its summary shows |
+| `safestate` | a safe state the sim fails at run time, which warns and exits 0, then one the runtime cannot plan on the sim, which exits 1 naming the refused call (#616) |
 
 Each scenario ends by breaking what its last check depends on, the runtime's
-InfluxDB token or grafana-server, and requires that check to fail. A check that
-can't fail fails the walk.
+InfluxDB token or grafana-server, and requires that check to fail; `safestate`
+instead installs a plannable safe state and requires exit 0, so its exit 1 is
+the safe state's. A check that can't fail fails the walk.
 
 It's the gate the bench follows: a change to `install.sh` walks here before it
 walks on a rig. To run one scenario on a disposable host:
