@@ -117,6 +117,15 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
 }
 
+@test "643: a preserved relative data_dir with data in both places keeps the config's" {
+    # Runtime 0.2.0 has run on it since an older one did: its data is current.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/estop" "${PREFIX}/config/state/estop"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
+}
+
 @test "643: a preserved relative data_dir with no data yet resolves against the config" {
     printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
     run phase_config_runtime
