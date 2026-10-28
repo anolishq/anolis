@@ -35,6 +35,8 @@ Out of scope for this contract:
 
 ## Minimal Runtime Skeleton
 
+<!-- validate: runtime-config -->
+
 ```yaml
 runtime:
   name: anolis-main
@@ -126,6 +128,8 @@ At the default `interval_ms: 500` with a single device this is exactly `2000` /
 chain of slow sensors where a full poll cycle exceeds 2s) gets proportionally
 looser bounds and stops flapping. Supply absolute overrides only when the heuristic does not fit:
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 health:
   staleness:
@@ -154,6 +158,8 @@ output the machine leaves disabled can read `QUALITY_UNKNOWN`, and an input
 channel with nothing connected can read `QUALITY_FAULT`, on a correctly built
 rig. Both would mark the device `STALE` or `FAULT`. List such signals per device
 under `health.excluded_signals`:
+
+<!-- validate: runtime-config fragment -->
 
 ```yaml
 health:

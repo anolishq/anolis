@@ -153,6 +153,8 @@ To run with a simulation provider, also download
 [`anolis-provider-sim`](https://github.com/anolishq/anolis-provider-sim/releases/latest)
 and write a minimal config:
 
+<!-- validate: runtime-config -->
+
 ```yaml
 # anolis-runtime.yaml
 runtime:
@@ -276,6 +278,8 @@ See [docs/http-api.md](docs/http-api.md) for full API reference.
 ## Automation Quickstart
 
 Enable automation and parameters in your runtime config:
+
+<!-- validate: runtime-config fragment -->
 
 ```yaml
 automation:

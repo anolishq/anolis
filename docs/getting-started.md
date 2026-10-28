@@ -109,6 +109,8 @@ workbench UI.
 
 Enable automation in runtime config:
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 automation:
   enabled: true

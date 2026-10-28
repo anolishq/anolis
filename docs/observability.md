@@ -35,6 +35,8 @@ Those defaults are for local development only.
 
 ## Runtime settings
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 telemetry:
   enabled: true

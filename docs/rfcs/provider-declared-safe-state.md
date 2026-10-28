@@ -11,6 +11,8 @@ tracked under anolishq/anolis#283.
 
 A safe state is a list of device calls written in YAML:
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 safety:
   safe_state:

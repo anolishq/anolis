@@ -212,6 +212,8 @@ ladder and verdict as `POST /v0/estop` but without engaging the latch.
 ([rfcs/stop-chain.md](rfcs/stop-chain.md)). The runtime only observes it, and
 no stop's effect depends on it. Absent means no stop is observed.
 
+<!-- validate: runtime-config fragment -->
+
 ```yaml
 safety:
   stop_chain:
