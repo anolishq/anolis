@@ -192,7 +192,7 @@ how the engines diverged):
 
 ## Workbench / UI
 
-`anolis-workbench` (v0.22.0): the authoring/commissioning app. Its `/api/*`
+`anolis-workbench`: the authoring/commissioning app. Its `/api/*`
 HTTP surface (default :3010; compose/commission/operate/provision routes) is
 **internal-API** — a private localhost contract between the bundled frontend,
 the Tauri shell, and the sidecar (documented in
@@ -226,6 +226,5 @@ Verified 2026-10-27; each should shrink over time.
 | Divergence | Where | Tracking |
 | --- | --- | --- |
 | Upstream anolis contract pins advance independently: each consumer pins a release, in the workbench's contract locks, the docs site's `data/repos.json`, anolis-projects' machine profiles and anolis-telemetry-export's contract lock, and moves it on its own schedule | each consumer's lock/pin | — |
-| SDK README status says v0.1.2; v0.4.0 has shipped and providers consume v0.2.0–v0.4.0 | `anolis-provider-sdk` | — (docs fix) |
 | Wire version literal `"v1"` duplicated (proto + SDK default) with no shared constant | `handshake.proto` / SDK `runtime.hpp` | — (accepted; changes with ADPP v2 only) |
 | Tauri desktop health-probe hard-depends on `/api/status` body containing `"workbench"`/`"composer"` — pinned nowhere | workbench `desktop/src-tauri/src/main.rs` | — (note here is the pin) |

@@ -77,7 +77,7 @@ mutually exclusive.
 | `--install-prefix` | Match a non-default prefix on the target. |
 | `--no-start` | Install without starting the runtime. |
 | `--with-telemetry-export`, `--with-observability`, `--allow-unmet-host` | Passed through to the install. |
-| `--variant` | Runtime variant to install, a key of the project's `runtime_profiles` (passed as `install.sh --variant`; default `manual`). On anolis-workbench main, not in 0.22.0, the latest release (anolishq/anolis-workbench#648). |
+| `--variant` | Runtime variant to install, a key of the project's `runtime_profiles` (passed as `install.sh --variant`; default `manual`). |
 | `--force` | **Destructive, locally.** Deletes and recreates the workstation's copy of the project under `~/.anolis/systems/`. For a commissioned rig that means losing its configs, behaviours and pre-migration backup. It does not touch the target. |
 
 **`remote` has no `--dry-run`**, unlike `install`, `fleet` and `update`. There is

@@ -79,8 +79,11 @@ Check both:
 ./bin/anolis-runtime --config anolis-runtime.yaml
 ```
 
-Leave it running and use a second terminal in the same directory for the next
-steps. Stop it with Ctrl+C.
+Run it from inside `anolis-try`: the provider's `command` and `--config` paths
+are relative to the directory you start the runtime in. It is ready when it
+logs `Runtime Ready`; a few `WARN` lines about poll hints and an undeclared
+safe state are expected with this config. Leave it running and use a second
+terminal for the next steps. Stop it with Ctrl+C.
 
 ## 4. Read and control a device
 
