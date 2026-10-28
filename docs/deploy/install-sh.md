@@ -138,7 +138,8 @@ on each install that actually changes the binaries — an install of a byte-iden
 the last *different* install.
 
 > **`--uninstall` is destructive beyond the binaries.** It stops, disables and
-> removes every `anolis-*` unit, then removes the prefix — which includes
+> removes the units install.sh writes, `anolis-runtime` and
+> `anolis-telemetry-export`, then removes the prefix — which includes
 > `<prefix>/projects/<profile>`, your installed config and behaviours — and deletes
 > the environment files holding the runtime's API token, including the
 > workbench service's copy at `/etc/anolis/workbench-runtime-token`. Recorded data is kept:
@@ -157,10 +158,14 @@ the last *different* install.
 > Before it stops anything, the uninstall checks the prefix and refuses one that
 > is not an absolute path, is a symlink, resolves to `/` or a top-level directory,
 > or is or holds `$HOME`. A prefix that exists must also be an anolis install (it
-> must hold `bin/anolis-runtime`) and have nothing mounted at or below it. A prefix
-> that does not exist passes, and the uninstall still removes the `anolis-*` units
-> and the environment files. A refusal changes nothing. If the run
-> journal is on its own mount, unmount it first.
+> must hold `bin/anolis-runtime`) and have nothing mounted at or below it. The
+> uninstall also refuses when one of those units runs from another prefix, and
+> names it: `--prefix /opt/anolsi`, a typo for a live `/opt/anolis`, stops
+> nothing and deletes nothing. A prefix that does not exist but that its units
+> run from is still uninstalled, units and environment files included. A refusal
+> changes nothing. If the run journal is on its own mount, unmount it first.
+> Another `anolis-*` unit, such as the workbench's `anolis-workbench.service`,
+> is kept, and the uninstall prints the commands that remove it.
 
 ## After installing
 
