@@ -152,3 +152,36 @@ UNPLANNABLE='{"version":"0.2.0","startup_safe_state":{"on_startup":"safe_state",
     ! _install_failed
     grep -q '^    if _install_failed; then$' "${INSTALL_SH}"  # main() decides the exit with it
 }
+
+# The summary of an install that is going to exit 1 must not say it is
+# complete, and the failure stays the last thing it shows (#616).
+summary_text() { sed 's/\x1b\[[0-9;]*m//g' <<< "$1" | sed '/^[[:space:]]*$/d'; }
+
+@test "616: a safe state that cannot be planned: no 'installation complete', and the failure is last" {
+    health_with "${UNPLANNABLE}"
+    phase_health >/dev/null
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" != *"Anolis installation complete"* ]]
+    [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
+    [[ "$(tail -2 <<< "${summary}")" == *"the install did NOT succeed"*"Fix safety.safe_state in"* ]]
+}
+
+@test "616: a runtime that did not come up: no 'installation complete', and the failure is last" {
+    health_with '{}'
+    HEALTH_FAILED=1
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" != *"Anolis installation complete"* ]]
+    [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
+    [[ "$(tail -1 <<< "${summary}")" == *"Runtime did not come up — the install did NOT succeed."* ]]
+}
+
+@test "616: an install that succeeded still says it is complete" {
+    health_with '{}'
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" == *"Anolis installation complete"* ]]
+    [[ "${summary}" != *"NOT ready"* ]]
+    [[ "${summary}" != *"did NOT succeed"* ]]
+}

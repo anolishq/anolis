@@ -2209,7 +2209,13 @@ phase_health() {
 phase_summary() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo " Anolis installation complete"
+    # An install that is going to exit 1 is not complete (#616); why it
+    # failed is printed last, below the summary.
+    if _install_failed; then
+        echo " Anolis installed, but NOT ready — see the end of this summary"
+    else
+        echo " Anolis installation complete"
+    fi
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     local port
     port=$(_runtime_port)
