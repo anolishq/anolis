@@ -248,14 +248,32 @@ on a machine where a restart must not interrupt a running process.
 
 ## Standard Startup Sequence
 
-1. Start runtime (with automation enabled it enters `IDLE`; with the default
-   `safety.on_startup` it runs the safe state before the HTTP server opens).
+With `automation.enabled: true`:
+
+1. Start runtime. It enters `IDLE`, and with the default `safety.on_startup` it
+   runs the safe state before the HTTP server opens.
 2. Verify provider/device availability and safe initial states.
 3. Transition to `MANUAL`.
 4. Run manual verification/calibration checks.
 5. Transition to `AUTO` only after operator acceptance.
 
-Use this canonical transition command:
+With automation disabled, the default, there is no mode to start in: `GET
+/v0/mode` and `POST /v0/mode` answer `503`, and a manual `POST /v0/call` is
+dispatched from the first request the HTTP server accepts. Nothing holds the
+machine idle for you:
+
+1. Start runtime. With the default `safety.on_startup` it runs the safe state
+   before the HTTP server opens; `startup_safe_state.safe_state_achieved` in
+   `GET /v0/runtime/status` says whether it took.
+2. If no actuating call may run until an operator is ready, engage the software
+   stop with `POST /v0/estop`. Its latch refuses actuating calls until
+   `POST /v0/estop/clear`.
+3. Verify provider/device availability and safe initial states before anyone
+   sends a call.
+4. Run manual verification/calibration checks, clearing the stop first if you
+   engaged it.
+
+On an automation machine, use this canonical transition command:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/v0/mode \
@@ -396,7 +414,10 @@ Development/testing:
 
 Production/hardware operation:
 
-1. Keep explicit IDLE verification and full startup checklist.
+1. Keep the full startup checklist, with explicit IDLE verification on
+   automation machines. Without automation, nothing refuses a manual call at
+   startup: engage the software stop if the machine must not move until an
+   operator is ready.
 2. Use `manual_gating_policy: BLOCK` unless a written override policy exists.
 3. Require documented recovery steps for FAULT entry and exit.
 

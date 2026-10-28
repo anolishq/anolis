@@ -499,6 +499,25 @@ TEST_F(CallRouterTest, IdleModeBlocksControlOperations) {
     EXPECT_THAT(result.error_message, HasSubstr("blocked in IDLE"));
 }
 
+// With automation.enabled: false the runtime wires no ModeManager into the
+// router (runtime.cpp), so there is no IDLE gate: a manual call is dispatched
+// from the first request (anolishq/anolis#569, docs/safety.md).
+TEST_F(CallRouterTest, WithoutAModeManagerAManualCallIsDispatchedAtStartup) {
+    RegisterMockDevice();
+    control::CallRouter no_automation(*registry, *state_cache);
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "reset";
+    req.is_automated = false;
+
+    EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
+
+    auto result = no_automation.execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success);
+    EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_OK);
+}
+
 TEST_F(CallRouterTest, IdleModeBlocksAutomatedCalls) {
     RegisterMockDevice();
 
