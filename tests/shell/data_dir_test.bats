@@ -4,6 +4,8 @@
 # so the installed runtime.yaml names <prefix>/anolis-data, where the unit's
 # WorkingDirectory used to put it: a fresh install writes the key, and an
 # upgrade adds it to a preserved config that lacks it. Nothing on disk moves.
+# A relative data_dir in a variant means what the runtime makes of it, the
+# config's directory (#643); a preserved one keeps the place its data is in.
 #
 # Source install.sh (main() guarded) and run the config phase with chown
 # mocked. No root, network or systemd.
@@ -65,11 +67,96 @@ dest() { printf '%s' "${PREFIX}/config/runtime.yaml"; }
 }
 
 @test "562: a preserved relative data_dir is pinned to where it resolved before" {
+    # A runtime before 0.2.0 resolved it against WorkingDirectory=<prefix>,
+    # and its data is there.
     printf 'runtime:\n  data_dir: state\n  name: kept\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/estop"
+    printf '{"latched":true}\n' > "${PREFIX}/state/estop/0123456789abcdef.json"
     run phase_config_runtime
     [ "$status" -eq 0 ]
     [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
     [ "$(_yaml_block_value "$(dest)" runtime name)" = "kept" ]
+}
+
+@test "643: a fresh install of a variant naming ../anolis-data names <prefix>/anolis-data" {
+    printf 'runtime:\n  name: rig\n  data_dir: ../anolis-data\nautomation:\n  enabled: false\n' \
+        > "${BUNDLE_DIR}/projects/proj/config/anolis-runtime.manual.yaml"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+    [ "$(grep -c data_dir "$(dest)")" -eq 1 ]
+}
+
+@test "643: --replace-config with a variant naming ../anolis-data names <prefix>/anolis-data" {
+    printf 'runtime:\n  name: old\n  data_dir: %s/anolis-data\n' "${PREFIX}" > "$(dest)"
+    printf 'runtime:\n  name: rig\n  data_dir: ../anolis-data\nautomation:\n  enabled: false\n' \
+        > "${BUNDLE_DIR}/projects/proj/config/anolis-runtime.manual.yaml"
+    REPLACE_CONFIG=1
+    REPLACE_STAMP=test
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+    [ "$(_yaml_block_value "$(dest)" runtime name)" = "rig" ]
+    [ "$(grep -c data_dir "$(dest)")" -eq 1 ]
+}
+
+@test "643: a preserved ../anolis-data copied in by hand stays at <prefix>/anolis-data" {
+    # A quickstart's cp of a variant over runtime.yaml, run by runtime 0.2.0,
+    # which keeps its data at <prefix>/config/../anolis-data.
+    printf 'runtime:\n  name: kept\n  data_dir: ../anolis-data\n' > "$(dest)"
+    mkdir -p "${PREFIX}/anolis-data/estop"
+    printf '{"latched":true}\n' > "${PREFIX}/anolis-data/estop/0123456789abcdef.json"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/anolis-data" ]
+}
+
+@test "643: a preserved relative data_dir with data beside the config resolves there" {
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/config/state/runs"
+    printf '{"run_id":"r1"}\n' > "${PREFIX}/config/state/runs/index.jsonl"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
+}
+
+@test "643: a preserved relative data_dir with data in both places keeps the config's" {
+    # Runtime 0.2.0 has run on it since an older one did: its data is current.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/estop" "${PREFIX}/config/state/estop"
+    printf '{"latched":true}\n' | tee "${PREFIX}/state/estop/a.json" > "${PREFIX}/config/state/estop/a.json"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
+}
+
+@test "643: directories a runtime only started in are not data" {
+    # Runtime 0.2.0 creates runs/ at every start, so a config it read once
+    # without data_dir leaves <config dir>/x/runs/ behind, empty.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/config/state/runs" "${PREFIX}/config/state/estop" "${PREFIX}/state/estop"
+    : > "${PREFIX}/config/state/runs/index.jsonl"
+    printf '{"latched":true}\n' > "${PREFIX}/state/estop/0123456789abcdef.json"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
+}
+
+@test "643: a run journal alone, with no latch, is data" {
+    # A runtime before 0.2.0 that was never stopped still kept its runs at <prefix>/x.
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    mkdir -p "${PREFIX}/state/runs"
+    printf '{"run_id":"r1"}\n' > "${PREFIX}/state/runs/index.jsonl"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/state" ]
+}
+
+@test "643: a preserved relative data_dir with no data yet resolves against the config" {
+    printf 'runtime:\n  name: kept\n  data_dir: state\n' > "$(dest)"
+    run phase_config_runtime
+    [ "$status" -eq 0 ]
+    [ "$(_yaml_block_value "$(dest)" runtime data_dir)" = "${PREFIX}/config/state" ]
 }
 
 @test "562: a flow-style runtime block is left as it is, with a warning" {

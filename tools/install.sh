@@ -664,10 +664,34 @@ _backup_replaced_config() {
 
 # The runtime resolves a default or relative runtime.data_dir against the
 # config file's directory (#562), not the unit's WorkingDirectory. Name it in
-# the installed config as the directory WorkingDirectory=${PREFIX} gave it, so
-# an install or upgrade moves neither the e-stop latch nor the run journal: an
-# absent key becomes <prefix>/anolis-data, a relative one <prefix>/<it>, and an
-# absolute one is left alone. A one-line `runtime: {...}` is not edited.
+# the installed config, so an install or upgrade moves neither the e-stop latch
+# nor the run journal: an absent key becomes <prefix>/anolis-data, where
+# WorkingDirectory=${PREFIX} put it, a relative one is resolved by
+# _relative_data_dir, and an absolute one is left alone. A one-line
+# `runtime: {...}` is not edited.
+# A latch file or a non-empty run index: the runtime creates runs/ at every
+# start, so a directory alone says only that a runtime started there.
+_holds_runtime_data() {
+    compgen -G "$1/estop/*.json" >/dev/null || [[ -s "$1/runs/index.jsonl" ]]
+}
+
+# A relative runtime.data_dir means what the runtime makes of it: the config's
+# directory, so a variant can name ../anolis-data and keep it through a copy
+# over runtime.yaml (#643). A preserved one may have been written for a runtime
+# before 0.2.0, which resolved it against WorkingDirectory=<prefix>: keep that
+# place if it holds a latch or a run journal and the config's does not.
+_relative_data_dir() {
+    local cfg="$1" rel="$2" how="$3"
+    local beside old
+    beside=$(realpath -m -s -- "$(dirname "${cfg}")/${rel}")
+    old=$(realpath -m -s -- "${PREFIX}/${rel}")
+    if [[ "${how}" == preserved ]] && ! _holds_runtime_data "${beside}" && _holds_runtime_data "${old}"; then
+        printf '%s' "${old}"
+    else
+        printf '%s' "${beside}"
+    fi
+}
+
 _pin_runtime_data_dir() {
     local cfg="$1" how="$2"
     local current
@@ -675,7 +699,7 @@ _pin_runtime_data_dir() {
     current=${current//[\"\']/}
     [[ "${current}" == /* ]] && return 0
     local want="${PREFIX}/anolis-data"
-    [[ -n "${current}" ]] && want="${PREFIX}/${current}"
+    [[ -n "${current}" ]] && want=$(_relative_data_dir "${cfg}" "${current}" "${how}")
     if grep -qE '^runtime:[[:space:]]*[^[:space:]#]' "${cfg}"; then
         log_warn "config (runtime): ${cfg} has a one-line runtime block; add runtime.data_dir: ${want} to it, or the runtime keeps its data beside the config"
         return 0

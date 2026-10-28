@@ -15,6 +15,8 @@
 #                              workbench, and what its summary shows
 #   install-walk.sh safestate  a safe state that fails at run time warns; one
 #                              the runtime cannot plan fails the install
+#   install-walk.sh handcopy   a variant copied over runtime.yaml by hand and a
+#                              restart keep the data dir and a latched e-stop
 #
 # Each scenario ends by breaking what its last check depends on and requiring
 # that check to fail, so a check that cannot fail fails the walk.
@@ -109,6 +111,14 @@ run_listed() { api /v0/runs | jq -e --arg id "$1" 'any(.runs[]; .run_id == $id)'
 runtime_ok() { api /v0/runtime/status | jq -e '.status.code == "OK"'; }
 safe_state_achieved() { api /v0/runtime/status | jq -e '.startup_safe_state.safe_state_achieved == true'; }
 runtime_version_is() { api /v0/runtime/status | jq -e --arg v "$1" '.version == $v'; }
+# data_dir_is <dir>: the running runtime logged it as its data dir at startup.
+data_dir_is() {
+    local logged
+    logged="$(journalctl -u anolis-runtime -o cat -n 400 | grep -F '[Config] Data dir: ' | tail -1)"
+    # The line carries the logger's timestamp and level before it.
+    [[ "${logged}" == *"[Config] Data dir: $1" ]] || fail "the runtime's data dir is not $1: ${logged:-not logged}"
+    pass "the runtime's data dir is $1"
+}
 telemetry_writing() { api /v0/telemetry/status | jq -e '.enabled and .connected and .total_written > 0'; }
 influxdb_up() { curl -fsS http://127.0.0.1:8086/health | jq -e '.status == "pass"'; }
 grafana_up() { curl -fsS http://127.0.0.1:3000/api/health | jq -e '.database == "ok"'; }
@@ -155,6 +165,10 @@ project_pinned_to() {
     cp -r "${PROJECT}" "${dir}"
     sed -i -E "/^  runtime:/,/^  [a-z]/ s/^(    version: ).*/\\1${version}/" "${dir}/machine-profile.yaml"
     grep -q "version: ${version}" "${dir}/machine-profile.yaml" || fail "could not pin ${dir} to ${version}"
+    # A runtime before 0.2.0 resolves a relative data_dir against its working
+    # directory, so the fixture's variants carry none for it, as they did then.
+    sed -i -e '/^  data_dir: \.\.\/anolis-data$/d' -e '/#643/d' -e '/so a copy of this file anywhere keeps it$/d' "${dir}"/config/anolis-runtime.*.yaml
+    ! grep -q data_dir "${dir}"/config/anolis-runtime.*.yaml || fail "could not strip data_dir from ${dir}"
     printf '%s' "${dir}"
 }
 
@@ -262,6 +276,44 @@ scenario_safestate() {
     expect_log replanned "health: startup safe state achieved"
 }
 
+# A project quickstart's variant switch (#643): copy a variant over the
+# installed runtime.yaml and restart. The variant names its data dir against
+# the config's directory, so the latch and the journal stay where install.sh
+# put them, and a latched e-stop still holds.
+scenario_handcopy() {
+    run_install manual "${INSTALL_SH}" --project "${PROJECT}" --variant manual --keep-hostname
+    check_runtime
+    data_dir_is /opt/anolis/anolis-data
+    api_post /v0/estop >/dev/null || fail "could not latch the e-stop"
+    eventually 30 "the e-stop is latched" estop_latched
+
+    # As the quickstart does: the installed project's copy, whose provider
+    # paths install.sh rendered for this host.
+    local variant=/opt/anolis/projects/e2e-sim/config/anolis-runtime.manual.yaml
+    [[ -f "${variant}" ]] || fail "no installed variant at ${variant}"
+    grep -qx '  data_dir: ../anolis-data' "${variant}" || fail "${variant} does not name ../anolis-data"
+    step "cp ${variant} over runtime.yaml; systemctl restart anolis-runtime"
+    cp "${variant}" /opt/anolis/config/runtime.yaml
+    systemctl restart anolis-runtime
+    eventually 60 "the runtime answers after the copy" runtime_answers
+    data_dir_is /opt/anolis/anolis-data
+    eventually 30 "the e-stop is still latched after the copy" estop_latched
+
+    # The check-the-check: the same copy without the variant's data_dir moves
+    # the data dir beside the config, and the latch is left behind.
+    step "self-test: a copied variant without data_dir must move the data dir"
+    sed '/^  data_dir:/d' "${variant}" >/opt/anolis/config/runtime.yaml
+    systemctl restart anolis-runtime
+    eventually 60 "the runtime answers after the copy without data_dir" runtime_answers
+    if (data_dir_is /opt/anolis/anolis-data) >/dev/null 2>&1; then
+        fail "data_dir_is passed for a config without data_dir: the check cannot fail"
+    fi
+    if estop_latched >/dev/null 2>&1; then
+        fail "the e-stop is latched with the data dir moved: the latch check cannot fail"
+    fi
+    pass "without data_dir the data dir moves and the latch is left behind"
+}
+
 # The workbench's own route: it fetches the install.sh of the runtime the
 # project pins and runs it, so this checks the released install.sh behind it.
 scenario_workbench() {
@@ -300,6 +352,7 @@ case "${1:-}" in
     upgrade) scenario_upgrade ;;
     workbench) scenario_workbench ;;
     safestate) scenario_safestate ;;
-    *) fail "usage: $0 fresh|recover|upgrade|workbench|safestate" ;;
+    handcopy) scenario_handcopy ;;
+    *) fail "usage: $0 fresh|recover|upgrade|workbench|safestate|handcopy" ;;
 esac
 printf '\nWALK PASSED: %s\n' "$1"
