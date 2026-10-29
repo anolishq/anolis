@@ -361,8 +361,10 @@ def check_estop_runs_after_transition_fault_hooks_without_a_rung(tester: FaultHo
     assert "After-transition hook (MANUAL -> FAULT): sim0/relayio0 set_relay_ch1 OK" in tester.runtime_log()
 
 
-def check_estop_refuses_fault_hooks_under_a_rung(tester: FaultHookEstopTester) -> None:
-    """Any other rung: the ladder stays the only authority, the hook is refused."""
+def _check_fault_hooks_held_under_a_rung(tester: FaultHookEstopTester, site: str) -> None:
+    """Any other rung: the ladder stays the only authority, so the e-stop's
+    FAULT entry does not make the hook's actuating call. One INFO line says so,
+    in place of an ERROR and a WARN per call (#648)."""
     tester.set_mode("MANUAL")
     tester._wait_for_mode("MANUAL")
 
@@ -374,8 +376,17 @@ def check_estop_refuses_fault_hooks_under_a_rung(tester: FaultHookEstopTester) -
     time.sleep(1.5)  # three poll intervals
     assert tester.relay_ch1_closed() is False, "the -> FAULT hook ran through the latch under rung hooks"
     log = tester.runtime_log()
-    assert "Before-transition hook failed (MANUAL -> FAULT): sim0/relayio0 set_relay_ch1" in log, log[-2000:]
-    assert "Actuation latched by e-stop" in log
+    assert f"{site.capitalize()} hook failed" not in log, log[-2000:]
+    assert "Actuation latched by e-stop" not in log, log[-2000:]
+    assert f"[INFO]  [Runtime] 1 {site} hook call(s) (MANUAL -> FAULT) not made: the e-stop latch" in log, log[-2000:]
+
+
+def check_estop_refuses_fault_hooks_under_a_rung(tester: FaultHookEstopTester) -> None:
+    _check_fault_hooks_held_under_a_rung(tester, "before-transition")
+
+
+def check_estop_refuses_after_transition_fault_hooks_under_a_rung(tester: FaultHookEstopTester) -> None:
+    _check_fault_hooks_held_under_a_rung(tester, "after-transition")
 
 
 def check_estop_reports_fault_hook_not_driven(tester: FaultHookEstopTester) -> None:
@@ -434,6 +445,11 @@ FAULT_HOOK_CHECKS: List[FaultHookCheck] = [
         "estop_refuses_fault_hooks_under_a_rung",
         {"safe_state": _MOTOR_SAFE_STATE},
         check_estop_refuses_fault_hooks_under_a_rung,
+    ),
+    (
+        "estop_refuses_after_transition_fault_hooks_under_a_rung",
+        {"safe_state": _MOTOR_SAFE_STATE, "hook_site": "after_transition"},
+        check_estop_refuses_after_transition_fault_hooks_under_a_rung,
     ),
     ("ordinary_fault_entry_runs_fault_hooks", {}, check_ordinary_fault_entry_runs_fault_hooks),
 ]

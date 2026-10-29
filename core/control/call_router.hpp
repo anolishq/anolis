@@ -145,6 +145,17 @@ public:
      */
     bool validate_call(const CallRequest &request, std::string &error) const;
 
+    /**
+     * @brief Whether execute_call would refuse this request for the e-stop
+     * latch, answered without dispatching or logging anything.
+     *
+     * A request whose device or function cannot be resolved is not refused
+     * here; execute_call reports what is wrong with it. A FAULT-entry hook
+     * the latch holds is skipped rather than refused, so a software stop does
+     * not log each one as a failure (#648).
+     */
+    bool latch_refuses(const CallRequest &request) const;
+
 private:
     using ProviderLock = std::shared_ptr<std::mutex>;
 
@@ -170,6 +181,9 @@ private:
     void log_call_record(const CallRequest &request, const std::string &function_name,
                          const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
                          const std::string &result);
+
+    // The e-stop latch check execute_call makes, on a resolved function.
+    bool latch_holds(const CallRequest &request, const registry::FunctionSpec &spec) const;
 
     // Validation helpers
     bool validate_device_exists(const std::string &device_handle, std::string &error) const;
