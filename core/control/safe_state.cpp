@@ -471,17 +471,20 @@ void SafeStateController::hold(const std::string &reason) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (latched_.load(std::memory_order_acquire)) {
-            return;
-        }
-        latched_.store(true, std::memory_order_release);
-        latched_at_ms_ = now_epoch_ms();
-        restored_reason_.reset();
-        LOG_WARN("[SafeState] E-stop latch held: " << reason << ". No safe-state calls are sent.");
-        if (latch_store_ != nullptr) {
-            std::string error;
-            if (!latch_store_->save(*latched_at_ms_, reason, error)) {
-                LOG_ERROR("[SafeState] E-stop latch not persisted (" << error
-                                                                     << "); a restart would come back unlatched");
+            // Already held: the latch keeps the time and file of when it was
+            // engaged, and the stop still enters FAULT below (#547).
+            LOG_WARN("[SafeState] E-stop latch already held: " << reason << ". No safe-state calls are sent.");
+        } else {
+            latched_.store(true, std::memory_order_release);
+            latched_at_ms_ = now_epoch_ms();
+            restored_reason_.reset();
+            LOG_WARN("[SafeState] E-stop latch held: " << reason << ". No safe-state calls are sent.");
+            if (latch_store_ != nullptr) {
+                std::string error;
+                if (!latch_store_->save(*latched_at_ms_, reason, error)) {
+                    LOG_ERROR("[SafeState] E-stop latch not persisted (" << error
+                                                                         << "); a restart would come back unlatched");
+                }
             }
         }
     }
