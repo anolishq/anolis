@@ -59,6 +59,25 @@ std::string make_ulid(uint64_t ts_ms, uint64_t counter) {
     return out;
 }
 
+// True when the file exists, is not empty, and its last byte is not a newline:
+// a record cut off mid-write by a killed process (#639). An append must then
+// start a new line, or it lands on the torn one and both fail to parse. The
+// torn bytes stay, as one malformed line that recovery skips with a warning.
+bool ends_without_newline(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if (!in.good()) {
+        return false;
+    }
+    const auto size = static_cast<std::streamoff>(in.tellg());
+    if (size <= 0) {
+        return false;
+    }
+    in.seekg(size - 1);
+    char last = '\n';
+    in.get(last);
+    return last != '\n';
+}
+
 std::vector<std::string> to_str_vec(const nlohmann::json& arr) {
     std::vector<std::string> out;
     if (arr.is_array()) {
@@ -317,10 +336,14 @@ bool RunJournal::initialize(std::string& error) {
 std::string RunJournal::mint_run_id() { return runtime_name_ + "-" + make_ulid(now_epoch_ms(), mint_counter_++); }
 
 bool RunJournal::append_record(const Run& run, std::string& error) {
+    const bool torn = ends_without_newline(index_path_);
     std::ofstream out(index_path_, std::ios::app);
     if (!out.good()) {
         error = "cannot open run log for append: " + index_path_.string();
         return false;
+    }
+    if (torn) {
+        out << "\n";
     }
     out << to_json(run).dump() << "\n";
     out.flush();
@@ -371,10 +394,14 @@ RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string&
     event.recorded_at_epoch_ms = now_epoch_ms();
     event.payload = payload.is_object() ? payload : nlohmann::json::object();
 
+    const bool torn = ends_without_newline(events_path(run_id));
     std::ofstream out(events_path(run_id), std::ios::app);
     if (!out.good()) {
         result.error = "cannot open run event log for append: " + events_path(run_id).string();
         return result;
+    }
+    if (torn) {
+        out << "\n";
     }
     out << to_json(event).dump() << "\n";
     out.flush();

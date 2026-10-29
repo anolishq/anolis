@@ -7,6 +7,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -145,6 +146,96 @@ TEST(RunJournalTest, TornLineToleratedOnRecovery) {
     std::string err;
     EXPECT_TRUE(restarted.initialize(err)) << err;  // recovers despite the torn line
     EXPECT_EQ(restarted.list(10, 0).size(), 1U);    // the one valid run survived
+    std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+// A line cut off before its newline, as a process killed mid-write leaves it.
+void append_torn(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream out(path, std::ios::app | std::ios::binary);
+    out << text;  // no trailing newline
+}
+
+size_t count_category(const std::vector<RunEvent>& events, RunEventCategory category) {
+    size_t n = 0;
+    for (const auto& e : events) {
+        if (e.category == category) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+// #639: the next record must not land on a torn final line. Case A: a torn
+// close record, then two restarts. The run is recovered as abandoned once.
+TEST(RunJournalTest, ATornLastLineDoesNotSwallowTheRecoveryRecord) {
+    auto dir = unique_dir();
+    std::string id;
+    {
+        RunJournal journal(dir, "rt1", 1000);
+        std::string err;
+        ASSERT_TRUE(journal.initialize(err)) << err;
+        id = journal.open(RunOpenSpec{}, std::nullopt).run.run_id;
+    }
+    append_torn(dir / "runs" / "index.jsonl", "{\"schema_version\":1,\"run_id\":\"" + id + "\",\"state\":\"clo");
+    for (int restart = 0; restart < 2; ++restart) {
+        RunJournal journal(dir, "rt1", 1000);
+        std::string err;
+        ASSERT_TRUE(journal.initialize(err)) << err;
+    }
+    RunJournal journal(dir, "rt1", 1000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto run = journal.get(id);
+    ASSERT_TRUE(run.has_value());
+    EXPECT_EQ(run->state, RunState::Closed);
+    EXPECT_EQ(count_category(journal.list_events(id, 100, 0), RunEventCategory::RunClosed), 1u)
+        << "the run was recovered as abandoned on more than one restart";
+    std::filesystem::remove_all(dir);
+}
+
+// Case B: a torn tail, then a new run left open. It survives the restart and
+// is recovered as abandoned.
+TEST(RunJournalTest, ATornLastLineDoesNotSwallowTheNextRunsOpenRecord) {
+    auto dir = unique_dir();
+    {
+        RunJournal journal(dir, "rt1", 1000);
+        std::string err;
+        ASSERT_TRUE(journal.initialize(err)) << err;
+        auto first = journal.open(RunOpenSpec{}, std::nullopt);
+        journal.close(first.run.run_id, CloseReason::OperatorStop);
+    }
+    append_torn(dir / "runs" / "index.jsonl", "{\"schema_version\":1,\"run_id\":\"rt1-TORN");
+    std::string second;
+    {
+        RunJournal journal(dir, "rt1", 1000);
+        std::string err;
+        ASSERT_TRUE(journal.initialize(err)) << err;
+        second = journal.open(RunOpenSpec{}, std::nullopt).run.run_id;
+    }
+    RunJournal journal(dir, "rt1", 1000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto run = journal.get(second);
+    ASSERT_TRUE(run.has_value()) << "the run opened after the torn line was lost";
+    EXPECT_EQ(run->close_reason, CloseReason::Abandoned);
+    std::filesystem::remove_all(dir);
+}
+
+// Case C: a torn line in a run's events file. The next event is listed.
+TEST(RunJournalTest, ATornEventLineDoesNotSwallowTheNextEvent) {
+    auto dir = unique_dir();
+    RunJournal journal(dir, "rt1", 1000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    append_torn(dir / "runs" / (opened.run.run_id + ".events.jsonl"), "{\"category\":\"annot");
+    auto appended =
+        journal.append_event(opened.run.run_id, RunEventCategory::Annotation, "note", nlohmann::json::object(), 0);
+    ASSERT_TRUE(appended.ok) << appended.error;
+    EXPECT_EQ(count_category(journal.list_events(opened.run.run_id, 100, 0), RunEventCategory::Annotation), 1u)
+        << "the event appended after the torn line was not listed";
     std::filesystem::remove_all(dir);
 }
 
