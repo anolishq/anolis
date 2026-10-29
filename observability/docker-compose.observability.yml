@@ -48,6 +48,10 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/signal-history.json
+      # Run the plugins this image ships: Grafana otherwise updates them in the
+      # background after start, unregistering the InfluxDB datasource while it
+      # does (#659).
+      - GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
       # Datasource provisioning inputs (expanded by Grafana in
       # provisioning/datasources/influxdb.yml — shared with the native
       # install path, which sets the same variables via systemd).
