@@ -10,6 +10,8 @@
 #include "call_router.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <format>
 #include <limits>
 #include <sstream>
@@ -170,6 +172,34 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         return result;
     }
 
+    // Refuse a call outside the function's declared allowed_modes (#566), for
+    // manual, behaviour-tree and mode-hook calls alike: the runtime is the
+    // protocol's authoritative enforcer. Safe-state calls are exempt so the
+    // ladder can always drive outputs safe. Without automation there is no mode
+    // manager and the runtime is under manual control, so the call is judged as
+    // MANUAL.
+    if (!request.safe_state && !func_spec->allowed_modes.empty()) {
+        const std::string mode = mode_manager_ != nullptr ? automation::mode_to_string(mode_manager_->current_mode())
+                                                          : std::string("MANUAL");
+        const bool allowed = std::any_of(func_spec->allowed_modes.begin(), func_spec->allowed_modes.end(),
+                                         [&mode](std::string declared) {
+                                             std::transform(declared.begin(), declared.end(), declared.begin(),
+                                                            [](unsigned char c) { return std::toupper(c); });
+                                             return declared == mode;
+                                         });
+        if (!allowed) {
+            std::string modes;
+            for (const auto& declared : func_spec->allowed_modes) {
+                modes += (modes.empty() ? "" : ", ") + declared;
+            }
+            result.error_message =
+                std::format("{} is allowed only in {}; the runtime is in {}", resolved_function_name, modes, mode);
+            result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+            LOG_WARN("[CallRouter] " << request.device_handle << ": " << result.error_message);
+            return result;
+        }
+    }
+
     // Refuse actuating calls while the e-stop latch is engaged. Fail closed:
     // only a function declared READ passes (registry::is_actuating), so CONFIG
     // and unclassified functions are refused too. Safe-state actions are
@@ -242,6 +272,30 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
         return result;
+    }
+
+    // Refuse a call sooner than the function's min_interval_ms after the last
+    // one dispatched (#566), with the time remaining: refused, not deferred, so
+    // the caller decides whether to retry. Under the provider lock, so two calls
+    // cannot both pass. Safe-state calls are exempt, and are still recorded.
+    if (func_spec->min_interval_ms > 0) {
+        const auto now = std::chrono::steady_clock::now();
+        const std::string key = request.device_handle + "/" + std::to_string(func_spec->function_id);
+        std::lock_guard<std::mutex> lock(last_dispatch_mutex_);
+        const auto last = last_dispatch_.find(key);
+        if (!request.safe_state && last != last_dispatch_.end()) {
+            const auto interval = std::chrono::milliseconds(func_spec->min_interval_ms);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last->second);
+            if (elapsed < interval) {
+                result.error_message =
+                    std::format("{} may be called once every {} ms; retry in {} ms", resolved_function_name,
+                                func_spec->min_interval_ms, (interval - elapsed).count());
+                result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+                LOG_WARN("[CallRouter] " << request.device_handle << ": " << result.error_message);
+                return result;
+            }
+        }
+        last_dispatch_[key] = now;
     }
 
     // Forward call to provider

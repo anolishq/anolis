@@ -252,7 +252,12 @@ nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
             {"label", spec.label},
             {"args", args},
             {"category", function_category_to_string(spec.category)},
-            {"actuating", registry::is_actuating(spec)}};
+            {"actuating", registry::is_actuating(spec)},
+            // The rest of the FunctionPolicy (#566): allowed_modes and
+            // min_interval_ms are enforced; requires_lease is shown, not enforced.
+            {"allowed_modes", spec.allowed_modes},
+            {"min_interval_ms", spec.min_interval_ms},
+            {"requires_lease", spec.requires_lease}};
 }
 
 nlohmann::json encode_capabilities(const registry::DeviceCapabilitySet &caps) {

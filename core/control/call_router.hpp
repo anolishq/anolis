@@ -5,6 +5,7 @@
  * @brief Validated control-path entry point for device function calls.
  */
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -176,6 +177,12 @@ private:
     // only when its arguments or result change (#623).
     std::map<std::string, std::string> last_tree_record_;
     std::mutex last_tree_record_mutex_;
+
+    // When each function with a min_interval_ms was last dispatched, keyed by
+    // "device_handle/function_id" (#566). Read and written under the
+    // provider's lock, so two calls cannot both pass the interval check.
+    std::map<std::string, std::chrono::steady_clock::time_point> last_dispatch_;
+    std::mutex last_dispatch_mutex_;
 
     // Log the call a provider received, with its source, arguments and result.
     void log_call_record(const CallRequest &request, const std::string &function_name,

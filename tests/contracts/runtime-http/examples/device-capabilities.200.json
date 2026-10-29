@@ -41,7 +41,10 @@
             "min": 0.0,
             "max": 1.0
           }
-        }
+        },
+        "allowed_modes": [],
+        "min_interval_ms": 0,
+        "requires_lease": false
       }
     ]
   }
