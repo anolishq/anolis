@@ -13,6 +13,55 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-29
+
+0.4.0 is a minor release because `install.sh --uninstall` behaves differently
+on an existing host (`docs/dependencies.md`: before 1.0, a change that makes an
+existing install behave differently bumps MINOR).
+
+Upgrade notes for operators:
+
+- **`--uninstall` refuses a prefix its units don't run from, and changes
+  nothing** (#654, Fixes #544). It used to stop and delete every `anolis-*`
+  unit and the secrets in `/etc/anolis` whatever the prefix. So
+  `--prefix /opt/anolsi`, a typo for a live `/opt/anolis`, took that install's
+  units and API token and reported success. It now reads which prefix
+  `anolis-runtime.service` and `anolis-telemetry-export.service` run from, by
+  their `WorkingDirectory` or the binary in `ExecStart`, and exits 1 when that
+  isn't the prefix given, naming it:
+
+  ```text
+  uninstall: anolis-runtime.service runs the install at /opt/anolis, not /opt/anolsi; nothing was changed (to remove that install: --uninstall --prefix /opt/anolis)
+  ```
+
+  A prefix that no longer exists but that its units run from is still
+  uninstalled.
+- **It also refuses when it can't tell which prefix one of those units runs
+  from**, again with nothing changed.
+- **It removes only the units install.sh writes.** Another `anolis-*.service`,
+  such as the workbench's `anolis-workbench.service`, is kept, and the
+  uninstall prints the commands that remove it:
+
+  ```text
+  systemctl disable --now anolis-workbench.service && rm /etc/systemd/system/anolis-workbench.service && systemctl daemon-reload
+  ```
+
+  Earlier releases deleted it with the runtime's units.
+
+### Changed
+
+- **`--uninstall` acts only on the install at its prefix** (#654, Fixes #544),
+  as the upgrade notes describe.
+
+### Docs
+
+- **`docs/safety.md` gives a runtime without automation its own startup
+  sequence** (#653, Fixes #569). With `automation.enabled: false`, the default,
+  there is no IDLE gate: `/v0/mode` answers 503 and a manual `POST /v0/call` is
+  dispatched from the first request. The sequence says to engage the software
+  stop if nothing may move until an operator is ready. A `CallRouter` test pins
+  that behaviour.
+
 ## [0.3.0] - 2026-10-28
 
 0.3.0 is a minor release because one kind of kept config resolves its data
