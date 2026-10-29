@@ -5,6 +5,16 @@
 #include <fstream>
 #include <random>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include "anolis_build_config.hpp"
 #include "logging/logger.hpp"
 
@@ -76,6 +86,32 @@ bool ends_without_newline(const std::filesystem::path& path) {
     char last = '\n';
     in.get(last);
     return last != '\n';
+}
+
+// Flush a file's (or, on POSIX, a directory's) contents to storage, as
+// LatchStore's sync_path does.
+bool platform_sync(const std::filesystem::path& path, bool directory) {
+#ifdef _WIN32
+    // Windows cannot open a directory this way; NTFS journals its metadata.
+    if (directory) {
+        return true;
+    }
+    int fd = -1;
+    if (_wsopen_s(&fd, path.c_str(), _O_RDWR | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0 || fd < 0) {
+        return false;
+    }
+    const bool ok = _commit(fd) == 0;
+    _close(fd);
+    return ok;
+#else
+    const int fd = ::open(path.c_str(), (directory ? O_RDONLY | O_DIRECTORY : O_RDWR) | O_CLOEXEC);
+    if (fd < 0) {
+        return false;
+    }
+    const bool ok = ::fsync(fd) == 0;
+    ::close(fd);
+    return ok;
+#endif
 }
 
 std::vector<std::string> to_str_vec(const nlohmann::json& arr) {
@@ -244,11 +280,15 @@ std::optional<Run> run_from_json(const nlohmann::json& j) {
     return run;
 }
 
-RunJournal::RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms)
+RunJournal::RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms, SyncFn sync)
     : data_dir_(std::move(data_dir)),
       runtime_name_(std::move(runtime_name)),
-      polling_interval_ms_(polling_interval_ms) {
+      polling_interval_ms_(polling_interval_ms),
+      sync_(std::move(sync)) {
     index_path_ = data_dir_ / "runs" / "index.jsonl";
+    if (!sync_) {
+        sync_ = platform_sync;
+    }
 }
 
 RunJournal::~RunJournal() {
@@ -336,6 +376,8 @@ bool RunJournal::initialize(std::string& error) {
 std::string RunJournal::mint_run_id() { return runtime_name_ + "-" + make_ulid(now_epoch_ms(), mint_counter_++); }
 
 bool RunJournal::append_record(const Run& run, std::string& error) {
+    std::error_code ec;
+    const bool created = !std::filesystem::exists(index_path_, ec);
     const bool torn = ends_without_newline(index_path_);
     std::ofstream out(index_path_, std::ios::app);
     if (!out.good()) {
@@ -346,9 +388,18 @@ bool RunJournal::append_record(const Run& run, std::string& error) {
         out << "\n";
     }
     out << to_json(run).dump() << "\n";
-    out.flush();
-    if (!out.good()) {
+    out.close();
+    if (out.fail()) {
         error = "failed to write run record to " + index_path_.string();
+        return false;
+    }
+    if (!sync_(index_path_, false)) {
+        error = "failed to sync run record to storage: " + index_path_.string();
+        return false;
+    }
+    // A new file's directory entry is durable only once its directory is synced.
+    if (created && !sync_(index_path_.parent_path(), true)) {
+        error = "failed to sync run data dir " + index_path_.parent_path().string();
         return false;
     }
     return true;
@@ -394,6 +445,8 @@ RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string&
     event.recorded_at_epoch_ms = now_epoch_ms();
     event.payload = payload.is_object() ? payload : nlohmann::json::object();
 
+    std::error_code ec;
+    const bool created = !std::filesystem::exists(events_path(run_id), ec);
     const bool torn = ends_without_newline(events_path(run_id));
     std::ofstream out(events_path(run_id), std::ios::app);
     if (!out.good()) {
@@ -404,13 +457,23 @@ RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string&
         out << "\n";
     }
     out << to_json(event).dump() << "\n";
-    out.flush();
-    if (!out.good()) {
+    out.close();
+    if (out.fail()) {
         result.error = "failed to write run event to " + events_path(run_id).string();
         return result;
     }
-
+    // The line is in the file whether or not the sync succeeds, so its sequence
+    // is spent either way.
     next_seq_[run_id] = seq + 1;
+    if (!sync_(events_path(run_id), false)) {
+        result.error = "failed to sync run event to storage: " + events_path(run_id).string();
+        return result;
+    }
+    if (created && !sync_(events_path(run_id).parent_path(), true)) {
+        result.error = "failed to sync run data dir " + events_path(run_id).parent_path().string();
+        return result;
+    }
+
     result.ok = true;
     result.event = std::move(event);
     return result;
@@ -535,7 +598,7 @@ RunJournal::OpenResult RunJournal::open(const RunOpenSpec& spec, std::optional<A
     run.tag_scope = spec.tag_scope;
 
     std::string werr;
-    if (!append_record(run, werr)) {  // durably flushed before we report success
+    if (!append_record(run, werr)) {  // synced to storage before we report success
         result.error = werr;
         return result;
     }
