@@ -19,7 +19,9 @@
  * - Timestamp: epoch milliseconds (precision=ms)
  */
 
+#include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -28,6 +30,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -195,7 +198,11 @@ inline std::string format_line_protocol(const events::StateUpdateEvent &event,
                     // InfluxDB doesn't support NaN/Inf, skip value field
                     // We still write quality
                 } else {
-                    line << "value_double=" << arg;
+                    // The shortest text that parses back to the same double; the
+                    // stream's default precision kept 6 significant digits (#573).
+                    std::array<char, 32> text{};
+                    const auto written = std::to_chars(text.data(), text.data() + text.size(), arg);
+                    line << "value_double=" << std::string_view(text.data(), written.ptr - text.data());
                 }
             } else if constexpr (std::is_same_v<T, int64_t>) {
                 line << "value_int=" << arg << "i";
