@@ -36,6 +36,21 @@
 namespace anolis {
 namespace runtime {
 
+namespace {
+
+// One line for the FAULT-entry hook calls the e-stop latch held, in place of a
+// failure per call (#648).
+void log_held_fault_hooks(const char *site, std::size_t held, automation::RuntimeMode prev,
+                          automation::RuntimeMode next) {
+    if (held > 0) {
+        LOG_INFO("[Runtime] " << held << " " << site << " hook call(s) (" << automation::mode_to_string(prev) << " -> "
+                              << automation::mode_to_string(next)
+                              << ") not made: the e-stop latch holds actuation (POST /v0/estop/clear releases it)");
+    }
+}
+
+}  // namespace
+
 Runtime::Runtime(const RuntimeConfig &config) : config_(config) {}
 
 Runtime::~Runtime() { shutdown(); }
@@ -545,6 +560,7 @@ bool Runtime::init_automation(std::string &error) {
             mode_manager_->on_before_mode_change([this, before_hooks, hook_mode_matches, warn_estop_hook_not_driven](
                                                      automation::RuntimeMode prev, automation::RuntimeMode next,
                                                      std::string &hook_error) {
+                std::size_t held = 0;
                 for (const auto &hook : before_hooks) {
                     if (!hook_mode_matches(hook.from, prev) || !hook_mode_matches(hook.to, next)) {
                         continue;
@@ -552,6 +568,13 @@ bool Runtime::init_automation(std::string &error) {
 
                     for (const auto &call : hook.calls) {
                         const auto request = mode_hook_request(call, next);
+                        // Under a rung the latch holds a FAULT entry's actuating
+                        // hooks on purpose: the ladder is the safe-state authority
+                        // (#251). Not made, so not reported as failures (#648).
+                        if (request.fault_entry_hook && call_router_->latch_refuses(request)) {
+                            ++held;
+                            continue;
+                        }
                         const auto result = call_router_->execute_call(request, provider_registry_);
                         if (!result.success) {
                             warn_estop_hook_not_driven(request, call, result);
@@ -585,6 +608,7 @@ bool Runtime::init_automation(std::string &error) {
                         }
                     }
                 }
+                log_held_fault_hooks("before-transition", held, prev, next);
                 return true;
             });
         }
@@ -592,6 +616,7 @@ bool Runtime::init_automation(std::string &error) {
         if (!after_hooks.empty()) {
             mode_manager_->on_mode_change([this, after_hooks, hook_mode_matches, warn_estop_hook_not_driven](
                                               automation::RuntimeMode prev, automation::RuntimeMode next) {
+                std::size_t held = 0;
                 for (const auto &hook : after_hooks) {
                     if (!hook_mode_matches(hook.from, prev) || !hook_mode_matches(hook.to, next)) {
                         continue;
@@ -599,6 +624,10 @@ bool Runtime::init_automation(std::string &error) {
 
                     for (const auto &call : hook.calls) {
                         const auto request = mode_hook_request(call, next);
+                        if (request.fault_entry_hook && call_router_->latch_refuses(request)) {
+                            ++held;
+                            continue;
+                        }
                         const auto result = call_router_->execute_call(request, provider_registry_);
                         if (!result.success) {
                             warn_estop_hook_not_driven(request, call, result);
@@ -623,6 +652,7 @@ bool Runtime::init_automation(std::string &error) {
                         }
                     }
                 }
+                log_held_fault_hooks("after-transition", held, prev, next);
             });
         }
     }
