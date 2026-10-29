@@ -117,6 +117,7 @@ target_include_directories(anolis_provider PUBLIC
 target_link_libraries(anolis_provider PUBLIC
     anolis_proto
     anolis_logging
+    anolis_signal
     protobuf::libprotobuf
 )
 anolis_apply_warnings(anolis_provider)

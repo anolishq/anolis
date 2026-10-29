@@ -38,3 +38,19 @@ TEST(SignalHandlerTest, InstallClearsStaleShutdownLatch) {
     // After fix:  install() stores false before re-arming → false → PASSES.
     EXPECT_FALSE(SignalHandler::is_shutdown_requested());
 }
+
+#ifndef _WIN32
+// #549: the disposition a provider gets back is the one the process started
+// with, saved once. A second call, as a second Runtime::initialize() makes,
+// finds SIGPIPE already ignored and must not save that. Saved once per process,
+// and ctest runs each case in a process of its own.
+TEST(SignalHandlerTest, ASecondIgnoreKeepsTheSigpipeDispositionSavedFirst) {
+    std::signal(SIGPIPE, SIG_DFL);
+
+    SignalHandler::ignore_broken_pipe();
+    SignalHandler::ignore_broken_pipe();
+
+    EXPECT_EQ(SignalHandler::inherited_broken_pipe_disposition(), SIG_DFL);
+    EXPECT_EQ(std::signal(SIGPIPE, SIG_IGN), SIG_IGN) << "SIGPIPE is not ignored after the calls";
+}
+#endif

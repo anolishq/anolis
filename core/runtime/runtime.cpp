@@ -57,6 +57,9 @@ Runtime::~Runtime() { shutdown(); }
 
 bool Runtime::initialize(std::string &error) {
     LOG_INFO("[Runtime] Initializing Anolis Core");
+    // Before any provider is spawned, and whether or not HTTP is enabled: the
+    // HTTP server's construction used to be what left SIGPIPE ignored (#549).
+    SignalHandler::ignore_broken_pipe();
     const auto startup_begin = std::chrono::steady_clock::now();
     const int startup_timeout_ms = config_.runtime.startup_timeout_ms;
 
