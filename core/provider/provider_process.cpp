@@ -18,6 +18,7 @@
 #include <thread>
 
 #include "logging/logger.hpp"
+#include "runtime/signal_handler.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -230,9 +231,9 @@ bool ProviderProcess::spawn_linux() {
         // anything it starts as well (#563).
         setpgid(0, 0);
 
-        // The runtime ignores SIGPIPE (#549); an ignored disposition survives
-        // exec, so give the provider the default it would have had.
-        signal(SIGPIPE, SIG_DFL);
+        // The runtime ignores SIGPIPE (#549), and an ignored disposition
+        // survives exec, so give the provider the one the runtime started with.
+        signal(SIGPIPE, runtime::SignalHandler::inherited_broken_pipe_disposition());
 
         // Redirect stdin
         dup2(stdin_pipe[0], STDIN_FILENO);
