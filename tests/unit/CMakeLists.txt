@@ -29,6 +29,7 @@ set(ANOLIS_UNIT_TEST_SOURCES
     runtime_latch_persistence_test.cpp
     runtime_stop_chain_test.cpp
     runtime_zero_devices_test.cpp
+    runtime_broken_pipe_test.cpp
     event_emitter_test.cpp
     influx_sink_test.cpp
     health_line_protocol_test.cpp
