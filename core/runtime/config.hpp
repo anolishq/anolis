@@ -22,6 +22,10 @@ namespace runtime {
  */
 enum class GatingPolicy { BLOCK, OVERRIDE };
 
+// What the tick loop does once the tree's root returns SUCCESS or FAILURE
+// (#596). REPEAT re-ticks it, as a control-loop tree needs; STOP ends the run.
+enum class OnTerminal { REPEAT, STOP };
+
 /** @brief Polling scheduler settings for background state refresh. */
 struct PollingConfig {
     int interval_ms = 500;  // Default 500ms
@@ -239,6 +243,7 @@ struct AutomationConfig {
     std::string behavior_tree;                                // Path to BT XML file
     int tick_rate_hz = 10;                                    // BT tick rate (1-1000 Hz)
     GatingPolicy manual_gating_policy = GatingPolicy::BLOCK;  // BLOCK or OVERRIDE
+    OnTerminal on_terminal = OnTerminal::REPEAT;              // repeat or stop
     std::vector<ParameterConfig> parameters;                  // Runtime parameters
     ModeTransitionHooksConfig mode_transition_hooks;          // Generic mode transition hooks
 };

@@ -1088,7 +1088,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             warn_unknown_keys(yaml["automation"], "automation",
                               {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz", "manual_gating_policy",
-                               "parameters", "mode_transition_hooks"});
+                               "on_terminal", "parameters", "mode_transition_hooks"});
 
             if (yaml["automation"]["enabled"]) {
                 config.automation.enabled = yaml["automation"]["enabled"].as<bool>();
@@ -1112,6 +1112,17 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     return false;
                 }
                 config.automation.manual_gating_policy = *policy;
+            }
+            if (yaml["automation"]["on_terminal"]) {
+                const auto on_terminal = yaml["automation"]["on_terminal"].as<std::string>();
+                if (on_terminal == "repeat") {
+                    config.automation.on_terminal = OnTerminal::REPEAT;
+                } else if (on_terminal == "stop") {
+                    config.automation.on_terminal = OnTerminal::STOP;
+                } else {
+                    error = "Invalid automation.on_terminal: must be repeat or stop";
+                    return false;
+                }
             }
 
             // Parameter parsing is type-directed: the declared parameter type

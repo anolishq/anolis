@@ -194,6 +194,16 @@ public:
         std::function<void(const std::string& locus, const std::string& message, int64_t occurred_at_epoch_ms)>;
     void set_fault_sink(FaultSink sink);
 
+    /**
+     * @brief What the tick loop does once the root returns SUCCESS or FAILURE (#596).
+     *
+     * false (the default, `automation.on_terminal: repeat`) re-ticks the tree
+     * from the root, as a control-loop tree needs. true (`stop`) ends the run:
+     * no more ticks and so no more calls, and status() reports completed or
+     * failed until a new run starts, on entering AUTO or loading a definition.
+     */
+    void set_stop_on_terminal(bool stop);
+
     /// True when called on the tick loop thread, e.g. from a mode-change
     /// callback that a tick exception's FAULT transition dispatched.
     bool on_tick_thread() const;
@@ -247,6 +257,7 @@ private:
 
     // Threading
     std::atomic<bool> running_{false};
+    std::atomic<bool> stop_on_terminal_{false};
     std::unique_ptr<std::thread> tick_thread_;
     std::atomic<std::thread::id> tick_thread_id_{};  ///< Set by the tick loop itself while it runs.
     int tick_rate_hz_ = 10;
@@ -255,6 +266,7 @@ private:
     mutable std::mutex health_mutex_;
     uint64_t last_tick_ms_ = 0;
     BT::NodeStatus last_tick_status_ = BT::NodeStatus::IDLE;
+    bool run_ended_ = false;  // under stop_on_terminal_, the root returned SUCCESS or FAILURE this run
     uint64_t ticks_since_progress_ = 0;
     uint64_t total_ticks_ = 0;
     std::string last_error_;

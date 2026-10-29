@@ -5,14 +5,19 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "automation/mode_manager.hpp"
 #include "runtime/config.hpp"
 #include "runtime/runtime.hpp"
+#include "runtime/signal_handler.hpp"
 
 namespace {
 
@@ -30,13 +35,13 @@ struct Rig {
     std::filesystem::path calls() const { return root / "calls"; }
 };
 
-Rig fresh_rig(const std::string &name) {
+// `body` is the tree's single root node.
+Rig fresh_rig(const std::string &name, const std::string &body = "<AlwaysSuccess/>") {
     Rig rig{std::filesystem::path(::testing::TempDir()) / name};
     std::filesystem::remove_all(rig.root);
     std::filesystem::create_directories(rig.root / "config");
-    std::ofstream(rig.root / "tree.xml")
-        << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    <AlwaysSuccess/>\n"
-           "  </BehaviorTree>\n</root>\n";
+    std::ofstream(rig.root / "tree.xml") << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    " << body
+                                         << "\n  </BehaviorTree>\n</root>\n";
     return rig;
 }
 
@@ -47,8 +52,10 @@ std::string calls_made(const Rig &rig) {
     return out.str();
 }
 
-// `hooks` is the body of automation.mode_transition_hooks.before_transition.
-anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &hooks) {
+// `hooks` is the body of automation.mode_transition_hooks.before_transition;
+// `automation_extra` adds keys to the automation block.
+anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &hooks,
+                                          const std::string &automation_extra = "") {
     const auto path = rig.root / "config" / "runtime.yaml";
     std::ofstream(path) << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
                         << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: \"" << kHelperPath
@@ -57,8 +64,8 @@ anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &hoo
                            "polling:\n  interval_ms: 100\ntelemetry:\n  enabled: false\n"
                            "safety:\n  on_startup: leave\n"
                            "automation:\n  enabled: true\n  behavior_tree: \""
-                        << (rig.root / "tree.xml").generic_string()
-                        << "\"\n  mode_transition_hooks:\n    before_transition:\n"
+                        << (rig.root / "tree.xml").generic_string() << "\"\n"
+                        << automation_extra << "  mode_transition_hooks:\n    before_transition:\n"
                         << hooks;
     anolis::runtime::RuntimeConfig config;
     std::string error;
@@ -118,4 +125,112 @@ TEST(RuntimeModeHooksTest, NonFaultHookFailureStillVetoesTheTransition) {
     EXPECT_EQ(mode->current_mode(), RuntimeMode::MANUAL);
     EXPECT_EQ(calls_made(rig), "");
     runtime.shutdown();
+}
+
+namespace {
+
+// #596: a tree whose root returns SUCCESS or FAILURE after one device call.
+constexpr const char *kOneShotSuccess =
+    "<Sequence>\n      <CallDevice device_handle=\"bread0/motor0\" function_name=\"set_pwm\" "
+    "args='json:{\"pwm\":0}'/>\n      <AlwaysSuccess/>\n    </Sequence>";
+constexpr const char *kOneShotFailure =
+    "<Sequence>\n      <CallDevice device_handle=\"bread0/motor0\" function_name=\"set_pwm\" "
+    "args='json:{\"pwm\":0}'/>\n      <AlwaysFailure/>\n    </Sequence>";
+// A FAULT hook, so the refuse-hookless gate admits AUTO. It never fires here.
+const std::string kFaultHook = std::string("      - to: FAULT\n        calls:\n") + kMotorCall;
+
+size_t count_of(const std::string &text, const std::string &needle) {
+    size_t count = 0;
+    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size())) {
+        ++count;
+    }
+    return count;
+}
+
+// Runs the runtime's main loop, and so the BT tick loop, for its lifetime.
+class MainLoop {
+public:
+    explicit MainLoop(anolis::runtime::Runtime &runtime) : runtime_(runtime) {
+        anolis::runtime::SignalHandler::install();
+        thread_ = std::thread([this] { runtime_.run(); });
+    }
+    MainLoop(const MainLoop &) = delete;
+    MainLoop &operator=(const MainLoop &) = delete;
+    ~MainLoop() {
+        std::raise(SIGTERM);
+        thread_.join();
+        runtime_.shutdown();
+        anolis::runtime::SignalHandler::install();
+    }
+
+private:
+    anolis::runtime::Runtime &runtime_;
+    std::thread thread_;
+};
+
+// Enters AUTO, lets the tree run for 600 ms (6 ticks at the default 10 Hz),
+// and returns what the runtime logged meanwhile. The log is captured before the
+// main loop starts and released after it joins, so no thread writes to it
+// while it is swapped.
+std::string run_in_auto(anolis::runtime::Runtime &runtime) {
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    {
+        MainLoop loop(runtime);
+        std::string error;
+        auto *mode = runtime.get_mode_manager();
+        EXPECT_NE(mode, nullptr);
+        if (mode != nullptr) {
+            EXPECT_TRUE(mode->set_mode(RuntimeMode::MANUAL, error)) << error;
+            EXPECT_TRUE(mode->set_mode(RuntimeMode::AUTO, error)) << error;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    }
+    std::cerr.rdbuf(old);
+    return captured.str();
+}
+
+}  // namespace
+
+// Under on_terminal: stop, a root that returns SUCCESS ends the run: its call
+// is made once, not once per tick.
+TEST(RuntimeModeHooksTest, StopOnTerminalCallsAOneShotTreeOnce) {
+    const auto rig = fresh_rig("anolis-596-stop-success", kOneShotSuccess);
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook, "  on_terminal: stop\n"));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    const std::string log = run_in_auto(runtime);
+
+    EXPECT_EQ(calls_made(rig), "motor0/1\n") << log;
+    EXPECT_EQ(count_of(log, "BT completed successfully"), 1u) << log;
+}
+
+TEST(RuntimeModeHooksTest, StopOnTerminalCallsATreeThatFailsOnce) {
+    const auto rig = fresh_rig("anolis-596-stop-failure", kOneShotFailure);
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook, "  on_terminal: stop\n"));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    const std::string log = run_in_auto(runtime);
+
+    EXPECT_EQ(calls_made(rig), "motor0/1\n") << log;
+    EXPECT_EQ(count_of(log, "BT failed"), 1u) << log;
+}
+
+// The default, repeat, keeps re-ticking a terminal root, as control-loop trees
+// rely on, but logs the terminal result once per change, not once per tick.
+TEST(RuntimeModeHooksTest, RepeatOnTerminalReticksAndLogsTheResultOnce) {
+    const auto rig = fresh_rig("anolis-596-repeat", kOneShotSuccess);
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    const std::string log = run_in_auto(runtime);
+
+    EXPECT_GE(count_of(calls_made(rig), "motor0/1\n"), 3u) << log;
+    EXPECT_EQ(count_of(log, "BT completed successfully"), 1u) << log;
 }

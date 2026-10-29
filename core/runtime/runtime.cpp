@@ -728,6 +728,8 @@ bool Runtime::init_automation(std::string &error) {
             bt_runtime_->set_event_emitter(event_emitter_);
         }
 
+        bt_runtime_->set_stop_on_terminal(config_.automation.on_terminal == OnTerminal::STOP);
+
         if (!bt_runtime_->load_tree(config_.automation.behavior_tree)) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;
             return false;

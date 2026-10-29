@@ -166,8 +166,14 @@ Fields:
 2. `behavior_tree` (string; required when enabled)
 3. `tick_rate_hz` (int)
 4. `manual_gating_policy` (`BLOCK|OVERRIDE`)
-5. `parameters` (array)
-6. `mode_transition_hooks` (optional object)
+5. `on_terminal` (`repeat|stop`, default `repeat`): what the tick loop does once
+   the tree's root returns `SUCCESS` or `FAILURE`. `repeat` ticks it again from
+   the root, as a control-loop tree needs. `stop` ends the run: no more ticks or
+   calls, and `execution_status` is `completed` or `failed` until AUTO is
+   entered again or a definition is loaded. Either way the result is logged
+   once per change.
+6. `parameters` (array)
+7. `mode_transition_hooks` (optional object)
 
 Parameter entry fields:
 

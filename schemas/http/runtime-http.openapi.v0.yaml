@@ -1659,8 +1659,12 @@ components:
             entered again. "blocked" means "not advancing"
             (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
             necessarily benign waiting). "completed" is emitted ONLY when the
-            engine declares a terminal completed state (a behaviour tree may
-            never emit it until terminal capture lands). A tick exception
+            engine declares a terminal completed state: a behaviour tree under
+            automation.on_terminal "stop" whose root returned SUCCESS. Its root
+            returning FAILURE there reports "failed" (execution_reason
+            "terminal_failure"). Both last until AUTO is entered again or a
+            definition is loaded. Under "repeat", the default, the tree is
+            ticked again and reports "running" or "blocked". A tick exception
             reports "failed" (execution_reason "terminal_failure"), moves the
             runtime to FAULT and emits an automation_fault event. A definition
             that fails to load is not a status either: the runtime does not

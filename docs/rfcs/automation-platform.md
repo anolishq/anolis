@@ -55,7 +55,17 @@ engine existed, so nothing was built for a second one.
   declared unstable, and clients must not depend on its keys. Anything an
   operator needs is promoted to a neutral field instead.
 - `completed` is emitted only when an engine declares a terminal completed
-  state. The behaviour-tree engine never does.
+  state. The behaviour-tree engine does so only under
+  `automation.on_terminal: stop`.
+- Terminal behaviour (D9, #596) is `automation.on_terminal`. Under `repeat`, the
+  default, a root that returned `SUCCESS` or `FAILURE` is ticked again from the
+  root, as a control-loop tree needs. Under `stop` the tree stays loaded but
+  idle: no more ticks and so no more calls, and `execution_status` reports
+  `completed` or `failed` until AUTO is entered again or a definition is
+  loaded. Either way the result is logged once per change, not once per tick.
+  Repeat is the default so that no existing config changes behaviour; the
+  original D9 decision, loaded-but-idle with auto-repeat as a later opt-in, is
+  available as `stop`.
 
 ### Failure is not a fault
 
@@ -174,8 +184,6 @@ The current descriptions:
 
 ## Deferred or not implemented
 
-- Terminal behaviour. The decision is that a tree stays loaded but idle after
-  a root `SUCCESS` or `FAILURE`; the engine still ticks it again.
 - Include-closure hashing. Nothing closes a run as `superseded` when the
   digest changes.
 - Build identity in run provenance. `runtime_version` is the version string

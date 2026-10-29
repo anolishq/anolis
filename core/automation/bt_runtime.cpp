@@ -81,6 +81,8 @@ void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &e
 
 void BTRuntime::set_fault_sink(FaultSink sink) { fault_sink_ = std::move(sink); }
 
+void BTRuntime::set_stop_on_terminal(bool stop) { stop_on_terminal_.store(stop, std::memory_order_release); }
+
 bool BTRuntime::on_tick_thread() const {
     return tick_thread_id_.load(std::memory_order_acquire) == std::this_thread::get_id();
 }
@@ -265,16 +267,35 @@ void BTRuntime::tick_loop() {
             was_auto = true;
         }
 
+        // Under on_terminal: stop, a run whose root returned SUCCESS or FAILURE
+        // has ended: tick nothing, so the tree issues no more calls (#596).
+        bool run_ended = false;
+        {
+            std::lock_guard<std::mutex> lock(health_mutex_);
+            run_ended = run_ended_;
+        }
+        if (run_ended) {
+            std::this_thread::sleep_until(next_tick);
+            next_tick += tick_period;
+            continue;
+        }
+
         // Execute single BT tick
         BT::NodeStatus status = BT::NodeStatus::IDLE;
         try {
             status = tick();
 
             // Update health tracking
+            bool status_changed = false;
             {
                 std::lock_guard<std::mutex> lock(health_mutex_);
                 last_tick_ms_ = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+                status_changed = status != last_tick_status_;
                 last_tick_status_ = status;
+                if ((status == BT::NodeStatus::SUCCESS || status == BT::NodeStatus::FAILURE) &&
+                    stop_on_terminal_.load(std::memory_order_acquire)) {
+                    run_ended_ = true;
+                }
                 total_ticks_++;
 
                 // Track progress: SUCCESS or RUNNING = making progress
@@ -290,10 +311,11 @@ void BTRuntime::tick_loop() {
                 }
             }
 
-            // Log terminal states (optional, can be verbose)
-            if (status == BT::NodeStatus::SUCCESS) {
+            // Log a terminal result once per change, not once per tick: a
+            // control-loop tree under repeat returns SUCCESS every tick (#596).
+            if (status_changed && status == BT::NodeStatus::SUCCESS) {
                 LOG_INFO("[BTRuntime] BT completed successfully");
-            } else if (status == BT::NodeStatus::FAILURE) {
+            } else if (status_changed && status == BT::NodeStatus::FAILURE) {
                 LOG_WARN("[BTRuntime] BT failed");
             }
             // RUNNING status is normal, don't log
@@ -375,6 +397,7 @@ void BTRuntime::tick_loop() {
 
 void BTRuntime::reset_run_status_locked() {
     last_tick_status_ = BT::NodeStatus::IDLE;
+    run_ended_ = false;
     error_count_ = 0;
     ticks_since_progress_ = 0;
     last_error_.clear();
@@ -446,6 +469,10 @@ AutomationStatusView BTRuntime::status() const {
     const bool loaded_and_running = tree_loaded_ && running_;
     if (loaded_and_running && error_count_ > 0 && last_tick_status_ == BT::NodeStatus::FAILURE) {
         view.status = AutomationStatus::Failed;
+    } else if (loaded_and_running && in_auto && run_ended_) {
+        // Under on_terminal: stop the run has ended on its root's result (#596).
+        view.status =
+            last_tick_status_ == BT::NodeStatus::SUCCESS ? AutomationStatus::Completed : AutomationStatus::Failed;
     } else if (!loaded_and_running || !in_auto) {
         // Outside AUTO the tick thread stays alive but skips every tick, so the
         // tree is loaded and not advancing (#270). A failure above still wins.
