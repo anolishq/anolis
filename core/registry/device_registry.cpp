@@ -84,6 +84,13 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
 
         // Log BEFORE the move
         std::string handle = reg_device.get_handle();
+        for (const auto &[name, spec] : reg_device.capabilities.functions_by_id) {
+            if (spec.requires_lease) {
+                LOG_WARN("[Registry] " << handle << "/" << name
+                                       << " declares requires_lease; protocol v1 leases are not implemented, so it is "
+                                          "called without one");
+            }
+        }
         LOG_INFO("[Registry] Registered: " << handle << " (" << reg_device.capabilities.signals_by_id.size()
                                            << " signals, " << reg_device.capabilities.functions_by_id.size()
                                            << " functions)");
@@ -234,6 +241,9 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
         // Retain the actuation classification. proto3 yields CATEGORY_UNSPECIFIED
         // when policy is absent, which is the fail-closed default we want.
         spec.category = function.policy().category();
+        spec.allowed_modes.assign(function.policy().allowed_modes().begin(), function.policy().allowed_modes().end());
+        spec.min_interval_ms = function.policy().min_interval_ms();
+        spec.requires_lease = function.policy().requires_lease();
         if (spec.category == anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_UNSPECIFIED) {
             LOG_WARN("[Registry] " << proto_device.device_id() << "/" << spec.function_name << " untagged; actuating");
         }

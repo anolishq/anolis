@@ -3,7 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -90,4 +92,29 @@ TEST(DeviceRegistryTest, ListedDevicesNoneOfWhichDescribeLeaveAnEmptyInventory) 
     auto provider = provider_listing("bread0", {"rlht0"}, false);
     EXPECT_TRUE(registry.discover_provider("bread0", *provider)) << registry.last_error();
     EXPECT_TRUE(registry.get_devices_for_provider("bread0").empty());
+}
+
+// #566: v1 implements no leases. A function that declares requires_lease is
+// discovered, and a WARN names it, so it is not silently treated as leased.
+TEST(DeviceRegistryTest, AFunctionThatRequiresALeaseIsWarnedAboutAtDiscovery) {
+    registry::DeviceRegistry registry;
+    auto provider = provider_listing("sim0", {"dev0"});
+    ON_CALL(*provider, describe_device(_, _))
+        .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+            response.mutable_device()->set_device_id(id);
+            auto *fn = response.mutable_capabilities()->add_functions();
+            fn->set_name("take_over");
+            fn->set_function_id(1);
+            fn->mutable_policy()->set_requires_lease(true);
+            return true;
+        }));
+
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    const bool ok = registry.discover_provider("sim0", *provider);
+    std::cerr.rdbuf(old);
+
+    ASSERT_TRUE(ok) << registry.last_error();
+    EXPECT_THAT(captured.str(), HasSubstr("sim0/dev0/take_over declares requires_lease"));
+    EXPECT_THAT(captured.str(), HasSubstr("[WARN]"));
 }
