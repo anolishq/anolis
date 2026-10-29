@@ -204,11 +204,14 @@ bool ProviderProcess::spawn_linux() {
     int stdin_pipe[2];
     int stdout_pipe[2];
 
-    if (pipe(stdin_pipe) < 0) {
+    // Close-on-exec, so no later provider inherits these ends: one that held an
+    // earlier provider's stdin write end kept it from seeing EOF on stop (#570).
+    // The child's dup2() onto 0 and 1 clears the flag on its own copies.
+    if (pipe2(stdin_pipe, O_CLOEXEC) < 0) {
         error_ = "Failed to create stdin pipe";
         return false;
     }
-    if (pipe(stdout_pipe) < 0) {
+    if (pipe2(stdout_pipe, O_CLOEXEC) < 0) {
         error_ = "Failed to create stdout pipe";
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
