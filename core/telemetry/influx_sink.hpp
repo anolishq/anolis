@@ -380,6 +380,10 @@ public:
      */
     size_t total_failed() const { return total_failed_.load(); }
 
+    /** @brief Rows InfluxDB rejected permanently (4xx but 429), dropped and not retried (#572). Also in total_failed().
+     */
+    size_t total_rejected() const { return total_rejected_.load(); }
+
     /**
      * @brief Get current batch size
      */
@@ -497,6 +501,7 @@ private:
 
     std::atomic<size_t> total_written_;
     std::atomic<size_t> total_failed_;
+    std::atomic<size_t> total_rejected_{0};
 
     // Last connection error time for rate-limited logging
     std::chrono::steady_clock::time_point last_error_log_;
