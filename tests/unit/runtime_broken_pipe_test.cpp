@@ -116,4 +116,23 @@ TEST(RuntimeBrokenPipeTest, AProviderStartsWithTheDefaultSigpipeDisposition) {
     runtime.shutdown();
 }
 
+// Under systemd (IgnoreSIGPIPE=yes) the runtime starts with SIGPIPE ignored, and
+// its providers always inherited that. The child gets back the disposition the
+// runtime started with, not a fixed default. The runtime saves it once per
+// process, and ctest runs each case in a process of its own.
+TEST(RuntimeBrokenPipeTest, AProviderOfARuntimeStartedWithSigpipeIgnoredInheritsIt) {
+    std::signal(SIGPIPE, SIG_IGN);
+    const auto root = fresh_dir("anolis-549-child-inherits-ignore");
+    const auto report = root / "sigpipe";
+    anolis::runtime::Runtime runtime(config_for(root, ", \"--sigpipe-to\", \"" + report.generic_string() + "\""));
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    std::string disposition;
+    std::ifstream(report) >> disposition;
+    EXPECT_EQ(disposition, "ignored") << "the provider did not get the disposition the runtime started with";
+
+    runtime.shutdown();
+}
+
 #endif  // !_WIN32
