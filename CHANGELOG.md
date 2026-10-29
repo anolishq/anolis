@@ -13,6 +13,81 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-29
+
+0.6.0 is a minor release because existing installs behave differently: when
+an observed stop enters FAULT, which provider-declared function policies are
+enforced, and how a behaviour tree's terminal result is logged
+(`docs/dependencies.md`: before 1.0, a change that makes an existing install
+behave differently bumps MINOR). The runtime-config schema gains
+`automation.on_terminal`, and the runtime-http capabilities gain three
+function fields.
+
+Upgrade notes for operators:
+
+- **An observed stop enters FAULT even when the latch is already held** (#662,
+  Fixes #547). With `safety.stop_chain` on an automation machine, a status
+  going `in_force` or `unknown` used to latch and enter FAULT only if the latch
+  was not already engaged: after a software stop and FAULT -> MANUAL, or with a
+  latch restored from file, the runtime stayed in MANUAL or IDLE. It now enters
+  FAULT either way, leaving an existing latch's time and file as they are, and
+  logs `E-stop latch already held: <reason>`. A stop status that holds at
+  startup also ends in FAULT once automation starts, where the runtime used to
+  come up IDLE and latched.
+- **With `http.enabled: false`, a software stop on an automation machine enters
+  FAULT** (#662). The safe-state controller got its mode manager only when the
+  HTTP server was on, so with it off a stop latched and drove the ladder but
+  stayed out of FAULT.
+- **A provider's `FunctionPolicy` `allowed_modes` and `min_interval_ms` are
+  enforced** (#663, Fixes #566), as the protocol requires of the runtime.
+  - A call in a mode outside a non-empty `allowed_modes` is refused with
+    `FAILED_PRECONDITION`, as in
+    `calibrate is allowed only in MANUAL; the runtime is in AUTO`, whether it is
+    manual, from the behaviour tree or from a mode-transition hook. A runtime
+    without automation judges calls as MANUAL.
+  - A call sooner than `min_interval_ms` after the last one dispatched to that
+    function is refused with the time remaining, not deferred.
+  - Software-stop and startup safe-state calls are exempt from both.
+  - `requires_lease` is not enforced: discovery logs a WARN naming each
+    function that sets it.
+  - `GET /v0/devices/{provider}/{device}/capabilities` carries all three
+    fields.
+
+  No shipped provider sets these fields yet, so nothing changes until one
+  does.
+- **`automation.on_terminal: repeat | stop`** (#665, Fixes #596). `repeat`, the
+  default, keeps today's behaviour: a root that returned `SUCCESS` or
+  `FAILURE` is ticked again from the root. `stop` ends the run instead: no more
+  ticks or calls, and `execution_status` reports `completed` or `failed` until
+  AUTO is entered again or a definition is loaded. Under either, the terminal
+  result is logged once per change, where a tree returning `SUCCESS` every tick
+  logged "BT completed successfully" on every tick.
+
+### Added
+
+- **`automation.on_terminal`** (#665, Fixes #596), as the upgrade notes
+  describe, in the runtime-config schema, the OpenAPI `execution_status` text
+  and D9 of `docs/rfcs/automation-platform.md`.
+- **The `allowed_modes`, `min_interval_ms` and `requires_lease` function
+  fields** in the capabilities JSON and the OpenAPI `FunctionSpec` (#663).
+
+### Changed
+
+- **`allowed_modes` and `min_interval_ms` are enforced in `CallRouter`** (#663,
+  Fixes #566), as the upgrade notes describe; `docs/automation.md` has a
+  section on them.
+- **A terminal behaviour-tree result is logged once per change** (#665).
+
+### Fixed
+
+- **An observed stop enters FAULT when the latch is held, and at startup**
+  (#662, Fixes #547), and `hold()`'s doc comment says so.
+- **A software stop enters FAULT with the HTTP server off** (#662).
+
+### CI
+
+- The install walk runs against runtime 0.5.0 (#664).
+
 ## [0.5.0] - 2026-10-29
 
 0.5.0 is a minor release because existing installs behave differently: what a
