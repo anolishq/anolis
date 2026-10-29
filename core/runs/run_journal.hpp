@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -41,7 +42,13 @@ namespace runs {
 
 class RunJournal {
 public:
-    RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms);
+    /// Flushes a file, or with `directory` set a directory, to storage; true on
+    /// success.
+    using SyncFn = std::function<bool(const std::filesystem::path& path, bool directory)>;
+
+    /// `sync` stands in for the platform sync (fsync, or _commit on Windows), for
+    /// tests; left empty, the platform sync is used.
+    RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms, SyncFn sync = {});
     ~RunJournal();
 
     RunJournal(const RunJournal&) = delete;
@@ -125,6 +132,7 @@ private:
     std::filesystem::path index_path_;
     std::string runtime_name_;
     int polling_interval_ms_;
+    SyncFn sync_;
 
     std::unordered_map<std::string, Run> runs_;  // run_id -> latest record
     std::vector<std::string> order_;             // run_ids in open order (for newest-first)

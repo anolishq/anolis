@@ -244,10 +244,11 @@ std::optional<Run> run_from_json(const nlohmann::json& j) {
     return run;
 }
 
-RunJournal::RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms)
+RunJournal::RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms, SyncFn sync)
     : data_dir_(std::move(data_dir)),
       runtime_name_(std::move(runtime_name)),
-      polling_interval_ms_(polling_interval_ms) {
+      polling_interval_ms_(polling_interval_ms),
+      sync_(std::move(sync)) {
     index_path_ = data_dir_ / "runs" / "index.jsonl";
 }
 
