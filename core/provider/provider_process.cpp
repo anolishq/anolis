@@ -230,6 +230,10 @@ bool ProviderProcess::spawn_linux() {
         // anything it starts as well (#563).
         setpgid(0, 0);
 
+        // The runtime ignores SIGPIPE (#549); an ignored disposition survives
+        // exec, so give the provider the default it would have had.
+        signal(SIGPIPE, SIG_DFL);
+
         // Redirect stdin
         dup2(stdin_pipe[0], STDIN_FILENO);
         close(stdin_pipe[0]);

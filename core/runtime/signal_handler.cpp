@@ -17,6 +17,12 @@ void SignalHandler::install() {
 #endif
 }
 
+void SignalHandler::ignore_broken_pipe() {
+#ifndef _WIN32
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+}
+
 bool SignalHandler::is_shutdown_requested() { return shutdown_requested_.load(); }
 
 void SignalHandler::handle_signal(int) {
