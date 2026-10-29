@@ -189,8 +189,6 @@ The current descriptions:
 - Build identity in run provenance. `runtime_version` is the version string
   only; there is no git SHA or build id.
 - Opening a run automatically on entering AUTO.
-- Durability against power loss. The journal flushes to the OS but does not
-  `fdatasync`.
 - A warning when run logs grow large. Cleanup is the operator's.
 - `POST /v0/runs` is not idempotent, and `tag_scope` is stored as supplied,
   without normalisation or existence checks.
