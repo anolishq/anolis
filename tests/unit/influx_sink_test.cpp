@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <string>
 
@@ -153,6 +154,45 @@ TEST(InfluxLineProtocolTest, FormatZeroDouble) {
 
     std::string line = format_line_protocol(event);
     EXPECT_TRUE(line.find("value_double=0") != std::string::npos);
+}
+
+namespace {
+
+// The text format_line_protocol writes for `value`'s value_double field.
+std::string written_double(double value) {
+    StateUpdateEvent event;
+    event.provider_id = "p";
+    event.device_id = "d";
+    event.signal_id = "s";
+    event.value = value;
+    event.quality = Quality::OK;
+    event.timestamp_ms = 1;
+    const std::string line = format_line_protocol(event);
+    const std::string key = "value_double=";
+    const auto start = line.find(key);
+    if (start == std::string::npos) return "";
+    const auto end = line.find(',', start);
+    return line.substr(start + key.size(), end - start - key.size());
+}
+
+}  // namespace
+
+// #573: the default stream precision kept 6 significant digits.
+TEST(InfluxLineProtocolTest, DoubleValuesRoundTripExactly) {
+    for (const double value : {123456.789, 1234567.0, 0.1234567, 1e20, 0.1 + 0.2, -9876.54321,
+                               std::numeric_limits<double>::max(), std::numeric_limits<double>::denorm_min()}) {
+        const std::string text = written_double(value);
+        ASSERT_FALSE(text.empty()) << "no value_double field for " << value;
+        EXPECT_EQ(std::strtod(text.c_str(), nullptr), value) << "written as " << text;
+    }
+}
+
+TEST(InfluxLineProtocolTest, DoubleValuesStayCompact) {
+    EXPECT_EQ(written_double(23.5), "23.5");
+    EXPECT_EQ(written_double(-15.75), "-15.75");
+    EXPECT_EQ(written_double(0.0), "0");
+    EXPECT_EQ(written_double(1234567.0), "1234567");
+    EXPECT_EQ(written_double(0.1234567), "0.1234567");
 }
 
 TEST(InfluxLineProtocolTest, FormatNaNSkipsValueField) {
