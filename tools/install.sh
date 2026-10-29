@@ -1381,6 +1381,39 @@ GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/signal-his
 EOF
 }
 
+# apt's first `E:` line in $1, the one that names the repo and the cause; the
+# last is often only "Some index files failed to download".
+_obs_first_apt_error() {
+    local line
+    line=$(grep -m1 '^E:' <<<"$1" || true)
+    printf '%s' "${line:-no E: line in the apt output}"
+}
+
+# `apt-get update`, retried (#669). A vendor repo whose index is mid-publish
+# fails the update with "Mirror sync in progress?" until its CDN catches up,
+# usually within a minute or two. Three attempts, 15 s then 45 s apart: about
+# a minute of waiting in all. A repo broken for longer (apt.grafana.com was for
+# over an hour on 2026-10-29) is no transient, so the step then fails and says
+# why. On failure _OBS_APT_ERROR holds apt's first error line.
+_OBS_APT_ATTEMPTS=3
+_OBS_APT_ERROR=""
+_obs_apt_update() {
+    local -a delays=(15 45)
+    local attempt out
+    for ((attempt = 1; attempt <= _OBS_APT_ATTEMPTS; attempt++)); do
+        if out=$(_apt update -qq 2>&1); then
+            return 0
+        fi
+        printf '%s\n' "${out}" >&2
+        _OBS_APT_ERROR=$(_obs_first_apt_error "${out}")
+        if ((attempt < _OBS_APT_ATTEMPTS)); then
+            log_warn "observability: apt-get update failed (attempt ${attempt} of ${_OBS_APT_ATTEMPTS}); retrying in ${delays[attempt - 1]} s"
+            sleep "${delays[attempt - 1]}"
+        fi
+    done
+    return 1
+}
+
 # Add the InfluxData + Grafana apt repos with dearmored keyrings. Idempotent.
 _obs_apt_repos() {
     if ! command -v gpg &>/dev/null; then
@@ -1713,11 +1746,18 @@ phase_observability() {
 
     if ! dpkg -s influxdb2 &>/dev/null || ! dpkg -s influxdb2-cli &>/dev/null || ! dpkg -s grafana &>/dev/null; then
         log_info "observability: installing influxdb2 + grafana (this can take a few minutes)"
-        # shellcheck disable=SC2015  # intentional: error handler covers both failures
-        _apt update -qq && _apt install -y -qq influxdb2 influxdb2-cli grafana || {
-            log_warn "observability: package install failed — skipped"
+        if ! _obs_apt_update; then
+            log_warn "observability: apt-get update failed after ${_OBS_APT_ATTEMPTS} attempts: ${_OBS_APT_ERROR} — skipped"
+            log_info "  The runtime install is unaffected; re-run with --with-observability later."
             return 0
-        }
+        fi
+        local install_out
+        if ! install_out=$(_apt install -y -qq influxdb2 influxdb2-cli grafana 2>&1); then
+            printf '%s\n' "${install_out}" >&2
+            log_warn "observability: apt-get install failed: $(_obs_first_apt_error "${install_out}") — skipped"
+            return 0
+        fi
+        printf '%s\n' "${install_out}"
     else
         log_skip "observability: influxdb2 + grafana already installed"
     fi
