@@ -1314,9 +1314,13 @@ emit_grafana_dropin() {
 # Grafana's own log still reach the journal. Needs systemd 253 or newer.
 # GF_SERVER_HTTP_ADDR: 127.0.0.1 unless install.sh ran with
 # --with-grafana-network, which binds 0.0.0.0 (Grafana's empty default).
+# GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false: Grafana otherwise updates its
+# preinstalled plugins in the background after start, and the InfluxDB
+# datasource is unregistered while it does (#659). Plugins move with the deb.
 [Service]
 EnvironmentFile=-${GRAFANA_ENV_FILE}
 Environment=GF_LOG_LEVEL=warn
+Environment=GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
 Environment=GF_SERVER_HTTP_ADDR=$([[ ${GRAFANA_NETWORK} -eq 1 ]] && echo 0.0.0.0 || echo 127.0.0.1)
 LogFilterPatterns=~.@level.:.debug.
 EOF
