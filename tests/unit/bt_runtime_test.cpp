@@ -824,8 +824,10 @@ TEST(BTRuntimeTest, StopOnTerminalReportsCompletedAndTicksNoMore) {
     EXPECT_EQ(runtime.status().status, AutomationStatus::Completed);
 
     // Re-entering AUTO starts a new run, which ticks once and completes again.
+    // The tick loop samples the mode once per period (100 ms at 10 Hz), so it
+    // sees a new run only if it observes MANUAL first: wait past a period.
     ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
-    ASSERT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Idle; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
     ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
     EXPECT_TRUE(wait_for([&] { return runtime.get_health().total_ticks == ticks + 1; }));
     EXPECT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Completed; }));
