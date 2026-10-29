@@ -738,6 +738,18 @@ bool Runtime::init_automation(std::string &error) {
         LOG_INFO("[Runtime] Automation disabled in config");
     }
 
+    // The e-stop controller drives FAULT on automation machines, with or without
+    // the HTTP server. Without automation there is no mode manager, so it stays
+    // latch + ladder only.
+    safe_state_controller_->set_mode_manager(mode_manager_.get());
+    // A stop status that held at startup was read before the ModeManager
+    // existed, so that hold latched without FAULT. Enter it now (#547).
+    if (mode_manager_ && stop_chain_ && stop_chain_->configured() && stop_chain_->holds()) {
+        const auto snapshot = stop_chain_->snapshot();
+        const std::string state = control::stop_chain_state_to_string(snapshot.state);
+        safe_state_controller_->hold("emergency stop " + state + ": " + snapshot.reason);
+    }
+
     return true;
 #else
     (void)error;
@@ -763,9 +775,6 @@ bool Runtime::init_http(std::string &error) {
         dependencies.mode_manager = mode_manager_.get();            // optional: automation mode
         dependencies.parameter_manager = parameter_manager_.get();  // optional: runtime parameters
         dependencies.bt_runtime = bt_runtime_.get();                // optional: automation runtime
-        // The e-stop controller drives FAULT on automation machines. Without
-        // automation there is no mode manager, so it stays latch + ladder only.
-        safe_state_controller_->set_mode_manager(mode_manager_.get());
 #endif
         // Expose the e-stop controller to the HTTP surface (POST /v0/estop and
         // the status snapshot) regardless of automation.

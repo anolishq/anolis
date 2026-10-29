@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -19,6 +20,8 @@
 #include <variant>
 #include <vector>
 
+#include "anolis_build_config.hpp"
+#include "automation/mode_manager.hpp"
 #include "control/device_loss_latch.hpp"
 #include "events/event_types.hpp"
 #include "runtime/config.hpp"
@@ -83,8 +86,17 @@ std::string calls_made(const Rig &rig) {
 }
 
 anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &scope = "[bread0/motor0]",
-                                          const std::string &extra_args = "", const std::string &on_startup = "leave") {
+                                          const std::string &extra_args = "", const std::string &on_startup = "leave",
+                                          bool automation = false) {
     const auto path = rig.root / "config" / "runtime.yaml";
+    std::string automation_block;
+    if (automation) {
+        std::ofstream(rig.root / "tree.xml")
+            << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    <AlwaysSuccess/>\n"
+               "  </BehaviorTree>\n</root>\n";
+        automation_block =
+            "automation:\n  enabled: true\n  behavior_tree: \"" + (rig.root / "tree.xml").generic_string() + "\"\n";
+    }
     std::ofstream(path) << "runtime:\n  data_dir: \"" << (rig.root / "data").generic_string()
                         << "\"\nhttp:\n  enabled: false\nproviders:\n  - id: bread0\n    command: \"" << kHelperPath
                         << "\"\n    args: [\"--stop-chain\", \"" << rig.root.generic_string() << "\"" << extra_args
@@ -95,7 +107,8 @@ anolis::runtime::RuntimeConfig config_for(const Rig &rig, const std::string &sco
                         << "\n  safe_state:\n    zero_is_safe: true\n"  // a ladder would call motor0
                            "  stop_chain:\n    status:\n      signal: bread0/gpio0/chain_open\n"
                            "    devices: "
-                        << scope << "\n";
+                        << scope << "\n"
+                        << automation_block;
     anolis::runtime::RuntimeConfig config;
     std::string error;
     EXPECT_TRUE(anolis::runtime::load_config(path.string(), config, error)) << error;
@@ -724,3 +737,49 @@ TEST(RuntimeStopChainTest, TheStopIsHeldWhileAnotherProviderRestarts) {
         },
         std::chrono::seconds(15)));
 }
+
+#if ANOLIS_ENABLE_AUTOMATION
+// #547: a status that holds at startup is read before the ModeManager exists,
+// so the hold latches without FAULT. Once it exists, the runtime enters FAULT.
+TEST(RuntimeStopChainTest, StartsInFaultWhenTheStatusIsUnknownOnAnAutomationMachine) {
+    const auto rig = fresh_rig("anolis-547-start-unknown-fault");
+    set_chain(rig, "");  // the helper reports FAULT quality
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", "", "leave", true));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    ASSERT_EQ(runtime.get_stop_chain().snapshot().state, StopChainState::Unknown)
+        << runtime.get_stop_chain().snapshot().reason;
+    EXPECT_TRUE(runtime.get_safe_state().is_engaged());
+    ASSERT_NE(runtime.get_mode_manager(), nullptr);
+    EXPECT_EQ(runtime.get_mode_manager()->current_mode(), anolis::automation::RuntimeMode::FAULT) << log;
+}
+
+TEST(RuntimeStopChainTest, StartsInFaultWhenTheStatusIsUnknownAndTheLatchWasRestored) {
+    const auto rig = fresh_rig("anolis-547-start-restored-fault");
+    set_chain(rig, "0");
+    std::optional<int64_t> latched_at;
+    {
+        anolis::runtime::Runtime first(config_for(rig, "[bread0/motor0]", "", "leave", true));
+        std::string error;
+        std::string log;
+        ASSERT_TRUE(initialize_capturing_log(first, error, log)) << error;
+        first.get_safe_state().trigger("operator");
+        latched_at = first.get_safe_state().capability().latched_at_epoch_ms;
+        ASSERT_TRUE(latched_at.has_value());
+        first.shutdown();
+    }
+
+    set_chain(rig, "");
+    anolis::runtime::Runtime runtime(config_for(rig, "[bread0/motor0]", "", "leave", true));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    ASSERT_TRUE(runtime.get_safe_state().capability().restored_reason.has_value()) << log;
+    ASSERT_NE(runtime.get_mode_manager(), nullptr);
+    EXPECT_EQ(runtime.get_mode_manager()->current_mode(), anolis::automation::RuntimeMode::FAULT) << log;
+    EXPECT_EQ(runtime.get_safe_state().capability().latched_at_epoch_ms, latched_at);
+}
+#endif

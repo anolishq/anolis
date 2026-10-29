@@ -206,7 +206,9 @@ public:
      * Engages the latch, persists it, and on an automation machine enters
      * FAULT, without running the ladder: the devices behind the stop may be
      * unpowered, and the hardware stop is what makes them safe. The latch
-     * refuses the FAULT entry's actuating hook calls. A no-op while latched.
+     * refuses the FAULT entry's actuating hook calls. A latch already held is
+     * left as it is, its time and file unchanged, and FAULT is still entered
+     * (#547).
      */
     void hold(const std::string &reason);
 
