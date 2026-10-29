@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -19,8 +20,14 @@
  * @brief Append-only JSONL run registry — the single writer/owner of run state.
  *
  * Durability: every state transition is appended to `<data_dir>/runs/index.jsonl`
- * and flushed before the call returns (run provenance must not lie about a
- * persisted run). A torn final line on crash is tolerated (skipped with a warn)
+ * and synced to storage (fsync; _commit on Windows) before the call returns, so
+ * open() and close() report success only for a record on storage (run provenance
+ * must not lie about a persisted run). Each event is synced the same way before
+ * append_event() returns. A queued fault or tick-thread mode change is synced by
+ * the background writer when it drains, so it is durable some time after
+ * enqueue returns. When an append creates index.jsonl or a run's events file,
+ * the runs directory is synced too (POSIX only). A sync failure is returned as
+ * the call's error. A torn final line on crash is tolerated (skipped with a warn)
  * on the next startup, when the in-memory index is rebuilt from the log and any
  * still-open run is closed `abandoned`. SQLite is deliberately avoided — a
  * low-rate append-only audit log on a store-less runtime is served by a file.
@@ -41,7 +48,13 @@ namespace runs {
 
 class RunJournal {
 public:
-    RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms);
+    /// Flushes a file, or with `directory` set a directory, to storage; true on
+    /// success.
+    using SyncFn = std::function<bool(const std::filesystem::path& path, bool directory)>;
+
+    /// `sync` stands in for the platform sync (fsync, or _commit on Windows), for
+    /// tests; left empty, the platform sync is used.
+    RunJournal(std::filesystem::path data_dir, std::string runtime_name, int polling_interval_ms, SyncFn sync = {});
     ~RunJournal();
 
     RunJournal(const RunJournal&) = delete;
@@ -83,7 +96,8 @@ public:
         std::string error;
         RunEvent event;
     };
-    /// Synchronously append an event to a run's stream (flushed before return).
+    /// Synchronously append an event to a run's stream (synced to storage before
+    /// it returns ok).
     /// Rejected for an unknown or already-closed run (closed runs are immutable).
     /// Used by HTTP/runtime-thread sources (operator markers, mode/parameter
     /// changes). NEVER call from the automation tick thread — use enqueue_fault,
@@ -112,7 +126,7 @@ public:
 
 private:
     std::string mint_run_id();                               // requires mutex_ held
-    bool append_record(const Run& run, std::string& error);  // sync write + flush; requires mutex_ held
+    bool append_record(const Run& run, std::string& error);  // write + sync; requires mutex_ held
     // Build + append an event to <run_id>.events.jsonl, assigning sequence and
     // recorded_at. Requires mutex_ held. On success returns the persisted event.
     AppendEventResult append_event_locked(const std::string& run_id, RunEventCategory category, const std::string& type,
@@ -125,6 +139,7 @@ private:
     std::filesystem::path index_path_;
     std::string runtime_name_;
     int polling_interval_ms_;
+    SyncFn sync_;
 
     std::unordered_map<std::string, Run> runs_;  // run_id -> latest record
     std::vector<std::string> order_;             // run_ids in open order (for newest-first)

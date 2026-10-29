@@ -81,6 +81,28 @@ void InfluxSink::flush_batch() {
             if (total_written_.load() % 1000 == 0) {
                 LOG_INFO("[InfluxSink] Written " << total_written_.load() << " events to InfluxDB");
             }
+        } else if (result->status != 429 && result->status >= 400 && result->status < 500) {
+            // A permanent rejection (#572): 400 malformed line protocol, 401/403
+            // a token without write access to the bucket, 404 no such org or
+            // bucket, 413 too large, 422 unprocessable. The same request would
+            // be rejected again, and re-queued it would sit ahead of every new
+            // batch until the retry buffer filled and new rows were dropped.
+            // So it is dropped and counted, not retried. 429 and 5xx are
+            // transient and take the retry path below.
+            connected_.store(true);  // the server answered
+            total_rejected_.fetch_add(lines_to_write.size());
+            total_failed_.fetch_add(lines_to_write.size());
+
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_error_log_).count();
+            if (elapsed >= 10) {
+                const bool auth = result->status == 401 || result->status == 403;
+                LOG_ERROR("[InfluxSink] Write rejected (HTTP "
+                          << result->status << "): " << result->body << "; dropped " << lines_to_write.size()
+                          << " rows, not retried" << (auth ? " (check the InfluxDB token and bucket)" : "") << " ("
+                          << total_rejected_.load() << " rejected in all)");
+                last_error_log_ = now;
+            }
         } else {
             // HTTP error - save to retry buffer up to max size
             connected_.store(false);

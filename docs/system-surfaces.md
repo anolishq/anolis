@@ -140,7 +140,7 @@ contract `schemas/telemetry/telemetry-timeseries.schema.v1.json`
 `schemas/telemetry/telemetry-health-timeseries.schema.v1.json` — the retained
 form of the `/v0/providers/health` view (io counters, watchdog state,
 degraded/failed-device flags), both derived from one shared collector. Run identity persists in an append-only JSONL journal
-(`<data_dir>/runs/index.jsonl`, flushed (not fsynced) per transition, abandoned-run recovery,
+(`<data_dir>/runs/index.jsonl`, synced to storage before each transition is reported, abandoned-run recovery,
 one open run at a time) — an internal file format, reached externally only via
 `/v0/runs*`. Historian *export* is `anolis-telemetry-export` (separate repo,
 v0.1.1): an authenticated HTTP service (default :8091) that queries InfluxDB
