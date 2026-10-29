@@ -322,7 +322,9 @@ keep_workbench_install_log() {
     local kept
     kept="$(sed -n 's/^ *install\.sh output: //p' "$1" | tail -1)"
     if [[ -n ${kept} && -f ${kept} ]]; then
-        cp "${kept}" "${LOGS}/workbench-install.log"
+        # The workbench writes it 0600 as root; the upload step is not root.
+        # The other scenarios' logs carry the same install.sh output at 0644.
+        install -m 0644 "${kept}" "${LOGS}/workbench-install.log"
     else
         printf 'note: no install.sh output file named in %s\n' "$1" >&2
     fi
