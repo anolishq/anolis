@@ -213,6 +213,9 @@ protected:
                 actuate->set_function_id(10);
                 actuate->mutable_policy()->set_category(
                     anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+                actuate->mutable_policy()->add_allowed_modes("MANUAL");
+                actuate->mutable_policy()->add_allowed_modes("AUTO");
+                actuate->mutable_policy()->set_min_interval_ms(250);
 
                 auto* read = caps->add_functions();
                 read->set_name("read_temp");
@@ -224,6 +227,7 @@ protected:
                 config->set_function_id(12);
                 config->mutable_policy()->set_category(
                     anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_CONFIG);
+                config->mutable_policy()->set_requires_lease(true);
 
                 // An out-of-range category (e.g. a newer provider's future
                 // enum value) must fail closed, not silently become safe. The
@@ -341,6 +345,35 @@ TEST_F(HttpHandlersTest, GetDeviceCapabilitiesSuccess) {
     // A function with no declared FunctionPolicy fails closed to actuating.
     EXPECT_EQ("UNSPECIFIED", caps["functions"][0]["category"]);
     EXPECT_TRUE(caps["functions"][0]["actuating"].get<bool>());
+}
+
+// #566: the policy fields the runtime enforces (allowed_modes,
+// min_interval_ms) and the one it does not (requires_lease) are visible.
+TEST_F(HttpHandlersTest, GetDeviceCapabilitiesSurfacesFunctionPolicy) {
+    RegisterMockDeviceWithCategories();
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+
+    const auto json = nlohmann::json::parse(res->body);
+    const auto& functions = json["capabilities"]["functions"];
+    ASSERT_EQ(4, functions.size());
+
+    EXPECT_EQ("set_heater", functions[0]["name"]);
+    EXPECT_EQ(nlohmann::json::array({"MANUAL", "AUTO"}), functions[0]["allowed_modes"]);
+    EXPECT_EQ(250, functions[0]["min_interval_ms"]);
+    EXPECT_FALSE(functions[0]["requires_lease"].get<bool>());
+
+    // Undeclared: every mode, no interval, no lease.
+    EXPECT_EQ("read_temp", functions[1]["name"]);
+    EXPECT_EQ(nlohmann::json::array(), functions[1]["allowed_modes"]);
+    EXPECT_EQ(0, functions[1]["min_interval_ms"]);
+    EXPECT_FALSE(functions[1]["requires_lease"].get<bool>());
+
+    EXPECT_EQ("calibrate", functions[2]["name"]);
+    EXPECT_TRUE(functions[2]["requires_lease"].get<bool>());
 }
 
 TEST_F(HttpHandlersTest, GetDeviceCapabilitiesSurfacesActuationCategory) {

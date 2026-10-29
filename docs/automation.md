@@ -64,6 +64,28 @@ Control-operation guardrails in current runtime:
 2. `AUTO` applies manual-call gating policy (`BLOCK`/`OVERRIDE`).
 3. `FAULT` is primarily a recovery mode; transition constraints apply, but control calls are not globally blocked by `CallRouter`.
 
+## Provider-declared function policy
+
+A provider's `FunctionPolicy` can restrict a function, and the runtime enforces
+it in `CallRouter`, as the protocol requires (#566). `GET
+/v0/devices/{provider_id}/{device_id}/capabilities` shows all three fields.
+
+1. `allowed_modes`: a call in any other mode is refused with
+   `FAILED_PRECONDITION`, naming the modes and the current one. This holds for
+   manual calls, the behavior tree and mode-transition hooks alike. Empty means
+   every mode. A runtime without automation has no mode and judges calls as
+   `MANUAL`.
+2. `min_interval_ms`: a call that arrives sooner than this after the last one
+   dispatched to that function is refused with `FAILED_PRECONDITION` and the
+   time remaining. It is refused, not deferred: retrying is the caller's
+   decision.
+3. `requires_lease`: protocol v1 leases are not implemented. Discovery logs a
+   WARN naming each function that sets it, and the function is called without a
+   lease.
+
+Software-stop and startup safe-state calls are exempt from `allowed_modes` and
+`min_interval_ms`, so the ladder can always drive outputs safe.
+
 ## Runtime Parameters
 
 Parameters are declared in runtime YAML and mutable via HTTP.

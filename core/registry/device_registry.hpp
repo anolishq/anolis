@@ -47,6 +47,13 @@ struct FunctionSpec {
     // actuate. Defaults to UNSPECIFIED so an untagged function fails closed.
     anolis::deviceprovider::v1::FunctionPolicy_Category category =
         anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_UNSPECIFIED;
+    // The rest of the FunctionPolicy (#566). The CallRouter enforces
+    // allowed_modes (empty: every mode) and min_interval_ms (0: none);
+    // requires_lease is kept for the capabilities surface only, since protocol
+    // v1 leases are not implemented.
+    std::vector<std::string> allowed_modes;
+    uint32_t min_interval_ms = 0;
+    bool requires_lease = false;
 };
 
 /**

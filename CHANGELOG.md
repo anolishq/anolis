@@ -13,6 +13,61 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-29
+
+0.5.0 is a minor release because existing installs behave differently: what a
+software stop logs, and how Grafana and its Signal History dashboard behave
+(`docs/dependencies.md`: before 1.0, a change that makes an existing install
+behave differently bumps MINOR). It is the first release since 0.2.0 whose
+runtime code changed.
+
+Upgrade notes for operators:
+
+- **A software stop on a variant with FAULT-entry hooks logs one INFO line
+  where it logged ERRORs** (#657, Fixes #648). Under a safe-state rung the
+  e-stop latch refuses a FAULT entry's actuating hook calls, by design. The
+  runtime no longer makes those calls, and logs per transition:
+
+  ```text
+  [Runtime] 4 before-transition hook call(s) (MANUAL -> FAULT) not made: the e-stop latch holds actuation (POST /v0/estop/clear releases it)
+  ```
+
+  Before, each call logged a `[CallRouter]` WARN and a `[Runtime]` ERROR
+  ("Before-transition hook failed ... Actuation latched by e-stop"). Nothing
+  actuates differently: those calls never reached a provider. READ-only hook
+  calls still run, and under rung `none` the hooks run as before. An alert or
+  log filter keyed on those ERRORs stops seeing them.
+- **Grafana no longer updates its preinstalled plugins at startup** (#660,
+  Fixes #659). Its `preinstall_auto_update` setting defaults to on, and while the InfluxDB
+  datasource is replaced, dashboard queries fail ("Data source became
+  unavailable", then "Plugin not registered"). `install.sh --with-observability`
+  writes `GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false` into Grafana's systemd
+  drop-in, and the Docker Compose stack sets it too. An existing host picks it
+  up when install.sh runs again with `--with-observability`, which rewrites
+  the drop-in and restarts Grafana. Plugin versions then change only with the
+  `grafana` package or the Grafana image.
+- **Signal History refreshes every 30 s by default, not every 5 s** (#658,
+  Fixes #647). On a Raspberry Pi its Double panel never drew at 5 s: each
+  refresh cancelled the load before it. A viewer can still pick a shorter
+  refresh in Grafana.
+
+### Changed
+
+- **FAULT-entry hook calls the e-stop latch would refuse are not made** (#657,
+  Fixes #648), as the upgrade notes describe. `CallRouter::latch_refuses`
+  answers the latch check without dispatching.
+- **Signal History's default refresh is 30 s** (#658, Fixes #647).
+
+### Fixed
+
+- **The observability stack keeps the plugins its Grafana shipped with**
+  (#660, Fixes #659), so the dashboard query suite no longer fails when a
+  plugin update lands mid-run.
+
+### CI
+
+- The install walk runs against runtime 0.4.0 (#656).
+
 ## [0.4.0] - 2026-10-29
 
 0.4.0 is a minor release because `install.sh --uninstall` behaves differently

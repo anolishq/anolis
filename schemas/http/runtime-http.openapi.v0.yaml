@@ -1185,6 +1185,31 @@ components:
             Fail-closed actuation flag: true unless the function explicitly
             declares category READ. UNSPECIFIED and CONFIG both fail closed to
             true. Safety gates use this to enumerate actuating outputs.
+        allowed_modes:
+          type: array
+          items:
+            type: string
+          description: >-
+            Runtime modes the provider's FunctionPolicy permits the function in.
+            Empty means every mode. Enforced: a call in any other mode is
+            refused with FAILED_PRECONDITION, whether manual, from the behavior
+            tree or from a mode-transition hook. Software-stop and startup
+            safe-state calls are exempt. A runtime without automation judges
+            calls as MANUAL.
+        min_interval_ms:
+          type: integer
+          minimum: 0
+          description: >-
+            Minimum milliseconds between dispatched calls to the function; 0
+            means none. Enforced: a call that arrives sooner is refused with
+            FAILED_PRECONDITION and the time remaining, not deferred.
+            Safe-state calls are exempt.
+        requires_lease:
+          type: boolean
+          description: >-
+            Whether the provider declares that the function needs an exclusive
+            lease. Protocol v1 leases are not implemented: the runtime logs a
+            warning at discovery and calls the function without one.
     SignalSpec:
       type: object
       additionalProperties: false

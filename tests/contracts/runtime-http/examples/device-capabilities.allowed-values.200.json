@@ -24,7 +24,10 @@
               "closed_speed"
             ]
           }
-        }
+        },
+        "allowed_modes": [],
+        "min_interval_ms": 0,
+        "requires_lease": false
       }
     ]
   }
