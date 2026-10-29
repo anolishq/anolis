@@ -782,3 +782,106 @@ TEST(AutomationStatusEnumTest, ToStringIsTotalAndMatchesWireEnum) {
     }
     EXPECT_EQ(mapped, wire_enum);
 }
+
+namespace {
+
+std::string single_node_tree(const std::string& node) {
+    return R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    )" + node +
+           R"(
+  </BehaviorTree>
+</root>
+)";
+}
+
+}  // namespace
+
+// #596: under on_terminal: stop a root that returns SUCCESS ends the run. No
+// more ticks, and the status is completed until a new run.
+TEST(BTRuntimeTest, StopOnTerminalReportsCompletedAndTicksNoMore) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    runtime.set_stop_on_terminal(true);
+    const auto tree_path = write_tree_file("anolis-596-completed", single_node_tree("<AlwaysSuccess/>"));
+    ASSERT_TRUE(runtime.load_tree(tree_path.string()));
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    ASSERT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Completed; }));
+    const auto ticks = runtime.get_health().total_ticks;
+    EXPECT_EQ(ticks, 1u);
+    std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    EXPECT_EQ(runtime.get_health().total_ticks, ticks) << "the tree was ticked again after it completed";
+    EXPECT_EQ(runtime.status().status, AutomationStatus::Completed);
+
+    // Re-entering AUTO starts a new run, which ticks once and completes again.
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Idle; }));
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    EXPECT_TRUE(wait_for([&] { return runtime.get_health().total_ticks == ticks + 1; }));
+    EXPECT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Completed; }));
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+TEST(BTRuntimeTest, StopOnTerminalReportsFailedNotBlocked) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    runtime.set_stop_on_terminal(true);
+    const auto tree_path = write_tree_file("anolis-596-failed", single_node_tree("<AlwaysFailure/>"));
+    ASSERT_TRUE(runtime.load_tree(tree_path.string()));
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    ASSERT_TRUE(wait_for([&] { return runtime.status().status == AutomationStatus::Failed; }));
+    // Past the >10-tick stall heuristic's window at 10 Hz: still failed, one tick.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+    EXPECT_EQ(runtime.status().status, AutomationStatus::Failed);
+    EXPECT_EQ(runtime.get_health().total_ticks, 1u);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// The default re-ticks a terminal root, as before.
+TEST(BTRuntimeTest, RepeatOnTerminalKeepsTicking) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    const auto tree_path = write_tree_file("anolis-596-repeat", single_node_tree("<AlwaysSuccess/>"));
+    ASSERT_TRUE(runtime.load_tree(tree_path.string()));
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    EXPECT_TRUE(wait_for([&] { return runtime.get_health().total_ticks >= 3; }));
+    EXPECT_EQ(runtime.status().status, AutomationStatus::Running);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}

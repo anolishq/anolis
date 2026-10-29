@@ -520,6 +520,15 @@
             "OVERRIDE"
           ]
         },
+        "on_terminal": {
+          "description": "What the tick loop does once the tree's root returns SUCCESS or FAILURE: repeat re-ticks it from the root (the default), stop ends the run until AUTO is re-entered or a definition is loaded.",
+          "type": "string",
+          "enum": [
+            "repeat",
+            "stop"
+          ],
+          "default": "repeat"
+        },
         "parameters": {
           "type": "array",
           "items": {
