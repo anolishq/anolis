@@ -44,6 +44,13 @@ setup() {
     grep -qx 'Environment=GF_LOG_LEVEL=warn' <<<"${output}"
 }
 
+@test "659: emit_grafana_dropin keeps Grafana from updating its plugins at startup" {
+    run emit_grafana_dropin
+    [ "$status" -eq 0 ]
+    # A background plugin update unregisters the InfluxDB datasource mid-session.
+    grep -qx 'Environment=GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false' <<<"${output}"
+}
+
 @test "emit_grafana_env renders connection, token, and first-boot admin password" {
     run emit_grafana_env "read-token-123" "grafana-pw-456"
     [ "$status" -eq 0 ]
