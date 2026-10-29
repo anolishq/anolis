@@ -751,6 +751,21 @@ std::vector<std::string> write_two_batches(MockInfluxWrite &mock, const std::str
 
 }  // namespace
 
+TEST(InfluxSinkWriteTest, ARejectedBatchIsCountedAsRejected) {
+    MockInfluxWrite mock({400});
+    auto emitter = std::make_shared<anolis::events::EventEmitter>();
+    anolis::telemetry::InfluxSink sink(mock_config(mock.url()));
+    ASSERT_TRUE(sink.start(emitter));
+    sink.enqueue_lines({"bad line", "also bad"});
+    ASSERT_GE(mock.bodies(1).size(), 1u);
+    sink.enqueue_lines({"good value=1 1"});
+    ASSERT_GE(mock.bodies(2).size(), 2u);
+    sink.stop();
+    EXPECT_EQ(sink.total_rejected(), 2u);
+    EXPECT_EQ(sink.total_failed(), 2u);
+    EXPECT_EQ(sink.total_written(), 1u);
+}
+
 TEST(InfluxSinkWriteTest, ARejectedBatchIsNotSentAgainAheadOfNewRows) {
     MockInfluxWrite mock({400});
     const auto bodies = write_two_batches(mock, "bad line", "good,tag=a value=1 1");

@@ -1096,6 +1096,10 @@ components:
           type: integer
         total_failed:
           type: integer
+          description: >-
+            Lines not written: dropped when the retry buffer was full, or
+            rejected by InfluxDB with a 4xx other than 429, which is not
+            retried and is logged with the status and the server's error.
         pending_batch:
           type: integer
           description: Lines buffered awaiting the next flush
