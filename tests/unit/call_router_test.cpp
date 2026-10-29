@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -114,6 +115,47 @@ protected:
                 read->set_name("read_val");
                 read->set_function_id(2);
                 read->mutable_policy()->set_category(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_READ);
+                return true;
+            }));
+
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    // Device whose functions declare FunctionPolicy restrictions (#566):
+    // "calibrate" MANUAL-only, "pulse" at most once per 200 ms, "lease_fn"
+    // requires a lease, "auto_only" AUTO-only.
+    void RegisterMockDeviceWithPolicies() {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("dev1");
+            devices.push_back(dev);
+            return true;
+        }));
+
+        EXPECT_CALL(*mock_provider, describe_device("dev1", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("dev1");
+                auto* caps = response.mutable_capabilities();
+
+                auto* calibrate = caps->add_functions();
+                calibrate->set_name("calibrate");
+                calibrate->set_function_id(1);
+                calibrate->mutable_policy()->add_allowed_modes("MANUAL");
+
+                auto* pulse = caps->add_functions();
+                pulse->set_name("pulse");
+                pulse->set_function_id(2);
+                pulse->mutable_policy()->set_min_interval_ms(200);
+
+                auto* leased = caps->add_functions();
+                leased->set_name("lease_fn");
+                leased->set_function_id(3);
+                leased->mutable_policy()->set_requires_lease(true);
+
+                auto* auto_only = caps->add_functions();
+                auto_only->set_name("auto_only");
+                auto_only->set_function_id(4);
+                auto_only->mutable_policy()->add_allowed_modes("AUTO");
                 return true;
             }));
 
@@ -1681,4 +1723,124 @@ TEST_F(CallRouterTest, DoesNotNarrowDoubleIntoIntegerParameter) {
     const auto result = router->execute_call(request, *provider_registry);
     ASSERT_FALSE(result.success);
     EXPECT_THAT(result.error_message, HasSubstr("Type mismatch"));
+}
+
+// #566: the runtime enforces a function's declared allowed_modes for manual,
+// behaviour-tree and mode-hook calls alike. Safe-state calls are exempt.
+TEST_F(CallRouterTest, AllowedModesRefusesABehaviourTreeCallOutsideThem) {
+    RegisterMockDeviceWithPolicies();
+    std::string err;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, err)) << err;
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "calibrate";
+    req.is_automated = true;
+    req.is_behavior_tree = true;
+
+    const auto result = router->execute_call(req, *provider_registry);
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+    EXPECT_THAT(result.error_message, HasSubstr("allowed only in MANUAL"));
+    EXPECT_THAT(result.error_message, HasSubstr("AUTO"));
+}
+
+TEST_F(CallRouterTest, AllowedModesRefusesAModeHookCallOutsideThem) {
+    RegisterMockDeviceWithPolicies();
+    std::string err;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, err)) << err;
+    EXPECT_CALL(*mock_provider, call(_, _, _, _, _)).Times(0);
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "calibrate";
+    req.is_automated = true;  // a mode-transition hook: automated, not the tree
+
+    const auto result = router->execute_call(req, *provider_registry);
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+}
+
+TEST_F(CallRouterTest, AllowedModesAdmitsAManualCallInAnAllowedMode) {
+    RegisterMockDeviceWithPolicies();
+    EXPECT_CALL(*mock_provider, call("dev1", _, "calibrate", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "calibrate";
+
+    const auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+TEST_F(CallRouterTest, AllowedModesExemptSafeStateCalls) {
+    RegisterMockDeviceWithPolicies();
+    std::string err;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, err)) << err;
+    EXPECT_CALL(*mock_provider, call("dev1", _, "calibrate", _, _)).WillOnce(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "calibrate";
+    req.safe_state = true;
+
+    const auto result = router->execute_call(req, *provider_registry);
+    EXPECT_TRUE(result.success) << result.error_message;
+}
+
+// Without automation there is no mode manager; the runtime is under manual
+// control, so allowed_modes is judged as MANUAL.
+TEST_F(CallRouterTest, AllowedModesWithoutAModeManagerJudgeTheCallAsManual) {
+    RegisterMockDeviceWithPolicies();
+    control::CallRouter no_automation(*registry, *state_cache);
+    EXPECT_CALL(*mock_provider, call("dev1", _, "calibrate", _, _)).WillOnce(Return(true));
+
+    control::CallRequest manual_only;
+    manual_only.device_handle = "sim0/dev1";
+    manual_only.function_name = "calibrate";
+    EXPECT_TRUE(no_automation.execute_call(manual_only, *provider_registry).success);
+
+    control::CallRequest auto_only;
+    auto_only.device_handle = "sim0/dev1";
+    auto_only.function_name = "auto_only";
+    const auto refused = no_automation.execute_call(auto_only, *provider_registry);
+    EXPECT_FALSE(refused.success);
+    EXPECT_EQ(refused.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+    EXPECT_THAT(refused.error_message, HasSubstr("allowed only in AUTO"));
+}
+
+// #566: a call sooner than min_interval_ms after the last one is refused with the
+// time remaining, not deferred. Safe-state calls are exempt.
+TEST_F(CallRouterTest, MinIntervalRefusesACallThatArrivesTooSoon) {
+    RegisterMockDeviceWithPolicies();
+    EXPECT_CALL(*mock_provider, call("dev1", _, "pulse", _, _)).Times(2).WillRepeatedly(Return(true));
+
+    control::CallRequest req;
+    req.device_handle = "sim0/dev1";
+    req.function_name = "pulse";
+
+    ASSERT_TRUE(router->execute_call(req, *provider_registry).success);
+    const auto too_soon = router->execute_call(req, *provider_registry);
+    EXPECT_FALSE(too_soon.success);
+    EXPECT_EQ(too_soon.status_code, anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION);
+    EXPECT_THAT(too_soon.error_message, HasSubstr("once every 200 ms"));
+    EXPECT_THAT(too_soon.error_message, HasSubstr("retry in"));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_TRUE(router->execute_call(req, *provider_registry).success);
+}
+
+TEST_F(CallRouterTest, MinIntervalExemptsSafeStateCalls) {
+    RegisterMockDeviceWithPolicies();
+    EXPECT_CALL(*mock_provider, call("dev1", _, "pulse", _, _)).Times(2).WillRepeatedly(Return(true));
+
+    control::CallRequest manual;
+    manual.device_handle = "sim0/dev1";
+    manual.function_name = "pulse";
+    ASSERT_TRUE(router->execute_call(manual, *provider_registry).success);
+
+    control::CallRequest safe = manual;
+    safe.safe_state = true;
+    EXPECT_TRUE(router->execute_call(safe, *provider_registry).success);
 }
