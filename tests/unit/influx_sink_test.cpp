@@ -671,6 +671,22 @@ TEST(InfluxLineProtocolTest, ValidateTimestampLast) {
 // Write responses (#572): a mock /api/v2/write answers with scripted statuses
 // and records every body it receives.
 // ---------------------------------------------------------------------------
+//
+// Skipped under ThreadSanitizer, as http_handlers_test.cpp's suite is:
+// cpp-httplib's server crashes there.
+#if defined(__SANITIZE_THREAD__)
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 1
+#else
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 0
+#endif
+#else
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 0
+#endif
+
+#if !ANOLIS_SKIP_INFLUX_WRITE_TESTS
 
 namespace {
 
@@ -786,3 +802,5 @@ TEST(InfluxSinkWriteTest, AServerErrorIsRetriedAndTheRowsDelivered) {
     ASSERT_GE(bodies.size(), 2u);
     EXPECT_EQ(bodies[1], "first value=1 1\nsecond value=2 2\n");
 }
+
+#endif  // !ANOLIS_SKIP_INFLUX_WRITE_TESTS
