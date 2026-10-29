@@ -110,7 +110,10 @@ install cannot bring a machine up already actuating.
 Two things about observability that surprise people. Its services **start
 immediately** — `--no-start` does not gate them. And if the vendor apt repos
 are unreachable it **warns and skips** rather than failing: the runtime install
-still succeeds, and you can re-run with the flag later once online.
+still succeeds, and you can re-run with the flag later once online. The same
+holds when a repo is reachable but its index is mid-publish ("Mirror sync in
+progress?"): `apt-get update` is tried 3 times, 15 s and then 45 s apart, and
+the warning then names the failing step and apt's first error.
 
 Raise retention with `OBSERVABILITY_RETENTION`, but read `observability/README.md`
 ("Data Retention") on the trade-offs first.

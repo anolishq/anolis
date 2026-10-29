@@ -85,7 +85,7 @@ setup() {
     [ "${total}" -le 60 ]
 }
 
-@test "669: an apt-get install that fails names the step and apt's last error" {
+@test "669: an apt-get install that fails names the step and apt's first error" {
     INSTALL_FAILS=1
     run phase_observability
     [ "$status" -eq 0 ]
