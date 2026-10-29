@@ -314,6 +314,22 @@ scenario_handcopy() {
     pass "without data_dir the data dir moves and the latch is left behind"
 }
 
+# keep_workbench_install_log <workbench log>: the workbench prints only a
+# summary and keeps install.sh's whole output in the file its summary names
+# ("install.sh output: <path>"). Copy that next to the walk's logs, so the
+# artifact carries apt's own errors when a step fails.
+keep_workbench_install_log() {
+    local kept
+    kept="$(sed -n 's/^ *install\.sh output: //p' "$1" | tail -1)"
+    if [[ -n ${kept} && -f ${kept} ]]; then
+        # The workbench writes it 0600 as root; the upload step is not root.
+        # The other scenarios' logs carry the same install.sh output at 0644.
+        install -m 0644 "${kept}" "${LOGS}/workbench-install.log"
+    else
+        printf 'note: no install.sh output file named in %s\n' "$1" >&2
+    fi
+}
+
 # The workbench's own route: it fetches the install.sh of the runtime the
 # project pins and runs it, so this checks the released install.sh behind it.
 scenario_workbench() {
@@ -324,7 +340,10 @@ scenario_workbench() {
     pass "$("${LOGS}/workbench-venv/bin/anolis-workbench" --version)"
 
     step "anolis-provision install --system ${PROJECT} --project e2e-sim --with-observability"
-    if ! "${provision}" install --system "${PROJECT}" --project e2e-sim --with-observability >"${log}" 2>&1; then
+    local rc=0
+    "${provision}" install --system "${PROJECT}" --project e2e-sim --with-observability >"${log}" 2>&1 || rc=$?
+    keep_workbench_install_log "${log}"
+    if [[ ${rc} -ne 0 ]]; then
         tail -60 "${log}" >&2
         fail "workbench: anolis-provision install exited non-zero (log: ${log})"
     fi
