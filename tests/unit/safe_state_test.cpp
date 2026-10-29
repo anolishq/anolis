@@ -3,6 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -12,6 +15,7 @@
 
 #include "automation/mode_manager.hpp"
 #include "control/call_router.hpp"
+#include "control/latch_store.hpp"
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
@@ -923,4 +927,54 @@ TEST_F(SafeStateTest, AutoIsRefusedAfterAStopUntilTheLatchIsCleared) {
 
     controller->clear();
     EXPECT_TRUE(mode.set_mode(automation::RuntimeMode::AUTO, error)) << error;
+}
+
+// #547: an observed stop going in_force or unknown enters FAULT on an
+// automation machine whether or not the latch is already held, and leaves an
+// existing latch's timestamp alone.
+TEST_F(SafeStateTest, HoldWhileLatchedAfterRecoveryStillEntersFault) {
+    auto controller = make_controller();
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    controller->set_mode_manager(&mode);
+    std::string error;
+
+    controller->trigger("operator");
+    ASSERT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+    ASSERT_TRUE(mode.set_mode(automation::RuntimeMode::MANUAL, error)) << error;
+    const auto latched_at = controller->capability().latched_at_epoch_ms;
+    ASSERT_TRUE(latched_at.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    controller->hold("emergency stop in_force: gpio0/estop/chain_open reads true");
+
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+    EXPECT_TRUE(controller->is_engaged());
+    EXPECT_EQ(controller->capability().latched_at_epoch_ms, latched_at);
+}
+
+TEST_F(SafeStateTest, HoldOnARestoredLatchEntersFaultAndKeepsTheFile) {
+    const auto data_dir = std::filesystem::path(::testing::TempDir()) / "anolis-547-restored";
+    std::filesystem::remove_all(data_dir);
+    std::string error;
+    ASSERT_TRUE(control::LatchStore(data_dir, "cfg").save(1234, "operator", error)) << error;
+    const auto file = control::LatchStore::path_for(data_dir, "cfg");
+    const auto read_file = [&file] {
+        std::ifstream in(file);
+        std::stringstream out;
+        out << in.rdbuf();
+        return out.str();
+    };
+    const std::string before = read_file();
+
+    auto controller = make_controller();
+    controller->attach_latch_store(std::make_unique<control::LatchStore>(data_dir, "cfg"));
+    ASSERT_TRUE(controller->is_engaged());
+    automation::ModeManager mode(automation::RuntimeMode::MANUAL);
+    controller->set_mode_manager(&mode);
+
+    controller->hold("emergency stop unknown: gpio0/estop/chain_open is stale");
+
+    EXPECT_EQ(mode.current_mode(), automation::RuntimeMode::FAULT);
+    EXPECT_EQ(controller->capability().latched_at_epoch_ms, std::optional<int64_t>(1234));
+    EXPECT_EQ(read_file(), before);
 }
