@@ -108,7 +108,11 @@ Fields:
 2. `influxdb` object:
    - `url`, `org`, `bucket`, `token`
    - `batch_size`, `flush_interval_ms`
-   - `max_retry_buffer_size`
+   - `max_retry_buffer_size`: lines kept from failed writes for the next
+     flush, when the failure may pass (a connection error, 429 or 5xx). A
+     write InfluxDB rejects with another 4xx (malformed lines, a token
+     without write access, no such bucket) is dropped and logged with the
+     status and the server's error, not retried.
 3. `health_interval_ms` (int, default 15000, `0` disables): cadence of
    provider/device health snapshot ingestion into InfluxDB
    (`anolis_provider_health` / `anolis_device_health`). Each snapshot performs

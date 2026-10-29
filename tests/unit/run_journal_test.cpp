@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -392,5 +393,159 @@ TEST(RunJournalTest, AbandonedRecoveryWritesRunClosedEvent) {
         EXPECT_EQ(events[1].sequence, 2U);  // sequence continued across restart
         EXPECT_TRUE(events[1].payload.value("recovery", false));
     }
+    std::filesystem::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
+// Durability (#551): each append is synced to storage before the call returns,
+// through the injectable sync hook.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Records every sync the journal asks for, and fails the ones `fail` names.
+struct SyncRecorder {
+    struct Call {
+        std::filesystem::path path;
+        bool directory = false;
+        std::thread::id thread;
+    };
+
+    std::mutex mutex;
+    std::vector<Call> calls;
+    std::function<bool(const std::filesystem::path&, bool)> fail;
+
+    RunJournal::SyncFn hook() {
+        return [this](const std::filesystem::path& path, bool directory) {
+            std::lock_guard<std::mutex> lock(mutex);
+            calls.push_back({path, directory, std::this_thread::get_id()});
+            return !(fail && fail(path, directory));
+        };
+    }
+
+    bool saw(const std::filesystem::path& path, bool directory) {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& call : calls) {
+            if (call.path == path && call.directory == directory) return true;
+        }
+        return false;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        calls.clear();
+    }
+};
+
+std::filesystem::path events_file(const std::filesystem::path& dir, const std::string& run_id) {
+    return dir / "runs" / (run_id + ".events.jsonl");
+}
+
+}  // namespace
+
+TEST(RunJournalTest, OpenSyncsTheIndexTheEventsFileAndTheDirectory) {
+    auto dir = unique_dir();
+    SyncRecorder sync;
+    RunJournal journal(dir, "rt1", 1000, sync.hook());
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+
+    // index.jsonl and the events file are both created by this open, so each
+    // file's sync is followed by one of the runs directory.
+    std::vector<std::pair<std::filesystem::path, bool>> calls;
+    for (const auto& call : sync.calls) calls.emplace_back(call.path, call.directory);
+    const std::vector<std::pair<std::filesystem::path, bool>> expected = {
+        {dir / "runs" / "index.jsonl", false},
+        {dir / "runs", true},
+        {events_file(dir, opened.run.run_id), false},
+        {dir / "runs", true},
+    };
+    EXPECT_EQ(calls, expected);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunJournalTest, CloseSyncsTheIndex) {
+    auto dir = unique_dir();
+    SyncRecorder sync;
+    RunJournal journal(dir, "rt1", 1000, sync.hook());
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+    sync.clear();
+
+    auto closed = journal.close(opened.run.run_id, CloseReason::Completed);
+    ASSERT_TRUE(closed.ok) << closed.error;
+
+    EXPECT_TRUE(sync.saw(dir / "runs" / "index.jsonl", false)) << "the close record was not synced";
+    EXPECT_TRUE(sync.saw(events_file(dir, opened.run.run_id), false)) << "run_closed was not synced";
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunJournalTest, AnOpenWhoseRecordCannotBeSyncedFails) {
+    auto dir = unique_dir();
+    SyncRecorder sync;
+    const auto index = dir / "runs" / "index.jsonl";
+    sync.fail = [&](const std::filesystem::path& path, bool directory) { return !directory && path == index; };
+    RunJournal journal(dir, "rt1", 1000, sync.hook());
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+
+    EXPECT_FALSE(opened.ok) << "open reported success for a record that was not synced";
+    EXPECT_FALSE(journal.open_run_id().has_value());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunJournalTest, AnEventThatCannotBeSyncedIsNotReportedAppended) {
+    auto dir = unique_dir();
+    SyncRecorder sync;
+    RunJournal journal(dir, "rt1", 1000, sync.hook());
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+    const auto events = events_file(dir, opened.run.run_id);
+    sync.fail = [&](const std::filesystem::path& path, bool directory) { return !directory && path == events; };
+
+    auto appended =
+        journal.append_event(opened.run.run_id, RunEventCategory::Annotation, "note", nlohmann::json::object(), 0);
+
+    EXPECT_FALSE(appended.ok) << "append_event reported success for an event that was not synced";
+    EXPECT_TRUE(sync.saw(events, false));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunJournalTest, AQueuedFaultIsSyncedOffTheCallersThread) {
+    auto dir = unique_dir();
+    SyncRecorder sync;
+    RunJournal journal(dir, "rt1", 1000, sync.hook());
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+    sync.clear();
+    const auto events = events_file(dir, opened.run.run_id);
+
+    journal.enqueue_fault("bt/node", "boom", 0);  // as the automation tick thread does
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!sync.saw(events, false) && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_TRUE(sync.saw(events, false)) << "the queued fault was not synced";
+    std::lock_guard<std::mutex> lock(sync.mutex);
+    for (const auto& call : sync.calls) {
+        EXPECT_NE(call.thread, std::this_thread::get_id()) << "a sync ran on the enqueuing thread";
+    }
+
     std::filesystem::remove_all(dir);
 }
