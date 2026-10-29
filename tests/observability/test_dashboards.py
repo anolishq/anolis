@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 from typing import Any
 
@@ -101,3 +102,18 @@ def test_a_second_runtime_does_not_change_the_view(grafana, dashboards, load, no
 
     changed = [name for name in alone if _normalise(alone[name]) != _normalise(shared.get(name, []))]
     assert not changed, f"r2 leaks into: {changed}"
+
+
+def _seconds(refresh: str) -> int:
+    match = re.fullmatch(r"(\d+)([smh])", refresh)
+    assert match, refresh
+    return int(match.group(1)) * {"s": 1, "m": 60, "h": 3600}[match.group(2)]
+
+
+def test_signal_history_refreshes_no_faster_than_a_pi_draws_it() -> None:
+    # On a Raspberry Pi the Double panel's query took 3.1 s alone, and the whole
+    # dashboard about 18 s to draw: at a 5 s refresh each reload cancelled the
+    # last, and the panel never drew (#647).
+    path = pathlib.Path(__file__).parents[2] / "observability" / "grafana" / "dashboards" / "signal-history.json"
+    model = json.loads(path.read_text(encoding="utf-8"))
+    assert _seconds(model["refresh"]) >= 30
