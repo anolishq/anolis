@@ -175,9 +175,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // and unclassified functions are refused too. Safe-state actions are
     // unaffected, and so is a FAULT-entry hook while the latch admits one (the
     // e-stop's own FAULT entry under rung none, #251).
-    if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
-        registry::is_actuating(*func_spec) &&
-        !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks())) {
+    if (latch_holds(request, *func_spec)) {
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
@@ -227,9 +225,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // engaged (and its ladder run to completion for this provider) while this
     // call waited for the lock; without this check an in-flight actuating call
     // would land after the safe state was applied. Safe-state calls are exempt.
-    if (!request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
-        registry::is_actuating(*func_spec) &&
-        !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks())) {
+    if (latch_holds(request, *func_spec)) {
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
@@ -271,6 +267,31 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
 
     result.success = true;
     return result;
+}
+
+bool CallRouter::latch_holds(const CallRequest& request, const registry::FunctionSpec& spec) const {
+    return !request.safe_state && actuation_latch_ != nullptr && actuation_latch_->is_engaged() &&
+           registry::is_actuating(spec) && !(request.fault_entry_hook && actuation_latch_->admits_fault_entry_hooks());
+}
+
+bool CallRouter::latch_refuses(const CallRequest& request) const {
+    if (request.safe_state || actuation_latch_ == nullptr || !actuation_latch_->is_engaged()) {
+        return false;
+    }
+    std::string provider_id, device_id, error;
+    if (!parse_device_handle(request.device_handle, provider_id, device_id, error)) {
+        return false;
+    }
+    auto device_opt = registry_.get_device_copy(provider_id, device_id);
+    if (!device_opt.has_value()) {
+        return false;
+    }
+    const registry::FunctionSpec* func_spec = nullptr;
+    std::string resolved_function_name;
+    if (!resolve_function_spec(device_opt.value(), request, func_spec, resolved_function_name, error)) {
+        return false;
+    }
+    return latch_holds(request, *func_spec);
 }
 
 bool CallRouter::validate_call(const CallRequest& request, std::string& error) const {

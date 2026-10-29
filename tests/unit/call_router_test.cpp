@@ -1541,6 +1541,51 @@ TEST_F(CallRouterTest, SafeStateBypassesLatch) {
     EXPECT_TRUE(result.success);
 }
 
+// latch_refuses answers what execute_call's e-stop latch check would, without
+// dispatching anything, so a FAULT-entry hook can skip a call the latch holds
+// instead of logging its refusal (#648).
+struct AdmittingLatch : StubLatch {
+    bool admits_fault_entry_hooks() const override { return true; }
+};
+
+TEST_F(CallRouterTest, LatchRefusesAnswersAsExecuteCallWould) {
+    RegisterMockDeviceWithReadAndActuate();
+    StubLatch latch;
+    router->set_actuation_latch(&latch);
+
+    control::CallRequest actuate;
+    actuate.device_handle = "sim0/dev1";
+    actuate.function_name = "reset";  // untagged -> actuating (fail closed)
+    control::CallRequest read = actuate;
+    read.function_name = "read_val";
+    control::CallRequest safe = actuate;
+    safe.safe_state = true;
+    control::CallRequest unknown = actuate;
+    unknown.device_handle = "sim0/nope";
+
+    EXPECT_FALSE(router->latch_refuses(actuate));  // not engaged
+    latch.engaged = true;
+    EXPECT_TRUE(router->latch_refuses(actuate));
+    EXPECT_FALSE(router->latch_refuses(read));
+    EXPECT_FALSE(router->latch_refuses(safe));
+    // Left for execute_call to report.
+    EXPECT_FALSE(router->latch_refuses(unknown));
+}
+
+TEST_F(CallRouterTest, LatchRefusesLetsAFaultEntryHookThroughWhenTheLatchAdmitsOne) {
+    RegisterMockDeviceWithReadAndActuate();
+    AdmittingLatch latch;
+    latch.engaged = true;
+    router->set_actuation_latch(&latch);
+
+    control::CallRequest hook;
+    hook.device_handle = "sim0/dev1";
+    hook.function_name = "reset";
+    EXPECT_TRUE(router->latch_refuses(hook));
+    hook.fault_entry_hook = true;
+    EXPECT_FALSE(router->latch_refuses(hook));
+}
+
 TEST_F(CallRouterTest, SafeStateBypassesIdleGating) {
     RegisterMockDeviceWithReadAndActuate();
     std::string err;
