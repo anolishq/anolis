@@ -34,10 +34,47 @@ Define machine profile manifest structure and lock manifest behavior for validat
      release; `signal` shows as `estop=true` in device state with the bus
      alive. Both wirings are first-class; nothing may branch runtime behavior
      on this field beyond presentation/interpretation, and absence is valid)
+   - an optional operator panel (`operator`, below): the readings an operator
+     watches, the experiment's settings in labelled groups, and what starting
+     and stopping the experiment does. Presentation only: nothing in the
+     runtime reads it, and absence is valid
 4. Validator enforces:
    - schema correctness
    - referenced file existence
    - referenced runtime profile schema compatibility
+
+## The `operator` block
+
+Read by the workbench's operator panel (anolishq/anolis-workbench#232). Every
+key is optional; a profile without the block is valid and behaves as before.
+
+<!-- validate: machine-profile fragment -->
+```yaml
+operator:
+  readings:                       # shown large, in this order
+    - { signal: ezo0/ph0/ph_value, label: pH, decimals: 2 }
+    - { signal: bread0/rlht0/t1_c, label: Temperature, unit: "°C", decimals: 1 }
+  settings:                       # automation parameters, grouped and labelled
+    - group: Stirring
+      items:
+        - { parameter: impeller_pwm, label: Speed }
+  experiment:                     # what Start and Stop do
+    start: { enable: [impeller_enable], mode: AUTO }
+    stop: { disable: [impeller_enable], mode: IDLE }
+```
+
+1. `readings[]`: `signal` is `provider/device/signal` and `label` is required;
+   `unit` (non-empty) and `decimals` (0 to 6) are optional.
+2. `settings[]`: a non-empty `group` name and at least one item; each item
+   names an automation `parameter` and a non-empty `label`, with an optional
+   `unit`.
+3. `experiment.start` and `experiment.stop`: the `mode` to enter (required),
+   and the bool parameters to set true (`enable`) or false (`disable`). Start
+   takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
+   Stop never leaves automation running.
+4. Unknown keys anywhere in the block are refused. The schema checks shape only:
+   that a named signal or parameter exists in the machine's variants is the
+   consumer's check.
 
 ## Validation Gates
 

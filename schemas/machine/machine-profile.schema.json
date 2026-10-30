@@ -254,6 +254,150 @@
           "description": "How the physical e-stop is wired. power_cut: e-stop cuts actuator-board power (software signature: device blackout, io_failed accrual, recovery on release). signal: e-stop drives the boards' ESTOP inputs (signature: estop=true in device state, bus stays alive). Both are first-class supported wirings."
         }
       }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional presentation for an operator panel: the readings an operator watches, the experiment's settings grouped and labelled, and what starting and stopping the experiment does. Nothing in the runtime reads it; absence is always valid. That each named signal and parameter exists is the consumer's check, not this schema's.",
+      "properties": {
+        "readings": {
+          "type": "array",
+          "description": "Signals shown large, in this order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "signal",
+              "label"
+            ],
+            "properties": {
+              "signal": {
+                "type": "string",
+                "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$",
+                "description": "provider/device/signal"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decimals": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 6
+              }
+            }
+          }
+        },
+        "settings": {
+          "type": "array",
+          "description": "Automation parameters in labelled groups.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "group",
+              "items"
+            ],
+            "properties": {
+              "group": {
+                "type": "string",
+                "minLength": 1
+              },
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "parameter",
+                    "label"
+                  ],
+                  "properties": {
+                    "parameter": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "An automation parameter of the variants that run automation."
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "unit": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "experiment": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What Start and Stop do.",
+          "properties": {
+            "start": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "enable": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Bool parameters set true."
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "IDLE",
+                    "MANUAL",
+                    "AUTO"
+                  ],
+                  "description": "The mode entered."
+                }
+              }
+            },
+            "stop": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "disable": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Bool parameters set false."
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "IDLE",
+                    "MANUAL"
+                  ],
+                  "description": "The mode left in. Not AUTO: a Stop does not leave automation running."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "definitions": {
