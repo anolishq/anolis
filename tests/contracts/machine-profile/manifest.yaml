@@ -15,6 +15,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/04-safety-estop-topology.yaml
     expect: valid
     note: optional informational safety.estop_topology declaration (power_cut)
+  - file: tests/contracts/machine-profile/valid/05-operator.yaml
+    expect: valid
+    note: optional operator block (readings, settings groups, experiment start and stop)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -28,6 +31,15 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/04-bad-estop-topology.yaml
     expect: invalid/schema
     note: safety.estop_topology outside the power_cut|signal enum
+  - file: tests/contracts/machine-profile/invalid/schema/05-operator-bad-signal.yaml
+    expect: invalid/schema
+    note: operator.readings[].signal that is not provider/device/signal
+  - file: tests/contracts/machine-profile/invalid/schema/06-operator-empty-label.yaml
+    expect: invalid/schema
+    note: operator.settings[].items[].label that is empty
+  - file: tests/contracts/machine-profile/invalid/schema/07-operator-unknown-key.yaml
+    expect: invalid/schema
+    note: an unknown key in the operator block
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references
