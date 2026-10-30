@@ -48,6 +48,7 @@ Define machine profile manifest structure and lock manifest behavior for validat
 Read by the workbench's operator panel (anolishq/anolis-workbench#232). Every
 key is optional; a profile without the block is valid and behaves as before.
 
+<!-- validate: machine-profile fragment -->
 ```yaml
 operator:
   readings:                       # shown large, in this order
