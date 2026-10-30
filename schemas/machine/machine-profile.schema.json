@@ -366,6 +366,39 @@
                     "AUTO"
                   ],
                   "description": "The mode entered."
+                },
+                "require": {
+                  "type": "array",
+                  "description": "Conditions on signals that must hold before Start runs. When one does not, Start refuses with its message.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "signal",
+                      "equals",
+                      "message"
+                    ],
+                    "properties": {
+                      "signal": {
+                        "type": "string",
+                        "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$",
+                        "description": "provider/device/signal"
+                      },
+                      "equals": {
+                        "type": [
+                          "boolean",
+                          "number",
+                          "string"
+                        ],
+                        "description": "The value the signal must read."
+                      },
+                      "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "What the operator sees when the signal does not read it: the fix."
+                      }
+                    }
+                  }
                 }
               }
             },
