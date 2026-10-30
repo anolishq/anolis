@@ -13,6 +13,91 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-30
+
+0.7.0 is a minor release because existing installs behave differently: run
+records and events are synced to storage before the API answers, a write
+InfluxDB rejects is dropped instead of retried, and providers no longer
+inherit each other's pipes (`docs/dependencies.md`: before 1.0, a change that
+makes an existing install behave differently bumps MINOR). The machine-profile
+schema gains an optional `operator` block.
+
+Upgrade notes for operators:
+
+- **Each run-journal append is synced to storage before it returns** (#673,
+  Fixes #551). `POST /v0/runs`, `POST /v0/runs/{id}/close` and run events used
+  to report success once the bytes reached the page cache, so a power cut soon
+  after could lose a confirmed record. Each append to `runs/index.jsonl` or a
+  run's events file is now fsynced, and `runs/` is synced after a new file is
+  created. A failed sync is the call's error: open and close report no success,
+  and an event append returns `ok == false`. Events are appended off the tick
+  thread.
+- **A write InfluxDB rejects is dropped, not retried** (#671, Fixes #572). A
+  4xx other than 429 (400, 401, 403, 404, 413, 422) used to go back into the
+  retry buffer and be sent ahead of every new batch; once the buffer filled,
+  each new batch was dropped instead, until a restart. Now the rejected request
+  is dropped, counted in `total_failed`, and logged as an ERROR with the status,
+  the server's error and the rows dropped, for example
+  `[InfluxSink] Write rejected (HTTP 400): …; dropped 2 rows, not retried (2 rejected in all)`.
+  401 and 403 add "(check the InfluxDB token and bucket)": the token is read
+  only at start, so fix it and restart. 429, 5xx and connection errors are
+  retried as before.
+- **Provider pipes are created close-on-exec** (#676, Fixes #570). On Linux,
+  each provider inherited the runtime's ends of every pipe made before it,
+  including earlier providers' stdin. Stopping a provider closes its stdin and
+  waits for EOF, which never came while a later provider held a copy, so the
+  stop waited out `shutdown_timeout_ms` and killed it, and the SDK's
+  `on_shutdown` never ran. Providers now hold only their own fds 0, 1 and 2,
+  shut down when asked, and run `on_shutdown`. Windows was unaffected.
+- **A provider that closes its stdin no longer ends the runtime** (#675, Fixes
+  #549). The runtime now ignores `SIGPIPE` from the start, so such a write fails
+  with "Broken pipe (provider terminated)" and that provider is marked
+  unavailable, where the runtime used to exit 141 with no log. That was
+  possible during provider startup and whenever `http.enabled` was false; the
+  installed service was already covered by systemd's `IgnoreSIGPIPE=yes`.
+  Providers start with the disposition the runtime inherited, as before.
+- **`value_double` is written so it reads back exactly** (#674, Fixes #573).
+  It used to be rounded to 6 significant digits on its way to InfluxDB:
+  `123456.789` was stored as `123457`. New points carry the full value; points
+  already written keep their rounding.
+
+### Added
+
+- **An optional `operator` block in the machine-profile schema** (#682, Fixes
+  #680): the readings an operator watches, the experiment's settings in
+  groups, and what Start and Stop set. Stop's `mode` takes `IDLE` or `MANUAL`
+  only. `docs/contracts/machine-profile-baseline.md` describes it, and the
+  release's machine-profile schema bundle carries the schema and its new
+  fixtures.
+- **`InfluxSink::total_rejected()`** (#671), and the OpenAPI `total_failed`
+  description says rejected writes count in it.
+
+### Changed
+
+- **Run-journal appends are synced to storage** (#673), as the upgrade notes
+  describe; the header, `docs/system-surfaces.md` and the automation-platform
+  RFC now say so.
+- **A 4xx other than 429 from InfluxDB is dropped and logged** (#671).
+
+### Fixed
+
+- **Providers shut down cleanly when there is more than one** (#676).
+- **A write to a closed provider fails that call instead of ending the
+  runtime** (#675).
+- **`value_double` round-trips exactly** (#674).
+- **A torn last journal line no longer swallows the next record** (#672, Fixes
+  #639): an append starts a new line when the file doesn't end in one, so an
+  abandoned run's recovery record, or a newly opened run, is kept.
+- **install.sh's observability step retries a failed `apt-get update`** (#670,
+  Fixes #669), up to 3 times over about a minute, and names apt's first `E:`
+  line when it gives up.
+
+### CI
+
+- The install walk runs against runtime 0.6.0 (#667), and its workbench
+  scenario keeps install.sh's output in the artifact (#668).
+- The docs check runs when `doc-schemas.json` or a schema changes (#683).
+
 ## [0.6.0] - 2026-10-29
 
 0.6.0 is a minor release because existing installs behave differently: when
