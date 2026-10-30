@@ -40,6 +40,9 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/07-operator-unknown-key.yaml
     expect: invalid/schema
     note: an unknown key in the operator block
+  - file: tests/contracts/machine-profile/invalid/schema/08-operator-stop-mode-auto.yaml
+    expect: invalid/schema
+    note: operator.experiment.stop.mode AUTO, a Stop that leaves automation running
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references
