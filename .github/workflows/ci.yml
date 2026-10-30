@@ -78,8 +78,9 @@ jobs:
               - '**/*.hpp'
               - '**/*.hxx'
               - '.clang-tidy'
-      # The files the docs-check workflow lints, so the docs gate skips (and ok
-      # stays green) on PRs that touch none of them.
+      # The files the docs-check workflow lints, and the schemas it validates the
+      # docs' config blocks against, so the docs gate skips (and ok stays green)
+      # on PRs that touch none of them.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: docsfilter
         with:
@@ -89,6 +90,8 @@ jobs:
               - '*.md'
               - '.markdownlint.jsonc'
               - '.github/workflows/ci.yml'
+              - 'doc-schemas.json'
+              - 'schemas/**'
       # What the dashboard query suite exercises: the dashboards and their
       # provisioning, the suite, and the sink whose rows it mirrors.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
