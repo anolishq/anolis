@@ -70,6 +70,7 @@ Freeze runtime YAML behavior used by `anolis-runtime --config` and `--check-conf
 6. Automation:
    - behavior tree path required when enabled
    - `tick_rate_hz` bounded
+   - `max_consecutive_call_failures` at least 1
    - parameter type/default consistency
    - mode-transition-hook structure and enum validation
 7. Safety:

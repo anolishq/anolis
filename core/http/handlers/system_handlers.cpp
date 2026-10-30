@@ -592,6 +592,17 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         {"run_id", run_id_json},
         {"last_error", health.last_error.empty() ? nlohmann::json() : nlohmann::json(health.last_error)}};
 
+    // This run's failed device calls (#678), an empty list when none failed.
+    nlohmann::json call_failures = nlohmann::json::array();
+    for (const auto &failure : view.call_failures) {
+        call_failures.push_back({{"device_handle", failure.device_handle},
+                                 {"function", failure.function},
+                                 {"consecutive_failures", failure.consecutive_failures},
+                                 {"last_error", failure.last_error},
+                                 {"last_failure_at_epoch_ms", failure.last_failure_at_epoch_ms}});
+    }
+    response["call_failures"] = call_failures;
+
     if (!execution_reason.empty()) {
         response["execution_reason"] = execution_reason;
     }

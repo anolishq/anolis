@@ -529,6 +529,12 @@
           ],
           "default": "repeat"
         },
+        "max_consecutive_call_failures": {
+          "description": "How many times in a row the same device call (device and function) may be refused or fail in one run before the runtime enters FAULT, which runs the AUTO -> FAULT hooks. A success resets the count, and so does entering AUTO.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
         "parameters": {
           "type": "array",
           "items": {

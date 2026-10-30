@@ -4,6 +4,7 @@
 #include <behaviortree_cpp/bt_factory.h>
 #include <openssl/evp.h>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iterator>
@@ -82,6 +83,52 @@ void BTRuntime::set_event_emitter(const std::shared_ptr<events::EventEmitter> &e
 void BTRuntime::set_fault_sink(FaultSink sink) { fault_sink_ = std::move(sink); }
 
 void BTRuntime::set_stop_on_terminal(bool stop) { stop_on_terminal_.store(stop, std::memory_order_release); }
+
+void BTRuntime::set_max_consecutive_call_failures(int limit) {
+    max_consecutive_call_failures_.store(limit < 1 ? 1 : limit, std::memory_order_release);
+}
+
+std::string BTRuntime::record_call_result(const std::string &device_handle, const std::string &function,
+                                          bool success, const std::string &error) {
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+    uint64_t consecutive = 0;
+    {
+        std::lock_guard<std::mutex> lock(health_mutex_);
+        auto it = std::find_if(call_failures_.begin(), call_failures_.end(), [&](const CallFailureView &f) {
+            return f.device_handle == device_handle && f.function == function;
+        });
+        if (success) {
+            // A success resets the count; the last error stays visible.
+            if (it != call_failures_.end()) {
+                it->consecutive_failures = 0;
+            }
+            return "";
+        }
+        if (it == call_failures_.end()) {
+            call_failures_.push_back(CallFailureView{device_handle, function, 0, "", 0});
+            it = std::prev(call_failures_.end());
+        }
+        consecutive = ++it->consecutive_failures;
+        it->last_error = error;
+        it->last_failure_at_epoch_ms = now_ms;
+    }
+
+    LOG_WARN("[BTRuntime] Automation call " << device_handle << " " << function << " failed (" << consecutive
+                                            << " in a row): " << error);
+    if (event_emitter_) {
+        event_emitter_->emit(events::AutomationCallFailedEvent{next_event_id_.fetch_add(1), device_handle, function,
+                                                               error, consecutive, now_ms});
+    }
+
+    const auto limit = static_cast<uint64_t>(max_consecutive_call_failures_.load(std::memory_order_acquire));
+    if (consecutive < limit) {
+        return "";
+    }
+    const std::string times = consecutive == 1 ? "once" : std::to_string(consecutive) + " times in a row";
+    return "automation call " + device_handle + " " + function + " failed " + times + "; last error: " + error;
+}
 
 bool BTRuntime::on_tick_thread() const {
     return tick_thread_id_.load(std::memory_order_acquire) == std::this_thread::get_id();
@@ -401,6 +448,7 @@ void BTRuntime::reset_run_status_locked() {
     error_count_ = 0;
     ticks_since_progress_ = 0;
     last_error_.clear();
+    call_failures_.clear();
 }
 
 void BTRuntime::populate_blackboard(BT::Tree &tree) {
@@ -415,6 +463,10 @@ void BTRuntime::populate_blackboard(BT::Tree &tree) {
     services.call_router = &call_router_;
     services.provider_registry = &provider_registry_;
     services.parameter_manager = parameter_manager_;
+    services.on_call_result = [this](const std::string &device_handle, const std::string &function, bool success,
+                                     const std::string &error) {
+        return record_call_result(device_handle, function, success, error);
+    };
     blackboard->set(kBTServiceContextKey, services);
 }
 
@@ -488,6 +540,7 @@ AutomationStatusView BTRuntime::status() const {
                                {"total_ticks", total_ticks_},
                                {"error_count", error_count_},
                                {"stall_suspected", ticks_since_progress_ > 10}};
+    view.call_failures = call_failures_;
     return view;
 }
 

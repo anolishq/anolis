@@ -610,7 +610,11 @@ paths:
 
         Event types: state_update, quality_change, device_availability,
         device_removed, mode_change, parameter_change, automation_fault,
-        stop_chain_change and stop_chain_mismatch. `stop_chain_change` carries
+        automation_call_failed, stop_chain_change and stop_chain_mismatch.
+        `automation_call_failed` carries device_handle, function, error,
+        consecutive_failures and timestamp_ms for each device call automation
+        made that the router refused or the provider failed; the
+        provider_id, device_id and signal_id filters do not apply to it. `stop_chain_change` carries
         previous_state, new_state (in_force, clear or unknown), reason and
         timestamp_ms when the observed emergency stop's state moves.
         `stop_chain_mismatch` carries device, expect (power_loss or
@@ -1646,6 +1650,7 @@ components:
         - last_evaluation_at_epoch_ms
         - engine_diagnostics
         - run_id
+        - call_failures
       properties:
         status:
           $ref: '#/components/schemas/Status'
@@ -1670,7 +1675,10 @@ components:
             definition is loaded. Under "repeat", the default, the tree is
             ticked again and reports "running" or "blocked". A tick exception
             reports "failed" (execution_reason "terminal_failure"), moves the
-            runtime to FAULT and emits an automation_fault event. A definition
+            runtime to FAULT and emits an automation_fault event, and so does
+            the same device call failing
+            automation.max_consecutive_call_failures times in a row (see
+            call_failures). A definition
             that fails to load is not a status either: the runtime does not
             start.
         execution_reason:
@@ -1701,6 +1709,38 @@ components:
             - type: string
             - type: "null"
           description: Last automation error message, or null when none is recorded.
+        call_failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutomationCallFailure'
+          description: >-
+            The device calls automation made that were refused or failed in
+            the current run, one entry per device and function; empty when
+            none did. Entering AUTO or loading a definition starts a new run
+            and clears it. Each refused or failed call also emits an
+            automation_call_failed event.
+    AutomationCallFailure:
+      type: object
+      additionalProperties: false
+      required: [device_handle, function, consecutive_failures, last_error, last_failure_at_epoch_ms]
+      properties:
+        device_handle:
+          type: string
+          description: provider/device
+        function:
+          type: string
+        consecutive_failures:
+          type: integer
+          minimum: 0
+          description: >-
+            Failures in a row so far. A success resets it to 0 and keeps
+            last_error. At automation.max_consecutive_call_failures (default
+            3) the runtime enters FAULT.
+        last_error:
+          type: string
+          description: The router's refusal or the provider's error for the last failure.
+        last_failure_at_epoch_ms:
+          type: integer
     ProviderSupervision:
       type: object
       additionalProperties: false

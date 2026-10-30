@@ -503,6 +503,10 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
             error = "Automation tick_rate_hz must be between 1 and 1000 Hz";
             return false;
         }
+        if (config.automation.max_consecutive_call_failures < 1) {
+            error = "Automation max_consecutive_call_failures must be at least 1";
+            return false;
+        }
 
         for (const auto &param : config.automation.parameters) {
             if (param.name.empty()) {
@@ -1088,7 +1092,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             warn_unknown_keys(yaml["automation"], "automation",
                               {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz", "manual_gating_policy",
-                               "on_terminal", "parameters", "mode_transition_hooks"});
+                               "on_terminal", "max_consecutive_call_failures", "parameters",
+                               "mode_transition_hooks"});
 
             if (yaml["automation"]["enabled"]) {
                 config.automation.enabled = yaml["automation"]["enabled"].as<bool>();
@@ -1123,6 +1128,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     error = "Invalid automation.on_terminal: must be repeat or stop";
                     return false;
                 }
+            }
+            if (yaml["automation"]["max_consecutive_call_failures"]) {
+                config.automation.max_consecutive_call_failures =
+                    yaml["automation"]["max_consecutive_call_failures"].as<int>();
             }
 
             // Parameter parsing is type-directed: the declared parameter type

@@ -176,8 +176,15 @@ Fields:
    calls, and `execution_status` is `completed` or `failed` until AUTO is
    entered again or a definition is loaded. Either way the result is logged
    once per change.
-6. `parameters` (array)
-7. `mode_transition_hooks` (optional object)
+6. `max_consecutive_call_failures` (int, at least 1, default 3): how many
+   times in a row the same device call (device and function) may be refused
+   or fail in one run before the runtime enters FAULT. FAULT runs the
+   `AUTO -> FAULT` hooks, and the reason names the call and its last error.
+   A success resets the count, and so does entering AUTO. Each failure is an
+   `automation_call_failed` event and an entry in
+   `GET /v0/automation/status`'s `call_failures`.
+7. `parameters` (array)
+8. `mode_transition_hooks` (optional object)
 
 Parameter entry fields:
 

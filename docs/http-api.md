@@ -215,9 +215,12 @@ Current event names:
 3. `mode_change`
 4. `parameter_change`
 5. `automation_fault`
-6. `device_removed`
-7. `stop_chain_change`
-8. `stop_chain_mismatch`
+6. `automation_call_failed` (each device call automation made that was refused
+   or failed: `device_handle`, `function`, `error`, `consecutive_failures`; not
+   narrowed by the filters above)
+7. `device_removed`
+8. `stop_chain_change`
+9. `stop_chain_mismatch`
 
 `quality_change` is defined in the wire format, but the runtime does not emit
 it.
