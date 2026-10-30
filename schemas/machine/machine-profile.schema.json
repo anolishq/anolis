@@ -389,10 +389,9 @@
                   "type": "string",
                   "enum": [
                     "IDLE",
-                    "MANUAL",
-                    "AUTO"
+                    "MANUAL"
                   ],
-                  "description": "The mode left in."
+                  "description": "The mode left in. Not AUTO: a Stop does not leave automation running."
                 }
               }
             }

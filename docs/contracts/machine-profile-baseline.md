@@ -68,9 +68,10 @@ operator:
 2. `settings[]`: a non-empty `group` name and at least one item; each item
    names an automation `parameter` and a non-empty `label`, with an optional
    `unit`.
-3. `experiment.start` and `experiment.stop`: the `mode` to enter (`IDLE`,
-   `MANUAL` or `AUTO`, required), and the bool parameters to set true
-   (`enable`) or false (`disable`).
+3. `experiment.start` and `experiment.stop`: the `mode` to enter (required),
+   and the bool parameters to set true (`enable`) or false (`disable`). Start
+   takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
+   Stop never leaves automation running.
 4. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
