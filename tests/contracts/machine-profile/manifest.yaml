@@ -18,6 +18,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/05-operator.yaml
     expect: valid
     note: optional operator block (readings, settings groups, experiment start and stop)
+  - file: tests/contracts/machine-profile/valid/06-operator-start-require.yaml
+    expect: valid
+    note: operator.experiment.start.require with bool, number and string equals (#686)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -43,6 +46,18 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/08-operator-stop-mode-auto.yaml
     expect: invalid/schema
     note: operator.experiment.stop.mode AUTO, a Stop that leaves automation running
+  - file: tests/contracts/machine-profile/invalid/schema/09-operator-require-missing-message.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require entry without a message
+  - file: tests/contracts/machine-profile/invalid/schema/10-operator-require-empty-message.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require entry with an empty message
+  - file: tests/contracts/machine-profile/invalid/schema/11-operator-require-bad-signal.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require signal that is not provider/device/signal
+  - file: tests/contracts/machine-profile/invalid/schema/12-operator-require-equals-not-scalar.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require equals that is not a bool, number or string
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references
