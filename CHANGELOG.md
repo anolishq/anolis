@@ -28,6 +28,11 @@ commit messages only.
 
 ### Added
 
+- **`operator.experiment.start.require` in the machine-profile schema** (#686):
+  optional conditions on signals that must hold before an operator panel's
+  Start runs, each `{signal, equals, message}`, where `equals` is a bool,
+  number or string and `message` is the fix the operator sees. Profiles
+  without it, 0.7.0's included, stay valid.
 - **`automation.max_consecutive_call_failures`** (#678), default 3, at least 1.
 - **`automation_call_failed` SSE event** (#678), one per refused or failed
   automation device call: `device_handle`, `function`, `error`,

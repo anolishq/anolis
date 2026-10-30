@@ -59,7 +59,11 @@ operator:
       items:
         - { parameter: impeller_pwm, label: Speed }
   experiment:                     # what Start and Stop do
-    start: { enable: [impeller_enable], mode: AUTO }
+    start:
+      enable: [impeller_enable]
+      mode: AUTO
+      require:                    # checked before Start runs
+        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake" }
     stop: { disable: [impeller_enable], mode: IDLE }
 ```
 
@@ -72,7 +76,12 @@ operator:
    and the bool parameters to set true (`enable`) or false (`disable`). Start
    takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
    Stop never leaves automation running.
-4. Unknown keys anywhere in the block are refused. The schema checks shape only:
+4. `experiment.start.require[]` (optional): conditions that must hold before
+   Start runs. Each names a `signal` (`provider/device/signal`), the value it
+   must read (`equals`: a bool, number or string) and a non-empty `message`,
+   the fix the operator sees when it doesn't. Start refuses while any does
+   not hold.
+5. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
 
