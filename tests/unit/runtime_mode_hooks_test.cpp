@@ -234,3 +234,27 @@ TEST(RuntimeModeHooksTest, RepeatOnTerminalReticksAndLogsTheResultOnce) {
     EXPECT_GE(count_of(calls_made(rig), "motor0/1\n"), 3u) << log;
     EXPECT_EQ(count_of(log, "BT completed successfully"), 1u) << log;
 }
+
+namespace {
+
+// anolis#678: bread0/gpio0 has no set_pwm, so the router refuses this call.
+constexpr const char *kRefusedEveryTick =
+    "<CallDevice device_handle=\"bread0/gpio0\" function_name=\"set_pwm\" args='json:{\"pwm\":0}'/>";
+
+}  // namespace
+
+// anolis#678: automation.max_consecutive_call_failures sets how many failures
+// in a row of the same call fault the runtime. At 1, the first refusal enters
+// FAULT, and FAULT runs the declared AUTO -> FAULT hook: the safe state.
+TEST(RuntimeModeHooksTest, CallFailureLimitFromConfigFaultsAndRunsTheSafeState) {
+    const auto rig = fresh_rig("anolis-678-limit", kRefusedEveryTick);
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook, "  max_consecutive_call_failures: 1\n"));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+
+    const std::string log = run_in_auto(runtime);
+
+    EXPECT_NE(log.find("bread0/gpio0 set_pwm failed once"), std::string::npos) << log;
+    EXPECT_EQ(calls_made(rig), "motor0/1\n") << log;
+}

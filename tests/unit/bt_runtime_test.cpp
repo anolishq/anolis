@@ -887,3 +887,85 @@ TEST(BTRuntimeTest, RepeatOnTerminalKeepsTicking) {
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
 }
+
+namespace {
+
+// anolis#678: a call the router refuses on every tick. `ghost0/pump0` is in no
+// registry, so each tick's call fails before reaching a provider.
+constexpr char kRefusedCallTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <CallDevice device_handle="ghost0/pump0" function_name="dose_on"/>
+  </BehaviorTree>
+</root>
+)";
+
+}  // namespace
+
+// anolis#678: an automation whose device call is refused or fails, three times
+// in a row (the default limit), faults the runtime: the engine-fault path
+// enters FAULT, which runs the AUTO -> FAULT hooks that drive the safe state,
+// and the reason names the call and its last error. Before, the tree was
+// re-ticked forever and nothing said the calls were failing.
+TEST(BTRuntimeTest, RepeatedCallFailuresDriveFaultNamingTheCall) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-678-refused", kRefusedCallTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }))
+        << "the refused call kept the runtime in " << mode_to_string(mode_manager.current_mode());
+
+    const auto health = runtime.get_health();
+    EXPECT_NE(health.last_error.find("ghost0/pump0 dose_on"), std::string::npos) << health.last_error;
+    EXPECT_NE(health.last_error.find("3 times in a row"), std::string::npos) << health.last_error;
+    EXPECT_NE(health.last_error.find("Device not found in registry"), std::string::npos) << health.last_error;
+    // The first two failures were ordinary FAILURE ticks; the third faulted.
+    EXPECT_EQ(2u, health.total_ticks);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// anolis#678: entering AUTO starts a new run, so the count starts again: after
+// a recovery through MANUAL, it takes another three failures to fault, not one.
+TEST(BTRuntimeTest, EnteringAutoRestartsTheCallFailureCount) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-678-reentry", kRefusedCallTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+    const auto ticks_at_first_fault = runtime.get_health().total_ticks;
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+
+    EXPECT_EQ(ticks_at_first_fault + 2, runtime.get_health().total_ticks)
+        << "a failure carried over from the previous run counted toward this one";
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
