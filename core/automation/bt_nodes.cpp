@@ -275,8 +275,8 @@ BT::NodeStatus CallDeviceNode::tick() {
     setOutput("error", result.error_message);
 
     if (services->on_call_result) {
-        const auto fault =
-            services->on_call_result(device_handle.value(), function_name.value(), result.success, result.error_message);
+        const auto fault = services->on_call_result(device_handle.value(), function_name.value(), result.success,
+                                                    result.error_message);
         if (!fault.empty()) {
             throw std::runtime_error(fault);
         }

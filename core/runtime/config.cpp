@@ -1092,8 +1092,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             warn_unknown_keys(yaml["automation"], "automation",
                               {"enabled", "behavior_tree", "behavior_tree_path", "tick_rate_hz", "manual_gating_policy",
-                               "on_terminal", "max_consecutive_call_failures", "parameters",
-                               "mode_transition_hooks"});
+                               "on_terminal", "max_consecutive_call_failures", "parameters", "mode_transition_hooks"});
 
             if (yaml["automation"]["enabled"]) {
                 config.automation.enabled = yaml["automation"]["enabled"].as<bool>();

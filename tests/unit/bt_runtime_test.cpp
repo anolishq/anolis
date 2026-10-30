@@ -997,7 +997,7 @@ TEST(BTRuntimeTest, EachFailedCallEmitsAnEventAndIsCountedInStatus) {
     std::vector<uint64_t> counts;
     bool fault_seen = false;
     while (auto event = sub->try_pop()) {
-        if (const auto *failed = std::get_if<anolis::events::AutomationCallFailedEvent>(&*event)) {
+        if (const auto* failed = std::get_if<anolis::events::AutomationCallFailedEvent>(&*event)) {
             EXPECT_EQ("ghost0/pump0", failed->device_handle);
             EXPECT_EQ("dose_on", failed->function);
             EXPECT_EQ("Provider not found: ghost0", failed->error);

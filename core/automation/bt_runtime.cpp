@@ -88,11 +88,11 @@ void BTRuntime::set_max_consecutive_call_failures(int limit) {
     max_consecutive_call_failures_.store(limit < 1 ? 1 : limit, std::memory_order_release);
 }
 
-std::string BTRuntime::record_call_result(const std::string &device_handle, const std::string &function,
-                                          bool success, const std::string &error) {
-    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::system_clock::now().time_since_epoch())
-                               .count();
+std::string BTRuntime::record_call_result(const std::string &device_handle, const std::string &function, bool success,
+                                          const std::string &error) {
+    const int64_t now_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
     uint64_t consecutive = 0;
     {
         std::lock_guard<std::mutex> lock(health_mutex_);

@@ -293,10 +293,9 @@ struct StopChainMismatchEvent {
  *
  * Subscribers receive Event variants and can dispatch on type.
  */
-using Event =
-    std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent, ParameterChangeEvent,
-                 AutomationFaultEvent, AutomationCallFailedEvent, DeviceRemovedEvent, StopChainEvent,
-                 StopChainMismatchEvent>;
+using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
+                           ParameterChangeEvent, AutomationFaultEvent, AutomationCallFailedEvent, DeviceRemovedEvent,
+                           StopChainEvent, StopChainMismatchEvent>;
 
 /**
  * @brief Get event ID from any event type

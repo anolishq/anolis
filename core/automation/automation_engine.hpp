@@ -88,7 +88,7 @@ struct AutomationStatusView {
     uint64_t last_evaluation_at_epoch_ms = 0;  ///< Last engine evaluation (NOT observable progress).
     std::string last_error;
     nlohmann::json engine_diagnostics = nlohmann::json::object();  ///< UNSTABLE / non-contractual.
-    std::vector<CallFailureView> call_failures;                     ///< Calls that failed this run (#678).
+    std::vector<CallFailureView> call_failures;                    ///< Calls that failed this run (#678).
 };
 
 /**
