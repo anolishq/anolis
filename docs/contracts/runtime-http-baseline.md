@@ -62,7 +62,8 @@ Freeze implemented `/v0` HTTP behavior so OpenAPI, examples, and conformance tes
    bytes dropped, and values truncated to 128 **bytes** on a UTF-8 character
    boundary, so a truncated value is still valid UTF-8.
 6. `/v0/events` currently emits:
-   - `state_update`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`, `device_removed`, `stop_chain_change`, `stop_chain_mismatch`.
+   - `state_update`, `device_availability`, `mode_change`, `parameter_change`, `automation_fault`, `automation_call_failed`, `device_removed`, `stop_chain_change`, `stop_chain_mismatch`.
+   - The OpenAPI check (`validate-runtime-http-openapi.py`) fails when the `/v0/events` description leaves out an event name `core/http/handlers/state_handlers.cpp` sends.
    - A quality change arrives as a `state_update` carrying the new `quality`; no `quality_change` frame is emitted.
 
 ## Validation Gates

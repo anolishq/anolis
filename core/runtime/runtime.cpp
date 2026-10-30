@@ -732,6 +732,7 @@ bool Runtime::init_automation(std::string &error) {
         }
 
         bt_runtime_->set_stop_on_terminal(config_.automation.on_terminal == OnTerminal::STOP);
+        bt_runtime_->set_max_consecutive_call_failures(config_.automation.max_consecutive_call_failures);
 
         if (!bt_runtime_->load_tree(config_.automation.behavior_tree)) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;

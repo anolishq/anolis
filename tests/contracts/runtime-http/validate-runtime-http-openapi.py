@@ -13,6 +13,7 @@ Contracts-02 slice 1 scope:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -201,6 +202,29 @@ def _validate_sse_contract(doc: dict, failures: list[Failure]) -> None:
         failures.append(Failure("sse", "GET /v0/events 200 must advertise text/event-stream"))
 
 
+# The SSE serializer writes each frame's name as a string literal `event: <name>`.
+SSE_SERIALIZER = "core/http/handlers/state_handlers.cpp"
+_SSE_EVENT_NAME = re.compile(r'"event: ([a-z_]+)')
+
+
+def _validate_sse_event_names(doc: dict, repo_root: Path, failures: list[Failure]) -> None:
+    """Every event the runtime's SSE serializer can send is named in the contract (#678)."""
+    serializer = repo_root / SSE_SERIALIZER
+    if not serializer.is_file():
+        failures.append(Failure("sse", f"SSE serializer not found: {SSE_SERIALIZER}"))
+        return
+    names = sorted(set(_SSE_EVENT_NAME.findall(serializer.read_text(encoding="utf-8"))))
+    if not names:
+        failures.append(Failure("sse", f"no `event: <name>` frames found in {SSE_SERIALIZER}"))
+        return
+    description = str(doc.get("paths", {}).get("/v0/events", {}).get("get", {}).get("description", ""))
+    for name in names:
+        if not re.search(rf"\b{name}\b", description):
+            failures.append(
+                Failure("sse", f"GET /v0/events description does not name the `{name}` event {SSE_SERIALIZER} sends")
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate runtime HTTP OpenAPI structural contract.")
     parser.add_argument(
@@ -227,6 +251,7 @@ def main() -> int:
     _validate_required_operations(document, failures)
     _validate_internal_refs(document, failures)
     _validate_sse_contract(document, failures)
+    _validate_sse_event_names(document, repo_root, failures)
 
     print("runtime-http openapi validation summary")
     print(f"  spec: {spec_path}")

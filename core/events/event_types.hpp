@@ -242,6 +242,24 @@ struct AutomationFaultEvent {
 };
 
 /**
+ * @brief A device call automation made was refused or failed (#678).
+ *
+ * One per failed call, whether the router refused it before any provider saw
+ * it or the provider failed it. `consecutive_failures` counts this call's
+ * failures in a row in the current run; at
+ * automation.max_consecutive_call_failures the runtime enters FAULT, which an
+ * `automation_fault` event reports.
+ */
+struct AutomationCallFailedEvent {
+    uint64_t event_id;
+    std::string device_handle;  // provider/device
+    std::string function;
+    std::string error;
+    uint64_t consecutive_failures;
+    int64_t timestamp_ms;
+};
+
+/**
  * @brief Stop-chain change (#483): the observed emergency stop's state moved.
  *
  * States are `in_force`, `clear` and `unknown`, as in GET /v0/runtime/status.
@@ -275,9 +293,9 @@ struct StopChainMismatchEvent {
  *
  * Subscribers receive Event variants and can dispatch on type.
  */
-using Event =
-    std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent, ParameterChangeEvent,
-                 AutomationFaultEvent, DeviceRemovedEvent, StopChainEvent, StopChainMismatchEvent>;
+using Event = std::variant<StateUpdateEvent, QualityChangeEvent, DeviceAvailabilityEvent, ModeChangeEvent,
+                           ParameterChangeEvent, AutomationFaultEvent, AutomationCallFailedEvent, DeviceRemovedEvent,
+                           StopChainEvent, StopChainMismatchEvent>;
 
 /**
  * @brief Get event ID from any event type

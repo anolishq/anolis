@@ -15,6 +15,7 @@
 #include "automation/mode_manager.hpp"
 #include "automation/parameter_manager.hpp"
 #include "control/call_router.hpp"
+#include "events/event_emitter.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
 #include "runs/run_journal.hpp"
@@ -886,4 +887,185 @@ TEST(BTRuntimeTest, RepeatOnTerminalKeepsTicking) {
     runtime.stop();
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
+}
+
+namespace {
+
+// anolis#678: a call the router refuses on every tick. `ghost0/pump0` is in no
+// registry, so the router refuses each tick's call: no provider ghost0.
+constexpr char kRefusedCallTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <CallDevice device_handle="ghost0/pump0" function_name="dose_on"/>
+  </BehaviorTree>
+</root>
+)";
+
+}  // namespace
+
+// anolis#678: an automation whose device call is refused or fails, three times
+// in a row (the default limit), faults the runtime: the engine-fault path
+// enters FAULT, which runs the AUTO -> FAULT hooks that drive the safe state,
+// and the reason names the call and its last error. Before, the tree was
+// re-ticked forever and nothing said the calls were failing.
+TEST(BTRuntimeTest, RepeatedCallFailuresDriveFaultNamingTheCall) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-678-refused", kRefusedCallTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }))
+        << "the refused call kept the runtime in " << mode_to_string(mode_manager.current_mode());
+
+    const auto health = runtime.get_health();
+    EXPECT_NE(health.last_error.find("ghost0/pump0 dose_on"), std::string::npos) << health.last_error;
+    EXPECT_NE(health.last_error.find("3 times in a row"), std::string::npos) << health.last_error;
+    EXPECT_NE(health.last_error.find("Provider not found: ghost0"), std::string::npos) << health.last_error;
+    // The first two failures were ordinary FAILURE ticks; the third faulted.
+    EXPECT_EQ(2u, health.total_ticks);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// anolis#678: entering AUTO starts a new run, so the count starts again: after
+// a recovery through MANUAL, it takes another three failures to fault, not one.
+TEST(BTRuntimeTest, EnteringAutoRestartsTheCallFailureCount) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-678-reentry", kRefusedCallTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+    const auto ticks_at_first_fault = runtime.get_health().total_ticks;
+
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::MANUAL, err)) << err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+
+    EXPECT_EQ(ticks_at_first_fault + 2, runtime.get_health().total_ticks)
+        << "a failure carried over from the previous run counted toward this one";
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// anolis#678: each failed call is an automation_call_failed event and an entry
+// in status()'s call_failures, so the operator sees the failures before the
+// fault, not only the fault.
+TEST(BTRuntimeTest, EachFailedCallEmitsAnEventAndIsCountedInStatus) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    auto emitter = std::make_shared<anolis::events::EventEmitter>();
+    auto sub = emitter->subscribe(anolis::events::EventFilter::all(), 0, "test");
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    runtime.set_event_emitter(emitter);
+    const auto tree_path = write_tree_file("anolis-678-events", kRefusedCallTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }));
+
+    std::vector<uint64_t> counts;
+    bool fault_seen = false;
+    while (auto event = sub->try_pop()) {
+        if (const auto* failed = std::get_if<anolis::events::AutomationCallFailedEvent>(&*event)) {
+            EXPECT_EQ("ghost0/pump0", failed->device_handle);
+            EXPECT_EQ("dose_on", failed->function);
+            EXPECT_EQ("Provider not found: ghost0", failed->error);
+            counts.push_back(failed->consecutive_failures);
+        } else if (std::holds_alternative<anolis::events::AutomationFaultEvent>(*event)) {
+            fault_seen = true;
+        }
+    }
+    EXPECT_EQ((std::vector<uint64_t>{1, 2, 3}), counts);
+    EXPECT_TRUE(fault_seen);
+
+    const auto status = runtime.status();
+    ASSERT_EQ(1u, status.call_failures.size());
+    EXPECT_EQ("ghost0/pump0", status.call_failures[0].device_handle);
+    EXPECT_EQ("dose_on", status.call_failures[0].function);
+    EXPECT_EQ(3u, status.call_failures[0].consecutive_failures);
+    EXPECT_EQ("Provider not found: ghost0", status.call_failures[0].last_error);
+    EXPECT_GT(status.call_failures[0].last_failure_at_epoch_ms, 0);
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
+// anolis#678: the count is per device call and in a row: a success resets it,
+// keeping the last error, and another call's failures do not add to it.
+TEST(BTRuntimeTest, ASuccessResetsTheCallFailureCount) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt1", "set_pwm", false, "brake engaged"));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt1", "set_pwm", false, "brake engaged"));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt1", "set_pwm", true, ""));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt0", "set_pwm", false, "other"));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt0", "set_pwm", false, "other"));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt1", "set_pwm", false, "brake engaged"));
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt1", "set_pwm", false, "brake engaged"));
+
+    auto status = runtime.status();
+    ASSERT_EQ(2u, status.call_failures.size());
+    EXPECT_EQ(2u, status.call_failures[0].consecutive_failures);
+    EXPECT_EQ(2u, status.call_failures[1].consecutive_failures);
+
+    EXPECT_EQ("automation call bread0/dcmt1 set_pwm failed 3 times in a row; last error: brake engaged",
+              runtime.record_call_result("bread0/dcmt1", "set_pwm", false, "brake engaged"));
+
+    EXPECT_EQ("", runtime.record_call_result("bread0/dcmt0", "set_pwm", true, ""));
+    status = runtime.status();
+    EXPECT_EQ(0u, status.call_failures[1].consecutive_failures);
+    EXPECT_EQ("other", status.call_failures[1].last_error);
+}
+
+// anolis#678: the limit is settable, down to 1, which faults on the first failure.
+TEST(BTRuntimeTest, CallFailureLimitOfOneFaultsOnTheFirstFailure) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    runtime.set_max_consecutive_call_failures(1);
+
+    EXPECT_EQ("automation call ghost0/pump0 dose_on failed once; last error: refused",
+              runtime.record_call_result("ghost0/pump0", "dose_on", false, "refused"));
 }

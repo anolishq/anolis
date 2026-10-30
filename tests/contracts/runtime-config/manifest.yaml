@@ -43,6 +43,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/14-automation-on-terminal-stop.yaml
     expect: valid
     note: automation.on_terminal stop ends the run on a terminal root (#596)
+  - file: tests/contracts/runtime-config/valid/15-automation-max-call-failures.yaml
+    expect: valid
+    note: automation.max_consecutive_call_failures sets the limit before FAULT (#678)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -77,6 +80,9 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/schema/11-automation-on-terminal-unknown.yaml
     expect: invalid/schema
     note: automation.on_terminal must be repeat or stop
+  - file: tests/contracts/runtime-config/invalid/schema/12-automation-max-call-failures-zero.yaml
+    expect: invalid/schema
+    note: automation.max_consecutive_call_failures must be at least 1 (#678)
 
   - file: tests/contracts/runtime-config/invalid/runtime/01-restart-backoff-length-mismatch.yaml
     expect: invalid/runtime

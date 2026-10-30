@@ -5,6 +5,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <stdexcept>
 
 #include "automation/parameter_manager.hpp"
 #include "control/call_router.hpp"
@@ -272,6 +273,14 @@ BT::NodeStatus CallDeviceNode::tick() {
 
     setOutput("success", result.success);
     setOutput("error", result.error_message);
+
+    if (services->on_call_result) {
+        const auto fault = services->on_call_result(device_handle.value(), function_name.value(), result.success,
+                                                    result.error_message);
+        if (!fault.empty()) {
+            throw std::runtime_error(fault);
+        }
+    }
 
     if (result.success) {
         // Emission reason (change vs keepalive, from EmitOnChangeOrInterval)
