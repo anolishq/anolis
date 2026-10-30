@@ -13,37 +13,55 @@ commit messages only.
 
 ## [Unreleased]
 
-### Changed
+## [0.8.0] - 2026-10-30
 
-- **A repeatedly failing automation call faults the runtime** (#678). When the
-  same device call automation makes is refused or fails three times in a row,
-  the runtime enters FAULT, which runs the `AUTO -> FAULT` hooks, and the
-  fault names the call and its last error. Before, the tree was ticked again
-  for as long as AUTO lasted, and nothing said the calls were failing: on the
-  reference rig, dosing ran 60 s in AUTO with every pulse refused. A success
-  resets the count, and so does entering AUTO. This includes calls the
-  device-loss latch refuses. **Upgrade note:** an install whose automation
-  calls fail now enters FAULT; set `automation.max_consecutive_call_failures`
-  higher to allow more failures in a row.
+0.8.0 is a minor release because a running machine behaves differently:
+automation whose device calls keep failing now enters FAULT
+(`docs/dependencies.md`: before 1.0, a change that makes an existing install
+behave differently bumps MINOR). The machine-profile schema gains
+`operator.experiment.start.require`, and the runtime-http contract gains an
+event and a status field.
+
+Upgrade notes for operators:
+
+- **A repeatedly failing automation call faults the runtime** (#687, Fixes
+  #678). When the same device call automation makes is refused or fails three
+  times in a row, the runtime enters FAULT, which runs the `AUTO -> FAULT`
+  hooks, and the fault names the call and its last error. Before, the tree was
+  ticked again for as long as AUTO lasted, and nothing said the calls were
+  failing: on the reference rig, dosing ran 60 s in AUTO with every pulse
+  refused. A success resets the count, and so does entering AUTO. Calls the
+  device-loss latch refuses count too: a tree that keeps calling a device the
+  latch holds now enters FAULT after three refusals, where it used to run on
+  until MANUAL -> AUTO re-armed the device. Set
+  `automation.max_consecutive_call_failures` (default 3, at least 1) higher to
+  allow more failures in a row.
 
 ### Added
 
-- **`operator.experiment.start.require` in the machine-profile schema** (#686):
-  optional conditions on signals that must hold before an operator panel's
-  Start runs, each `{signal, equals, message}`, where `equals` is a bool,
-  number or string and `message` is the fix the operator sees. Profiles
-  without it, 0.7.0's included, stay valid.
-- **`automation.max_consecutive_call_failures`** (#678), default 3, at least 1.
-- **`automation_call_failed` SSE event** (#678), one per refused or failed
+- **`operator.experiment.start.require` in the machine-profile schema** (#689,
+  Fixes #686): optional conditions on signals that must hold before an
+  operator panel's Start runs, each `{signal, equals, message}`, where
+  `equals` is a bool, number or string and `message` is the fix the operator
+  sees. Profiles without it, 0.7.0's included, stay valid.
+- **`automation.max_consecutive_call_failures`** (#687), default 3, at least 1.
+- **`automation_call_failed` SSE event** (#687), one per refused or failed
   automation device call: `device_handle`, `function`, `error`,
   `consecutive_failures`.
-- **`call_failures` in `GET /v0/automation/status`** (#678): each device call
+- **`call_failures` in `GET /v0/automation/status`** (#687): each device call
   that failed this run, with its failures in a row, last error and when.
+
+### Changed
+
+- **A repeatedly failing automation call faults the runtime** (#687): see the
+  upgrade note.
 
 ### CI
 
+- The install walk runs against runtime 0.7.0 (#685).
 - The runtime-http OpenAPI check fails when the `/v0/events` description
-  leaves out an event the SSE serializer sends (#678).
+  leaves out an event the SSE serializer sends (#687).
+- pytest moves to `>=9.2.0,<9.3.0` for the Python checks (#688).
 
 ## [0.7.0] - 2026-10-30
 
