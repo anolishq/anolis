@@ -20,7 +20,7 @@ This guide defines safe operating procedures for Anolis-managed hardware systems
    or emergency-stop systems. The runtime can only command devices that remain
    powered — see Stop categories below.
 
-## Stop categories — what software can and cannot be
+## Stop categories: what software can and cannot be
 
 Read this before any other section. Most confusion about this system's safety
 behaviour comes from using one word, "e-stop", for three unrelated mechanisms.
@@ -287,13 +287,13 @@ header; see [install-sh.md](deploy/install-sh.md#after-installing).
 
 ## Mode Procedure Checklist
 
-### IDLE -> MANUAL
+### IDLE to MANUAL
 
 1. Confirm providers are `AVAILABLE`.
 2. Confirm actuator signals are in safe states.
 3. Transition to `MANUAL`.
 
-### MANUAL -> AUTO
+### MANUAL to AUTO
 
 1. Validate behavior tree configuration and parameters.
 2. Confirm manual verification is complete.
@@ -323,18 +323,18 @@ header; see [install-sh.md](deploy/install-sh.md#after-installing).
 > alone drives the outputs. The refusal message says so when the ladder would
 > drive nothing.
 
-### AUTO -> MANUAL
+### AUTO to MANUAL
 
 1. Transition to `MANUAL` for planned operator takeover.
 2. Verify actuators and signals settle to expected state.
 
-### MANUAL -> IDLE
+### MANUAL to IDLE
 
 1. Command actuators to safe outputs.
 2. Verify safe state via `/v0/state`.
 3. Transition to `IDLE`.
 
-### Any -> FAULT, then FAULT -> MANUAL
+### Any to FAULT, then FAULT to MANUAL
 
 1. Enter `FAULT` when explicit recovery isolation is needed.
 2. Diagnose and resolve root cause.

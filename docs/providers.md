@@ -108,12 +108,26 @@ Key supervision fields:
 
 ## Building a Provider
 
-Minimal implementation steps:
+Build it on [anolis-provider-sdk](https://github.com/anolishq/anolis-provider-sdk),
+the C++ library the sim, BREAD and EZO providers use: it implements the framed
+stdio transport and the ADPP request loop, and you implement the devices. Its
+guide,
+[Writing a provider](https://github.com/anolishq/anolis-provider-sdk/blob/main/docs/writing-a-provider.md),
+walks through one. The
+[executable profile](https://github.com/anolishq/anolis-protocol/blob/main/docs/profiles/anolis-executable-profile-v1.md)
+sets the command-line flags a provider must accept, and the protocol's
+[conformance harness](https://github.com/anolishq/anolis-protocol/blob/main/conformance/ADPP-CONFORMANCE.md)
+checks the result.
 
-1. Implement framed stdio transport.
-2. Implement required ADPP operations.
-3. Implement device capability descriptions with accurate arg constraints.
-4. Map hardware errors to meaningful status/quality outputs.
+Whatever it is built on, a provider must:
+
+1. Speak framed stdio and the required ADPP operations.
+2. Describe each device's functions with accurate argument constraints.
+3. Set a `poll_hint_hz` above 0 on every signal the runtime should poll. The
+   runtime polls only those signals, at `polling.interval_ms`, and serves
+   state from what it polled, so a signal with no hint never appears in
+   `/v0/state`.
+4. Map hardware errors to meaningful status and quality outputs.
 
 Recommended quality bar:
 
@@ -132,8 +146,12 @@ Use runtime with a provider entry in runtime YAML:
 providers:
   - id: my_provider
     command: /path/to/my-provider
-    args: []
+    args: ["--config", "/path/to/my-provider.yaml"]
 ```
+
+The runtime starts `command` with exactly these `args`, and nothing else, so
+pass the provider's own `--config` here. A relative `command` resolves against
+the directory the runtime was started in, not `PATH`.
 
 Then validate:
 

@@ -123,8 +123,9 @@ curl -s -X POST http://127.0.0.1:8080/v0/call \
 The reply carries `"code": "OK"`. Read the state again and `relay1_state` is
 `true`.
 
-This runtime has automation off, so it is in `MANUAL` mode and accepts calls
-straight away. With automation on, it starts in `IDLE` and refuses calls until
+This runtime has automation off, so it has no mode machine:
+`/v0/runtime/status` reports `MANUAL`, `/v0/mode` answers `503`, and calls are
+accepted straight away. With automation on, it starts in `IDLE` and refuses calls until
 you switch modes; see [Automation](automation.md).
 
 ## Next
