@@ -25,6 +25,12 @@ commit messages only.
 
 ### Changed
 
+- **`run.start.enable` lists the groups' on switches** (#701). A consumer's
+  Start runs only if at least one is on, and no longer sets them true, so the
+  operator's On switches decide what a run drives; `stop.disable` still sets
+  its parameters false. The shape is unchanged: only the schema's description
+  and the contract doc say so.
+
 - **The operator block's `experiment` is now `run`** (#696). A filament
   extruder or a centrifuge does a run, not an experiment.
   `operator.run` has the same shape as `operator.experiment` (`start` with

@@ -383,7 +383,7 @@
                 "type": "string",
                 "minLength": 1
               },
-              "description": "Bool parameters set true."
+              "description": "The groups' on switches (bool parameters): Start runs only if at least one is on; it doesn't change them."
             },
             "mode": {
               "type": "string",

@@ -75,8 +75,10 @@ operator:
    `unit`.
 3. `run.label` (optional, non-empty): what the operator panel heads the run
    section with, such as `Batch` or `Print`. The panel's default is "Run".
-4. `run.start` and `run.stop`: the `mode` to enter (required),
-   and the bool parameters to set true (`enable`) or false (`disable`). Start
+4. `run.start` and `run.stop`: the `mode` to enter (required). `start.enable`
+   lists the groups' on switches (bool parameters): Start runs only if at
+   least one is on, and doesn't change them (0.9.0; before, Start set them
+   true). `stop.disable` lists the bool parameters Stop sets false. Start
    takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
    Stop never leaves automation running.
 5. `run.start.require[]` (optional): conditions that must hold before
