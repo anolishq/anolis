@@ -13,6 +13,22 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- **The operator block's `experiment` is now `run`** (#696). A filament
+  extruder or a centrifuge does a run, not an experiment.
+  `operator.run` has the same shape as `operator.experiment` (`start` with
+  `enable`, `mode`, `require`; `stop` with `disable`, `mode`) and an optional
+  `label`, the heading the workbench gives the section (default "Run").
+  `operator.experiment` is accepted as a deprecated alias through 0.9.x; a
+  profile with both is refused.
+- **Runs take a `label`** (#696). `POST /v0/runs` accepts `label`, and every
+  run record carries it. `experiment_label` is its deprecated alias through
+  0.9.x: a request may still send it, and records and responses carry it with
+  the same value as `label`. A request that sends both with different values is
+  refused with `INVALID_ARGUMENT` (400). Journals written before this read the
+  old `experiment_label` as the label.
+
 ## [0.8.0] - 2026-10-30
 
 0.8.0 is a minor release because a running machine behaves differently:

@@ -614,9 +614,7 @@ def main() -> int:
         exercising appendRunMarker + listRunEvents against their schemas live."""
         nonlocal checks_run, checks_passed
         try:
-            open_resp = _invoke_json(
-                "POST", f"{fixture.base_url}/v0/runs", json_body={"experiment_label": "conformance"}
-            )
+            open_resp = _invoke_json("POST", f"{fixture.base_url}/v0/runs", json_body={"label": "conformance"})
         except Exception as exc:  # noqa: BLE001
             checks_run += 2
             failures.append(Failure("check", f"run_marker_lifecycle: open failed: {exc}"))

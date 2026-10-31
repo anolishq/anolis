@@ -63,8 +63,10 @@ void HttpServer::handle_post_runs(const httplib::Request &req, httplib::Response
     }
 
     runs::RunOpenSpec spec;
-    if (body.contains("experiment_label") && body["experiment_label"].is_string()) {
-        spec.experiment_label = body["experiment_label"].get<std::string>();
+    std::string label_error;
+    if (!runs::label_from_open_request(body, spec.label, label_error)) {
+        send_json(res, StatusCode::INVALID_ARGUMENT, make_error_response(StatusCode::INVALID_ARGUMENT, label_error));
+        return;
     }
     if (body.contains("params") && body["params"].is_object()) {
         spec.params = body["params"];

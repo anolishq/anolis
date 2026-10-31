@@ -13,6 +13,7 @@
       "polling_interval_ms": 2000,
       "params": {},
       "tag_scope": { "provider_ids": [], "device_ids": [], "signal_ids": [] },
+      "label": null,
       "experiment_label": null
     }
   ],

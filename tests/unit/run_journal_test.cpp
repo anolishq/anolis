@@ -13,11 +13,14 @@
 namespace {
 
 using anolis::runs::CloseReason;
+using anolis::runs::label_from_open_request;
+using anolis::runs::run_from_json;
 using anolis::runs::RunEvent;
 using anolis::runs::RunEventCategory;
 using anolis::runs::RunJournal;
 using anolis::runs::RunOpenSpec;
 using anolis::runs::RunState;
+using anolis::runs::to_json;
 
 std::filesystem::path unique_dir() {
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -28,7 +31,7 @@ std::filesystem::path unique_dir() {
 
 RunOpenSpec spec_with_scope() {
     RunOpenSpec spec;
-    spec.experiment_label = "campaign-A";
+    spec.label = "campaign-A";
     spec.params = {{"setpoint", 25.0}};
     spec.tag_scope.provider_ids = {"bread0"};
     spec.tag_scope.device_ids = {"rlht0"};
@@ -54,7 +57,7 @@ TEST(RunJournalTest, OpenCloseRoundTrip) {
 
     auto got = journal.get(opened.run.run_id);
     ASSERT_TRUE(got.has_value());
-    EXPECT_EQ(got->experiment_label.value_or(""), "campaign-A");
+    EXPECT_EQ(got->label.value_or(""), "campaign-A");
     EXPECT_EQ(got->tag_scope.provider_ids.size(), 1U);
 
     auto closed = journal.close(opened.run.run_id, CloseReason::OperatorStop);
@@ -548,4 +551,58 @@ TEST(RunJournalTest, AQueuedFaultIsSyncedOffTheCallersThread) {
     }
 
     std::filesystem::remove_all(dir);
+}
+
+// #696: `label` names the run; `experiment_label` is its deprecated alias for
+// one minor release, written beside it and read when `label` is absent.
+TEST(RunLabelTest, ARecordCarriesTheLabelUnderBothNames) {
+    anolis::runs::Run run;
+    run.run_id = "rt1-1";
+    run.label = "Batch 7";
+    const auto j = to_json(run);
+    EXPECT_EQ(j["label"], "Batch 7");
+    EXPECT_EQ(j["experiment_label"], "Batch 7");
+
+    run.label.reset();
+    const auto unlabelled = to_json(run);
+    EXPECT_TRUE(unlabelled["label"].is_null());
+    EXPECT_TRUE(unlabelled["experiment_label"].is_null());
+}
+
+TEST(RunLabelTest, AnOlderRecordWithOnlyExperimentLabelReadsAsTheLabel) {
+    const auto old = run_from_json({{"run_id", "rt1-1"}, {"experiment_label", "campaign-A"}});
+    ASSERT_TRUE(old.has_value());
+    EXPECT_EQ(old->label.value_or(""), "campaign-A");
+
+    const auto both = run_from_json({{"run_id", "rt1-2"}, {"label", "new"}, {"experiment_label", "old"}});
+    ASSERT_TRUE(both.has_value());
+    EXPECT_EQ(both->label.value_or(""), "new");
+}
+
+TEST(RunLabelTest, AnOpenRequestTakesLabelOrTheDeprecatedAlias) {
+    std::optional<std::string> label;
+    std::string error;
+
+    ASSERT_TRUE(label_from_open_request({{"label", "Batch 7"}}, label, error)) << error;
+    EXPECT_EQ(label.value_or(""), "Batch 7");
+
+    label.reset();
+    ASSERT_TRUE(label_from_open_request({{"experiment_label", "campaign-A"}}, label, error)) << error;
+    EXPECT_EQ(label.value_or(""), "campaign-A");
+
+    label.reset();
+    ASSERT_TRUE(label_from_open_request({{"label", "same"}, {"experiment_label", "same"}}, label, error)) << error;
+    EXPECT_EQ(label.value_or(""), "same");
+
+    label.reset();
+    ASSERT_TRUE(label_from_open_request(nlohmann::json::object(), label, error)) << error;
+    EXPECT_FALSE(label.has_value());
+}
+
+TEST(RunLabelTest, AnOpenRequestWithTwoDifferentLabelsIsRefused) {
+    std::optional<std::string> label;
+    std::string error;
+    EXPECT_FALSE(label_from_open_request({{"label", "new"}, {"experiment_label", "old"}}, label, error));
+    EXPECT_NE(error.find("experiment_label"), std::string::npos) << error;
+    EXPECT_FALSE(label.has_value());
 }

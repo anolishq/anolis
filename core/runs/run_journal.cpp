@@ -231,7 +231,8 @@ nlohmann::json to_json(const Run& run) {
                         {"polling_interval_ms", run.polling_interval_ms},
                         {"params", run.params},
                         {"tag_scope", to_json(run.tag_scope)}};
-    j["experiment_label"] = run.experiment_label.has_value() ? nlohmann::json(*run.experiment_label) : nlohmann::json();
+    j["label"] = run.label.has_value() ? nlohmann::json(*run.label) : nlohmann::json();
+    j["experiment_label"] = j["label"];  // deprecated alias (#696)
     j["close_reason"] = run.close_reason.has_value() ? nlohmann::json(to_string(*run.close_reason)) : nlohmann::json();
     j["ended_at_epoch_ms"] =
         run.ended_at_epoch_ms.has_value() ? nlohmann::json(*run.ended_at_epoch_ms) : nlohmann::json();
@@ -243,6 +244,21 @@ nlohmann::json to_json(const Run& run) {
         j["automation_version"] = nlohmann::json();
     }
     return j;
+}
+
+bool label_from_open_request(const nlohmann::json& body, std::optional<std::string>& label, std::string& error) {
+    const auto text = [&](const char* key) -> std::optional<std::string> {
+        if (body.contains(key) && body[key].is_string()) return body[key].get<std::string>();
+        return std::nullopt;
+    };
+    const auto current = text("label");
+    const auto deprecated = text("experiment_label");
+    if (current && deprecated && *current != *deprecated) {
+        error = "label and experiment_label differ; send label only (experiment_label is deprecated)";
+        return false;
+    }
+    label = current ? current : deprecated;
+    return true;
 }
 
 std::optional<Run> run_from_json(const nlohmann::json& j) {
@@ -257,8 +273,11 @@ std::optional<Run> run_from_json(const nlohmann::json& j) {
     run.runtime_version = j.value("runtime_version", std::string());
     run.polling_interval_ms = j.value("polling_interval_ms", 0);
     if (j.contains("params") && j["params"].is_object()) run.params = j["params"];
-    if (j.contains("experiment_label") && j["experiment_label"].is_string())
-        run.experiment_label = j["experiment_label"].get<std::string>();
+    // A record from before #696 has only experiment_label.
+    if (j.contains("label") && j["label"].is_string())
+        run.label = j["label"].get<std::string>();
+    else if (j.contains("experiment_label") && j["experiment_label"].is_string())
+        run.label = j["experiment_label"].get<std::string>();
     if (j.contains("close_reason") && j["close_reason"].is_string())
         run.close_reason = close_reason_from_string(j["close_reason"].get<std::string>());
     if (j.contains("ended_at_epoch_ms") && j["ended_at_epoch_ms"].is_number_unsigned())
@@ -588,7 +607,7 @@ RunJournal::OpenResult RunJournal::open(const RunOpenSpec& spec, std::optional<A
 
     Run run;
     run.run_id = mint_run_id();
-    run.experiment_label = spec.experiment_label;
+    run.label = spec.label;
     run.state = RunState::Open;
     run.started_at_epoch_ms = now_epoch_ms();
     run.automation_version = std::move(version);
