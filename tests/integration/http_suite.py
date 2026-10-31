@@ -234,12 +234,13 @@ class HttpGatewayTester:
         assert isinstance(listing["body"].get("runs"), list), listing
 
         # Open a run.
-        opened = self.http_post("/v0/runs", {"experiment_label": "it-cycle", "tag_scope": {"provider_ids": ["sim0"]}})
+        opened = self.http_post("/v0/runs", {"label": "it-cycle", "tag_scope": {"provider_ids": ["sim0"]}})
         assert opened["status_code"] == 200, f"open run failed: {opened}"
         run = opened["body"]["run"]
         run_id = run["run_id"]
         assert run["state"] == "open", run
-        assert run["experiment_label"] == "it-cycle", run
+        assert run["label"] == "it-cycle", run
+        assert run["experiment_label"] == "it-cycle", run  # deprecated alias (#696)
         assert run["tag_scope"]["provider_ids"] == ["sim0"], run
 
         # The open run id is reflected on /v0/automation/status (when automation is enabled).
@@ -294,6 +295,15 @@ class HttpGatewayTester:
         reopened = self.http_post("/v0/runs", {})
         assert reopened["status_code"] == 200, f"open after close should succeed: {reopened}"
         self.http_post(f"/v0/runs/{reopened['body']['run']['run_id']}/close", {})
+
+        # The deprecated experiment_label still names a run (#696), and two
+        # different labels are refused before anything opens.
+        conflict = self.http_post("/v0/runs", {"label": "a", "experiment_label": "b"})
+        assert conflict["status_code"] == 400, f"differing labels should be 400: {conflict}"
+        legacy = self.http_post("/v0/runs", {"experiment_label": "old-client"})
+        assert legacy["status_code"] == 200, f"open with experiment_label failed: {legacy}"
+        assert legacy["body"]["run"]["label"] == "old-client", legacy
+        self.http_post(f"/v0/runs/{legacy['body']['run']['run_id']}/close", {})
 
     def check_sse_endpoint(self) -> None:
         try:

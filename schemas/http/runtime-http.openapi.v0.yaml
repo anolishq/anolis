@@ -1519,6 +1519,7 @@ components:
         - polling_interval_ms
         - params
         - tag_scope
+        - label
         - experiment_label
       properties:
         schema_version: { type: integer }
@@ -1548,10 +1549,19 @@ components:
           description: Recorded so a consumer can reason about time-window boundary fuzz.
         params: { type: object, additionalProperties: true }
         tag_scope: { $ref: '#/components/schemas/TagScope' }
+        label:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+          description: What the operator called the run, or null.
         experiment_label:
           oneOf:
             - { type: string }
             - { type: "null" }
+          deprecated: true
+          description: >-
+            Deprecated alias of label, always equal to it. Kept for one minor
+            release (0.9.x); read label.
     RunResponse:
       type: object
       additionalProperties: false
@@ -1571,7 +1581,16 @@ components:
       type: object
       additionalProperties: false
       properties:
-        experiment_label: { type: string }
+        label:
+          type: string
+          description: What the operator calls the run.
+        experiment_label:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated alias of label, accepted for one minor release (0.9.x).
+            Sent with a different label, the request is refused with
+            INVALID_ARGUMENT.
         params: { type: object, additionalProperties: true }
         tag_scope: { $ref: '#/components/schemas/TagScope' }
     RunCloseRequest:

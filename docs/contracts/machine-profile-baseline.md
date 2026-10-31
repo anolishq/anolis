@@ -35,8 +35,8 @@ Define machine profile manifest structure and lock manifest behavior for validat
      alive. Both wirings are first-class; nothing may branch runtime behavior
      on this field beyond presentation/interpretation, and absence is valid)
    - an optional operator panel (`operator`, below): the readings an operator
-     watches, the experiment's settings in labelled groups, and what starting
-     and stopping the experiment does. Presentation only: nothing in the
+     watches, the automation's settings in labelled groups, and what starting
+     and stopping a run does. Presentation only: nothing in the
      runtime reads it, and absence is valid
 4. Validator enforces:
    - schema correctness
@@ -58,7 +58,8 @@ operator:
     - group: Stirring
       items:
         - { parameter: impeller_pwm, label: Speed }
-  experiment:                     # what Start and Stop do
+  run:                            # what Start run and Stop run do
+    label: Batch                  # the section's heading; default "Run"
     start:
       enable: [impeller_enable]
       mode: AUTO
@@ -72,16 +73,21 @@ operator:
 2. `settings[]`: a non-empty `group` name and at least one item; each item
    names an automation `parameter` and a non-empty `label`, with an optional
    `unit`.
-3. `experiment.start` and `experiment.stop`: the `mode` to enter (required),
+3. `run.label` (optional, non-empty): what the operator panel heads the run
+   section with, such as `Batch` or `Print`. The panel's default is "Run".
+4. `run.start` and `run.stop`: the `mode` to enter (required),
    and the bool parameters to set true (`enable`) or false (`disable`). Start
    takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
    Stop never leaves automation running.
-4. `experiment.start.require[]` (optional): conditions that must hold before
+5. `run.start.require[]` (optional): conditions that must hold before
    Start runs. Each names a `signal` (`provider/device/signal`), the value it
    must read (`equals`: a bool, number or string) and a non-empty `message`,
    the fix the operator sees when it doesn't. Start refuses while any does
    not hold.
-5. Unknown keys anywhere in the block are refused. The schema checks shape only:
+6. `experiment` (0.7.0 and 0.8.0) is a deprecated alias of `run`, with the
+   same shape, accepted through 0.9.x. A profile carries one or the other: one
+   with both is refused.
+7. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
 

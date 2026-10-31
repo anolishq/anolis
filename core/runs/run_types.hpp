@@ -55,7 +55,9 @@ struct AutomationVersionRecord {
 /// A run record — append-only and immutable once closed.
 struct Run {
     std::string run_id;
-    std::optional<std::string> experiment_label;
+    /// What the operator called the run (#696). Serialized as `label` and, for
+    /// one minor release, as the deprecated `experiment_label` too.
+    std::optional<std::string> label;
     RunState state = RunState::Open;
     std::optional<CloseReason> close_reason;
     uint64_t started_at_epoch_ms = 0;
@@ -70,7 +72,7 @@ struct Run {
 
 /// Operator-supplied inputs at run-open.
 struct RunOpenSpec {
-    std::optional<std::string> experiment_label;
+    std::optional<std::string> label;
     nlohmann::json params = nlohmann::json::object();
     TagScope tag_scope;
 };
@@ -112,6 +114,11 @@ nlohmann::json to_json(const RunEvent& event);
 /// Parse a durable record (index-rebuild path). Returns nullopt on a malformed line.
 std::optional<Run> run_from_json(const nlohmann::json& j);
 std::optional<RunEvent> run_event_from_json(const nlohmann::json& j);
+
+/// The label from a POST /v0/runs body: `label`, or the deprecated
+/// `experiment_label` (#696). False, with `error` set, when both are given and
+/// differ; a non-string value is ignored, as before.
+bool label_from_open_request(const nlohmann::json& body, std::optional<std::string>& label, std::string& error);
 
 }  // namespace runs
 }  // namespace anolis

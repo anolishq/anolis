@@ -17,6 +17,7 @@
     "polling_interval_ms": 2000,
     "params": { "setpoint_c": 25.0 },
     "tag_scope": { "provider_ids": ["bread0"], "device_ids": ["rlht0"], "signal_ids": [] },
+    "label": "campaign-A",
     "experiment_label": "campaign-A"
   }
 }
