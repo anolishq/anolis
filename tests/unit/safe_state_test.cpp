@@ -115,6 +115,8 @@ TEST_F(SafeStateTest, NoDeclaredSafeStateReportsNoneAndLatches) {
     const auto cap = controller->capability();
     EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::None);
     EXPECT_EQ(cap.uncovered_actuating_functions, 1u);  // one actuator, no setpoint
+    EXPECT_EQ(cap.uncovered_functions,
+              std::vector<std::string>{"sim0/heater/set_output"});  // #698: named, not only counted
     EXPECT_TRUE(cap.latched);
 }
 
@@ -261,6 +263,7 @@ TEST_F(SafeStateTest, HooksCoveringEveryActuatorCountZeroUncovered) {
     const auto cap = controller->capability();
     EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Hooks);
     EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+    EXPECT_TRUE(cap.uncovered_functions.empty());
 }
 
 // A hook that names the function but cannot pass validate_call (here: its
@@ -273,6 +276,7 @@ TEST_F(SafeStateTest, UndispatchableHookDoesNotCover) {
     auto controller = make_controller();
 
     EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+    EXPECT_EQ(controller->capability().uncovered_functions, std::vector<std::string>{"sim0/heater/set_output"});
 }
 
 TEST_F(SafeStateTest, HookOnAnotherFunctionDoesNotCover) {
@@ -306,6 +310,7 @@ TEST_F(SafeStateTest, ZeroRungDoesNotCoverActuatorItCannotBuild) {
     auto controller = make_controller();
 
     EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+    EXPECT_EQ(controller->capability().uncovered_functions, std::vector<std::string>{"sim0/heater/set_output"});
 }
 
 // Rung 3 builds pwm=0, but the provider declares min 1: the e-stop call

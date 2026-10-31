@@ -22,6 +22,13 @@ commit messages only.
   true at Start. Without `when` it applies always, as before, so 0.8.0
   profiles stay valid. The runtime does not read the operator block; the
   workbench evaluates `when`.
+- **The runtime status names what a stop or a fault leaves running** (#698).
+  `estop.uncovered_functions` lists the functions `uncovered_actuating_functions`
+  counts, as `provider/device/function`: what a software stop leaves as it was.
+  With automation enabled, `fault_uncovered_functions` lists the actuating
+  functions no `AUTO -> FAULT` hook drives, which a fault in AUTO leaves as
+  they were; it was only the startup preflight's warning before. Both are
+  additive; the count stays.
 
 ### Changed
 

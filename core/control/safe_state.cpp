@@ -518,16 +518,16 @@ void SafeStateController::attach_latch_store(std::unique_ptr<LatchStore> store) 
                                       "safe");
 }
 
-size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
-    // Coverage of the rung that would actually run, counted the way it would
+std::vector<std::string> SafeStateController::uncovered_functions(SafeStateKind kind) const {
+    // Coverage of the rung that would actually run, judged the way it would
     // run: a call covers a function only if it can dispatch (#253).
     switch (kind) {
         case SafeStateKind::Hooks:
-            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.hooks).size();
+            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.hooks);
         case SafeStateKind::Setpoints:
-            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.setpoints).size();
+            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.setpoints);
         case SafeStateKind::Zero: {
-            size_t uncovered = 0;
+            std::vector<std::string> uncovered;
             // Covered only if rung 3 can build the call AND the call would
             // pass validation: a zero below an argument's min fails at e-stop.
             for (const auto &[handle, spec] : actuating_functions()) {
@@ -537,21 +537,27 @@ size_t SafeStateController::uncovered_count(SafeStateKind kind) const {
                 request.function_name = spec.function_name;
                 std::string err;
                 if (!build_zero_args(spec, request.args).empty() || !call_router_.validate_call(request, err)) {
-                    ++uncovered;
+                    uncovered.push_back(handle + "/" + spec.function_name);
                 }
             }
             return uncovered;
         }
         case SafeStateKind::None:
-        default:
-            return actuating_functions().size();
+        default: {
+            std::vector<std::string> all;
+            for (const auto &[handle, spec] : actuating_functions()) {
+                all.push_back(handle + "/" + spec.function_name);
+            }
+            return all;
+        }
     }
 }
 
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
     cap.software_safe_state = planned_kind();
-    cap.uncovered_actuating_functions = uncovered_count(cap.software_safe_state);
+    cap.uncovered_functions = uncovered_functions(cap.software_safe_state);
+    cap.uncovered_actuating_functions = cap.uncovered_functions.size();
     {
         // Read latch flag and timestamp together so the pair is consistent
         // against a concurrent clear() (no {latched:true, latched_at:null}).
