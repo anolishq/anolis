@@ -15,6 +15,13 @@ commit messages only.
 
 ### Added
 
+- **Start conditions that apply only when a group is on** (#701). A
+  `run.start.require` entry (and one under the deprecated `experiment`)
+  takes an optional `when`: the name of a bool parameter, normally one of
+  `start.enable`. The condition then applies only while that parameter reads
+  true at Start. Without `when` it applies always, as before, so 0.8.0
+  profiles stay valid. The runtime does not read the operator block; the
+  workbench evaluates `when`.
 - **The runtime status names what a stop or a fault leaves running** (#698).
   `estop.uncovered_functions` lists the functions `uncovered_actuating_functions`
   counts, as `provider/device/function`: what a software stop leaves as it was.
@@ -24,6 +31,12 @@ commit messages only.
   additive; the count stays.
 
 ### Changed
+
+- **`run.start.enable` lists the groups' on switches** (#701). A consumer's
+  Start runs only if at least one is on, and no longer sets them true, so the
+  operator's On switches decide what a run drives; `stop.disable` still sets
+  its parameters false. The shape is unchanged: only the schema's description
+  and the contract doc say so.
 
 - **The operator block's `experiment` is now `run`** (#696). A filament
   extruder or a centrifuge does a run, not an experiment.
