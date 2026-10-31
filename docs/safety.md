@@ -281,7 +281,9 @@ curl -X POST http://127.0.0.1:8080/v0/mode \
   -d '{"mode":"MANUAL"}'
 ```
 
-Use the same command shape for `AUTO`, `IDLE`, and `FAULT`.
+Use the same command shape for `AUTO`, `IDLE`, and `FAULT`. With auth on, as
+`install.sh` sets it for a config that binds `127.0.0.1`, add the token
+header; see [install-sh.md](deploy/install-sh.md#after-installing).
 
 ## Mode Procedure Checklist
 

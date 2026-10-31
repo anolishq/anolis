@@ -19,11 +19,13 @@ Both surfaces below do exactly that — neither is a separate install mechanism.
 On the **workstation**:
 
 ```bash
-pip install anolis-workbench
+pipx install anolis-workbench
 ```
 
-`paramiko`, which provisioning from the browser UI needs, is a core dependency,
-so no extra is required. The target does not need the workbench installed.
+Current Debian, Ubuntu and Homebrew Python refuse a system-wide `pip install`;
+`pipx` installs the commands into their own environment. A virtual environment
+works too. `paramiko`, which provisioning from the browser UI needs, is a core
+dependency, so no extra is required. The target does not need the workbench installed.
 
 The workstation also needs internet: it fetches `install.sh` from the pinned
 runtime release.
@@ -84,8 +86,9 @@ mutually exclusive.
 no rehearsal for this command.
 
 Other subcommands: `install` (this machine), `bundle`, `rollback`, `fleet`,
-`check-update`, `update`. `rollback` wraps `install.sh --rollback`, but resolves
-the latest release to fetch the script, so unlike the raw script it needs network.
+`workbench-service`, `check-update`, `update`. `rollback` wraps
+`install.sh --rollback`, but resolves the latest release to fetch the script,
+so unlike the raw script it needs network.
 
 ## What lands on the target
 
@@ -94,6 +97,11 @@ Exactly what [install-sh.md](install-sh.md) describes: one
 the install prefix. A machine provisioned this way is indistinguishable from one
 provisioned by hand, so every operational instruction in that guide applies.
 
+That includes the hostname. An arm64 target with a device-tree serial, such as
+a Pi, is renamed `anolis-<last 8 of serial>`, and `remote` has no
+`--keep-hostname`, so after provisioning reach it by that name
+(`anolis-<serial>.local`) or by its IP address.
+
 ## Verifying from the workstation
 
 ```bash
@@ -101,19 +109,22 @@ ssh pi@192.168.1.50 'systemctl status anolis-runtime'
 ssh pi@192.168.1.50 'journalctl -u anolis-runtime -n 50'
 ```
 
-The runtime binds `127.0.0.1`, so reach its HTTP surface over a tunnel rather than
-exposing it:
+The install renders the config for the LAN: a config that sets
+`bind: 127.0.0.1` is served on `0.0.0.0` with auth on, so the API answers at
+`http://<host>:8080` from any machine on the network, over plain HTTP, to a
+client with the token. To keep it off the network, leave `bind` out of the
+config before provisioning; see [Security](../security.md#defaults). A loopback
+runtime is reached over a tunnel:
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 pi@192.168.1.50
-curl -s http://127.0.0.1:8080/v0/providers/health | jq
 ```
 
-If the runtime has `http.auth_enabled: true`, a request through the tunnel
-needs the API token like any other: it arrives on the device's loopback, and
-loopback is not exempt unless `http.auth_exempt_loopback` is set. Copy the
-header into a file only you can read, and have curl read it from there, so the
-token stays off the command line:
+With auth on, a request through the tunnel needs the API token too: it
+arrives on the device's loopback, and loopback is not exempt unless
+`http.auth_exempt_loopback` is set. Copy the header into a file only you can
+read, and have curl read it from there, so the token stays off the command
+line:
 
 ```bash
 (umask 077; ssh pi@192.168.1.50 \
