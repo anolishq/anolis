@@ -54,6 +54,16 @@ refuse its `POST`s, but it can read `GET` responses. Leave
 With the defaults the API is reachable only from the same host, so local
 development needs no configuration.
 
+These are the runtime's defaults, not what `install.sh` leaves on a machine. It
+renders the project's config for the LAN: an unquoted `bind: 127.0.0.1` becomes
+`bind: 0.0.0.0`, and `auth_enabled: true` is added unless the config sets
+`auth_enabled` itself. Every install generates a token into
+`/etc/anolis/runtime.env`. So a project config that names the loopback bind is
+installed reachable from the network, over plain HTTP, with the token required.
+To keep an installed runtime on loopback, leave `bind` out of the config, or
+edit `<prefix>/config/runtime.yaml` after the install. See
+[Decoupling](decoupling.md) for the topologies.
+
 ## Safety gate
 
 The runtime **refuses to start** when `http.bind` is non-loopback and
