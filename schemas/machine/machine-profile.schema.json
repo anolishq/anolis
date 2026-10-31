@@ -337,6 +337,30 @@
             }
           }
         },
+        "actions": {
+          "type": "array",
+          "description": "Buttons the operator panel shows. Each increases its counter parameter by one, which a tree reads to run something once per press, such as RequestedPulseWindow (#697).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "parameter"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The button's text, such as \"Sample now\"."
+              },
+              "parameter": {
+                "type": "string",
+                "minLength": 1,
+                "description": "An int64 automation parameter the press increases by one."
+              }
+            }
+          }
+        },
         "run": {
           "$ref": "#/definitions/operatorRun"
         },

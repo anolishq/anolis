@@ -66,6 +66,8 @@ operator:
       require:                    # checked before Start runs
         - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake", when: impeller_enable }
     stop: { disable: [impeller_enable], mode: IDLE }
+  actions:                        # buttons; each press adds one to its counter
+    - { label: Sample now, parameter: sample_requests }
 ```
 
 1. `readings[]`: `signal` is `provider/device/signal` and `label` is required;
@@ -92,7 +94,11 @@ operator:
 6. `experiment` (0.7.0 and 0.8.0) is a deprecated alias of `run`, with the
    same shape, accepted through 0.9.x. A profile carries one or the other: one
    with both is refused.
-7. Unknown keys anywhere in the block are refused. The schema checks shape only:
+7. `actions[]` (optional, 0.9.0): buttons. Each has a non-empty `label` and
+   names an int64 automation `parameter`, a counter the press increases by
+   one. A tree reads it to run something once per press, such as
+   `RequestedPulseWindow` (see `docs/automation.md`).
+8. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
 

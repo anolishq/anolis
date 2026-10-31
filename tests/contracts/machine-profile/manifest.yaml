@@ -27,6 +27,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/08-operator-require-when.yaml
     expect: valid
     note: an operator.run.start.require entry that applies only when a bool parameter is true (#701)
+  - file: tests/contracts/machine-profile/valid/09-operator-actions.yaml
+    expect: valid
+    note: operator.actions, a button that increases a counter parameter (#697)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -73,6 +76,9 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/15-operator-require-when-empty.yaml
     expect: invalid/schema
     note: an operator.run.start.require when that is empty (#701)
+  - file: tests/contracts/machine-profile/invalid/schema/16-operator-action-missing-label.yaml
+    expect: invalid/schema
+    note: an operator.actions entry without a label (#697)
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references
