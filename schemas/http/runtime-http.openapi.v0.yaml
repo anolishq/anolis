@@ -842,6 +842,16 @@ components:
             type: string
         stop_chain:
           $ref: '#/components/schemas/StopChainStatus'
+        fault_uncovered_functions:
+          type: array
+          items:
+            type: string
+          description: >-
+            Present with automation enabled. The actuating functions no
+            dispatchable AUTO -> FAULT hook call drives, as
+            "provider/device/function": what a fault in AUTO leaves as it was,
+            the same list the startup preflight warns about. Empty when every
+            function is driven, or when no AUTO -> FAULT hook is declared.
     StopChainStatus:
       type: object
       additionalProperties: false
@@ -924,7 +934,7 @@ components:
     EstopStatus:
       type: object
       additionalProperties: false
-      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions]
+      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions, uncovered_functions]
       properties:
         latched:
           type: boolean
@@ -951,6 +961,13 @@ components:
             passes the same check. Every ACTUATE function counts when
             software_safe_state is "none". Covered means a call drives the
             function, not that the value it sends is safe.
+        uncovered_functions:
+          type: array
+          items:
+            type: string
+          description: >-
+            The functions uncovered_actuating_functions counts, as
+            "provider/device/function": what a software stop leaves as it was.
     StartupSafeStateStatus:
       type: object
       additionalProperties: false

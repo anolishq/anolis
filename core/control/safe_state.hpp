@@ -138,7 +138,8 @@ struct EstopCapability {
     bool latched = false;
     SafeStateKind software_safe_state = SafeStateKind::None;  // what a trigger WOULD do now
     std::optional<int64_t> latched_at_epoch_ms;
-    size_t uncovered_actuating_functions = 0;  // ACTUATE functions the active rung cannot drive
+    size_t uncovered_actuating_functions = 0;      // ACTUATE functions the active rung cannot drive
+    std::vector<std::string> uncovered_functions;  // the same, as "provider/device/function" (#698)
     // Set while the latch is one this runtime started with, read from disk (#482): why.
     std::optional<std::string> restored_reason;
 };
@@ -259,8 +260,9 @@ private:
     std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;
     // Which rung would run now.
     SafeStateKind planned_kind() const;
-    // ACTUATE functions the rung `kind` cannot drive (all of them for None).
-    size_t uncovered_count(SafeStateKind kind) const;
+    // ACTUATE functions the rung `kind` cannot drive (all of them for None),
+    // as "provider/device/function".
+    std::vector<std::string> uncovered_functions(SafeStateKind kind) const;
     // Runs the planned rung. With `only_device` set, only calls whose target is
     // that handle are issued. With `absent` set, calls whose target is in it
     // are skipped instead of issued.

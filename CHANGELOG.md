@@ -15,20 +15,39 @@ commit messages only.
 
 ### Added
 
+- **Start conditions that apply only when a group is on** (#701). A
+  `run.start.require` entry (and one under the deprecated `experiment`)
+  takes an optional `when`: the name of a bool parameter, normally one of
+  `start.enable`. The condition then applies only while that parameter reads
+  true at Start. Without `when` it applies always, as before, so 0.8.0
+  profiles stay valid. The runtime does not read the operator block; the
+  workbench evaluates `when`.
+- **The runtime status names what a stop or a fault leaves running** (#698).
+  `estop.uncovered_functions` lists the functions `uncovered_actuating_functions`
+  counts, as `provider/device/function`: what a software stop leaves as it was.
+  With automation enabled, `fault_uncovered_functions` lists the actuating
+  functions no `AUTO -> FAULT` hook drives, which a fault in AUTO leaves as
+  they were; it was only the startup preflight's warning before. Both are
+  additive; the count stays.
 - **One pulse per operator request** (#697). The `RequestedPulseWindow`
-  behaviour-tree node runs one pulse, `delay_s` after a request and
-  `pulse_s` long, each time its `request` counter parameter increases.
-  Requests that arrive while one runs wait their turn (`queued`), up to
-  `max_queued` outstanding, the running one included (default 1); presses
-  beyond it add nothing. The counter's value when the tree starts is the
-  baseline, so a start runs
-  nothing, and a counter that drops only moves the baseline. A tree cannot
-  write parameters, so a counter, not a bool, is what an operator's request
-  can be. The machine profile's `operator.actions` declares buttons that
-  increase such a counter, each with a `label` ("Sample now"); the workbench
-  shows them. Neither names a device.
+  behaviour-tree node runs one pulse, `delay_s` after a request and `pulse_s`
+  long, each time its `request` counter parameter increases. Requests that
+  arrive while one runs wait their turn (`queued`), up to `max_queued`
+  outstanding, the running one included (default 1); presses beyond it add
+  nothing. The counter's value when the tree starts is the baseline, so a
+  start runs nothing, and a counter that drops only moves the baseline. A tree
+  cannot write parameters, so a counter, not a bool, is what an operator's
+  request can be. The machine profile's `operator.actions` declares buttons
+  that increase such a counter, each with a `label` ("Sample now"); the
+  workbench shows them. Neither names a device.
 
 ### Changed
+
+- **`run.start.enable` lists the groups' on switches** (#701). A consumer's
+  Start runs only if at least one is on, and no longer sets them true, so the
+  operator's On switches decide what a run drives; `stop.disable` still sets
+  its parameters false. The shape is unchanged: only the schema's description
+  and the contract doc say so.
 
 - **The operator block's `experiment` is now `run`** (#696). A filament
   extruder or a centrifuge does a run, not an experiment.

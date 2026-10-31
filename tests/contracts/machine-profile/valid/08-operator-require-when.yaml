@@ -1,0 +1,47 @@
+schema_version: 1
+machine_id: fixture-machine-require-when
+display_name: Fixture Machine With Operator Panel
+
+runtime_profiles:
+  manual: runtime.manual.yml
+
+providers:
+  provider0:
+    config: provider0.yml
+
+behaviors:
+  - behavior.xml
+
+validation:
+  expected_providers:
+    - provider0
+
+compatibility:
+  runtime:
+    config_contract: "01"
+    http_contract: "02"
+  providers:
+    provider0:
+      strategy: local-build
+      version: local
+
+operator:
+  readings:
+    - { signal: provider0/sensor0/ph_value, label: pH, decimals: 2 }
+    - { signal: provider0/sensor0/temp_c, label: Temperature, unit: "°C", decimals: 1 }
+  settings:
+    - group: Stirring
+      items:
+        - { parameter: impeller_pwm, label: Speed }
+    - group: Dose 1
+      items:
+        - { parameter: dose1_interval_s, label: Every, unit: s }
+        - { parameter: dose1_pulse_s, label: For, unit: s }
+  run:
+    start:
+      enable: [impeller_enable, dose1_enable]
+      mode: AUTO
+      require:
+        - { signal: provider0/pump0/motor1_brake, equals: false, message: "Release dose pump 1's brake", when: dose1_enable }
+        - { signal: provider0/door0/state, equals: closed, message: "Close the reactor door" }
+    stop: { disable: [impeller_enable, dose1_enable], mode: IDLE }

@@ -407,7 +407,7 @@
                 "type": "string",
                 "minLength": 1
               },
-              "description": "Bool parameters set true."
+              "description": "The groups' on switches (bool parameters): Start runs only if at least one is on; it doesn't change them."
             },
             "mode": {
               "type": "string",
@@ -447,6 +447,11 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "What the operator sees when the signal does not read it: the fix."
+                  },
+                  "when": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A bool parameter, normally one of start.enable: the condition applies only while it reads true at Start. Without when, it always applies."
                   }
                 }
               }

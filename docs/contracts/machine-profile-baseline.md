@@ -64,7 +64,7 @@ operator:
       enable: [impeller_enable]
       mode: AUTO
       require:                    # checked before Start runs
-        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake" }
+        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake", when: impeller_enable }
     stop: { disable: [impeller_enable], mode: IDLE }
   actions:                        # buttons; each press adds one to its counter
     - { label: Sample now, parameter: sample_requests }
@@ -77,15 +77,20 @@ operator:
    `unit`.
 3. `run.label` (optional, non-empty): what the operator panel heads the run
    section with, such as `Batch` or `Print`. The panel's default is "Run".
-4. `run.start` and `run.stop`: the `mode` to enter (required),
-   and the bool parameters to set true (`enable`) or false (`disable`). Start
+4. `run.start` and `run.stop`: the `mode` to enter (required). `start.enable`
+   lists the groups' on switches (bool parameters): Start runs only if at
+   least one is on, and doesn't change them (0.9.0; before, Start set them
+   true). `stop.disable` lists the bool parameters Stop sets false. Start
    takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
    Stop never leaves automation running.
 5. `run.start.require[]` (optional): conditions that must hold before
    Start runs. Each names a `signal` (`provider/device/signal`), the value it
    must read (`equals`: a bool, number or string) and a non-empty `message`,
    the fix the operator sees when it doesn't. Start refuses while any does
-   not hold.
+   not hold. An optional `when` names a bool parameter, normally one of
+   `start.enable`: the condition then applies only while that parameter reads
+   true at Start, so a condition about one output does not refuse a run that
+   leaves it off (0.9.0).
 6. `experiment` (0.7.0 and 0.8.0) is a deprecated alias of `run`, with the
    same shape, accepted through 0.9.x. A profile carries one or the other: one
    with both is refused.

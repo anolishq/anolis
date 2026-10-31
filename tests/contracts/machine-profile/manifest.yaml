@@ -24,6 +24,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/07-operator-run.yaml
     expect: valid
     note: operator.run, the name operator.experiment is a deprecated alias of, with a label (#696)
+  - file: tests/contracts/machine-profile/valid/08-operator-require-when.yaml
+    expect: valid
+    note: an operator.run.start.require entry that applies only when a bool parameter is true (#701)
   - file: tests/contracts/machine-profile/valid/09-operator-actions.yaml
     expect: valid
     note: operator.actions, a button that increases a counter parameter (#697)
@@ -70,6 +73,9 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/14-operator-run-empty-label.yaml
     expect: invalid/schema
     note: operator.run.label that is empty (#696)
+  - file: tests/contracts/machine-profile/invalid/schema/15-operator-require-when-empty.yaml
+    expect: invalid/schema
+    note: an operator.run.start.require when that is empty (#701)
   - file: tests/contracts/machine-profile/invalid/schema/16-operator-action-missing-label.yaml
     expect: invalid/schema
     note: an operator.actions entry without a label (#697)
