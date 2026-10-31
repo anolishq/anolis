@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -156,6 +157,84 @@ telemetry:
     EXPECT_EQ(config.telemetry.influx_bucket, "testbucket");
     EXPECT_EQ(config.telemetry.batch_size, 50);
     EXPECT_EQ(config.telemetry.flush_interval_ms, 500);
+}
+
+// #548: the flat keys are documented deprecated aliases, but the loader only
+// warned about them and kept the defaults.
+TEST_F(ConfigTest, FlatTelemetryKeysAreMapped) {
+    std::string config_path = create_config_file("flat_telemetry.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+telemetry:
+  enabled: true
+  influx_url: http://influx.example:9999
+  influx_org: flatorg
+  influx_bucket: flatbucket
+  influx_token: flat-token
+  batch_size: 7
+  flush_interval_ms: 333
+)");
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.telemetry.influx_url, "http://influx.example:9999");
+    EXPECT_EQ(config.telemetry.influx_org, "flatorg");
+    EXPECT_EQ(config.telemetry.influx_bucket, "flatbucket");
+    EXPECT_EQ(config.telemetry.influx_token, "flat-token");
+    EXPECT_EQ(config.telemetry.batch_size, 7u);
+    EXPECT_EQ(config.telemetry.flush_interval_ms, 333);
+}
+
+TEST_F(ConfigTest, NestedTelemetryKeysOverrideFlatOnes) {
+    std::string config_path = create_config_file("flat_and_nested_telemetry.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+telemetry:
+  enabled: true
+  influx_url: http://flat.example:9999
+  influx_org: flatorg
+  batch_size: 7
+  influxdb:
+    url: http://nested.example:8086
+    batch_size: 50
+)");
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    EXPECT_EQ(config.telemetry.influx_url, "http://nested.example:8086");
+    EXPECT_EQ(config.telemetry.batch_size, 50u);
+    EXPECT_EQ(config.telemetry.influx_org, "flatorg");  // set only flat
+}
+
+TEST_F(ConfigTest, AFlatTokenStopsTheEnvironmentTokenFallback) {
+#ifdef _WIN32
+    _putenv_s("INFLUXDB_TOKEN", "env-token");
+#else
+    setenv("INFLUXDB_TOKEN", "env-token", 1);
+#endif
+    std::string config_path = create_config_file("flat_token.yaml", R"(
+providers:
+  - id: test
+    command: /path/to/provider
+telemetry:
+  enabled: true
+  influx_token: flat-token
+)");
+    RuntimeConfig config;
+    std::string error;
+
+    const bool loaded = load_config(config_path, config, error);
+#ifdef _WIN32
+    _putenv_s("INFLUXDB_TOKEN", "");
+#else
+    unsetenv("INFLUXDB_TOKEN");
+#endif
+    ASSERT_TRUE(loaded) << "Error: " << error;
+    EXPECT_EQ(config.telemetry.influx_token, "flat-token");
 }
 
 TEST_F(ConfigTest, UnknownKeysDoNotFailLoad) {
