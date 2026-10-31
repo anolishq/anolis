@@ -16,10 +16,21 @@ sudo tools/install.sh --project /path/to/bioreactor-v1
 The config directory holds `machine-profile.yaml` with `config/` and `behaviors/`
 beside it. `install.sh` reads the component pins from the profile, downloads those
 versions, assembles a bundle, and installs it.
+[bioreactor-v1](https://github.com/anolishq/anolis-projects/tree/main/projects/bioreactor-v1)
+is a complete example, and the workbench writes projects in the same layout.
+`install.sh` relies on that layout:
+
+- The profile must have a `components:` block naming the runtime and provider
+  versions.
+- Only `config/anolis-runtime.*.yaml` and `config/provider-*.yaml` are installed.
+- The directory's name is the installed project's name. Provider config paths
+  in the runtime config name it too (`../anolis-projects/projects/<name>/config/...`),
+  so a copy under a new name must update those paths.
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
-with `pyyaml` to resolve the profile. Set `GITHUB_TOKEN` if you hit release
-rate-limiting — that is the usual cause of a failed download.
+with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set
+`GITHUB_TOKEN` if you hit release rate-limiting — that is the usual cause of a
+failed download.
 
 ### Using `install.sh` from a release
 
@@ -175,17 +186,21 @@ the last *different* install.
 ```bash
 systemctl status anolis-runtime
 journalctl -u anolis-runtime -f
-curl -s http://127.0.0.1:8080/v0/providers/health | jq
 ```
 
-With `http.auth_enabled: true` that request needs the API token too, even on
-the device itself. This reads it from the root-only `runtime.env` and passes
-it to curl on stdin, so it does not appear on the command line:
+A config that sets `bind: 127.0.0.1` is installed with auth on (see
+[Security](../security.md#defaults)). With auth on, an HTTP request needs the
+API token, even on the device itself. This reads it from the root-only
+`runtime.env` and passes it to curl on stdin, so it does not appear on the
+command line:
 
 ```bash
 sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env \
   | curl -s -H @- http://127.0.0.1:8080/v0/providers/health | jq
 ```
+
+The commands here pipe through `jq`; install it with `sudo apt install jq`, or
+drop the pipe.
 
 There is one unit. Providers are **forked child processes** of the runtime, so
 there is no `anolis-provider-*` service to check.
@@ -214,9 +229,11 @@ fails the install, with exit 1: the runtime marks such a call `cause: config`
 function that does not exist, or an argument out of range), and it fails the
 same way on every restart and every e-stop. The install logs `health:
 safety.safe_state cannot run on this machine's devices: <first refused call>`,
-and the summary says the install did not succeed. Fix `safety.safe_state` and
-run the install again (#616). A runtime before 0.2.0 marks no call, so
-against one every failure stays a warning.
+and the summary says the install did not succeed. The install has already
+written `<prefix>/config/runtime.yaml`, and a re-run keeps it, so fix
+`safety.safe_state` there and run the install again; or fix the project's
+config and re-run with `--replace-config` (#616). A runtime before 0.2.0 marks
+no call, so against one every failure stays a warning.
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is
@@ -248,7 +265,10 @@ limits:
 `install.sh` deploys anolis; it does not set up the host's hardware. Enabling a bus
 (on a Raspberry Pi, the `config.txt` lines), loading modules, and giving the
 `anolis` user access to device nodes belong to the project's host prep for its
-platform, run first: host prep, then any reboot it asks for, then `install.sh`. The
+platform, run first: host prep, then any reboot it asks for, then `install.sh`.
+For a Raspberry Pi, bioreactor-v1's
+[`prep-raspberrypi-os.sh`](https://github.com/anolishq/anolis-projects/blob/main/projects/bioreactor-v1/host/prep-raspberrypi-os.sh)
+is a worked example to start from. The
 `anolis` system user is a contract between the two: host prep may create it, and
 `install.sh` accepts an existing one. `install.sh` never grants or revokes its
 groups, so a user kept by `--uninstall` keeps the ones an earlier install or host
