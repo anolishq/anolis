@@ -70,6 +70,7 @@ Base classes for Anolis-specific BT nodes:
 - `GetParameterInt64Node` - Reads int64 runtime parameters
 - `CheckBoolNode` - Evaluates boolean conditions in BT control flow
 - `PeriodicPulseWindowNode` - Computes periodic activation windows
+- `RequestedPulseWindowNode` - One pulse after a delay each time a counter parameter increases (#697)
 - `EmitOnChangeOrIntervalNode` - Gates command emission by change/keepalive
 - `BuildArgsJsonNode` - Builds JSON args payload from typed slots
 

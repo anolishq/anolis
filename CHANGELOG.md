@@ -13,6 +13,19 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **One pulse per operator request** (#697). The `RequestedPulseWindow`
+  behaviour-tree node runs one pulse, `delay_s` after a request and
+  `pulse_s` long, each time its `request` counter parameter increases.
+  Requests that arrive while one runs wait their turn (`queued`). The
+  counter's value when the tree starts is the baseline, so a start runs
+  nothing, and a counter that drops only moves the baseline. A tree cannot
+  write parameters, so a counter, not a bool, is what an operator's request
+  can be. The machine profile's `operator.actions` declares buttons that
+  increase such a counter, each with a `label` ("Sample now"); the workbench
+  shows them. Neither names a device.
+
 ### Changed
 
 - **The operator block's `experiment` is now `run`** (#696). A filament

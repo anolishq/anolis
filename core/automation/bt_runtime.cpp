@@ -68,6 +68,7 @@ BTRuntime::BTRuntime(state::StateCache &state_cache, control::CallRouter &call_r
     factory_->registerNodeType<GetParameterInt64Node>("GetParameterInt64");
     factory_->registerNodeType<CheckBoolNode>("CheckBool");
     factory_->registerNodeType<PeriodicPulseWindowNode>("PeriodicPulseWindow");
+    factory_->registerNodeType<RequestedPulseWindowNode>("RequestedPulseWindow");
     factory_->registerNodeType<EmitOnChangeOrIntervalNode>("EmitOnChangeOrInterval");
     factory_->registerNodeType<BuildArgsJsonNode>("BuildArgsJson");
 

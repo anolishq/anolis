@@ -173,6 +173,18 @@ Core runtime nodes include:
 6. `GetParameterInt64`
 7. `CheckBool`
 8. `PeriodicPulseWindow`
+9. `RequestedPulseWindow`: one pulse, `delay_s` after a request and
+   `pulse_s` long, each time the `request` counter parameter increases.
+   Requests that arrive while one runs wait their turn (`queued`). The
+   counter's value when the tree starts is the baseline, so a start runs
+   nothing. An operator panel increases the counter with an
+   `operator.actions` button in the machine profile:
+
+   ```xml
+   <GetParameterInt64 param="sample_requests" value="{sample_requests}"/>
+   <RequestedPulseWindow request="{sample_requests}" delay_s="{sample_delay_s}"
+                         pulse_s="{sample_pulse_s}" active="{sample_active}" queued="{sample_queued}"/>
+   ```
 
 Use runtime capability metadata and parameter constraints to keep BT logic generic.
 

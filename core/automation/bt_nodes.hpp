@@ -233,6 +233,32 @@ private:
 };
 
 /**
+ * RequestedPulseWindowNode - One pulse per operator request (#697).
+ *
+ * `request` is a counter parameter an operator increases, such as from an
+ * operator action. Each increase runs one pulse: `delay_s`, then `active` for
+ * `pulse_s`. Requests that arrive while one runs wait their turn (`queued`).
+ * The counter's first value is the baseline, so a runtime start runs nothing,
+ * and a counter that drops (a restart's default) only moves the baseline.
+ * Names no device: a tree drives an output from `active`.
+ */
+class RequestedPulseWindowNode : public BT::SyncActionNode {
+public:
+    RequestedPulseWindowNode(const std::string &name, const BT::NodeConfig &config);
+
+    BT::NodeStatus tick() override;
+
+    static BT::PortsList providedPorts();
+
+private:
+    bool initialized_ = false;
+    int64_t last_request_ = 0;
+    int64_t queued_ = 0;
+    bool running_ = false;
+    int64_t start_ms_ = 0;
+};
+
+/**
  * EmitOnChangeOrIntervalNode - Generic emission gate.
  *
  * Emits true when an input key changes or keepalive interval elapses.

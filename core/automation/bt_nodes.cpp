@@ -613,6 +613,60 @@ BT::NodeStatus PeriodicPulseWindowNode::tick() {
 }
 
 //-----------------------------------------------------------------------------
+// RequestedPulseWindowNode
+//-----------------------------------------------------------------------------
+
+RequestedPulseWindowNode::RequestedPulseWindowNode(const std::string &name, const BT::NodeConfig &config)
+    : BT::SyncActionNode(name, config) {}
+
+/*static*/ BT::PortsList RequestedPulseWindowNode::providedPorts() {
+    return {BT::InputPort<int64_t>("request", "Counter an operator increases, once per request"),
+            BT::InputPort<int64_t>("delay_s", 0, "Delay from a request to its pulse (seconds)"),
+            BT::InputPort<int64_t>("pulse_s", 1, "Pulse width (seconds)"),
+            BT::InputPort<int64_t>("now_ms", "Optional time override for deterministic testing"),
+            BT::OutputPort<bool>("active", "True while a requested pulse is on"),
+            BT::OutputPort<int64_t>("queued", "Requests waiting behind the current one")};
+}
+
+BT::NodeStatus RequestedPulseWindowNode::tick() {
+    const auto request = getInput<int64_t>("request");
+    const int64_t delay_s = getInput<int64_t>("delay_s").value_or(0);
+    const int64_t pulse_s = getInput<int64_t>("pulse_s").value_or(1);
+    const int64_t now_ms = getInput<int64_t>("now_ms").value_or(current_time_ms());
+
+    if (!request || delay_s < 0 || pulse_s <= 0) {
+        LOG_ERROR("[RequestedPulseWindowNode] Invalid inputs: request must be set, delay_s >= 0, pulse_s > 0");
+        setOutput("active", false);
+        setOutput("queued", queued_);
+        return BT::NodeStatus::FAILURE;
+    }
+
+    if (!initialized_) {
+        initialized_ = true;
+        last_request_ = *request;
+    } else if (*request > last_request_) {
+        queued_ += *request - last_request_;
+        last_request_ = *request;
+    } else if (*request < last_request_) {
+        last_request_ = *request;
+    }
+
+    const int64_t pulse_ms = pulse_s * 1000;
+    if (running_ && now_ms >= start_ms_ + pulse_ms) {
+        running_ = false;
+    }
+    if (!running_ && queued_ > 0) {
+        --queued_;
+        running_ = true;
+        start_ms_ = now_ms + delay_s * 1000;
+    }
+
+    setOutput("active", running_ && now_ms >= start_ms_ && now_ms < start_ms_ + pulse_ms);
+    setOutput("queued", queued_);
+    return BT::NodeStatus::SUCCESS;
+}
+
+//-----------------------------------------------------------------------------
 // EmitOnChangeOrIntervalNode
 //-----------------------------------------------------------------------------
 
