@@ -13,6 +13,36 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-31
+
+0.9.0 is a minor release because an existing profile's operator panel
+behaves differently (`docs/dependencies.md`: before 1.0, a change that makes
+an existing install behave differently bumps MINOR). The operator block's
+`experiment` is now `run`, and `run.start.enable` now lists the groups' on
+switches, which Start no longer turns on. Runs take a `label` in place of
+`experiment_label`.
+
+New in 0.9.0, all additive: `require.when` on Start conditions (#701),
+`operator.actions` and the `RequestedPulseWindow` node with `max_queued`
+(#697), and `estop.uncovered_functions` and `fault_uncovered_functions` in
+the runtime status (#698). Each is under Added.
+
+Upgrade notes for operators:
+
+- **`operator.experiment` is now `operator.run`** (#696). A profile that
+  still says `experiment` validates through 0.9.x, as a deprecated alias; one
+  with both is refused. Rename the key to `run` before 0.10. `run` may also
+  carry a `label`, the heading of the panel's run section.
+- **Start leaves the On switches as they are** (#701). `run.start.enable` now
+  lists the groups' on switches. With a workbench that reads 0.9.0's
+  schema, Start run runs only the groups an operator ticked On, and refuses
+  while none is; it used to set every `start.enable` parameter true. Stop
+  still sets `stop.disable` false. A profile that relied on Start to switch
+  everything on now needs the groups ticked first.
+- **Runs take a `label`** (#696). `experiment_label` still works through
+  0.9.x and is returned with the same value; a request that sends both with
+  different values is refused with 400. Send `label`.
+
 ### Added
 
 - **Start conditions that apply only when a group is on** (#701). A
@@ -48,7 +78,6 @@ commit messages only.
   operator's On switches decide what a run drives; `stop.disable` still sets
   its parameters false. The shape is unchanged: only the schema's description
   and the contract doc say so.
-
 - **The operator block's `experiment` is now `run`** (#696). A filament
   extruder or a centrifuge does a run, not an experiment.
   `operator.run` has the same shape as `operator.experiment` (`start` with
@@ -62,6 +91,20 @@ commit messages only.
   the same value as `label`. A request that sends both with different values is
   refused with `INVALID_ARGUMENT` (400). Journals written before this read the
   old `experiment_label` as the label.
+
+### Docs
+
+- The install-route pages say what the install does to the runtime's bind
+  and auth (it rewrites a loopback bind to `0.0.0.0` with auth on), show the
+  health check with its token, and say how to apply a safe-state fix after a
+  failed install (#692).
+- The HTTP API reference documents the runs and telemetry endpoints, the
+  provider pages point at the SDK and its conformance harness, and the
+  safety anchors work on the docs site as well as on GitHub (#693).
+
+### CI
+
+- The install walk runs against runtime 0.8.0 (#691).
 
 ## [0.8.0] - 2026-10-30
 
