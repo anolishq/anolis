@@ -5,7 +5,7 @@ Status: increments 1 to 5 are implemented, 1 to 3 in anolis 0.1.53
 (anolishq/anolis-workbench#641, anolishq/anolis-workbench#644). Increment 6,
 renaming `/v0/estop`, is not (#485). Tracked as anolishq/anolis#284, part of
 anolishq/anolis#283. Depends on the stop categories in
-[safety.md](../safety.md#stop-categories--what-software-can-and-cannot-be).
+[safety.md](../safety.md#stop-categories-what-software-can-and-cannot-be).
 
 The behaviour is specified in
 [configuration-schema.md](../configuration-schema.md#safety) under

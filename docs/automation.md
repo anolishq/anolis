@@ -118,7 +118,7 @@ automation:
 **Safe-state hooks (required to enter AUTO with actuators).** Automation that
 drives actuating outputs must declare safe-state `mode_transition_hooks`; the
 runtime refuses `MANUAL -> AUTO` (HTTP 409) without them — see
-[safety.md](safety.md#manual---auto). Add a `*->FAULT` hook that drives actuators
+[safety.md](safety.md#manual-to-auto). Add a `*->FAULT` hook that drives actuators
 to a safe value:
 
 > This hook is **not** the software stop's safe state. `POST /v0/estop` runs

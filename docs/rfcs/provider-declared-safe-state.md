@@ -4,7 +4,7 @@
 request, and the runtime's safe state is still the ladder declared in
 `safety.safe_state`. The zero rung, and the install's check that a safe state
 can be planned, belong to that ladder, not to this proposal. Depends on the stop
-categories in [safety.md](../safety.md#stop-categories--what-software-can-and-cannot-be);
+categories in [safety.md](../safety.md#stop-categories-what-software-can-and-cannot-be);
 tracked under anolishq/anolis#283.
 
 ## The problem
@@ -121,7 +121,7 @@ Each of these is the kind of gap that produced the issues above.
 
 This is a Category 2 mechanism. It commands devices that are still powered,
 so it is a protective stop and cannot be an emergency stop; see
-[safety.md](../safety.md#stop-categories--what-software-can-and-cannot-be). On
+[safety.md](../safety.md#stop-categories-what-software-can-and-cannot-be). On
 a machine whose emergency stop removes power, the devices are off before any
 of this could run.
 

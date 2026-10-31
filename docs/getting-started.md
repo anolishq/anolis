@@ -125,7 +125,7 @@ automation:
 
 If your machine has actuating outputs, you must also declare safe-state
 `mode_transition_hooks` or the runtime will refuse `MANUAL -> AUTO` — see
-[automation.md](automation.md) and [safety.md](safety.md#manual---auto).
+[automation.md](automation.md) and [safety.md](safety.md#manual-to-auto).
 
 **Declare `safety.safe_state` as well.** These are two different declarations
 for two different triggers: the hook above runs on an *autonomous* fault, while
@@ -134,7 +134,7 @@ enter AUTO, so it is possible to satisfy the gate and still have a machine whose
 software stop has no safe state of its own: it runs only the hook you just added,
 when it matches the mode the stop was pressed in (in IDLE, only an
 `after_transition` hook runs), and reports `safe_state_achieved: false`.
-See [safety.md](safety.md#stop-categories--what-software-can-and-cannot-be).
+See [safety.md](safety.md#stop-categories-what-software-can-and-cannot-be).
 
 Update a parameter at runtime:
 

@@ -4,9 +4,13 @@ Human-oriented runtime API guide.
 
 Machine contract authority:
 
-1. OpenAPI: `schemas/http/runtime-http.openapi.v0.yaml`
-2. Contract examples: `tests/contracts/runtime-http/examples/`
-3. Baseline: `docs/contracts/runtime-http-baseline.md`
+1. OpenAPI:
+   [`schemas/http/runtime-http.openapi.v0.yaml`](https://github.com/anolishq/anolis/blob/main/schemas/http/runtime-http.openapi.v0.yaml),
+   also rendered on the docs site as the
+   [Runtime HTTP API reference](https://anolishq.github.io/reference/runtime-http-api)
+2. Contract examples:
+   [`tests/contracts/runtime-http/examples/`](https://github.com/anolishq/anolis/tree/main/tests/contracts/runtime-http/examples)
+3. Baseline: [runtime-http-baseline.md](contracts/runtime-http-baseline.md)
 
 Use this file for operational semantics and practical examples.
 
@@ -84,8 +88,11 @@ Notes:
 2. To tell whether a mode machine exists, call `GET /v0/mode`. On an
    automation-disabled runtime it returns `503 UNAVAILABLE`
    (`Automation layer not enabled`), as do `POST /v0/mode`,
-   `GET /v0/automation/tree` and `GET /v0/automation/status`. A `MANUAL`
-   from `/v0/runtime/status` alone does not distinguish the two cases.
+   `GET /v0/automation/tree` and `GET /v0/automation/status`.
+   `GET /v0/parameters` and `POST /v0/parameters` return `503` too, with
+   `Parameter system not enabled`: parameters are declared under
+   `automation`. A `MANUAL` from `/v0/runtime/status` alone does not
+   distinguish the two cases.
 
 ### Discovery and capabilities
 
@@ -196,6 +203,34 @@ Notes:
 4. `POST /v0/parameters`
 5. `GET /v0/automation/tree`
 6. `GET /v0/automation/status`
+
+### Runs
+
+A run is a recorded span of operation: an experiment, a batch. At most one is
+open at a time, and its id is `<runtime.name>-<ULID>`. The runtime records its
+own lifecycle events in it (`run_opened`, `run_closed`, `mode_change`,
+`parameter_change`, `automation_fault`); operators add markers. Telemetry is
+tied to a run by its time window.
+
+1. `POST /v0/runs` - open a run. Optional body: `experiment_label`, `params`
+   (any object), `tag_scope`. Returns `409` while another run is open.
+2. `GET /v0/runs` - list runs, newest first (`limit`, `offset`).
+3. `GET /v0/runs/{run_id}` - one run.
+4. `POST /v0/runs/{run_id}/close` - close a run; idempotent. Optional
+   `close_reason`: `operator_stop`, `completed`, `failed` or `superseded`.
+5. `GET /v0/runs/{run_id}/events` - the run's events and markers, oldest first
+   (`limit`, `offset`).
+6. `POST /v0/runs/{run_id}/events` - add an operator marker: `type` (required,
+   your own vocabulary, such as `feed` or `sample`), optional `payload` object
+   and `occurred_at_epoch_ms`. Returns `409` on a closed run.
+
+Runs need a writable `runtime.data_dir`; without one every run endpoint
+returns `503`.
+
+### Telemetry
+
+1. `GET /v0/telemetry/status` - the InfluxDB sink's health and throughput
+   counters. See [Telemetry](observability.md).
 
 ### Streaming
 
@@ -320,6 +355,8 @@ curl -s -X POST http://127.0.0.1:8080/v0/call \
 
 ### Mode and parameters
 
+These need `automation.enabled: true`; see [Automation](automation.md).
+
 ```bash
 curl -s http://127.0.0.1:8080/v0/mode | jq
 curl -s -X POST http://127.0.0.1:8080/v0/mode \
@@ -364,5 +401,7 @@ Example:
 
 ## Related
 
-1. `docs/http/README.md` - HTTP contract validation workflow.
-2. `tests/contracts/runtime-http/examples/manifest.yaml` - fixture inventory.
+1. [`docs/http/README.md`](https://github.com/anolishq/anolis/blob/main/docs/http/README.md) -
+   HTTP contract validation workflow.
+2. [`tests/contracts/runtime-http/examples/manifest.yaml`](https://github.com/anolishq/anolis/blob/main/tests/contracts/runtime-http/examples/manifest.yaml) -
+   fixture inventory.
