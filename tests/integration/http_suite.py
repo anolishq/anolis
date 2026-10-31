@@ -79,6 +79,14 @@ class HttpGatewayTester:
         providers = body.get("providers", [])
         assert providers, f"Expected providers in runtime status, got: {body}"
 
+        # The uncovered functions are named, not only counted (#698).
+        estop = body.get("estop", {})
+        names = estop.get("uncovered_functions")
+        assert isinstance(names, list) and all(isinstance(n, str) for n in names), estop
+        assert len(names) == estop.get("uncovered_actuating_functions"), estop
+        fault = body.get("fault_uncovered_functions", [])
+        assert isinstance(fault, list) and all(isinstance(n, str) for n in fault), body
+
     def check_devices_endpoint(self) -> None:
         result = self.http_get("/v0/devices")
         assert result["status_code"] == 200, f"Expected 200 from /v0/devices, got {result}"

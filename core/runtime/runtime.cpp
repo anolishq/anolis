@@ -788,6 +788,11 @@ bool Runtime::init_http(std::string &error) {
         // Latched devices are reported on GET /v0/runtime/status (#285).
         dependencies.device_loss_latch = device_loss_latch_.get();
         dependencies.stop_chain = stop_chain_.get();
+        if (config_.automation.enabled) {
+            dependencies.fault_uncovered_functions = [this] {
+                return fault_hook_uncovered_functions(*registry_, *call_router_, config_.automation);
+            };
+        }
         // Device-liveness staleness thresholds (#220): derived from the poll
         // cadence + device count unless explicitly overridden.
         dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,

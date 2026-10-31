@@ -19,7 +19,8 @@
     "latched": true,
     "software_safe_state": "hooks",
     "latched_at_epoch_ms": 1761400000000,
-    "uncovered_actuating_functions": 0
+    "uncovered_actuating_functions": 0,
+    "uncovered_functions": []
   },
   "startup_safe_state": {
     "on_startup": "safe_state",
