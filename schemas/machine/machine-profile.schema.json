@@ -423,6 +423,11 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "What the operator sees when the signal does not read it: the fix."
+                  },
+                  "when": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A bool parameter, normally one of start.enable: the condition applies only while it reads true at Start. Without when, it always applies."
                   }
                 }
               }

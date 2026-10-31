@@ -13,6 +13,16 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **Start conditions that apply only when a group is on** (#701). A
+  `run.start.require` entry (and one under the deprecated `experiment`)
+  takes an optional `when`: the name of a bool parameter, normally one of
+  `start.enable`. The condition then applies only while that parameter reads
+  true at Start. Without `when` it applies always, as before, so 0.8.0
+  profiles stay valid. The runtime does not read the operator block; the
+  workbench evaluates `when`.
+
 ### Changed
 
 - **The operator block's `experiment` is now `run`** (#696). A filament

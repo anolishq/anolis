@@ -64,7 +64,7 @@ operator:
       enable: [impeller_enable]
       mode: AUTO
       require:                    # checked before Start runs
-        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake" }
+        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake", when: impeller_enable }
     stop: { disable: [impeller_enable], mode: IDLE }
 ```
 
@@ -83,7 +83,10 @@ operator:
    Start runs. Each names a `signal` (`provider/device/signal`), the value it
    must read (`equals`: a bool, number or string) and a non-empty `message`,
    the fix the operator sees when it doesn't. Start refuses while any does
-   not hold.
+   not hold. An optional `when` names a bool parameter, normally one of
+   `start.enable`: the condition then applies only while that parameter reads
+   true at Start, so a condition about one output does not refuse a run that
+   leaves it off (0.9.0).
 6. `experiment` (0.7.0 and 0.8.0) is a deprecated alias of `run`, with the
    same shape, accepted through 0.9.x. A profile carries one or the other: one
    with both is refused.
