@@ -175,7 +175,10 @@ Core runtime nodes include:
 8. `PeriodicPulseWindow`
 9. `RequestedPulseWindow`: one pulse, `delay_s` after a request and
    `pulse_s` long, each time the `request` counter parameter increases.
-   Requests that arrive while one runs wait their turn (`queued`). The
+   Requests that arrive while one runs wait their turn (`queued`), up to
+   `max_queued` outstanding, the running one included (default 1): with
+   the default, pressing again while a pulse is pending or running adds
+   nothing. The
    counter's value when the tree starts is the baseline, so a start runs
    nothing. An operator panel increases the counter with an
    `operator.actions` button in the machine profile:

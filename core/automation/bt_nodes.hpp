@@ -237,7 +237,9 @@ private:
  *
  * `request` is a counter parameter an operator increases, such as from an
  * operator action. Each increase runs one pulse: `delay_s`, then `active` for
- * `pulse_s`. Requests that arrive while one runs wait their turn (`queued`).
+ * `pulse_s`. Requests that arrive while one runs wait their turn (`queued`),
+ * up to `max_queued` outstanding, the running one included (default 1);
+ * presses beyond it add nothing.
  * The counter's first value is the baseline, so a runtime start runs nothing,
  * and a counter that drops (a restart's default) only moves the baseline.
  * Names no device: a tree drives an output from `active`.

@@ -1,5 +1,6 @@
 #include "automation/bt_nodes.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -623,6 +624,7 @@ RequestedPulseWindowNode::RequestedPulseWindowNode(const std::string &name, cons
     return {BT::InputPort<int64_t>("request", "Counter an operator increases, once per request"),
             BT::InputPort<int64_t>("delay_s", 0, "Delay from a request to its pulse (seconds)"),
             BT::InputPort<int64_t>("pulse_s", 1, "Pulse width (seconds)"),
+            BT::InputPort<int64_t>("max_queued", 1, "Most requests outstanding, the running one included"),
             BT::InputPort<int64_t>("now_ms", "Optional time override for deterministic testing"),
             BT::OutputPort<bool>("active", "True while a requested pulse is on"),
             BT::OutputPort<int64_t>("queued", "Requests waiting behind the current one")};
@@ -632,29 +634,37 @@ BT::NodeStatus RequestedPulseWindowNode::tick() {
     const auto request = getInput<int64_t>("request");
     const int64_t delay_s = getInput<int64_t>("delay_s").value_or(0);
     const int64_t pulse_s = getInput<int64_t>("pulse_s").value_or(1);
+    const int64_t max_queued = getInput<int64_t>("max_queued").value_or(1);
     const int64_t now_ms = getInput<int64_t>("now_ms").value_or(current_time_ms());
 
-    if (!request || delay_s < 0 || pulse_s <= 0) {
-        LOG_ERROR("[RequestedPulseWindowNode] Invalid inputs: request must be set, delay_s >= 0, pulse_s > 0");
+    if (!request || delay_s < 0 || pulse_s <= 0 || max_queued < 1) {
+        LOG_ERROR(
+            "[RequestedPulseWindowNode] Invalid inputs: request must be set, delay_s >= 0, pulse_s > 0, "
+            "max_queued >= 1");
         setOutput("active", false);
         setOutput("queued", queued_);
         return BT::NodeStatus::FAILURE;
+    }
+
+    // A pulse that has ended frees its place before new presses are counted.
+    const int64_t pulse_ms = pulse_s * 1000;
+    if (running_ && now_ms >= start_ms_ + pulse_ms) {
+        running_ = false;
     }
 
     if (!initialized_) {
         initialized_ = true;
         last_request_ = *request;
     } else if (*request > last_request_) {
-        queued_ += *request - last_request_;
+        // Presses beyond max_queued outstanding (the running one included)
+        // add nothing; the baseline moves either way.
+        const int64_t room = max_queued - queued_ - (running_ ? 1 : 0);
+        queued_ += std::max<int64_t>(0, std::min(*request - last_request_, room));
         last_request_ = *request;
     } else if (*request < last_request_) {
         last_request_ = *request;
     }
 
-    const int64_t pulse_ms = pulse_s * 1000;
-    if (running_ && now_ms >= start_ms_ + pulse_ms) {
-        running_ = false;
-    }
     if (!running_ && queued_ > 0) {
         --queued_;
         running_ = true;
