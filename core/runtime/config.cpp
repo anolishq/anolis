@@ -971,6 +971,26 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                              << deprecated_key << "' - use 'telemetry.influxdb." << canonical_key << "' instead");
                 }
             }
+            // Mapped here, before the nested block, which overrides them (#548).
+            const auto flat = yaml["telemetry"];
+            if (flat["influx_url"]) {
+                config.telemetry.influx_url = flat["influx_url"].as<std::string>();
+            }
+            if (flat["influx_org"]) {
+                config.telemetry.influx_org = flat["influx_org"].as<std::string>();
+            }
+            if (flat["influx_bucket"]) {
+                config.telemetry.influx_bucket = flat["influx_bucket"].as<std::string>();
+            }
+            if (flat["influx_token"]) {
+                config.telemetry.influx_token = flat["influx_token"].as<std::string>();
+            }
+            if (flat["batch_size"]) {
+                config.telemetry.batch_size = flat["batch_size"].as<size_t>();
+            }
+            if (flat["flush_interval_ms"]) {
+                config.telemetry.flush_interval_ms = flat["flush_interval_ms"].as<int>();
+            }
 
             // Canonical nested telemetry settings are loaded after warnings so
             // newer keys cleanly override any deprecated flat values.
