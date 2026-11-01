@@ -13,6 +13,12 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-31
+
+0.9.2 is a patch release: Grafana dashboard display names, nothing in the
+runtime. An install with `--with-observability` refreshes the dashboards
+from the release asset.
+
 ### Fixed
 
 - **Grafana panels name what they show** (#712). Stat tiles on Device
