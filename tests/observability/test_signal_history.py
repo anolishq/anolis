@@ -17,9 +17,10 @@ def _series(grafana, dashboard, window, selected=None) -> dict[str, list]:
         for frame in grafana.panel(dashboard, panel["id"], window, selected):
             for column in frame.value_columns():
                 signal = column.labels.get("signal_id")
-                if signal is None and "signal_id" in [c.name for c in frame.columns]:
+                # The String table names its signal column "Signal" (#712).
+                if signal is None and "Signal" in [c.name for c in frame.columns]:
                     for row in frame.rows():
-                        found.setdefault(row["signal_id"], []).append(row.get(column.name))
+                        found.setdefault(row["Signal"], []).append(row.get(column.name))
                     continue
                 found.setdefault(signal or column.name, []).extend(v for v in column.values if v is not None)
     return found
