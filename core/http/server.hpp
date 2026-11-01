@@ -9,10 +9,12 @@
 #include <httplib.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "anolis_build_config.hpp"
 #include "control/i_device_loss_latch.hpp"
@@ -85,6 +87,9 @@ struct HttpServerDependencies {
     const control::IDeviceLossLatch *device_loss_latch = nullptr;  // optional: per-device loss latch (#285)
     const control::StopChainMonitor *stop_chain = nullptr;         // optional: observed emergency stop (#483)
     health::StalenessPolicy staleness_policy;                      // #220: device-liveness thresholds
+    // Optional (#698): the actuating functions no dispatchable AUTO->FAULT hook
+    // call drives, as "provider/device/function". Set only with automation.
+    std::function<std::vector<std::string>()> fault_uncovered_functions;
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
@@ -175,6 +180,7 @@ private:
     const control::IDeviceLossLatch *device_loss_latch_;  // optional: per-device loss latch (#285)
     const control::StopChainMonitor *stop_chain_;         // optional: observed emergency stop (#483)
     health::StalenessPolicy staleness_policy_;            // #220: device-liveness thresholds
+    std::function<std::vector<std::string>()> fault_uncovered_functions_;  // optional (#698)
 #if ANOLIS_ENABLE_AUTOMATION
     automation::BTRuntime *bt_runtime_;  // optional
 #endif

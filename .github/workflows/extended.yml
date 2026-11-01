@@ -67,7 +67,7 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@0afd073b878c469f78a52f24020b1c3a49ae4fee # v2.7
         with:
           triplet: x64-linux-static
 
@@ -121,7 +121,7 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@0afd073b878c469f78a52f24020b1c3a49ae4fee # v2.7
         with:
           # ci-tsan builds x64-linux-tsan. The triplet names the cache key, so
           # naming x64-linux-static here saved TSan packages under the key the
@@ -182,7 +182,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -193,7 +193,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@0afd073b878c469f78a52f24020b1c3a49ae4fee # v2.7
         with:
           triplet: x64-linux-static
 

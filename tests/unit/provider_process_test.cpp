@@ -22,6 +22,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -411,6 +412,92 @@ TEST_F(ProviderProcessTest, IsRunningIsSafeWhileAnotherThreadShutsDown) {
 
     EXPECT_FALSE(proc.is_running());
 }
+
+#ifndef _WIN32
+// #570: every provider inherited the runtime's pipe ends for the providers
+// spawned before it, among them their stdin write ends. So closing an earlier
+// provider's stdin gave it no EOF while a later one ran, and its stop waited out
+// the timeout and then killed it.
+TEST_F(ProviderProcessTest, StoppingAnEarlierProviderIsCleanWhileALaterOneRuns) {
+    CreateLongRunningTestExecutable();
+    ProviderProcess first("first", test_executable_path_.string(), {}, 3000);
+    ProviderProcess second("second", test_executable_path_.string(), {}, 3000);
+    ASSERT_TRUE(first.spawn()) << first.last_error();
+    ASSERT_TRUE(second.spawn()) << second.last_error();
+
+    const auto begin = std::chrono::steady_clock::now();
+    EXPECT_TRUE(first.shutdown());
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin);
+
+    EXPECT_LT(elapsed.count(), 2000) << "the first provider saw no EOF and was killed after its 3 s timeout";
+    EXPECT_TRUE(second.is_running());
+    second.shutdown();
+}
+
+TEST_F(ProviderProcessTest, ALaterProviderHoldsNoPipeOfAnEarlierOne) {
+    CreateLongRunningTestExecutable();
+    const auto report = std::filesystem::current_path() / "fds_of_second_570";
+    std::filesystem::remove(report);
+    const auto lister = std::filesystem::current_path() / "list_fds_570";
+    {
+        // What the script's own shell holds beyond 0, 1 and 2, then wait for EOF.
+        // Each readlink appends on its own: a redirect on the whole loop would
+        // have the shell keep a copy of its stdout open while it lists.
+        std::ofstream out(lister);
+        out << "#!/bin/bash\n"
+               "for fd in /proc/$$/fd/*; do\n"
+               "  case \"${fd##*/}\" in 0|1|2) ;; *) readlink \"$fd\" >> \""
+            << report.string()
+            << "\" ;; esac\n"
+               "done\n"
+               "echo done >> \""
+            << report.string()
+            << "\"\n"
+               "while read line; do :; done\n";
+    }
+    std::filesystem::permissions(lister, std::filesystem::perms::owner_all, std::filesystem::perm_options::add);
+
+    // Pipes this test process already held, as the environment that started it
+    // may pass some down; only pipes beyond these count.
+    std::set<std::string> inherited;
+    for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+        std::error_code ec;
+        const auto target = std::filesystem::read_symlink(entry.path(), ec).string();
+        if (!ec && target.rfind("pipe:", 0) == 0) inherited.insert(target);
+    }
+
+    ProviderProcess first("first", test_executable_path_.string(), {}, 3000);
+    ProviderProcess second("second", lister.string(), {}, 3000);
+    ASSERT_TRUE(first.spawn()) << first.last_error();
+    ASSERT_TRUE(second.spawn()) << second.last_error();
+    const auto listed = [&] {
+        std::ifstream in(report);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line == "done") return true;
+        }
+        return false;
+    };
+    for (int attempt = 0; attempt < 250 && !listed(); ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(listed()) << "the second provider did not list its fds";
+
+    std::ifstream in(report);
+    std::string line;
+    std::string pipes;
+    while (std::getline(in, line)) {
+        if (line.rfind("pipe:", 0) == 0 && inherited.count(line) == 0) pipes += line + " ";
+    }
+    EXPECT_TRUE(pipes.empty()) << "the second provider holds pipes beyond its own stdio: " << pipes;
+
+    first.shutdown();
+    second.shutdown();
+    std::filesystem::remove(report);
+    std::filesystem::remove(lister);
+}
+#endif
 
 /******************************************************************************
  * Platform-Specific Notes

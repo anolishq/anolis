@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /**
  * @file automation_engine.hpp
@@ -65,6 +66,20 @@ struct AutomationVersion {
 };
 
 /**
+ * @brief A device call that failed in the current run (#678).
+ *
+ * `consecutive_failures` is the failures in a row so far; a success resets it
+ * to 0 and keeps the last error.
+ */
+struct CallFailureView {
+    std::string device_handle;  ///< provider/device
+    std::string function;
+    uint64_t consecutive_failures = 0;
+    std::string last_error;
+    int64_t last_failure_at_epoch_ms = 0;
+};
+
+/**
  * @brief One coherent snapshot of engine status (read under the engine's lock).
  */
 struct AutomationStatusView {
@@ -73,6 +88,7 @@ struct AutomationStatusView {
     uint64_t last_evaluation_at_epoch_ms = 0;  ///< Last engine evaluation (NOT observable progress).
     std::string last_error;
     nlohmann::json engine_diagnostics = nlohmann::json::object();  ///< UNSTABLE / non-contractual.
+    std::vector<CallFailureView> call_failures;                    ///< Calls that failed this run (#678).
 };
 
 /**

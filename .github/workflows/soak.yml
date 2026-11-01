@@ -45,7 +45,7 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@7b20551d1532b9e4f1264c9e966fa6ebbf098d75 # v2.6
+        uses: anolishq/.github/.github/actions/setup-vcpkg@0afd073b878c469f78a52f24020b1c3a49ae4fee # v2.7
         with:
           triplet: x64-linux-static
 

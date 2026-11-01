@@ -12,19 +12,26 @@
  * 7. Parameter change event formatting
  * 8. InfluxConfig validation
  *
- * Note: Batching and HTTP interaction require integration testing with
- * real InfluxDB or HTTP mocking library. These tests focus on unit-testable
- * formatting and escaping logic.
+ * 9. Write responses (#572), against an in-process mock of /api/v2/write
  */
 
 #include "telemetry/influx_sink.hpp"
 
 #include <gtest/gtest.h>
+#include <httplib.h>
 
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
+#include "events/event_emitter.hpp"
 #include "events/event_types.hpp"
 
 using namespace anolis::telemetry;
@@ -153,6 +160,45 @@ TEST(InfluxLineProtocolTest, FormatZeroDouble) {
 
     std::string line = format_line_protocol(event);
     EXPECT_TRUE(line.find("value_double=0") != std::string::npos);
+}
+
+namespace {
+
+// The text format_line_protocol writes for `value`'s value_double field.
+std::string written_double(double value) {
+    StateUpdateEvent event;
+    event.provider_id = "p";
+    event.device_id = "d";
+    event.signal_id = "s";
+    event.value = value;
+    event.quality = Quality::OK;
+    event.timestamp_ms = 1;
+    const std::string line = format_line_protocol(event);
+    const std::string key = "value_double=";
+    const auto start = line.find(key);
+    if (start == std::string::npos) return "";
+    const auto end = line.find(',', start);
+    return line.substr(start + key.size(), end - start - key.size());
+}
+
+}  // namespace
+
+// #573: the default stream precision kept 6 significant digits.
+TEST(InfluxLineProtocolTest, DoubleValuesRoundTripExactly) {
+    for (const double value : {123456.789, 1234567.0, 0.1234567, 1e20, 0.1 + 0.2, -9876.54321,
+                               std::numeric_limits<double>::max(), std::numeric_limits<double>::denorm_min()}) {
+        const std::string text = written_double(value);
+        ASSERT_FALSE(text.empty()) << "no value_double field for " << value;
+        EXPECT_EQ(std::strtod(text.c_str(), nullptr), value) << "written as " << text;
+    }
+}
+
+TEST(InfluxLineProtocolTest, DoubleValuesStayCompact) {
+    EXPECT_EQ(written_double(23.5), "23.5");
+    EXPECT_EQ(written_double(-15.75), "-15.75");
+    EXPECT_EQ(written_double(0.0), "0");
+    EXPECT_EQ(written_double(1234567.0), "1234567");
+    EXPECT_EQ(written_double(0.1234567), "0.1234567");
 }
 
 TEST(InfluxLineProtocolTest, FormatNaNSkipsValueField) {
@@ -660,3 +706,141 @@ TEST(InfluxLineProtocolTest, ValidateTimestampLast) {
     EXPECT_TRUE(line.find("9876543210") != std::string::npos);
     EXPECT_TRUE(line.rfind("9876543210") == line.length() - 10);  // Last 10 characters
 }
+
+// ---------------------------------------------------------------------------
+// Write responses (#572): a mock /api/v2/write answers with scripted statuses
+// and records every body it receives.
+// ---------------------------------------------------------------------------
+//
+// Skipped under ThreadSanitizer, as http_handlers_test.cpp's suite is:
+// cpp-httplib's server crashes there.
+#if defined(__SANITIZE_THREAD__)
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 1
+#else
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 0
+#endif
+#else
+#define ANOLIS_SKIP_INFLUX_WRITE_TESTS 0
+#endif
+
+#if !ANOLIS_SKIP_INFLUX_WRITE_TESTS
+
+namespace {
+
+class MockInfluxWrite {
+public:
+    // `statuses` answers the requests in order; past its end, 204.
+    explicit MockInfluxWrite(std::vector<int> statuses) : statuses_(std::move(statuses)) {
+        server_.Post("/api/v2/write", [this](const httplib::Request &req, httplib::Response &res) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const size_t i = bodies_.size();
+            bodies_.push_back(req.body);
+            res.status = i < statuses_.size() ? statuses_[i] : 204;
+            if (res.status >= 400) {
+                res.set_content(R"({"code":"invalid","message":"unable to parse 'bad line': missing fields"})",
+                                "application/json");
+            }
+        });
+        port_ = server_.bind_to_any_port("127.0.0.1");
+        thread_ = std::thread([this] { server_.listen_after_bind(); });
+    }
+    ~MockInfluxWrite() {
+        server_.stop();
+        thread_.join();
+    }
+    MockInfluxWrite(const MockInfluxWrite &) = delete;
+    MockInfluxWrite &operator=(const MockInfluxWrite &) = delete;
+
+    std::string url() const { return "http://127.0.0.1:" + std::to_string(port_); }
+
+    // The request bodies so far, once at least `count` have arrived (or 5 s).
+    std::vector<std::string> bodies(size_t count) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (bodies_.size() >= count) {
+                    return bodies_;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        return bodies_;
+    }
+
+private:
+    httplib::Server server_;
+    std::vector<int> statuses_;
+    std::vector<std::string> bodies_;
+    std::mutex mutex_;
+    int port_ = 0;
+    std::thread thread_;
+};
+
+anolis::telemetry::InfluxConfig mock_config(const std::string &url) {
+    anolis::telemetry::InfluxConfig config;
+    config.enabled = true;
+    config.url = url;
+    config.token = "test-token";
+    config.flush_interval_ms = 50;
+    config.timeout_ms = 2000;
+    return config;
+}
+
+// Writes `first`, waits for its request, then writes `second` and returns the
+// bodies of the first two requests.
+std::vector<std::string> write_two_batches(MockInfluxWrite &mock, const std::string &first, const std::string &second) {
+    auto emitter = std::make_shared<anolis::events::EventEmitter>();
+    anolis::telemetry::InfluxSink sink(mock_config(mock.url()));
+    EXPECT_TRUE(sink.start(emitter));
+    sink.enqueue_lines({first});
+    EXPECT_GE(mock.bodies(1).size(), 1u);
+    sink.enqueue_lines({second});
+    const auto bodies = mock.bodies(2);
+    sink.stop();
+    return bodies;
+}
+
+}  // namespace
+
+TEST(InfluxSinkWriteTest, ARejectedBatchIsCountedAsRejected) {
+    MockInfluxWrite mock({400});
+    auto emitter = std::make_shared<anolis::events::EventEmitter>();
+    anolis::telemetry::InfluxSink sink(mock_config(mock.url()));
+    ASSERT_TRUE(sink.start(emitter));
+    sink.enqueue_lines({"bad line", "also bad"});
+    ASSERT_GE(mock.bodies(1).size(), 1u);
+    sink.enqueue_lines({"good value=1 1"});
+    ASSERT_GE(mock.bodies(2).size(), 2u);
+    sink.stop();
+    EXPECT_EQ(sink.total_rejected(), 2u);
+    EXPECT_EQ(sink.total_failed(), 2u);
+    EXPECT_EQ(sink.total_written(), 1u);
+}
+
+TEST(InfluxSinkWriteTest, ARejectedBatchIsNotSentAgainAheadOfNewRows) {
+    MockInfluxWrite mock({400});
+    const auto bodies = write_two_batches(mock, "bad line", "good,tag=a value=1 1");
+    ASSERT_GE(bodies.size(), 2u);
+    EXPECT_EQ(bodies[1], "good,tag=a value=1 1\n") << "the 400-rejected row was sent again with the new one";
+}
+
+TEST(InfluxSinkWriteTest, AnUnauthorizedBatchIsNotSentAgainAheadOfNewRows) {
+    MockInfluxWrite mock({401});
+    const auto bodies = write_two_batches(mock, "first value=1 1", "second value=2 2");
+    ASSERT_GE(bodies.size(), 2u);
+    EXPECT_EQ(bodies[1], "second value=2 2\n");
+}
+
+TEST(InfluxSinkWriteTest, AServerErrorIsRetriedAndTheRowsDelivered) {
+    MockInfluxWrite mock({503});
+    const auto bodies = write_two_batches(mock, "first value=1 1", "second value=2 2");
+    ASSERT_GE(bodies.size(), 2u);
+    EXPECT_EQ(bodies[1], "first value=1 1\nsecond value=2 2\n");
+}
+
+#endif  // !ANOLIS_SKIP_INFLUX_WRITE_TESTS

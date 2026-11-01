@@ -15,6 +15,21 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/04-safety-estop-topology.yaml
     expect: valid
     note: optional informational safety.estop_topology declaration (power_cut)
+  - file: tests/contracts/machine-profile/valid/05-operator.yaml
+    expect: valid
+    note: optional operator block (readings, settings groups, experiment start and stop)
+  - file: tests/contracts/machine-profile/valid/06-operator-start-require.yaml
+    expect: valid
+    note: operator.experiment.start.require with bool, number and string equals (#686)
+  - file: tests/contracts/machine-profile/valid/07-operator-run.yaml
+    expect: valid
+    note: operator.run, the name operator.experiment is a deprecated alias of, with a label (#696)
+  - file: tests/contracts/machine-profile/valid/08-operator-require-when.yaml
+    expect: valid
+    note: an operator.run.start.require entry that applies only when a bool parameter is true (#701)
+  - file: tests/contracts/machine-profile/valid/09-operator-actions.yaml
+    expect: valid
+    note: operator.actions, a button that increases a counter parameter (#697)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -28,6 +43,42 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/04-bad-estop-topology.yaml
     expect: invalid/schema
     note: safety.estop_topology outside the power_cut|signal enum
+  - file: tests/contracts/machine-profile/invalid/schema/05-operator-bad-signal.yaml
+    expect: invalid/schema
+    note: operator.readings[].signal that is not provider/device/signal
+  - file: tests/contracts/machine-profile/invalid/schema/06-operator-empty-label.yaml
+    expect: invalid/schema
+    note: operator.settings[].items[].label that is empty
+  - file: tests/contracts/machine-profile/invalid/schema/07-operator-unknown-key.yaml
+    expect: invalid/schema
+    note: an unknown key in the operator block
+  - file: tests/contracts/machine-profile/invalid/schema/08-operator-stop-mode-auto.yaml
+    expect: invalid/schema
+    note: operator.experiment.stop.mode AUTO, a Stop that leaves automation running
+  - file: tests/contracts/machine-profile/invalid/schema/09-operator-require-missing-message.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require entry without a message
+  - file: tests/contracts/machine-profile/invalid/schema/10-operator-require-empty-message.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require entry with an empty message
+  - file: tests/contracts/machine-profile/invalid/schema/11-operator-require-bad-signal.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require signal that is not provider/device/signal
+  - file: tests/contracts/machine-profile/invalid/schema/12-operator-require-equals-not-scalar.yaml
+    expect: invalid/schema
+    note: an operator.experiment.start.require equals that is not a bool, number or string
+  - file: tests/contracts/machine-profile/invalid/schema/13-operator-run-and-experiment.yaml
+    expect: invalid/schema
+    note: operator.run and its deprecated alias operator.experiment in one profile (#696)
+  - file: tests/contracts/machine-profile/invalid/schema/14-operator-run-empty-label.yaml
+    expect: invalid/schema
+    note: operator.run.label that is empty (#696)
+  - file: tests/contracts/machine-profile/invalid/schema/15-operator-require-when-empty.yaml
+    expect: invalid/schema
+    note: an operator.run.start.require when that is empty (#701)
+  - file: tests/contracts/machine-profile/invalid/schema/16-operator-action-missing-label.yaml
+    expect: invalid/schema
+    note: an operator.actions entry without a label (#697)
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references

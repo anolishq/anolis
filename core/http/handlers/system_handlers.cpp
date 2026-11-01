@@ -59,13 +59,20 @@ void HttpServer::handle_get_runtime_status(const httplib::Request &, httplib::Re
                                {"providers", providers_json},
                                {"device_count", total_device_count}};
 
+    // What a fault in AUTO leaves as it was (#698): the startup preflight's
+    // warning, as data. Absent without automation.
+    if (fault_uncovered_functions_) {
+        response["fault_uncovered_functions"] = fault_uncovered_functions_();
+    }
+
     // Software safe-state / e-stop surface: what a POST /v0/estop would do now,
     // and whether actuation is currently latched.
     if (safe_state_ != nullptr) {
         const auto cap = safe_state_->capability();
         nlohmann::json estop = {{"latched", cap.latched},
                                 {"software_safe_state", control::safe_state_kind_to_string(cap.software_safe_state)},
-                                {"uncovered_actuating_functions", cap.uncovered_actuating_functions}};
+                                {"uncovered_actuating_functions", cap.uncovered_actuating_functions},
+                                {"uncovered_functions", cap.uncovered_functions}};
         if (cap.latched_at_epoch_ms.has_value()) {
             estop["latched_at_epoch_ms"] = *cap.latched_at_epoch_ms;
         } else {
@@ -591,6 +598,17 @@ void HttpServer::handle_get_automation_status(const httplib::Request &, httplib:
         {"engine_diagnostics", view.engine_diagnostics},
         {"run_id", run_id_json},
         {"last_error", health.last_error.empty() ? nlohmann::json() : nlohmann::json(health.last_error)}};
+
+    // This run's failed device calls (#678), an empty list when none failed.
+    nlohmann::json call_failures = nlohmann::json::array();
+    for (const auto &failure : view.call_failures) {
+        call_failures.push_back({{"device_handle", failure.device_handle},
+                                 {"function", failure.function},
+                                 {"consecutive_failures", failure.consecutive_failures},
+                                 {"last_error", failure.last_error},
+                                 {"last_failure_at_epoch_ms", failure.last_failure_at_epoch_ms}});
+    }
+    response["call_failures"] = call_failures;
 
     if (!execution_reason.empty()) {
         response["execution_reason"] = execution_reason;

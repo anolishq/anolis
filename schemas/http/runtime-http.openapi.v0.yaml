@@ -610,7 +610,11 @@ paths:
 
         Event types: state_update, quality_change, device_availability,
         device_removed, mode_change, parameter_change, automation_fault,
-        stop_chain_change and stop_chain_mismatch. `stop_chain_change` carries
+        automation_call_failed, stop_chain_change and stop_chain_mismatch.
+        `automation_call_failed` carries device_handle, function, error,
+        consecutive_failures and timestamp_ms for each device call automation
+        made that the router refused or the provider failed; the
+        provider_id, device_id and signal_id filters do not apply to it. `stop_chain_change` carries
         previous_state, new_state (in_force, clear or unknown), reason and
         timestamp_ms when the observed emergency stop's state moves.
         `stop_chain_mismatch` carries device, expect (power_loss or
@@ -838,6 +842,16 @@ components:
             type: string
         stop_chain:
           $ref: '#/components/schemas/StopChainStatus'
+        fault_uncovered_functions:
+          type: array
+          items:
+            type: string
+          description: >-
+            Present with automation enabled. The actuating functions no
+            dispatchable AUTO -> FAULT hook call drives, as
+            "provider/device/function": what a fault in AUTO leaves as it was,
+            the same list the startup preflight warns about. Empty when every
+            function is driven, or when no AUTO -> FAULT hook is declared.
     StopChainStatus:
       type: object
       additionalProperties: false
@@ -920,7 +934,7 @@ components:
     EstopStatus:
       type: object
       additionalProperties: false
-      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions]
+      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions, uncovered_functions]
       properties:
         latched:
           type: boolean
@@ -947,6 +961,13 @@ components:
             passes the same check. Every ACTUATE function counts when
             software_safe_state is "none". Covered means a call drives the
             function, not that the value it sends is safe.
+        uncovered_functions:
+          type: array
+          items:
+            type: string
+          description: >-
+            The functions uncovered_actuating_functions counts, as
+            "provider/device/function": what a software stop leaves as it was.
     StartupSafeStateStatus:
       type: object
       additionalProperties: false
@@ -1096,6 +1117,10 @@ components:
           type: integer
         total_failed:
           type: integer
+          description: >-
+            Lines not written: dropped when the retry buffer was full, or
+            rejected by InfluxDB with a 4xx other than 429, which is not
+            retried and is logged with the status and the server's error.
         pending_batch:
           type: integer
           description: Lines buffered awaiting the next flush
@@ -1511,6 +1536,7 @@ components:
         - polling_interval_ms
         - params
         - tag_scope
+        - label
         - experiment_label
       properties:
         schema_version: { type: integer }
@@ -1540,10 +1566,19 @@ components:
           description: Recorded so a consumer can reason about time-window boundary fuzz.
         params: { type: object, additionalProperties: true }
         tag_scope: { $ref: '#/components/schemas/TagScope' }
+        label:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+          description: What the operator called the run, or null.
         experiment_label:
           oneOf:
             - { type: string }
             - { type: "null" }
+          deprecated: true
+          description: >-
+            Deprecated alias of label, always equal to it. Kept for one minor
+            release (0.9.x); read label.
     RunResponse:
       type: object
       additionalProperties: false
@@ -1563,7 +1598,16 @@ components:
       type: object
       additionalProperties: false
       properties:
-        experiment_label: { type: string }
+        label:
+          type: string
+          description: What the operator calls the run.
+        experiment_label:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated alias of label, accepted for one minor release (0.9.x).
+            Sent with a different label, the request is refused with
+            INVALID_ARGUMENT.
         params: { type: object, additionalProperties: true }
         tag_scope: { $ref: '#/components/schemas/TagScope' }
     RunCloseRequest:
@@ -1642,6 +1686,7 @@ components:
         - last_evaluation_at_epoch_ms
         - engine_diagnostics
         - run_id
+        - call_failures
       properties:
         status:
           $ref: '#/components/schemas/Status'
@@ -1666,7 +1711,10 @@ components:
             definition is loaded. Under "repeat", the default, the tree is
             ticked again and reports "running" or "blocked". A tick exception
             reports "failed" (execution_reason "terminal_failure"), moves the
-            runtime to FAULT and emits an automation_fault event. A definition
+            runtime to FAULT and emits an automation_fault event, and so does
+            the same device call failing
+            automation.max_consecutive_call_failures times in a row (see
+            call_failures). A definition
             that fails to load is not a status either: the runtime does not
             start.
         execution_reason:
@@ -1697,6 +1745,38 @@ components:
             - type: string
             - type: "null"
           description: Last automation error message, or null when none is recorded.
+        call_failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutomationCallFailure'
+          description: >-
+            The device calls automation made that were refused or failed in
+            the current run, one entry per device and function; empty when
+            none did. Entering AUTO or loading a definition starts a new run
+            and clears it. Each refused or failed call also emits an
+            automation_call_failed event.
+    AutomationCallFailure:
+      type: object
+      additionalProperties: false
+      required: [device_handle, function, consecutive_failures, last_error, last_failure_at_epoch_ms]
+      properties:
+        device_handle:
+          type: string
+          description: provider/device
+        function:
+          type: string
+        consecutive_failures:
+          type: integer
+          minimum: 0
+          description: >-
+            Failures in a row so far. A success resets it to 0 and keeps
+            last_error. At automation.max_consecutive_call_failures (default
+            3) the runtime enters FAULT.
+        last_error:
+          type: string
+          description: The router's refusal or the provider's error for the last failure.
+        last_failure_at_epoch_ms:
+          type: integer
     ProviderSupervision:
       type: object
       additionalProperties: false

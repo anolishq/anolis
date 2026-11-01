@@ -18,5 +18,14 @@
     "stall_suspected": false
   },
   "run_id": null,
-  "last_error": null
+  "last_error": null,
+  "call_failures": [
+    {
+      "device_handle": "bread0/dcmt1",
+      "function": "set_motor1_pwm",
+      "consecutive_failures": 2,
+      "last_error": "Provider call failed: motor1 brake is engaged, so the command would not move it",
+      "last_failure_at_epoch_ms": 1710000000312
+    }
+  ]
 }

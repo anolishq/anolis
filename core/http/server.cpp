@@ -99,7 +99,8 @@ HttpServer::HttpServer(const runtime::HttpConfig &config, int polling_interval_m
       safe_state_(dependencies.safe_state),
       device_loss_latch_(dependencies.device_loss_latch),
       stop_chain_(dependencies.stop_chain),
-      staleness_policy_(dependencies.staleness_policy)
+      staleness_policy_(dependencies.staleness_policy),
+      fault_uncovered_functions_(std::move(dependencies.fault_uncovered_functions))
 #if ANOLIS_ENABLE_AUTOMATION
       ,
       bt_runtime_(dependencies.bt_runtime)

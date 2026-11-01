@@ -108,7 +108,11 @@ Fields:
 2. `influxdb` object:
    - `url`, `org`, `bucket`, `token`
    - `batch_size`, `flush_interval_ms`
-   - `max_retry_buffer_size`
+   - `max_retry_buffer_size`: lines kept from failed writes for the next
+     flush, when the failure may pass (a connection error, 429 or 5xx). A
+     write InfluxDB rejects with another 4xx (malformed lines, a token
+     without write access, no such bucket) is dropped and logged with the
+     status and the server's error, not retried.
 3. `health_interval_ms` (int, default 15000, `0` disables): cadence of
    provider/device health snapshot ingestion into InfluxDB
    (`anolis_provider_health` / `anolis_device_health`). Each snapshot performs
@@ -172,8 +176,15 @@ Fields:
    calls, and `execution_status` is `completed` or `failed` until AUTO is
    entered again or a definition is loaded. Either way the result is logged
    once per change.
-6. `parameters` (array)
-7. `mode_transition_hooks` (optional object)
+6. `max_consecutive_call_failures` (int, at least 1, default 3): how many
+   times in a row the same device call (device and function) may be refused
+   or fail in one run before the runtime enters FAULT. FAULT runs the
+   `AUTO -> FAULT` hooks, and the reason names the call and its last error.
+   A success resets the count, and so does entering AUTO. Each failure is an
+   `automation_call_failed` event and an entry in
+   `GET /v0/automation/status`'s `call_failures`.
+7. `parameters` (array)
+8. `mode_transition_hooks` (optional object)
 
 Parameter entry fields:
 

@@ -20,6 +20,12 @@
 // motor0_off holds "stale", motor0 is reported instead, with stale quality.
 // With `--slow-ready-when <path>`, while that file exists it waits 6 s before
 // answering WaitReady, so a test can hold a restart in flight (#557).
+// On POSIX, with `--close-stdin-after-hello`, or `--close-stdin-when <path>` once
+// that file exists, it closes its stdin before answering the request in hand
+// and then stays alive for 10 s without reading: a provider whose read end is
+// gone, so the runtime's next write to it finds no reader (#549). With
+// `--sigpipe-to <path>` it writes "ignored" or "default" there, for the SIGPIPE
+// disposition it started with.
 
 #include <array>
 #include <chrono>
@@ -37,6 +43,10 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#else
+#include <unistd.h>
+
+#include <csignal>
 #endif
 
 #include "protocol.pb.h"
@@ -162,6 +172,9 @@ int main(int argc, char **argv) {
     bool stop_chain_actuating = false;
     bool stop_chain_no_hint = false;
     bool stop_chain_estop = false;
+    bool close_stdin_after_hello = false;
+    std::string close_stdin_when;
+    std::string sigpipe_to;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
@@ -179,8 +192,21 @@ int main(int argc, char **argv) {
             stop_chain_no_hint = true;
         } else if (std::string(argv[i]) == "--stop-chain-estop") {
             stop_chain_estop = true;
+        } else if (std::string(argv[i]) == "--close-stdin-after-hello") {
+            close_stdin_after_hello = true;
+        } else if (std::string(argv[i]) == "--close-stdin-when" && i + 1 < argc) {
+            close_stdin_when = argv[i + 1];
+        } else if (std::string(argv[i]) == "--sigpipe-to" && i + 1 < argc) {
+            sigpipe_to = argv[i + 1];
         }
     }
+#ifndef _WIN32
+    if (!sigpipe_to.empty()) {
+        struct sigaction current {};
+        sigaction(SIGPIPE, nullptr, &current);
+        std::ofstream(sigpipe_to) << (current.sa_handler == SIG_IGN ? "ignored" : "default");
+    }
+#endif
     // An exception that ends the helper says what it was on stderr, which
     // MSVC's runtime does not do by itself (#605).
     std::set_terminate([] {
@@ -346,7 +372,20 @@ int main(int argc, char **argv) {
             response.mutable_status()->set_code(adpp::Status_Code_CODE_NOT_FOUND);
             response.mutable_status()->set_message("no such device");
         }
+        bool stdin_closed = false;
+#ifndef _WIN32
+        if ((close_stdin_after_hello && request.has_hello()) ||
+            (!close_stdin_when.empty() && marker_present(close_stdin_when))) {
+            // Before answering, so the runtime's next write is sure to find it closed.
+            close(STDIN_FILENO);
+            stdin_closed = true;
+        }
+#endif
         write_response(response);
+        if (stdin_closed) {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            return 0;
+        }
     }
     return 0;
 }

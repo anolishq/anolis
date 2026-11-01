@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "automation/bt_services.hpp"
 #include "automation/parameter_manager.hpp"
@@ -74,6 +76,20 @@ std::string make_pulse_tree_xml(int64_t startup_delay_s, int64_t interval_s, int
     <PeriodicPulseWindow enabled="true" startup_delay_s=")"
         << startup_delay_s << R"(" interval_s=")" << interval_s << R"(" pulse_s=")" << pulse_s << R"("
         now_ms="{now}" active="{active}" pulse_index="{idx}" elapsed_ms="{elapsed}"/>
+  </BehaviorTree>
+</root>
+)";
+    return xml.str();
+}
+
+std::string make_requested_pulse_tree_xml(int64_t delay_s, int64_t pulse_s, int64_t max_queued = 1) {
+    std::stringstream xml;
+    xml << R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <RequestedPulseWindow request="{request}" delay_s=")"
+        << delay_s << R"(" pulse_s=")" << pulse_s << R"(" max_queued=")" << max_queued
+        << R"(" now_ms="{now}" active="{active}" queued="{queued}"/>
   </BehaviorTree>
 </root>
 )";
@@ -152,6 +168,7 @@ protected:
         factory.registerNodeType<anolis::automation::GetParameterInt64Node>("GetParameterInt64");
         factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
         factory.registerNodeType<anolis::automation::PeriodicPulseWindowNode>("PeriodicPulseWindow");
+        factory.registerNodeType<anolis::automation::RequestedPulseWindowNode>("RequestedPulseWindow");
         factory.registerNodeType<anolis::automation::EmitOnChangeOrIntervalNode>("EmitOnChangeOrInterval");
         factory.registerNodeType<anolis::automation::BuildArgsJsonNode>("BuildArgsJson");
     }
@@ -298,6 +315,128 @@ TEST_F(BTNodesTest, PeriodicPulseWindowNodeAcceptsNumericParametersFromGetParame
     EXPECT_EQ(0, blackboard->get<int64_t>("idx"));
 }
 
+// #697: one pulse after a delay each time a counter parameter increases. The
+// counter's first value is the baseline: a runtime start runs nothing.
+namespace {
+
+struct RequestedPulse {
+    BT::Tree tree;
+    BT::Blackboard::Ptr blackboard;
+
+    bool at(int64_t now_ms, int64_t request) {
+        blackboard->set<int64_t>("now", now_ms);
+        blackboard->set<int64_t>("request", request);
+        EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
+        return blackboard->get<bool>("active");
+    }
+    int64_t queued() { return blackboard->get<int64_t>("queued"); }
+};
+
+}  // namespace
+
+TEST_F(BTNodesTest, RequestedPulseWindowRunsOncePerIncreaseAfterItsDelay) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(10, 3), blackboard), blackboard};
+
+    EXPECT_FALSE(p.at(0, 4));     // the baseline: no pulse at start
+    EXPECT_FALSE(p.at(5000, 4));  // nothing requested
+    EXPECT_FALSE(p.at(6000, 5));  // requested: waits delay_s
+    EXPECT_EQ(0, p.queued());     // the one request is running, not queued
+    EXPECT_FALSE(p.at(15999, 5));
+    EXPECT_TRUE(p.at(16000, 5));  // delay over: on for pulse_s
+    EXPECT_TRUE(p.at(18999, 5));
+    EXPECT_FALSE(p.at(19000, 5));  // and off
+    EXPECT_FALSE(p.at(60000, 5));  // once: no repeat without a new request
+}
+
+TEST_F(BTNodesTest, RequestedPulseWindowRunsQueuedRequestsOneAfterAnother) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(0, 2, 2), blackboard), blackboard};
+
+    EXPECT_FALSE(p.at(0, 0));
+    EXPECT_TRUE(p.at(1000, 2));  // two requests at once: the first runs now
+    EXPECT_EQ(1, p.queued());
+    EXPECT_TRUE(p.at(2999, 2));
+    EXPECT_TRUE(p.at(3000, 2));  // the second follows when the first ends
+    EXPECT_EQ(0, p.queued());
+    EXPECT_FALSE(p.at(5000, 2));
+}
+
+// max_queued caps the requests outstanding, the running one included; presses
+// beyond it add nothing, and the baseline still moves.
+namespace {
+
+int count_pulses(RequestedPulse& p, int presses) {
+    int pulses = 0;
+    bool was_active = false;
+    int64_t request = 0;
+    EXPECT_FALSE(p.at(0, request));
+    for (int64_t t = 100; t <= 60000; t += 100) {
+        if (presses > 0 && t % 300 == 0) {  // five presses, 0.3 s apart
+            ++request;
+            --presses;
+        }
+        const bool active = p.at(t, request);
+        if (active && !was_active) ++pulses;
+        was_active = active;
+    }
+    return pulses;
+}
+
+}  // namespace
+
+TEST_F(BTNodesTest, RequestedPulseWindowCapsTheRequestsOutstanding) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    for (const auto& [cap, pulses] : std::vector<std::pair<int64_t, int>>{{1, 1}, {3, 3}}) {
+        auto blackboard = make_blackboard(true);
+        RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(2, 3, cap), blackboard), blackboard};
+        EXPECT_EQ(pulses, count_pulses(p, 5)) << "max_queued " << cap;
+    }
+}
+
+TEST_F(BTNodesTest, RequestedPulseWindowTakesAPressOnTheTickAPulseEnds) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(0, 2, 1), blackboard), blackboard};
+
+    EXPECT_FALSE(p.at(0, 0));
+    EXPECT_TRUE(p.at(1000, 1));  // runs 1000-3000
+    EXPECT_TRUE(p.at(3000, 2));  // pressed as it ends: its place is free, so it runs
+    EXPECT_FALSE(p.at(5000, 2));
+}
+
+TEST_F(BTNodesTest, RequestedPulseWindowTakesADroppedCounterAsTheNewBaseline) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(0, 2), blackboard), blackboard};
+
+    EXPECT_FALSE(p.at(0, 7));
+    EXPECT_FALSE(p.at(1000, 0));  // reset (a runtime restart's default): nothing runs
+    EXPECT_TRUE(p.at(2000, 1));   // the next increase from the new baseline runs
+}
+
+TEST_F(BTNodesTest, RequestedPulseWindowFailsOnInvalidInputs) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    blackboard->set<int64_t>("now", 0);
+    blackboard->set<int64_t>("request", 0);
+    auto negative_delay = factory.createTreeFromText(make_requested_pulse_tree_xml(-1, 2), blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, negative_delay.tickOnce());
+    auto no_pulse = factory.createTreeFromText(make_requested_pulse_tree_xml(0, 0), blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, no_pulse.tickOnce());
+    auto no_queue = factory.createTreeFromText(make_requested_pulse_tree_xml(0, 2, 0), blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, no_queue.tickOnce());
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+}
+
 TEST_F(BTNodesTest, EmitOnChangeOrIntervalNodeEmitsOnFirstAndChange) {
     BT::BehaviorTreeFactory factory;
     register_nodes(factory);
@@ -349,6 +488,8 @@ TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
     expect_ports(anolis::automation::GetParameterInt64Node::providedPorts(), {"param", "value"});
     expect_ports(anolis::automation::CheckBoolNode::providedPorts(), {"value", "expected"});
     expect_ports(anolis::automation::PeriodicPulseWindowNode::providedPorts(), {"enabled", "active"});
+    expect_ports(anolis::automation::RequestedPulseWindowNode::providedPorts(),
+                 {"request", "delay_s", "pulse_s", "max_queued", "active", "queued"});
     expect_ports(anolis::automation::EmitOnChangeOrIntervalNode::providedPorts(), {"key", "emit"});
     expect_ports(anolis::automation::BuildArgsJsonNode::providedPorts(), {"arg1_name", "json"});
 }

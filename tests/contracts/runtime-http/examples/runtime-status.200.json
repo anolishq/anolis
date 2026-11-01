@@ -19,8 +19,10 @@
     "latched": false,
     "software_safe_state": "hooks",
     "latched_at_epoch_ms": null,
-    "uncovered_actuating_functions": 0
+    "uncovered_actuating_functions": 0,
+    "uncovered_functions": []
   },
+  "fault_uncovered_functions": ["bread0/dcmt0/set_brake", "bread0/dcmt1/set_brake"],
   "startup_safe_state": {
     "on_startup": "safe_state",
     "ran": true,

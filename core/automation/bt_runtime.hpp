@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 // BehaviorTree.CPP includes
 #include <behaviortree_cpp/basic_types.h>
@@ -204,6 +205,22 @@ public:
      */
     void set_stop_on_terminal(bool stop);
 
+    /**
+     * @brief How many failures in a row of the same device call fault the
+     * runtime (`automation.max_consecutive_call_failures`, default 3; #678).
+     */
+    void set_max_consecutive_call_failures(int limit);
+
+    /**
+     * @brief Counts one device call's outcome and emits an
+     * `automation_call_failed` event for a failure.
+     *
+     * @return The fault reason once this call has failed the limit's number of
+     * times in a row, else empty. CallDeviceNode throws it.
+     */
+    std::string record_call_result(const std::string& device_handle, const std::string& function, bool success,
+                                   const std::string& error);
+
     /// True when called on the tick loop thread, e.g. from a mode-change
     /// callback that a tick exception's FAULT transition dispatched.
     bool on_tick_thread() const;
@@ -258,6 +275,7 @@ private:
     // Threading
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_on_terminal_{false};
+    std::atomic<int> max_consecutive_call_failures_{3};
     std::unique_ptr<std::thread> tick_thread_;
     std::atomic<std::thread::id> tick_thread_id_{};  ///< Set by the tick loop itself while it runs.
     int tick_rate_hz_ = 10;
@@ -271,6 +289,7 @@ private:
     uint64_t total_ticks_ = 0;
     std::string last_error_;
     uint64_t error_count_ = 0;
+    std::vector<CallFailureView> call_failures_;  // this run's failed device calls (#678)
 
     // Event emitter (optional, for error notifications)
     std::shared_ptr<events::EventEmitter> event_emitter_;

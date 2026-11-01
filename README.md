@@ -293,7 +293,7 @@ automation:
 
 Machines with actuating outputs must also declare safe-state
 `mode_transition_hooks` or the runtime refuses `MANUAL -> AUTO` (see
-[docs/safety.md](docs/safety.md#manual---auto)).
+[docs/safety.md](docs/safety.md#manual-to-auto)).
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v0/parameters \

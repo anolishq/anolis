@@ -13,6 +13,270 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-31
+
+0.9.2 is a patch release: Grafana dashboard display names, nothing in the
+runtime. An install with `--with-observability` refreshes the dashboards
+from the release asset.
+
+### Fixed
+
+- **Grafana panels name what they show** (#712). Stat tiles on Device
+  Health and System Overview read "_value" above their number (the Flux
+  column's name); they now show the value alone, as the title names it.
+  I/O & Watchdog Health named each device's series and tiles
+  `bread0/dcmt0 {device_id="dcmt0", provider_id="bread0", runtime_name=…}`;
+  they now read `bread0/dcmt0`, and Provider Degraded / Failed Devices
+  reads "bread0 degraded" and "bread0 failed devices". Its status table and
+  Signal History's String table head their columns Provider, Device,
+  I/O OK, Trips and so on, not `provider_id`, `io_ok`, `watchdog_trip_count`.
+
+## [0.9.1] - 2026-10-31
+
+0.9.1 is a patch release: the Grafana dashboards' queries, nothing in the
+runtime. An install with `--with-observability` refreshes the dashboards
+from the release asset.
+
+### Fixed
+
+- **Grafana's dashboards no longer time out on a Raspberry Pi** (#708).
+  Twelve panels on Signal History, Device Health and System Overview seed
+  each series with its last value from the 30 days before the range, and
+  filtered that read by the live runtimes before `last()`. That filter can't
+  be pushed down to storage, so InfluxDB read the whole 30 days into Flux on
+  every refresh: 22-36 s per query on the reference rig, past Grafana's 30 s
+  timeout. The filter now follows `last()`, and the same queries take
+  0.13-1.1 s there with the same results (Quality Distribution Over Time,
+  6.1 s, is slow for another reason).
+
+## [0.9.0] - 2026-10-31
+
+0.9.0 is a minor release because an existing profile's operator panel
+behaves differently (`docs/dependencies.md`: before 1.0, a change that makes
+an existing install behave differently bumps MINOR). The operator block's
+`experiment` is now `run`, and `run.start.enable` now lists the groups' on
+switches, which Start no longer turns on. Runs take a `label` in place of
+`experiment_label`.
+
+New in 0.9.0, all additive: `require.when` on Start conditions (#701),
+`operator.actions` and the `RequestedPulseWindow` node with `max_queued`
+(#697), and `estop.uncovered_functions` and `fault_uncovered_functions` in
+the runtime status (#698). Each is under Added.
+
+Upgrade notes for operators:
+
+- **`operator.experiment` is now `operator.run`** (#696). A profile that
+  still says `experiment` validates through 0.9.x, as a deprecated alias; one
+  with both is refused. Rename the key to `run` before 0.10. `run` may also
+  carry a `label`, the heading of the panel's run section.
+- **Start leaves the On switches as they are** (#701). `run.start.enable` now
+  lists the groups' on switches. With a workbench that reads 0.9.0's
+  schema, Start run runs only the groups an operator ticked On, and refuses
+  while none is; it used to set every `start.enable` parameter true. Stop
+  still sets `stop.disable` false. A profile that relied on Start to switch
+  everything on now needs the groups ticked first.
+- **Runs take a `label`** (#696). `experiment_label` still works through
+  0.9.x and is returned with the same value; a request that sends both with
+  different values is refused with 400. Send `label`.
+
+### Added
+
+- **Start conditions that apply only when a group is on** (#701). A
+  `run.start.require` entry (and one under the deprecated `experiment`)
+  takes an optional `when`: the name of a bool parameter, normally one of
+  `start.enable`. The condition then applies only while that parameter reads
+  true at Start. Without `when` it applies always, as before, so 0.8.0
+  profiles stay valid. The runtime does not read the operator block; the
+  workbench evaluates `when`.
+- **The runtime status names what a stop or a fault leaves running** (#698).
+  `estop.uncovered_functions` lists the functions `uncovered_actuating_functions`
+  counts, as `provider/device/function`: what a software stop leaves as it was.
+  With automation enabled, `fault_uncovered_functions` lists the actuating
+  functions no `AUTO -> FAULT` hook drives, which a fault in AUTO leaves as
+  they were; it was only the startup preflight's warning before. Both are
+  additive; the count stays.
+- **One pulse per operator request** (#697). The `RequestedPulseWindow`
+  behaviour-tree node runs one pulse, `delay_s` after a request and `pulse_s`
+  long, each time its `request` counter parameter increases. Requests that
+  arrive while one runs wait their turn (`queued`), up to `max_queued`
+  outstanding, the running one included (default 1); presses beyond it add
+  nothing. The counter's value when the tree starts is the baseline, so a
+  start runs nothing, and a counter that drops only moves the baseline. A tree
+  cannot write parameters, so a counter, not a bool, is what an operator's
+  request can be. The machine profile's `operator.actions` declares buttons
+  that increase such a counter, each with a `label` ("Sample now"); the
+  workbench shows them. Neither names a device.
+
+### Changed
+
+- **`run.start.enable` lists the groups' on switches** (#701). A consumer's
+  Start runs only if at least one is on, and no longer sets them true, so the
+  operator's On switches decide what a run drives; `stop.disable` still sets
+  its parameters false. The shape is unchanged: only the schema's description
+  and the contract doc say so.
+- **The operator block's `experiment` is now `run`** (#696). A filament
+  extruder or a centrifuge does a run, not an experiment.
+  `operator.run` has the same shape as `operator.experiment` (`start` with
+  `enable`, `mode`, `require`; `stop` with `disable`, `mode`) and an optional
+  `label`, the heading the workbench gives the section (default "Run").
+  `operator.experiment` is accepted as a deprecated alias through 0.9.x; a
+  profile with both is refused.
+- **Runs take a `label`** (#696). `POST /v0/runs` accepts `label`, and every
+  run record carries it. `experiment_label` is its deprecated alias through
+  0.9.x: a request may still send it, and records and responses carry it with
+  the same value as `label`. A request that sends both with different values is
+  refused with `INVALID_ARGUMENT` (400). Journals written before this read the
+  old `experiment_label` as the label.
+
+### Docs
+
+- The install-route pages say what the install does to the runtime's bind
+  and auth (it rewrites a loopback bind to `0.0.0.0` with auth on), show the
+  health check with its token, and say how to apply a safe-state fix after a
+  failed install (#692).
+- The HTTP API reference documents the runs and telemetry endpoints, the
+  provider pages point at the SDK and its conformance harness, and the
+  safety anchors work on the docs site as well as on GitHub (#693).
+
+### CI
+
+- The install walk runs against runtime 0.8.0 (#691).
+
+## [0.8.0] - 2026-10-30
+
+0.8.0 is a minor release because a running machine behaves differently:
+automation whose device calls keep failing now enters FAULT
+(`docs/dependencies.md`: before 1.0, a change that makes an existing install
+behave differently bumps MINOR). The machine-profile schema gains
+`operator.experiment.start.require`, and the runtime-http contract gains an
+event and a status field.
+
+Upgrade notes for operators:
+
+- **A repeatedly failing automation call faults the runtime** (#687, Fixes
+  #678). When the same device call automation makes is refused or fails three
+  times in a row, the runtime enters FAULT, which runs the `AUTO -> FAULT`
+  hooks, and the fault names the call and its last error. Before, the tree was
+  ticked again for as long as AUTO lasted, and nothing said the calls were
+  failing: on the reference rig, dosing ran 60 s in AUTO with every pulse
+  refused. A success resets the count, and so does entering AUTO. Calls the
+  device-loss latch refuses count too: a tree that keeps calling a device the
+  latch holds now enters FAULT after three refusals, where it used to run on
+  until MANUAL -> AUTO re-armed the device. Set
+  `automation.max_consecutive_call_failures` (default 3, at least 1) higher to
+  allow more failures in a row.
+
+### Added
+
+- **`operator.experiment.start.require` in the machine-profile schema** (#689,
+  Fixes #686): optional conditions on signals that must hold before an
+  operator panel's Start runs, each `{signal, equals, message}`, where
+  `equals` is a bool, number or string and `message` is the fix the operator
+  sees. Profiles without it, 0.7.0's included, stay valid.
+- **`automation.max_consecutive_call_failures`** (#687), default 3, at least 1.
+- **`automation_call_failed` SSE event** (#687), one per refused or failed
+  automation device call: `device_handle`, `function`, `error`,
+  `consecutive_failures`.
+- **`call_failures` in `GET /v0/automation/status`** (#687): each device call
+  that failed this run, with its failures in a row, last error and when.
+
+### Changed
+
+- **A repeatedly failing automation call faults the runtime** (#687): see the
+  upgrade note.
+
+### CI
+
+- The install walk runs against runtime 0.7.0 (#685).
+- The runtime-http OpenAPI check fails when the `/v0/events` description
+  leaves out an event the SSE serializer sends (#687).
+- pytest moves to `>=9.2.0,<9.3.0` for the Python checks (#688).
+
+## [0.7.0] - 2026-10-30
+
+0.7.0 is a minor release because existing installs behave differently: run
+records and events are synced to storage before the API answers, a write
+InfluxDB rejects is dropped instead of retried, and providers no longer
+inherit each other's pipes (`docs/dependencies.md`: before 1.0, a change that
+makes an existing install behave differently bumps MINOR). The machine-profile
+schema gains an optional `operator` block.
+
+Upgrade notes for operators:
+
+- **Each run-journal append is synced to storage before it returns** (#673,
+  Fixes #551). `POST /v0/runs`, `POST /v0/runs/{id}/close` and run events used
+  to report success once the bytes reached the page cache, so a power cut soon
+  after could lose a confirmed record. Each append to `runs/index.jsonl` or a
+  run's events file is now fsynced, and `runs/` is synced after a new file is
+  created. A failed sync is the call's error: open and close report no success,
+  and an event append returns `ok == false`. Events are appended off the tick
+  thread.
+- **A write InfluxDB rejects is dropped, not retried** (#671, Fixes #572). A
+  4xx other than 429 (400, 401, 403, 404, 413, 422) used to go back into the
+  retry buffer and be sent ahead of every new batch; once the buffer filled,
+  each new batch was dropped instead, until a restart. Now the rejected request
+  is dropped, counted in `total_failed`, and logged as an ERROR with the status,
+  the server's error and the rows dropped, for example
+  `[InfluxSink] Write rejected (HTTP 400): …; dropped 2 rows, not retried (2 rejected in all)`.
+  401 and 403 add "(check the InfluxDB token and bucket)": the token is read
+  only at start, so fix it and restart. 429, 5xx and connection errors are
+  retried as before.
+- **Provider pipes are created close-on-exec** (#676, Fixes #570). On Linux,
+  each provider inherited the runtime's ends of every pipe made before it,
+  including earlier providers' stdin. Stopping a provider closes its stdin and
+  waits for EOF, which never came while a later provider held a copy, so the
+  stop waited out `shutdown_timeout_ms` and killed it, and the SDK's
+  `on_shutdown` never ran. Providers now hold only their own fds 0, 1 and 2,
+  shut down when asked, and run `on_shutdown`. Windows was unaffected.
+- **A provider that closes its stdin no longer ends the runtime** (#675, Fixes
+  #549). The runtime now ignores `SIGPIPE` from the start, so such a write fails
+  with "Broken pipe (provider terminated)" and that provider is marked
+  unavailable, where the runtime used to exit 141 with no log. That was
+  possible during provider startup and whenever `http.enabled` was false; the
+  installed service was already covered by systemd's `IgnoreSIGPIPE=yes`.
+  Providers start with the disposition the runtime inherited, as before.
+- **`value_double` is written so it reads back exactly** (#674, Fixes #573).
+  It used to be rounded to 6 significant digits on its way to InfluxDB:
+  `123456.789` was stored as `123457`. New points carry the full value; points
+  already written keep their rounding.
+
+### Added
+
+- **An optional `operator` block in the machine-profile schema** (#682, Fixes
+  #680): the readings an operator watches, the experiment's settings in
+  groups, and what Start and Stop set. Stop's `mode` takes `IDLE` or `MANUAL`
+  only. `docs/contracts/machine-profile-baseline.md` describes it, and the
+  release's machine-profile schema bundle carries the schema and its new
+  fixtures.
+- **`InfluxSink::total_rejected()`** (#671), and the OpenAPI `total_failed`
+  description says rejected writes count in it.
+
+### Changed
+
+- **Run-journal appends are synced to storage** (#673), as the upgrade notes
+  describe; the header, `docs/system-surfaces.md` and the automation-platform
+  RFC now say so.
+- **A 4xx other than 429 from InfluxDB is dropped and logged** (#671).
+
+### Fixed
+
+- **Providers shut down cleanly when there is more than one** (#676).
+- **A write to a closed provider fails that call instead of ending the
+  runtime** (#675).
+- **`value_double` round-trips exactly** (#674).
+- **A torn last journal line no longer swallows the next record** (#672, Fixes
+  #639): an append starts a new line when the file doesn't end in one, so an
+  abandoned run's recovery record, or a newly opened run, is kept.
+- **install.sh's observability step retries a failed `apt-get update`** (#670,
+  Fixes #669), up to 3 times over about a minute, and names apt's first `E:`
+  line when it gives up.
+
+### CI
+
+- The install walk runs against runtime 0.6.0 (#667), and its workbench
+  scenario keeps install.sh's output in the artifact (#668).
+- The docs check runs when `doc-schemas.json` or a schema changes (#683).
+
 ## [0.6.0] - 2026-10-29
 
 0.6.0 is a minor release because existing installs behave differently: when

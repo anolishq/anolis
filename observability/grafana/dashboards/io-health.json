@@ -101,7 +101,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "watchdog_armed"
+              "options": "Watchdog"
             },
             "properties": [
               {
@@ -149,7 +149,7 @@
         "sortBy": [
           {
             "desc": false,
-            "displayName": "provider_id"
+            "displayName": "Provider"
           }
         ]
       },
@@ -188,7 +188,19 @@
               "missing": 9,
               "excluded": 10
             },
-            "renameByName": {}
+            "renameByName": {
+              "provider_id": "Provider",
+              "device_id": "Device",
+              "health": "Health",
+              "io_ok": "I/O OK",
+              "io_failed": "I/O failed",
+              "io_retried_attempts": "Retried attempts",
+              "watchdog_armed": "Watchdog",
+              "watchdog_tripped": "Tripped",
+              "watchdog_trip_count": "Trips",
+              "missing": "Missing",
+              "excluded": "Excluded"
+            }
           }
         }
       ],
@@ -246,7 +258,8 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -337,7 +350,8 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -428,7 +442,8 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -502,7 +517,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -592,7 +608,7 @@
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "value_and_name",
+        "textMode": "value",
         "wideLayout": true
       },
       "targets": [
@@ -668,7 +684,8 @@
               }
             ]
           },
-          "unit": "ms"
+          "unit": "ms",
+          "displayName": "${__field.labels.provider_id}/${__field.labels.device_id}"
         },
         "overrides": []
       },
@@ -761,7 +778,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "${__field.labels.provider_id} degraded"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "${__field.labels.provider_id} failed devices"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,

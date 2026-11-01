@@ -316,6 +316,16 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 data["new_value"] = e.new_value_str;
                 data["timestamp_ms"] = e.timestamp_ms;
 
+            } else if constexpr (std::is_same_v<T, events::AutomationCallFailedEvent>) {
+                result = "event: automation_call_failed\n";
+                result += "id: " + std::to_string(e.event_id) + "\n";
+
+                data["device_handle"] = e.device_handle;
+                data["function"] = e.function;
+                data["error"] = e.error;
+                data["consecutive_failures"] = e.consecutive_failures;
+                data["timestamp_ms"] = e.timestamp_ms;
+
             } else if constexpr (std::is_same_v<T, events::AutomationFaultEvent>) {
                 // Neutral engine-fault event. Rendered inline because it carries a
                 // generic `locus` field rather than the default payload shape. The

@@ -57,6 +57,9 @@ Runtime::~Runtime() { shutdown(); }
 
 bool Runtime::initialize(std::string &error) {
     LOG_INFO("[Runtime] Initializing Anolis Core");
+    // Before any provider is spawned, and whether or not HTTP is enabled: the
+    // HTTP server's construction used to be what left SIGPIPE ignored (#549).
+    SignalHandler::ignore_broken_pipe();
     const auto startup_begin = std::chrono::steady_clock::now();
     const int startup_timeout_ms = config_.runtime.startup_timeout_ms;
 
@@ -729,6 +732,7 @@ bool Runtime::init_automation(std::string &error) {
         }
 
         bt_runtime_->set_stop_on_terminal(config_.automation.on_terminal == OnTerminal::STOP);
+        bt_runtime_->set_max_consecutive_call_failures(config_.automation.max_consecutive_call_failures);
 
         if (!bt_runtime_->load_tree(config_.automation.behavior_tree)) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;
@@ -784,6 +788,11 @@ bool Runtime::init_http(std::string &error) {
         // Latched devices are reported on GET /v0/runtime/status (#285).
         dependencies.device_loss_latch = device_loss_latch_.get();
         dependencies.stop_chain = stop_chain_.get();
+        if (config_.automation.enabled) {
+            dependencies.fault_uncovered_functions = [this] {
+                return fault_hook_uncovered_functions(*registry_, *call_router_, config_.automation);
+            };
+        }
         // Device-liveness staleness thresholds (#220): derived from the poll
         // cadence + device count unless explicitly overridden.
         dependencies.staleness_policy = {config_.polling.interval_ms, config_.health.staleness.warn_after_ms,

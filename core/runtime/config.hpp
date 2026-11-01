@@ -244,6 +244,7 @@ struct AutomationConfig {
     int tick_rate_hz = 10;                                    // BT tick rate (1-1000 Hz)
     GatingPolicy manual_gating_policy = GatingPolicy::BLOCK;  // BLOCK or OVERRIDE
     OnTerminal on_terminal = OnTerminal::REPEAT;              // repeat or stop
+    int max_consecutive_call_failures = 3;                    // Same call failing this often faults (#678)
     std::vector<ParameterConfig> parameters;                  // Runtime parameters
     ModeTransitionHooksConfig mode_transition_hooks;          // Generic mode transition hooks
 };

@@ -106,7 +106,7 @@ at its `schema-source.json` pin, sha-verified, Renovate-bumped), docs site
 `/v0`: runtime/provider/telemetry status, devices + capabilities, state,
 `/v0/call`, `/v0/mode`, `/v0/estop`, `/v0/estop/clear`, `/v0/parameters`, automation tree/status, runs (+ run
 events), and SSE `/v0/events` (state/quality/availability/removal/mode/
-parameter/`automation_fault`/`stop_chain_change`/`stop_chain_mismatch`). Routes register in
+parameter/`automation_fault`/`automation_call_failed`/`stop_chain_change`/`stop_chain_mismatch`). Routes register in
 `core/http/server.cpp`; human guide in [docs/http/README.md](http/README.md).
 **Security is enforced in code**: Bearer auth (`core/http/auth.cpp`,
 global pre-routing 401, loopback included unless `auth_exempt_loopback`; token via config or
@@ -119,10 +119,12 @@ guard in `info.description`; operator guidance is [docs/security.md](security.md
 ## Automation
 
 Config-driven BehaviorTree: `automation.behavior_tree` (XML path),
-`tick_rate_hz`, `manual_gating_policy`, `parameters[]`,
-`mode_transition_hooks`. Wire surface: `/v0/automation/tree|status`,
-`/v0/mode`, `/v0/parameters`, plus the `automation_fault` SSE event (neutral
-since v0.1.26 — no BT vocabulary). Internally the engine seam exists
+`tick_rate_hz`, `manual_gating_policy`, `on_terminal`,
+`max_consecutive_call_failures`, `parameters[]`, `mode_transition_hooks`. Wire
+surface: `/v0/automation/tree|status` (status lists `call_failures`),
+`/v0/mode`, `/v0/parameters`, plus the `automation_fault` and
+`automation_call_failed` SSE events (neutral since v0.1.26 — no BT
+vocabulary). Internally the engine seam exists
 (`IAutomationEngine`, `core/automation/automation_engine.hpp` — Phase 0 of the
 [automation-platform RFC](rfcs/automation-platform.md)); `BTRuntime` is the
 only implementation and parts of the HTTP layer still read BT-shaped state, so
@@ -140,7 +142,7 @@ contract `schemas/telemetry/telemetry-timeseries.schema.v1.json`
 `schemas/telemetry/telemetry-health-timeseries.schema.v1.json` — the retained
 form of the `/v0/providers/health` view (io counters, watchdog state,
 degraded/failed-device flags), both derived from one shared collector. Run identity persists in an append-only JSONL journal
-(`<data_dir>/runs/index.jsonl`, flushed (not fsynced) per transition, abandoned-run recovery,
+(`<data_dir>/runs/index.jsonl`, synced to storage before each transition is reported, abandoned-run recovery,
 one open run at a time) — an internal file format, reached externally only via
 `/v0/runs*`. Historian *export* is `anolis-telemetry-export` (separate repo,
 v0.1.1): an authenticated HTTP service (default :8091) that queries InfluxDB

@@ -34,10 +34,73 @@ Define machine profile manifest structure and lock manifest behavior for validat
      release; `signal` shows as `estop=true` in device state with the bus
      alive. Both wirings are first-class; nothing may branch runtime behavior
      on this field beyond presentation/interpretation, and absence is valid)
+   - an optional operator panel (`operator`, below): the readings an operator
+     watches, the automation's settings in labelled groups, and what starting
+     and stopping a run does. Presentation only: nothing in the
+     runtime reads it, and absence is valid
 4. Validator enforces:
    - schema correctness
    - referenced file existence
    - referenced runtime profile schema compatibility
+
+## The `operator` block
+
+Read by the workbench's operator panel (anolishq/anolis-workbench#232). Every
+key is optional; a profile without the block is valid and behaves as before.
+
+<!-- validate: machine-profile fragment -->
+```yaml
+operator:
+  readings:                       # shown large, in this order
+    - { signal: ezo0/ph0/ph_value, label: pH, decimals: 2 }
+    - { signal: bread0/rlht0/t1_c, label: Temperature, unit: "°C", decimals: 1 }
+  settings:                       # automation parameters, grouped and labelled
+    - group: Stirring
+      items:
+        - { parameter: impeller_pwm, label: Speed }
+  run:                            # what Start run and Stop run do
+    label: Batch                  # the section's heading; default "Run"
+    start:
+      enable: [impeller_enable]
+      mode: AUTO
+      require:                    # checked before Start runs
+        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake", when: impeller_enable }
+    stop: { disable: [impeller_enable], mode: IDLE }
+  actions:                        # buttons; each press adds one to its counter
+    - { label: Sample now, parameter: sample_requests }
+```
+
+1. `readings[]`: `signal` is `provider/device/signal` and `label` is required;
+   `unit` (non-empty) and `decimals` (0 to 6) are optional.
+2. `settings[]`: a non-empty `group` name and at least one item; each item
+   names an automation `parameter` and a non-empty `label`, with an optional
+   `unit`.
+3. `run.label` (optional, non-empty): what the operator panel heads the run
+   section with, such as `Batch` or `Print`. The panel's default is "Run".
+4. `run.start` and `run.stop`: the `mode` to enter (required). `start.enable`
+   lists the groups' on switches (bool parameters): Start runs only if at
+   least one is on, and doesn't change them (0.9.0; before, Start set them
+   true). `stop.disable` lists the bool parameters Stop sets false. Start
+   takes `IDLE`, `MANUAL` or `AUTO`; Stop takes `IDLE` or `MANUAL` only, so a
+   Stop never leaves automation running.
+5. `run.start.require[]` (optional): conditions that must hold before
+   Start runs. Each names a `signal` (`provider/device/signal`), the value it
+   must read (`equals`: a bool, number or string) and a non-empty `message`,
+   the fix the operator sees when it doesn't. Start refuses while any does
+   not hold. An optional `when` names a bool parameter, normally one of
+   `start.enable`: the condition then applies only while that parameter reads
+   true at Start, so a condition about one output does not refuse a run that
+   leaves it off (0.9.0).
+6. `experiment` (0.7.0 and 0.8.0) is a deprecated alias of `run`, with the
+   same shape, accepted through 0.9.x. A profile carries one or the other: one
+   with both is refused.
+7. `actions[]` (optional, 0.9.0): buttons. Each has a non-empty `label` and
+   names an int64 automation `parameter`, a counter the press increases by
+   one. A tree reads it to run something once per press, such as
+   `RequestedPulseWindow` (see `docs/automation.md`).
+8. Unknown keys anywhere in the block are refused. The schema checks shape only:
+   that a named signal or parameter exists in the machine's variants is the
+   consumer's check.
 
 ## Validation Gates
 
