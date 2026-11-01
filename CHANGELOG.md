@@ -13,6 +13,24 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-01
+
+0.10.0 is a minor release because a runtime config that sets the deprecated
+flat telemetry keys now writes telemetry differently (`docs/dependencies.md`:
+before 1.0, a change that makes an existing install behave differently bumps
+MINOR).
+
+Upgrade notes:
+
+- **The flat telemetry keys are applied** (#548). A config that sets
+  `telemetry.influx_url`, `influx_org`, `influx_bucket`, `influx_token`,
+  `batch_size` or `flush_interval_ms` now uses those values; before, each was
+  warned about and dropped, and the defaults were used. A flat
+  `influx_token` now wins over `INFLUXDB_TOKEN` from the environment, so a
+  stale token left there is rejected by InfluxDB (logged as a rejected write
+  with a token hint). The nested `telemetry.influxdb` keys still win over the
+  flat ones; the bioreactor-v1 project's configs set only nested keys.
+
 ### Added
 
 - **Conditions checked before an action press** (#707):
@@ -21,6 +39,21 @@ commit messages only.
   consumer refuses a press, increasing nothing, while any does not hold.
   Both lists now share the schema's `operatorRequirement` definition.
   Additive: existing profiles stay valid.
+
+### Changed
+
+- **The deprecated flat telemetry keys are mapped into the telemetry
+  config** (#548), as `docs/contracts/runtime-config-baseline.md` already
+  documented, after their deprecation warnings and before the nested
+  `telemetry.influxdb` block. See the upgrade note.
+
+### Docs
+
+- **Upgrading a running machine** (#711) in `docs/deploy/install-sh.md`:
+  leave the runtime running, since the install restarts it once near the
+  end. Stopping it first leaves every board's hardware watchdog unserviced
+  for the whole install, so each trips and the startup safe state fails. The
+  section says how to clear the boards if they did.
 
 ## [0.9.2] - 2026-10-31
 
