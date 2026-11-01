@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Grafana panels name what they show** (#712). Stat tiles on Device
+  Health and System Overview read "_value" above their number (the Flux
+  column's name); they now show the value alone, as the title names it.
+  I/O & Watchdog Health named each device's series and tiles
+  `bread0/dcmt0 {device_id="dcmt0", provider_id="bread0", runtime_name=…}`;
+  they now read `bread0/dcmt0`, and Provider Degraded / Failed Devices
+  reads "bread0 degraded" and "bread0 failed devices". Its status table and
+  Signal History's String table head their columns Provider, Device,
+  I/O OK, Trips and so on, not `provider_id`, `io_ok`, `watchdog_trip_count`.
+
 ## [0.9.1] - 2026-10-31
 
 0.9.1 is a patch release: the Grafana dashboards' queries, nothing in the
