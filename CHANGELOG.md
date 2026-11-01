@@ -13,6 +13,12 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-31
+
+0.9.1 is a patch release: the Grafana dashboards' queries, nothing in the
+runtime. An install with `--with-observability` refreshes the dashboards
+from the release asset.
+
 ### Fixed
 
 - **Grafana's dashboards no longer time out on a Raspberry Pi** (#708).
