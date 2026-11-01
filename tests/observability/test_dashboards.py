@@ -136,6 +136,44 @@ def test_the_live_runtime_filter_comes_after_last(name: str) -> None:
     assert not bad, f"{len(bad)} pipelines filter on the live runtimes before last():\n" + "\n---\n".join(bad)
 
 
+NAMED_DASHBOARDS = ["signal-history", "device-health", "system-overview", "io-health"]
+
+
+def _sets_display_name(panel: dict[str, Any]) -> bool:
+    config = panel.get("fieldConfig", {})
+    if config.get("defaults", {}).get("displayName"):
+        return True
+    named = {
+        o["matcher"].get("options")
+        for o in config.get("overrides", [])
+        if o["matcher"].get("id") == "byFrameRefID" and any(p["id"] == "displayName" for p in o["properties"])
+    }
+    return bool(named) and named == {t["refId"] for t in panel.get("targets", [])}
+
+
+@pytest.mark.parametrize("name", NAMED_DASHBOARDS)
+def test_every_panel_names_what_it_shows(name: str) -> None:
+    # Without a display name, Grafana names a value by its Flux column and
+    # labels: a stat tile read "_value" above its number, and legends read
+    # 'bread0/dcmt0 {device_id="dcmt0", ...}' (#712).
+    path = pathlib.Path(__file__).parents[2] / "observability" / "grafana" / "dashboards" / f"{name}.json"
+    panels = json.loads(path.read_text(encoding="utf-8"))["panels"]
+    unnamed = [
+        f"{p['id']} {p['title']!r}"
+        for p in panels
+        if p["type"] in ("stat", "timeseries", "gauge")
+        and not _sets_display_name(p)
+        and not (p["type"] == "stat" and p.get("options", {}).get("textMode") == "value")
+    ]
+    assert not unnamed, f"{name}: panels that show raw field names: {unnamed}"
+    for p in panels:
+        for t in p.get("transformations", []):
+            if t["id"] == "organize":
+                shown = set(t["options"].get("indexByName", {}))
+                missing = shown - set(t["options"].get("renameByName", {}))
+                assert not missing, f"{name} {p['title']!r}: columns shown by their raw name: {sorted(missing)}"
+
+
 def test_signal_history_refreshes_no_faster_than_a_pi_draws_it() -> None:
     # On a Raspberry Pi the Double panel's query took 3.1 s alone, and the whole
     # dashboard about 18 s to draw: at a 5 s refresh each reload cancelled the
