@@ -13,6 +13,11 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-01
+
+0.10.1 is a patch release: one additive machine-profile block. Nothing an
+existing config, install or client does changes.
+
 ### Added
 
 - **`operator.trip_recovery` in the machine profile**
