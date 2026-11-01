@@ -110,6 +110,25 @@ install cannot bring a machine up already actuating.
 > `<prefix>/projects/<project>/config/`, which every install replaces, and the
 > runtime config points there.
 
+## Upgrading a running machine
+
+**Leave the runtime running.** The install replaces files under the running
+runtime and restarts it once, near the end (`systemctl restart`), so the boards
+go unserviced only for that restart. If you stop it first, every board with a
+hardware watchdog goes unserviced for the whole install. That is longer than a 5 s watchdog, so
+each board trips. Its trip holds it safe, but the startup safe state then fails:
+every hook call is refused with `WATCHDOG_TRIP`, and the install warns `health:
+startup safe state NOT achieved`. On the reference rig on 2026-10-31, an install
+after a stop tripped all three boards; the installs before and after it, with
+the runtime left running, tripped none (#711).
+
+If the boards did trip, clear each one with its provider's clear-trip function,
+then release any brake the trip set. For the bread provider that is
+`clear_watchdog_trip` on each board, then `set_brake` with both channels false on
+each DCMT. Restart the runtime (`sudo systemctl restart anolis-runtime`) to
+re-apply the startup safe state. Until then, the status still reports the
+failed attempt from the last start.
+
 ## Optional components
 
 | flag | effect |
