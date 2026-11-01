@@ -4,12 +4,12 @@ providers:
 
 telemetry:
   enabled: true
-  influx_url: http://localhost:8086
-  influx_org: anolis
-  influx_bucket: anolis
+  influx_url: http://influx.example:9999
+  influx_org: flatorg
+  influx_bucket: flatbucket
   influx_token: dev-token
-  batch_size: 100
-  flush_interval_ms: 1000
+  batch_size: 7
+  flush_interval_ms: 333
 
 http:
   enabled: false
