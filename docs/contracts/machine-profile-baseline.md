@@ -71,6 +71,10 @@ operator:
       parameter: sample_requests
       require:                    # checked before a press
         - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the sample pump's brake" }
+  trip_recovery:                  # steps after a watchdog-trip clear
+    - device: bread0/dcmt0
+      after_clear:
+        - { label: Release both brakes, function: set_brake, args: { motor1_brake: false, motor2_brake: false }, confirm: true }
 ```
 
 1. `readings[]`: `signal` is `provider/device/signal` and `label` is required;
@@ -104,7 +108,14 @@ operator:
    (0.10.0) takes the same entries as `run.start.require[]`: a press is
    refused, and the counter left as it is, while any does not hold. A `when`
    applies at the press.
-8. Unknown keys anywhere in the block are refused. The schema checks shape only:
+8. `trip_recovery[]` (optional): what the operator panel offers after
+   clearing a device's watchdog trip. The clear itself is the provider SDK's
+   reserved `clear_watchdog_trip` function, which needs no entry. Each entry
+   names a `device` (`provider/device`) and its `after_clear` steps, in order:
+   a non-empty `label` and `function`, optional `args` as plain bool, number or
+   string values by argument name, and `confirm: true` for a step that
+   actuates, which then takes a second click.
+9. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
 

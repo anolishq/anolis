@@ -33,6 +33,9 @@ fixtures:
   - file: tests/contracts/machine-profile/valid/10-operator-action-require.yaml
     expect: valid
     note: operator.actions[].require, conditions checked before a press, with and without when (#707)
+  - file: tests/contracts/machine-profile/valid/11-operator-trip-recovery.yaml
+    expect: valid
+    note: operator.trip_recovery, steps after a watchdog-trip clear, with args and confirm (anolishq/anolis-workbench#750)
 
   - file: tests/contracts/machine-profile/invalid/schema/01-missing-machine-id.yaml
     expect: invalid/schema
@@ -85,6 +88,12 @@ fixtures:
   - file: tests/contracts/machine-profile/invalid/schema/17-operator-action-require-missing-message.yaml
     expect: invalid/schema
     note: an operator.actions[].require entry without a message (#707)
+  - file: tests/contracts/machine-profile/invalid/schema/18-operator-trip-recovery-step-no-label.yaml
+    expect: invalid/schema
+    note: an operator.trip_recovery step without a label (anolishq/anolis-workbench#750)
+  - file: tests/contracts/machine-profile/invalid/schema/19-operator-trip-recovery-arg-not-scalar.yaml
+    expect: invalid/schema
+    note: an operator.trip_recovery step argument that is not a bool, number or string (anolishq/anolis-workbench#750)
 
   - file: tests/contracts/machine-profile/invalid/references/01-missing-provider-config.yaml
     expect: invalid/references
