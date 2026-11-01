@@ -295,6 +295,21 @@ prep gave it, such as `dialout` and `gpio` from before #318. An install over an
 existing user names its groups, and how to drop one:
 `sudo gpasswd -d anolis <group>`.
 
+Whatever the platform, the tools around host prep rely on it to:
+
+- **Create the user as `install.sh` would, if it creates it:**
+  `useradd --system --shell /usr/sbin/nologin --home-dir <prefix> anolis`, where
+  `<prefix>` is the install prefix (`/opt/anolis` by default). No
+  `--create-home`, which would copy `/etc/skel` into the install tree.
+- **Signal a pending reboot with `/run/reboot-required`**, the Debian convention.
+  The workbench reports it after a deploy, so an operator knows to reboot before
+  relying on hardware. `install.sh` does not read it. `/run` is tmpfs, so the
+  reboot clears it.
+- **Be safe to run again.** A second run changes nothing, so a guide can always
+  say "run host prep" without asking whether it already ran.
+- **Optionally, offer a check mode** that changes nothing and exits non-zero when
+  something is missing, so the host can be confirmed before installing.
+
 Before anything starts, `install.sh` checks the result. As `anolis`, from the
 install prefix, it runs:
 
