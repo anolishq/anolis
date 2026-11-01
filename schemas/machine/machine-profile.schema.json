@@ -368,6 +368,65 @@
             }
           }
         },
+        "trip_recovery": {
+          "type": "array",
+          "description": "What the operator panel offers after clearing a device's watchdog trip (anolishq/anolis-workbench#750). The clear itself is the SDK-reserved clear_watchdog_trip function; each entry names a device and the steps that follow the clear, such as releasing brakes the trip engaged.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "device",
+              "after_clear"
+            ],
+            "properties": {
+              "device": {
+                "type": "string",
+                "pattern": "^[^/\\s]+/[^/\\s]+$",
+                "description": "provider/device"
+              },
+              "after_clear": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Steps offered after the clear, in order, each a call on the same device.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label",
+                    "function"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The step's button text, such as \"Release both brakes\"."
+                    },
+                    "function": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The device function the step calls."
+                    },
+                    "args": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": [
+                          "boolean",
+                          "number",
+                          "string"
+                        ]
+                      },
+                      "description": "The call's arguments by name, as plain values; the consumer types them from the function's spec."
+                    },
+                    "confirm": {
+                      "type": "boolean",
+                      "description": "Ask a second click before the call, for a step that actuates. Default false."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "run": {
           "$ref": "#/definitions/operatorRun"
         },

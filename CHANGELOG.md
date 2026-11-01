@@ -13,6 +13,16 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **`operator.trip_recovery` in the machine profile**
+  (anolishq/anolis-workbench#750): the steps an operator panel offers after
+  clearing a device's watchdog trip, such as releasing the brakes the trip
+  engaged. The clear itself is the provider SDK's reserved
+  `clear_watchdog_trip`. Each step names a function on the device, its
+  arguments as plain values, and whether it takes a second click. Additive:
+  existing profiles stay valid.
+
 ## [0.10.0] - 2026-11-01
 
 0.10.0 is a minor release because a runtime config that sets the deprecated
