@@ -357,6 +357,13 @@
                 "type": "string",
                 "minLength": 1,
                 "description": "An int64 automation parameter the press increases by one."
+              },
+              "require": {
+                "type": "array",
+                "description": "Conditions on signals that must hold before a press. When one does not, the press is refused with its message and the counter is not increased (#707).",
+                "items": {
+                  "$ref": "#/definitions/operatorRequirement"
+                }
               }
             }
           }
@@ -422,38 +429,7 @@
               "type": "array",
               "description": "Conditions on signals that must hold before Start runs. When one does not, Start refuses with its message.",
               "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "signal",
-                  "equals",
-                  "message"
-                ],
-                "properties": {
-                  "signal": {
-                    "type": "string",
-                    "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$",
-                    "description": "provider/device/signal"
-                  },
-                  "equals": {
-                    "type": [
-                      "boolean",
-                      "number",
-                      "string"
-                    ],
-                    "description": "The value the signal must read."
-                  },
-                  "message": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "What the operator sees when the signal does not read it: the fix."
-                  },
-                  "when": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "A bool parameter, normally one of start.enable: the condition applies only while it reads true at Start. Without when, it always applies."
-                  }
-                }
+                "$ref": "#/definitions/operatorRequirement"
               }
             }
           }
@@ -483,6 +459,40 @@
               "description": "The mode left in. Not AUTO: a Stop does not leave automation running."
             }
           }
+        }
+      }
+    },
+    "operatorRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "signal",
+        "equals",
+        "message"
+      ],
+      "properties": {
+        "signal": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$",
+          "description": "provider/device/signal"
+        },
+        "equals": {
+          "type": [
+            "boolean",
+            "number",
+            "string"
+          ],
+          "description": "The value the signal must read."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the operator sees when the signal does not read it: the fix."
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A bool parameter: the condition applies only while it reads true when it is checked (at Start for run.start.require, normally one of start.enable; at the press for an action). Without when, it always applies."
         }
       }
     }

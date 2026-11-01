@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **Conditions checked before an action press** (#707):
+  `operator.actions[].require` in the machine profile, with the same entries
+  as `run.start.require` (`signal`, `equals`, `message`, optional `when`). A
+  consumer refuses a press, increasing nothing, while any does not hold.
+  Both lists now share the schema's `operatorRequirement` definition.
+  Additive: existing profiles stay valid.
+
 ## [0.9.2] - 2026-10-31
 
 0.9.2 is a patch release: Grafana dashboard display names, nothing in the

@@ -67,7 +67,10 @@ operator:
         - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the impeller's brake", when: impeller_enable }
     stop: { disable: [impeller_enable], mode: IDLE }
   actions:                        # buttons; each press adds one to its counter
-    - { label: Sample now, parameter: sample_requests }
+    - label: Sample now
+      parameter: sample_requests
+      require:                    # checked before a press
+        - { signal: bread0/dcmt0/motor1_brake, equals: false, message: "Release the sample pump's brake" }
 ```
 
 1. `readings[]`: `signal` is `provider/device/signal` and `label` is required;
@@ -97,7 +100,10 @@ operator:
 7. `actions[]` (optional, 0.9.0): buttons. Each has a non-empty `label` and
    names an int64 automation `parameter`, a counter the press increases by
    one. A tree reads it to run something once per press, such as
-   `RequestedPulseWindow` (see `docs/automation.md`).
+   `RequestedPulseWindow` (see `docs/automation.md`). An optional `require[]`
+   (0.10.0) takes the same entries as `run.start.require[]`: a press is
+   refused, and the counter left as it is, while any does not hold. A `when`
+   applies at the press.
 8. Unknown keys anywhere in the block are refused. The schema checks shape only:
    that a named signal or parameter exists in the machine's variants is the
    consumer's check.
