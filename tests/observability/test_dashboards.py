@@ -110,6 +110,32 @@ def _seconds(refresh: str) -> int:
     return int(match.group(1)) * {"s": 1, "m": 60, "h": 3600}[match.group(2)]
 
 
+LIVE_FILTER = "|> filter(fn: (r) => contains(value: r.runtime_name, set: live))"
+
+
+def _live_filters_before_last(query: str) -> list[str]:
+    """The pipelines in a query that filter on the live runtimes before last()."""
+    bad = []
+    for pipeline in re.split(r"\n\s*\n", query):
+        lines = [line.strip() for line in pipeline.splitlines()]
+        if LIVE_FILTER in lines and "|> last()" not in lines[: lines.index(LIVE_FILTER)]:
+            bad.append(pipeline)
+    return bad
+
+
+@pytest.mark.parametrize("name", ["signal-history", "device-health", "system-overview"])
+def test_the_live_runtime_filter_comes_after_last(name: str) -> None:
+    # contains() can't be pushed down to storage: ahead of last() it pulled the
+    # whole 30-day seed window into Flux. On a Raspberry Pi each such query took
+    # 22-36 s and Grafana timed out at 30 s on every refresh; after last() it
+    # filters one row per series, 0.13-1.1 s (#708).
+    path = pathlib.Path(__file__).parents[2] / "observability" / "grafana" / "dashboards" / f"{name}.json"
+    queries = _queries(json.loads(path.read_text(encoding="utf-8")))
+    assert any(LIVE_FILTER in q for q in queries), f"{name} no longer filters on the live runtimes"
+    bad = [p for q in queries for p in _live_filters_before_last(q)]
+    assert not bad, f"{len(bad)} pipelines filter on the live runtimes before last():\n" + "\n---\n".join(bad)
+
+
 def test_signal_history_refreshes_no_faster_than_a_pi_draws_it() -> None:
     # On a Raspberry Pi the Double panel's query took 3.1 s alone, and the whole
     # dashboard about 18 s to draw: at a 5 s refresh each reload cancelled the

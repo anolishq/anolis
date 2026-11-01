@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Grafana's dashboards no longer time out on a Raspberry Pi** (#708).
+  Twelve panels on Signal History, Device Health and System Overview seed
+  each series with its last value from the 30 days before the range, and
+  filtered that read by the live runtimes before `last()`. That filter can't
+  be pushed down to storage, so InfluxDB read the whole 30 days into Flux on
+  every refresh: 22-36 s per query on the reference rig, past Grafana's 30 s
+  timeout. The filter now follows `last()`, and the same queries take
+  0.13-1.1 s there with the same results (Quality Distribution Over Time,
+  6.1 s, is slow for another reason).
+
 ## [0.9.0] - 2026-10-31
 
 0.9.0 is a minor release because an existing profile's operator panel
