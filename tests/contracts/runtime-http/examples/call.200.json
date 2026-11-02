@@ -5,6 +5,6 @@
   },
   "provider_id": "sim0",
   "device_id": "motorctl0",
-  "function_id": 10,
+  "function_id": 1,
   "post_call_poll_triggered": true
 }

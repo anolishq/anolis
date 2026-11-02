@@ -22,11 +22,12 @@ http:
 
 providers:
   - id: sim0
-    # Portable relative path (adjust based on your build configuration)
-    # Windows Release: ../anolis-provider-sim/build/Release/anolis-provider-sim.exe
-    # Windows Debug:   ../anolis-provider-sim/build/Debug/anolis-provider-sim.exe
-    # Linux/macOS:     ../anolis-provider-sim/build/anolis-provider-sim
-    command: ../anolis-provider-sim/build/Release/anolis-provider-sim
+    # provider-sim built with its presets, from a sibling checkout:
+    #   Linux/macOS (dev-release): ../anolis-provider-sim/build/dev-release/anolis-provider-sim
+    #   Linux/macOS (dev-debug):   ../anolis-provider-sim/build/dev-debug/anolis-provider-sim
+    #   Windows (dev-windows-release): ../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe
+    #   Windows (dev-windows-debug):   ../anolis-provider-sim/build/dev-windows-debug/Debug/anolis-provider-sim.exe
+    command: ../anolis-provider-sim/build/dev-release/anolis-provider-sim
     args: ["--config", "../anolis-provider-sim/config/provider-sim.yaml"]
     timeout_ms: 5000
 
