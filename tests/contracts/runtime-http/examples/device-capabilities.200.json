@@ -23,8 +23,8 @@
     ],
     "functions": [
       {
-        "function_id": 10,
-        "name": "set_motor",
+        "function_id": 1,
+        "name": "set_motor_duty",
         "label": "Set motor duty",
         "category": "ACTUATE",
         "actuating": true,
