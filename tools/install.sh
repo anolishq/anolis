@@ -1990,6 +1990,35 @@ _runtime_port() {
     fi
 }
 
+# True when this host has IPv6 up, so a socket can be bound on ::1.
+_ipv6_available() {
+    [[ -s /proc/net/if_inet6 ]]
+}
+
+# The address to reach the runtime on, for the health probes, as a URL host.
+# The probes carry the API token, so they go to the address the runtime itself
+# listens on: nobody else can bind it while the runtime holds it. Never
+# `localhost`, which resolves to ::1 first on Debian: a runtime bound to IPv4
+# leaves [::1]:<port> free for any local user to listen on and collect the
+# token (#534). A wildcard bind is reached on loopback; a name the runtime
+# resolves itself (`localhost`) is reached where it binds first, ::1 when IPv6
+# is up.
+_runtime_probe_host() {
+    local bind
+    bind=$(_http_value "${PREFIX}/config/runtime.yaml" bind)
+    bind="${bind//\"/}"
+    bind="${bind//\'/}"
+    case "${bind}" in
+        "" | 0.0.0.0) printf '127.0.0.1' ;;
+        :: | ::1) printf '[::1]' ;;
+        localhost)
+            if _ipv6_available; then printf '[::1]'; else printf '127.0.0.1'; fi
+            ;;
+        *:*) printf '[%s]' "${bind}" ;;
+        *) printf '%s' "${bind}" ;;
+    esac
+}
+
 # The runtime's API token, resolved as the runtime resolves it: http.auth_token
 # in runtime.yaml, else ANOLIS_API_TOKEN from runtime.env. Prints nothing when
 # neither is set (auth off, or a config this install did not provision).
@@ -2212,9 +2241,9 @@ phase_health() {
         return
     fi
 
-    local port
-    port=$(_runtime_port)
-    local url="http://localhost:${port}/v0/runtime/status"
+    local base
+    base="http://$(_runtime_probe_host):$(_runtime_port)"
+    local url="${base}/v0/runtime/status"
     local elapsed=0
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
@@ -2222,14 +2251,14 @@ phase_health() {
             local version
             version=$(_runtime_curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
             log_ok "health: runtime responding (v${version})"
-            if _run_registry_available "http://localhost:${port}"; then
+            if _run_registry_available "${base}"; then
                 log_ok "health: run registry available"
             else
                 log_warn "health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded"
                 log_info "  sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'"
             fi
             _report_startup_safe_state "${url}"
-            _check_provider_liveness "http://localhost:${port}"
+            _check_provider_liveness "${base}"
             return
         fi
         sleep ${HEALTH_INTERVAL}
