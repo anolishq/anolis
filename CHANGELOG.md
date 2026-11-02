@@ -13,6 +13,11 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-01
+
+0.10.2 is a patch release with one security fix in `install.sh`. No config,
+contract or runtime behaviour changes.
+
 ### Security
 
 - **`install.sh` no longer sends the API token to `http://localhost`**
