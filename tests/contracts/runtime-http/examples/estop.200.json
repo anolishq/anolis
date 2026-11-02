@@ -8,7 +8,7 @@
   "actions": [
     {
       "device_handle": "sim0/motorctl0",
-      "function": "set_motor",
+      "function": "set_motor_duty",
       "success": true
     }
   ],

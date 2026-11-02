@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The example runtime configs start provider-sim where its presets build
+  it** (#586): `examples/anolis-runtime.yaml` and
+  `examples/anolis-runtime-telemetry.yaml` run
+  `../anolis-provider-sim/build/dev-release/anolis-provider-sim`, and their
+  comments give each preset's path. Both used to fail at startup with
+  "Executable not found".
+- **The runtime HTTP fixtures match provider-sim v0.2.8** (#582): `motorctl0`'s
+  function is `1` / `set_motor_duty`, with its label and argument bounds, in
+  the capabilities, call and e-stop examples.
+
 ## [0.10.2] - 2026-11-01
 
 0.10.2 is a patch release with one security fix in `install.sh`. No config,
