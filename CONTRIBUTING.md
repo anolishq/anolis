@@ -1015,3 +1015,21 @@ By contributing, you agree that your contributions will be licensed under the pr
 - Platform fixtures belong in the main repo under `tests/fixtures/` or `examples/` and should be generic.
 - Realization assets should be kept in private or deployment-specific repos and never committed to the main repo.
 - When in doubt, prefer documenting new fixture types in this section and clarifying their intended scope.
+
+## External contributions
+
+We welcome contributions from people using the project or genuinely interested
+in becoming involved.
+
+Before implementing changes, prospective contributors should engage through an
+issue or discussion, explain the problem or proposed improvement, and coordinate
+with maintainers.
+
+Open issues are not automatically invitations to submit implementations.
+Unsolicited pull requests from accounts without prior project involvement or
+maintainer coordination may be closed without review.
+
+Automated contribution farming, mass-submitted PRs, and superficial changes
+intended primarily to build contribution history are not accepted. AI-assisted
+contributions are welcome when contributors understand, validate, and take
+responsibility for their work.
