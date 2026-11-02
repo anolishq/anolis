@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+### Security
+
+- **`install.sh` no longer sends the API token to `http://localhost`**
+  (#534). Its health probes now go to the address the runtime listens on:
+  `127.0.0.1` for the default and for a rendered `0.0.0.0` bind, `[::1]` for
+  `::1` or `::`, the address itself otherwise, and for `localhost` wherever
+  the runtime binds it first. `localhost` resolves to `::1` first on Debian,
+  so with the runtime bound to IPv4, any local user listening on
+  `[::1]:<port>` received the root-only token, and could make the install
+  report a runtime that was down as healthy.
+
 ## [0.10.1] - 2026-11-01
 
 0.10.1 is a patch release: one additive machine-profile block. Nothing an
