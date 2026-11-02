@@ -9,13 +9,13 @@
  * - Async batched writes (don't block state cache)
  * - Configurable batch size and flush interval
  * - Graceful degradation on connection failure
- * - Per-type value fields (value_double, value_int, value_bool)
+ * - Per-type value fields (value_double, value_int, value_uint, value_bool, value_string)
  * - HTTP and HTTPS support (TLS via OpenSSL)
  *
  * InfluxDB Schema:
  * - Measurement: anolis_signal
- * - Tags: runtime_name, provider_id, device_id, signal_id
- * - Fields: value_double|value_int|value_bool, quality
+ * - Tags: runtime_name, provider_id (operator configuration), device_id, signal_id
+ * - Fields: value_double|value_int|value_uint|value_bool|value_string, quality
  * - Timestamp: epoch milliseconds (precision=ms)
  */
 
@@ -76,8 +76,10 @@ struct InfluxConfig {
  * Tag keys/values and field keys need escaping of: comma, equals, space
  * Field string values need escaping of: double quote, backslash
  *
- * Tag values are provider-supplied too — `device_id`, `provider_id` and
- * `signal_id` reach here verbatim, with no charset validation anywhere upstream.
+ * `device_id` and `signal_id` are provider-supplied; `provider_id` comes from
+ * operator runtime configuration (`providers[].id`), which checks only for
+ * non-empty and unique IDs, not for a character set. The tag values reach
+ * here without charset filtering.
  * Line protocol is newline-delimited, so a `\n` in a device id splits one row
  * into two malformed ones and the whole batch is rejected: silent, repeated
  * telemetry loss. A trailing backslash is as bad, escaping the separator that
