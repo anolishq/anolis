@@ -295,7 +295,7 @@ _cannot_verify_file() {
     _cannot_verify_file ' runtime:\n   name: t\n http:\n   bind: 0.0.0.0\n' "an indented first line"
     _cannot_verify_file '  http:\n    bind: 0.0.0.0\n' "an indented first line"
     _cannot_verify_file 'runtime:\r  name: t\rhttp:\r  bind: 0.0.0.0\r' "a carriage return inside a line (CR line endings)"
-    _cannot_verify_file '? http\n: {bind: 0.0.0.0}\n' "a top-level line not written name: value"
+    _cannot_verify_file '? http\n: {bind: 0.0.0.0}\n' "an explicit key (?)"
     _cannot_verify_file '' "a file with no top-level key"
     _cannot_verify_file '# only a comment\n' "a file with no top-level key"
     _cannot_verify_file 'http:\n  - bind: 0.0.0.0\n' "a line in http not written name: value"
@@ -319,6 +319,29 @@ _cannot_verify_file() {
     run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: don\'t panic\nhttp:\n  bind: 127.0.0.1\n')"
     [ "$status" -eq 0 ]
     run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: "say \\"hi\\""\nhttp:\n  bind: 127.0.0.1\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a quote after a tag, an anchor or a ? key is still tracked" {
+    # Each opens a quote that runs on and hides the auth line from yaml-cpp.
+    local q="a quoted value or a collection over several lines"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: !!str "abc\n  auth_enabled: true\n  zzz: end"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: !x "abc\n  auth_enabled: true\n  zzz: end"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: &a "abc\n  auth_enabled: true\n  zzz: end"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: !!str \'abc\n  allow_insecure_bind: true\n  zzz: end\'\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    note: !!str "abc\n  auth_enabled: true\n  zzz: end"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  list:\n    - !!str "abc\n  auth_enabled: true\n  zzz: end"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    ? "abc\n  auth_enabled: true\n  zzz: end"\n    : v\n' "${q}"
+}
+
+@test "530: shapes yaml-cpp refuses outright cannot be verified" {
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xc2\x85b\n' "a NEL, line separator or paragraph separator character"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xe2\x80\xa8b\n' "a NEL, line separator or paragraph separator character"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xe2\x80\xa9b\n' "a NEL, line separator or paragraph separator character"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    "a":"b\n' "a quoted key with no space after its colon"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: ? x\n' "an explicit key (?)"
+    # A plain value may hold ! and & past its start, and a quoted key its space.
+    run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: a!b&c\n  "q": "v"\nhttp:\n  bind: 127.0.0.1\n')"
     [ "$status" -eq 0 ]
 }
 

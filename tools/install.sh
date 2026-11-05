@@ -2060,9 +2060,11 @@ _yaml_block_value() {
 #     (with only the escapes \" and \\), and no anchor, alias, tag, block
 #     scalar, collection or value continued on the next line; a `port` that is
 #     a plain decimal number;
-#   - anywhere in the file: no quote or bracket left open at the end of a line,
-#     and no tab in the indentation; a `#` comment on its own line, or after a
-#     value outside quotes.
+#   - anywhere in the file: no quote or bracket left open at the end of a line
+#     (a tag or anchor before a value does not hide its quote), no `? `
+#     explicit key, no quoted key with a value right after its colon, no tab
+#     in the indentation, and no NEL, line or paragraph separator character; a
+#     `#` comment on its own line, or after a value outside quotes.
 #
 # Block scalars (`|`, `>`) are allowed outside http's watched keys, and their
 # lines are not checked.
@@ -2077,17 +2079,33 @@ _http_config_check() {
         function indent_of(s) { match(s, /^ */); return RLENGTH }
         # Scan a line from `from`: leave it with no quote or bracket open, or
         # say it does. A quote opens a scalar only where a value starts.
-        function open_at_end(s, from,   i, c, prev, q, depth, vs) {
-            q = ""; depth = 0; vs = 1; prev = " "
+        # A tag (!...) or anchor (&...) where a value starts is a property of
+        # that value: skipped to the next blank, the value still starts after
+        # it. An explicit key (? ) is outside the subset: it sets `shape`.
+        function open_at_end(s, from,   i, c, prev, q, depth, vs, nx) {
+            q = ""; depth = 0; vs = 1; prev = " "; shape = ""
             for (i = from; i <= length(s); i++) {
                 c = substr(s, i, 1)
-                if (q == "\"") { if (c == "\\") i++; else if (c == q) { q = ""; vs = 0 } prev = c; continue }
+                nx = substr(s, i + 1, 1)
+                if (q == "\"") {
+                    if (c == "\\") i++
+                    else if (c == q) { q = ""; vs = 0; if (nx == ":" && substr(s, i + 2, 1) !~ /^([ \t]|)$/) shape = "a quoted key with no space after its colon" }
+                    prev = c; continue
+                }
                 if (q == "\047") {
-                    if (c == q) { if (substr(s, i + 1, 1) == q) i++; else { q = ""; vs = 0 } }
+                    if (c == q) {
+                        if (nx == q) i++
+                        else { q = ""; vs = 0; if (nx == ":" && substr(s, i + 2, 1) !~ /^([ \t]|)$/) shape = "a quoted key with no space after its colon" }
+                    }
                     prev = c; continue
                 }
                 if (c == " " || c == "\t") { prev = c; continue }
                 if (c == "#" && (prev == " " || prev == "\t")) break
+                if ((c == "!" || c == "&") && vs) {
+                    while (i < length(s) && substr(s, i + 1, 1) !~ /[ \t]/) i++
+                    prev = substr(s, i, 1); continue
+                }
+                if (c == "?" && vs && (nx == "" || nx ~ /[ \t]/)) { shape = "an explicit key (?)"; vs = 1; prev = c; continue }
                 if ((c == "\"" || c == "\047") && vs) q = c
                 else if ((c == "[" || c == "{") && (vs || depth > 0)) { depth++; vs = 1 }
                 else if ((c == "]" || c == "}") && depth > 0) { depth--; vs = 0 }
@@ -2184,6 +2202,9 @@ _http_config_check() {
         {
             sub(/\r$/, "")
             if (index($0, "\r")) bad("a carriage return inside a line (CR line endings)")
+            # NEL, LS and PS in UTF-8: yaml-cpp breaks no line on them, and refuses the file.
+            if (index($0, "\302\205") || index($0, "\342\200\250") || index($0, "\342\200\251"))
+                bad("a NEL, line separator or paragraph separator character")
         }
         NR == 1 && substr($0, 1, 3) == "\357\273\277" { bad("a byte-order mark"); $0 = substr($0, 4) }
         state == 2 { flow_line($0, 1); next }
@@ -2203,8 +2224,10 @@ _http_config_check() {
             line = substr($0, ind + 1)
             if (ind > 0 && !started) { bad("an indented first line"); next }
             # (The flow mapping of http may span lines: flow_line reads it.)
-            if (!(ind == 0 && line ~ /^http:[ \t]*\{/) && open_at_end(line, 1))
-                bad("a quoted value or a collection over several lines")
+            if (!(ind == 0 && line ~ /^http:[ \t]*\{/)) {
+                if (open_at_end(line, 1)) bad("a quoted value or a collection over several lines")
+                if (shape != "") bad(shape)
+            }
             rest = line; sub(/^[^:]*:[ \t]*/, "", rest)
         }
         ind == 0 {

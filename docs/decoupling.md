@@ -102,8 +102,11 @@ reader` rather than guess. The subset:
   quote but a comment, and nothing on the lines under them; `port` a plain
   decimal number;
 - everywhere: no tab in the indentation, and no quote or bracket left open at
-  the end of a line, except inside a block scalar (`|`, `>`), whose lines are
-  passed over; comments on their own line or after a value.
+  the end of a line (a tag or anchor in front of a quoted value counts), except
+  inside a block scalar (`|`, `>`), whose lines are passed over; no explicit
+  key (`?` followed by a space), no quoted key with its value right after the colon (`"a":"b"`),
+  and no NEL, line separator or paragraph separator character; comments on
+  their own line or after a value.
 
 Quoted key names, `?` keys, merge keys and an indented first line are outside
 it. Simplify the config, or check it with `anolis-runtime --check-config <file>`.
