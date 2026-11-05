@@ -523,7 +523,9 @@ _install_txn_refuse_stale() {
     done
     log_err "install: ${txn} exists: an earlier install stopped before its host preflight passed and did not put all of the prefix back"
     if [[ ${#held[@]} -gt 0 ]]; then
-        log_info "It holds ${held[*]} as they were before that install; the others were put back. To put back each one it holds:"
+        local others=""
+        if [[ ${#held[@]} -lt ${#INSTALL_TXN_DIRS[@]} ]]; then others="; the others were put back"; fi
+        log_info "It holds ${held[*]} as they were before that install${others}. To put back each one it holds:"
         log_info "  sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
         log_info "then remove it: sudo rm -rf ${txn}"
         log_info "Or, if ${PREFIX} is as you want it, remove the copy: sudo rm -rf ${txn}"

@@ -336,6 +336,13 @@ KILL_IN_COPY='cp() {
     [[ "${output}" != *"bin/, config/"* ]]
 }
 
+@test "535: a stale copy holding all four directories does not say others were put back" {
+    mkdir -p "${PFX}/.install-txn/bin" "${PFX}/.install-txn/config" "${PFX}/.install-txn/projects" "${PFX}/.install-txn/.prev"
+    _main
+    [[ "${output}" == *"It holds bin/ config/ projects/ .prev/ as they were before that install. To put back"* ]]
+    [[ "${output}" != *"the others were put back"* ]]
+}
+
 @test "535: a symlink at .install-txn or .install-txn.partial is refused too, and left alone" {
     ln -s "${BATS_TEST_TMPDIR}/nowhere" "${PFX}/.install-txn"
     _main
