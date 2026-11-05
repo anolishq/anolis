@@ -21,12 +21,21 @@ commit messages only.
   refuses, and refused configs the runtime starts with: a quoted
   `bind: "127.0.0.1"`, `auth_enabled: True`, `allow_insecure_bind: yes`, and
   any bind under `http.enabled: false`. The refusal killed upgrades over
-  working configs. The reader now takes block and flow mappings, quoted values
-  and trailing comments; booleans are read as yaml-cpp reads them; the bind is
-  checked only with the HTTP server enabled; and a value the runtime cannot
-  read as a boolean fails the preflight. The health check's reads of
+  working configs. The reader now takes block mappings and flow mappings on
+  one line or several, quoted values, and a comment after a block value or
+  after a one-line flow mapping; booleans are read as yaml-cpp reads them; the
+  bind is checked only with the HTTP server enabled, and `bind: ""` as the
+  non-loopback address it is; and an `enabled`, `auth_enabled` or
+  `allow_insecure_bind` that is present but not a boolean the runtime accepts,
+  empty included, fails the preflight. Where the reader cannot read the block
+  as the runtime does (a comment inside a multi-line flow mapping, an anchor,
+  alias, tag or merge key, a second top-level `http`, JSON-style flow, a block
+  scalar, a quoted value over several lines, an escape other than `\"` and
+  `\\`, a non-decimal port, a byte-order mark), the preflight refuses with
+  "cannot verify" instead of guessing. The health check's reads of
   `http.port`, `http.bind` and `http.auth_token`, and the install's read of
-  `runtime.data_dir`, use the same reader.
+  `runtime.data_dir`, use the same reader, and no longer strip a second layer
+  of quotes from its value.
 
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and

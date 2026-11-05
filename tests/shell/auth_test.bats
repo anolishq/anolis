@@ -163,6 +163,127 @@ _http_cfg() {
     [ "$(_http_value "${TMP}/crlf.yaml" port)" = "9090" ]
 }
 
+# Where the reader cannot read the http block as yaml-cpp does, the preflight
+# refuses with "cannot verify" rather than guess. Each config here is one the
+# runtime refuses or accepts; the reader can tell neither.
+_cannot_verify() {
+    run preflight_runtime_config "$(_http_cfg "$1")"
+    [ "$status" -ne 0 ] || { echo "accepted"; return 1; }
+    [[ "${output}" == *"cannot verify the http settings in ${TMP}/runtime.yaml: $2 is not supported by the installer's reader"* ]] \
+        || { echo "${output}"; return 1; }
+    [[ "${output}" == *"anolis-runtime --check-config"* ]]
+}
+
+@test "530: a comment inside a multi-line flow mapping cannot be verified" {
+    _cannot_verify $'http: {\n  port: 8080, # api\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
+    _cannot_verify $'http: {\n  port: 8080, # don\'t expose\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
+    _cannot_verify $'http: {\n  port: 8080, # see {docs}\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
+    _cannot_verify $'http: { # the api\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
+    _cannot_verify $'http: {\n  bind: 0.0.0.0, # exposed\n  auth_enabled: true\n}\n' "a comment inside a flow mapping"
+}
+
+@test "530: a comment after a one-line flow mapping is read" {
+    run preflight_runtime_config "$(_http_cfg $'http: {bind: 0.0.0.0, auth_enabled: true}  # exposed\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: an anchor, alias or tag on http or on a key it reads cannot be verified" {
+    _cannot_verify $'http: &h\n  bind: 0.0.0.0\n' "an anchor, alias or tag on http"
+    _cannot_verify $'http: !!map\n  bind: 0.0.0.0\n' "an anchor, alias or tag on http"
+    _cannot_verify $'http: &h {bind: 0.0.0.0}\n' "an anchor, alias or tag on http"
+    _cannot_verify $'h: &h {bind: 0.0.0.0}\nhttp: *h\n' "an anchor, alias or tag on http"
+    _cannot_verify $'http:\n  bind: !!str 0.0.0.0\n' "an anchor, alias or tag on http.bind"
+    _cannot_verify $'http:\n  bind: &b 127.0.0.1\n' "an anchor, alias or tag on http.bind"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  auth_enabled: !!bool yes\n' "an anchor, alias or tag on http.auth_enabled"
+    _cannot_verify $'b: &b {bind: 0.0.0.0}\nhttp:\n  <<: *b\n' "a merge key in http"
+}
+
+@test "530: a quoted empty bind is non-loopback, as the runtime reads it" {
+    local v
+    for v in '""' "''" '' '~'; do
+        run preflight_runtime_config "$(_http_cfg "http:"$'\n'"  bind: ${v}"$'\n')"
+        [ "$status" -ne 0 ] || { echo "accepted bind: ${v}"; return 1; }
+        [[ "${output}" == *"is non-loopback but authentication is disabled"* ]]
+    done
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: ""\n  auth_enabled: true\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: an empty boolean is refused, as the runtime refuses it" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1\n  auth_enabled:\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.auth_enabled ''"*"is not a boolean the runtime accepts"* ]]
+    run preflight_runtime_config "$(_http_cfg $'http:\n  enabled: ""\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.enabled ''"* ]]
+}
+
+@test "530: other forms the reader does not follow cannot be verified" {
+    _cannot_verify $'http: {"bind":"0.0.0.0"}\n' "a flow entry in http not written key: value"
+    _cannot_verify $'http:\n  {bind: 0.0.0.0}\n' "a flow mapping on the line after http:"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\nhttp:\n  auth_enabled: true\n' "a second top-level http"
+    _cannot_verify $'http:\n  bind: >-\n    0.0.0.0\n' "a block scalar for http.bind"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n    0.0.0.0\n' "a value of http.bind continued on the next line"
+    _cannot_verify $'http:\n  auth_token: "abc\n  bind: 0.0.0.0"\n' "a quoted value of http.auth_token over several lines"
+    _cannot_verify $'http:\n  bind: "127.0.0\\x2e1"\n' "an escape sequence in http.bind"
+    _cannot_verify $'http:\n  port: 0x1F91\n' "http.port written as other than a plain decimal number"
+    _cannot_verify $'http:\n  port: 010\n' "http.port written as other than a plain decimal number"
+    _cannot_verify $'http:\n' "an empty http"
+    printf '{"http": {"bind": "0.0.0.0"}}\n' > "${TMP}/runtime.yaml"
+    run preflight_runtime_config "${TMP}/runtime.yaml"
+    [[ "${output}" == *"a flow-style document is not supported"* ]]
+    printf '\357\273\277http:\n  bind: 0.0.0.0\n' > "${TMP}/runtime.yaml"
+    run preflight_runtime_config "${TMP}/runtime.yaml"
+    [[ "${output}" == *"a byte-order mark is not supported"* ]]
+}
+
+@test "530: the reader stops at the end of the first YAML document, as yaml-cpp does" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1\n---\nhttp:\n  bind: 0.0.0.0\n')"
+    [ "$status" -eq 0 ]
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1\n...\nhttp:\n  bind: 0.0.0.0\n')"
+    [ "$status" -eq 0 ]
+    # A leading --- starts the first document; it does not end one.
+    printf -- '---\nhttp:\n  bind: 0.0.0.0\n' > "${TMP}/runtime.yaml"
+    run preflight_runtime_config "${TMP}/runtime.yaml"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"is non-loopback"* ]]
+}
+
+@test "530: flow entries split only at top-level commas outside quotes" {
+    # A comma or brace in a nested list or a quoted value does not end an entry.
+    run preflight_runtime_config "$(_http_cfg $'http: {cors_allowed_origins: [a, b], bind: 0.0.0.0}\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
+    run preflight_runtime_config "$(_http_cfg $'http: {auth_token: "a,b}c", bind: 0.0.0.0}\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
+    [ "$(_http_value "${TMP}/runtime.yaml" auth_token)" = 'a,b}c' ]
+}
+
+@test "530: the reader takes quoted keys, the '' escape and the first of duplicate keys" {
+    cfg=$(_http_cfg $'http:\n  "bind": 0.0.0.0\n  \'port\': 9090\n  auth_token: \'it\'\'s\'\n  auth_enabled: false\n  auth_enabled: true\n')
+    [ "$(_http_value "${cfg}" bind)" = "0.0.0.0" ]
+    [ "$(_http_value "${cfg}" port)" = "9090" ]
+    [ "$(_http_value "${cfg}" auth_token)" = "it's" ]
+    # yaml-cpp keeps the first: auth is off, so the exposed bind is refused.
+    run preflight_runtime_config "${cfg}"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"is non-loopback"* ]]
+}
+
+@test "530: callers take the reader's value as it is, without a second unquote" {
+    PREFIX="${TMP}/prefix"
+    mkdir -p "${PREFIX}/config"
+    printf 'http:\n  auth_token: "'"'"'quoted'"'"'"\n  bind: "'"'"'h'"'"'"\n' > "${PREFIX}/config/runtime.yaml"
+    [ "$(_runtime_api_token)" = "'quoted'" ]
+    [ "$(_runtime_probe_host)" = "'h'" ]
+    printf 'runtime:\n  data_dir: "it'"'"'s"\n' > "${TMP}/dd.yaml"
+    [ "$(_yaml_block_value "${TMP}/dd.yaml" runtime data_dir)" = "it's" ]
+    # The pin resolves the relative dir the runtime names, apostrophe and all.
+    _pin_runtime_data_dir "${TMP}/dd.yaml" new >/dev/null
+    grep -qxF "  data_dir: ${TMP}/it's" "${TMP}/dd.yaml"
+}
+
 # ---------------------------------------------------------------------------
 # _http_value — scoped to the top-level http: block
 # ---------------------------------------------------------------------------

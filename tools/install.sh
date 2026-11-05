@@ -696,7 +696,6 @@ _pin_runtime_data_dir() {
     local cfg="$1" how="$2"
     local current
     current=$(_yaml_block_value "${cfg}" runtime data_dir)
-    current=${current//[\"\']/}
     [[ "${current}" == /* ]] && return 0
     local want="${PREFIX}/anolis-data"
     [[ -n "${current}" ]] && want=$(_relative_data_dir "${cfg}" "${current}" "${how}")
@@ -792,13 +791,21 @@ warn_kept_provider_configs() {
 # across upgrades too.
 preflight_runtime_config() {
     local cfg="$1"
-    local bind key value
+    local bind="127.0.0.1" key value reason
+    # The reader is not a YAML parser: where it cannot read the http block as
+    # the runtime does, refuse rather than guess (#530).
+    reason=$(_yaml_block_value "${cfg}" http "enabled bind port auth_enabled allow_insecure_bind" check)
+    if [[ -n "${reason}" ]]; then
+        die "config (runtime): cannot verify the http settings in ${cfg}: ${reason} is not supported by the installer's reader; simplify it, or check it with: anolis-runtime --check-config ${cfg}"
+    fi
+
     # The runtime reads these with yaml-cpp's as<bool>() and refuses the whole
-    # config when one is not a boolean it accepts. An empty value is read as
-    # unset here.
+    # config when one that is present is not a boolean it accepts, an empty
+    # value included.
     for key in enabled auth_enabled allow_insecure_bind; do
+        [[ -n "$(_yaml_block_value "${cfg}" http "${key}" present)" ]] || continue
         value=$(_http_value "${cfg}" "${key}")
-        if [[ -n "${value}" && -z "$(_yaml_bool "${value}")" ]]; then
+        if [[ -z "$(_yaml_bool "${value}")" ]]; then
             die "config (runtime): http.${key} '${value}' in ${cfg} is not a boolean the runtime accepts (true/false, yes/no, on/off)"
         fi
     done
@@ -806,10 +813,14 @@ preflight_runtime_config() {
     # validate_config checks the bind only with the HTTP server on.
     [[ "$(_yaml_bool "$(_http_value "${cfg}" enabled)")" != false ]] || return 0
 
-    bind=$(_http_value "${cfg}" bind)
+    # Only an absent bind is the loopback default: `bind: ""` binds "", and a
+    # key with no value is "null" to the runtime, both non-loopback.
+    if [[ -n "$(_yaml_block_value "${cfg}" http bind present)" ]]; then
+        bind=$(_http_value "${cfg}" bind)
+    fi
 
     # Matches is_loopback_bind() in core/runtime/config.cpp.
-    case "${bind:-127.0.0.1}" in
+    case "${bind}" in
         127.* | ::1 | localhost) return 0 ;;
     esac
 
@@ -1891,28 +1902,52 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
-# Read the scalar `key` of a top-level mapping `block` of a YAML file, as the
-# runtime's YAML parser reads it (#530): the block may be block style (`key`
-# a direct child, at any indentation) or a flow mapping (`block: {key: v}`,
-# on one line or several); a quoted value loses its quotes, and a plain one its
-# trailing comment. Prints the empty string when absent. Dependency-free (awk,
-# no python) so it works on an offline --local host that has no pyyaml. Not a
-# YAML parser: anchors, aliases, tags, block scalars and escapes other than
-# \" and \\ are not resolved.
+# Read the top-level mapping `block` of a YAML file the way the runtime's YAML
+# parser (yaml-cpp) reads it, without python, so it works on an offline
+# --local host that has no pyyaml (#530). The block may be block style (`key`
+# a direct child, at any indentation) or a flow mapping (`block: {key: v}`, on
+# one line or several). The first of duplicate keys counts, as in yaml-cpp, and
+# the file ends at a second `---` or at `...`, as yaml-cpp reads only its first
+# document. A quoted value loses its quotes (`''` is a quote inside single
+# quotes; `\"` and `\\` are resolved in double quotes, and any other escape is
+# left as written), and a plain one its trailing comment.
+#
+#   _yaml_block_value <file> <block> <key>            the value; empty if absent
+#   _yaml_block_value <file> <block> <key> present    "1" if the key is there
+#   _yaml_block_value <file> <block> "<k1 k2..>" check
+#
+# The reader is not a YAML parser. `check` prints the first construct in the
+# block it does not read as yaml-cpp would, for the keys named, or nothing: a
+# byte-order mark, a flow-style document, a second top-level <block>, an
+# anchor, alias or tag on <block> or on one of the keys, a merge key, a comment
+# or a multi-line quote inside a flow mapping, a flow entry not written
+# `key: value`, a flow mapping on the line after `<block>:`, a block scalar, an
+# escape other than \" and \\, a value continued on the next line, a tab in the
+# indentation, an empty <block>. A caller that must not guess refuses on it.
 _yaml_block_value() {
-    local cfg="$1" block="$2" key="$3"
+    local cfg="$1" block="$2" key="$3" mode="${4:-value}"
     [[ -f "${cfg}" ]] || return 0
-    awk -v blk="${block}" -v key="${key}" '
-        # A scalar: quotes removed ('' is a quote in single quotes), or a plain
-        # one up to a comment.
-        function scalar(s,   q, i, c, out) {
+    # Bytes, not characters: the byte-order mark is three of them.
+    LC_ALL=C awk -v blk="${block}" -v key="${key}" -v mode="${mode}" '
+        BEGIN {
+            if (mode == "check") { n = split(key, kl, " "); for (i = 1; i <= n; i++) watched[kl[i]] = 1 }
+            state = 0       # 0: outside the block, 1: in a block-style block, 2: in a flow mapping, 3: done
+            reason = ""
+        }
+        function bad(r) { if (reason == "") reason = r }
+        # A scalar: quotes removed, or a plain one up to a comment.
+        function scalar(s,   q, i, c, n, out) {
             sub(/^[ \t]+/, "", s)
             q = substr(s, 1, 1)
             if (q == "\"" || q == "\047") {
                 out = ""
                 for (i = 2; i <= length(s); i++) {
                     c = substr(s, i, 1)
-                    if (q == "\"" && c == "\\") { i++; out = out substr(s, i, 1); continue }
+                    if (q == "\"" && c == "\\") {
+                        i++; n = substr(s, i, 1)
+                        out = out ((n == "\\" || n == "\"") ? n : "\\" n)
+                        continue
+                    }
                     if (c == q) {
                         if (q == "\047" && substr(s, i + 1, 1) == q) { out = out q; i++; continue }
                         return out
@@ -1934,69 +1969,138 @@ _yaml_block_value() {
             if (s !~ /^[^ \t:#][^:]*:([ \t]|$)/) return ""
             k = s; sub(/[ \t]*:([ \t].*)?$/, "", k); return k
         }
-        # The value of a "key: value" entry.
-        function entry_value(s) {
+        # The raw value text of a "key: value" entry.
+        function entry_raw(s) {
             sub(/^[ \t]+/, "", s)
             if (s ~ /^["\047]/) { sub(/^("[^"]*"|\047[^\047]*\047)[ \t]*:/, "", s) }
             else { sub(/^[^:]*:/, "", s) }
-            return scalar(s)
+            sub(/^[ \t]+/, "", s)
+            return s
         }
-        # A flow mapping body: split at commas outside quotes and brackets.
-        function flow_lookup(body,   i, c, q, depth, item) {
+        # Is the quoted value at the start of s closed on this line?
+        function closed_quote(s,   q, i, c) {
+            q = substr(s, 1, 1)
+            for (i = 2; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                if (q == "\"" && c == "\\") { i++; continue }
+                if (c == q) {
+                    if (q == "\047" && substr(s, i + 1, 1) == q) { i++; continue }
+                    return 1
+                }
+            }
+            return 0
+        }
+        # One entry of the block. The first of duplicate keys is kept.
+        function entry(k, raw, flowing,   t, e) {
+            if (k == "<<") bad("a merge key in " blk)
+            if (!(k in seen)) { seen[k] = 1; val[k] = raw }
+            t = raw
+            # Any key: a quote left open runs on into the lines that follow.
+            if (t ~ /^["\047]/ && !flowing && !closed_quote(t)) bad("a quoted value of " blk "." k " over several lines")
+            if (!(k in watched)) return
+            if (t ~ /^[&!*]/) bad("an anchor, alias or tag on " blk "." k)
+            if (t ~ /^[|>]/) bad("a block scalar for " blk "." k)
+            if (t ~ /^[[{]/) bad(blk "." k " written as other than a scalar")
+            if (k == "port" && scalar(t) !~ /^([1-9][0-9]*|0)$/) bad(blk "." k " written as other than a plain decimal number")
+            if (t ~ /^"/) {
+                e = t; gsub(/\\\\/, "", e); gsub(/\\"/, "", e)
+                if (e ~ /\\/) bad("an escape sequence in " blk "." k)
+            }
+        }
+        # Split a flow mapping body at commas outside quotes and brackets.
+        function flow_entries(body,   i, c, q, depth, item) {
             q = ""; depth = 0; item = ""
-            for (i = 1; i <= length(body); i++) {
-                c = substr(body, i, 1)
+            for (i = 1; i <= length(body) + 1; i++) {
+                c = (i <= length(body)) ? substr(body, i, 1) : ","
                 if (q != "") { if (c == q) q = ""; item = item c; continue }
                 if (c == "\"" || c == "\047") q = c
                 else if (c == "[" || c == "{") depth++
                 else if (c == "]" || c == "}") depth--
                 else if (c == "," && depth == 0) {
-                    if (entry_key(item) == key) { print entry_value(item); return 1 }
+                    if (item !~ /^[ \t]*$/) {
+                        if (entry_key(item) == "") bad("a flow entry in " blk " not written key: value")
+                        else entry(entry_key(item), entry_raw(item), 1)
+                    }
                     item = ""; continue
                 }
                 item = item c
             }
-            if (entry_key(item) == key) { print entry_value(item); return 1 }
-            return 0
+        }
+        # Scan one line of an open flow mapping from character `from`: track
+        # quotes and brackets, refuse a comment or a quote left open, and end
+        # the mapping at its closing brace.
+        function flow_line(line, from,   i, c, prev) {
+            for (i = from; i <= length(line); i++) {
+                c = substr(line, i, 1)
+                if (fq != "") { if (c == fq) fq = ""; body = body c; continue }
+                prev = (i > 1) ? substr(line, i - 1, 1) : " "
+                if (c == "#" && (prev == " " || prev == "\t")) { bad("a comment inside a flow mapping"); return }
+                if (c == "\"" || c == "\047") fq = c
+                else if (c == "[" || c == "{") fdepth++
+                else if (c == "]") fdepth--
+                else if (c == "}") {
+                    if (fdepth == 0) {
+                        state = 3
+                        flow_entries(body)
+                        return
+                    }
+                    fdepth--
+                }
+                body = body c
+            }
+            if (fq != "") bad("a quoted value over several lines in a flow mapping")
+            body = body " "
         }
         { sub(/\r$/, "") }
-        flow {
-            # Collect a multi-line flow mapping up to its closing brace.
-            body = body " " $0
-            if (flow_end()) { flow_lookup(body); exit }
-            next
-        }
-        # The text of an open flow mapping ends at a "}" outside quotes and
-        # nested brackets; cut it there and say whether it was found.
-        function flow_end(   i, c, q, depth) {
-            q = ""; depth = 0
-            for (i = 1; i <= length(body); i++) {
-                c = substr(body, i, 1)
-                if (q != "") { if (c == q) q = ""; continue }
-                if (c == "\"" || c == "\047") q = c
-                else if (c == "[" || c == "{") depth++
-                else if (c == "]") depth--
-                else if (c == "}") { if (depth == 0) { body = substr(body, 1, i - 1); return 1 } depth-- }
-            }
-            return 0
-        }
+        NR == 1 && substr($0, 1, 3) == "\357\273\277" { bad("a byte-order mark"); $0 = substr($0, 4) }
+        done { next }
+        state == 2 { flow_line($0, 1); next }
+        /^(---|\.\.\.)([ \t]|$)/ { if (started) done = 1; next }
         /^[^ \t#]/ {
-            in_blk = 0
+            if (!started && $0 ~ /^[[{]/) bad("a flow-style document")
+            started = 1
+            if (state == 1) { if (!children) bad("an empty " blk); state = 3 }
             if (entry_key($0) != blk) next
-            rest = $0; sub(/^[^:]*:[ \t]*/, "", rest)
-            if (rest ~ /^\{/) {
-                body = substr(rest, 2); flow = 1
-                if (flow_end()) { flow_lookup(body); exit }
-                next
-            }
-            if (rest == "" || rest ~ /^#/) { in_blk = 1; indent = -1 }
+            if (++headers > 1) { bad("a second top-level " blk); next }
+            rest = entry_raw($0)
+            if (rest ~ /^\{/) { state = 2; fq = ""; fdepth = 0; body = ""; flow_line(rest, 2); next }
+            if (rest == "" || rest ~ /^#/) { state = 1; indent = -1; children = 0; next }
+            if (rest ~ /^[&!*]/) bad("an anchor, alias or tag on " blk)
+            else bad(blk " written as other than a mapping")
+            state = 3
             next
         }
-        in_blk && /^[ \t]*(#|$)/ { next }
-        in_blk {
+        state == 1 && /^[ \t]*(#|$)/ { next }
+        state == 1 {
+            if ($0 ~ /^ *\t/) { bad("a tab in the indentation"); next }
             match($0, /^ */)
-            if (indent < 0) indent = RLENGTH
-            if (RLENGTH == indent && entry_key($0) == key) { print entry_value($0); exit }
+            line = substr($0, RLENGTH + 1)
+            if (indent < 0) {
+                indent = RLENGTH
+                if (line ~ /^[[{]/) bad("a flow mapping on the line after " blk ":")
+            }
+            if (RLENGTH == indent) {
+                children++
+                k = entry_key(line)
+                if (k == "") { bad("a line in " blk " not written key: value"); last = ""; next }
+                entry(k, entry_raw(line), 0)
+                last = k
+                v = scalar(entry_raw(line))
+                last_has = (v != "")
+            } else if (RLENGTH > indent) {
+                if ((last in watched) && last_has) bad("a value of " blk "." last " continued on the next line")
+            } else {
+                bad("an indentation in " blk " the reader does not follow")
+            }
+        }
+        END {
+            if (state == 2) bad("an unclosed flow mapping")
+            if (state == 1 && !children) bad("an empty " blk)
+            if (mode == "check") { if (reason != "") print reason; exit }
+            if (key in seen) {
+                if (mode == "present") print 1
+                else print scalar(val[key])
+            }
         }
     ' "${cfg}"
 }
@@ -2126,8 +2230,6 @@ _ipv6_available() {
 _runtime_probe_host() {
     local bind
     bind=$(_http_value "${PREFIX}/config/runtime.yaml" bind)
-    bind="${bind//\"/}"
-    bind="${bind//\'/}"
     case "${bind}" in
         "" | 0.0.0.0) printf '127.0.0.1' ;;
         :: | ::1) printf '[::1]' ;;
@@ -2147,9 +2249,8 @@ _runtime_probe_host() {
 # removed.
 _runtime_api_token() {
     local token
+    # _http_value has removed the YAML quotes: what is left is the token.
     token=$(_http_value "${PREFIX}/config/runtime.yaml" auth_token)
-    token="${token#[\"\']}"
-    token="${token%[\"\']}"
     if [[ -z "${token}" && -r "${RUNTIME_ENV_FILE}" ]]; then
         # shellcheck disable=SC2016  # sed's $ (last line), not a shell expansion
         token=$(sed -n '/^ANOLIS_API_TOKEN=/{s///;h;}; ${x;p;}' "${RUNTIME_ENV_FILE}")

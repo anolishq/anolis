@@ -74,12 +74,25 @@ only way to get that combination.
 failure surfaces as an actionable install error rather than a service that
 crash-loops while the install reports success. That mirroring is itself worth
 preserving: the two checks are meant to agree, and a change to one needs the
-other. The preflight reads `http` as the runtime does, without python: block or
-flow style, quoted or plain values, every boolean spelling the runtime accepts
-(`true`, `yes`, `on`, `y` and their negatives, lower case, upper case or
-capitalised), and it skips the bind check when `http.enabled` is false. A value
-the runtime cannot read as a boolean fails the preflight, as it fails the
-runtime.
+other. The preflight reads `http` as the runtime does, without python: a block
+mapping, or a flow mapping on one line or several, quoted or plain values,
+every boolean spelling the runtime accepts (`true`, `yes`, `on`, `y` and their
+negatives, lower case, upper case or capitalised), and it skips the bind check
+when `http.enabled` is false. An `http.enabled`, `http.auth_enabled` or
+`http.allow_insecure_bind` that is present but not one of those booleans,
+an empty value included, fails the preflight, as it fails the runtime. Only an
+absent `http.bind` is the loopback default: `bind: ""` is checked as the
+non-loopback address it is.
+
+Its reader is not a YAML parser, so where it cannot read the block as the
+runtime does, the preflight refuses with `cannot verify the http settings in
+<file>: <construct> is not supported by the installer's reader` rather than
+guess. That covers a comment inside a multi-line flow mapping, an anchor,
+alias, tag or merge key on `http` or on the keys it reads, a second top-level
+`http`, a JSON-style document or flow entry, a block scalar, a quoted value
+over several lines, an escape other than `\"` and `\\`, a port not written as a
+plain decimal number, and a byte-order mark. Simplify the config, or check it
+with `anolis-runtime --check-config <file>`.
 
 The API token is generated **per device at install time**, never baked into a
 bundle — a bundle is a redistributable artifact that may be installed on many
