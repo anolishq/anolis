@@ -84,15 +84,29 @@ an empty value included, fails the preflight, as it fails the runtime. Only an
 absent `http.bind` is the loopback default: `bind: ""` is checked as the
 non-loopback address it is.
 
-Its reader is not a YAML parser, so where it cannot read the block as the
-runtime does, the preflight refuses with `cannot verify the http settings in
-<file>: <construct> is not supported by the installer's reader` rather than
-guess. That covers a comment inside a multi-line flow mapping, an anchor,
-alias, tag or merge key on `http` or on the keys it reads, a second top-level
-`http`, a JSON-style document or flow entry, a block scalar, a quoted value
-over several lines, an escape other than `\"` and `\\`, a port not written as a
-plain decimal number, and a byte-order mark. Simplify the config, or check it
-with `anolis-runtime --check-config <file>`.
+Its reader is not a YAML parser. It reads a strict subset of YAML, the one
+`install.sh` itself writes, and refuses everything else with `cannot verify
+the http settings in <file>: <construct> is not supported by the installer's
+reader` rather than guess. The subset:
+
+- at most one `---`, alone on the first content line; no `...`, no `%`
+  directive, no byte-order mark, and LF or CRLF line endings;
+- top-level keys at column 0, each a plain name (letters, digits, `_`, `-`)
+  followed by a colon, and nothing else at column 0;
+- `http:` once, either as a block whose children sit at one indentation, each a
+  plain name and a colon, or as a flow mapping opened on the `http:` line, with
+  `name: value` entries and no comment inside it;
+- `enabled`, `bind`, `port`, `auth_enabled` and `allow_insecure_bind` written as
+  a plain value or a value quoted on one line, with no escape but `\"` and `\\`,
+  no anchor, alias, tag, block scalar or collection, nothing after the closing
+  quote but a comment, and nothing on the lines under them; `port` a plain
+  decimal number;
+- everywhere: no tab in the indentation, and no quote or bracket left open at
+  the end of a line, except inside a block scalar (`|`, `>`), whose lines are
+  passed over; comments on their own line or after a value.
+
+Quoted key names, `?` keys, merge keys and an indented first line are outside
+it. Simplify the config, or check it with `anolis-runtime --check-config <file>`.
 
 The API token is generated **per device at install time**, never baked into a
 bundle — a bundle is a redistributable artifact that may be installed on many
