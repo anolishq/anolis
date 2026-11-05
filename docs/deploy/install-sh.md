@@ -22,19 +22,34 @@ is a complete example, and the workbench writes projects in the same layout.
 
 - The profile must have a `components:` block naming the runtime and provider
   versions.
-- Only `config/anolis-runtime.*.yaml`, `config/provider-*.yaml` and the files
-  directly in `behaviors/` are installed.
+- What is installed: `config/anolis-runtime.*.yaml`, `config/provider-*.yaml`,
+  the files directly in `behaviors/` and `machine-profile.yaml`, under
+  `<prefix>/projects/<name>/`, and the file `runtime_profiles.manual` names,
+  rendered as `<prefix>/config/runtime.yaml`. The files are copied as written,
+  apart from the provider command and project path rewrites and the bind and
+  auth change described under [Security](../security.md#defaults); a comment
+  ships as it is.
 - The directory's name is the installed project's name. A path written as
-  `../anolis-projects/projects/<name>/config/...` or `.../behaviors/...` is
-  installed as `<prefix>/projects/<directory's name>/...`, whatever `<name>` it
-  was written with, so a project copied under a new name needs no edits; the
-  bundle step prints a `note:` for each other name it rewrote (#694). Such a path
-  must name one of the installed files, or the bundle step stops and names it.
-- No config may set `http.auth_token`. Each install generates the device's own
-  token into `/etc/anolis/runtime.env`, and a token in the config would replace
-  it on every device. The bundle step stops and names the file, without printing
-  the token. A runtime config, provider config or `machine-profile.yaml` that
-  is not valid YAML stops it too, since it cannot be checked (#529).
+  `../anolis-projects/projects/<name>/config/<file>` or
+  `.../behaviors/<file>`, where `<name>` is lower case letters, digits and `-`,
+  is installed as `<prefix>/projects/<directory's name>/...`, whatever `<name>`
+  it was written with, so a project copied under a new name needs no edits.
+  That holds for a path naming another project too: it is pointed at this
+  project's file of the same name. The bundle step prints a `note:` for each
+  other name it rewrote (#694). Such a path must name one of the installed
+  files, or the bundle step stops and names it; a path inside a YAML comment is
+  rewritten but not checked. Any other path, such as one under another
+  directory of the project or with upper case letters or `_` in `<name>`, is
+  left as it is and not checked.
+- No config may set `http.auth_token` to anything but `""`. Each install
+  generates the device's own token into `/etc/anolis/runtime.env`, and a token
+  in the config would replace it on every device. A null value counts: the
+  runtime reads `auth_token:`, `~` and `null` as the token `null`. The bundle
+  step checks every file it renders and `machine-profile.yaml`, reads them as
+  the runtime's YAML parser does (the first of duplicate keys, a tag does not
+  hide the value), stops and names the file, and never prints the token. A file
+  that is not valid YAML or not UTF-8 stops it too, since it cannot be checked
+  (#529).
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set

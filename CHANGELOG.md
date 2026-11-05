@@ -21,10 +21,15 @@ commit messages only.
   `projects/<name>/config/`. The runtime prefers that token to
   `ANOLIS_API_TOKEN`, so every device installed from the bundle accepted the
   same token, and the per-device one in `/etc/anolis/runtime.env` was ignored.
-  The bundle step now stops, naming the file and never the token, when a
-  runtime config, provider config or `machine-profile.yaml` sets a non-empty
-  `http.auth_token`, or is not valid YAML. An install whose `runtime.yaml`
-  already carries one warns, and the summary names it as the token in use.
+  The bundle step now stops, naming the file and never the token, when any
+  config it renders (the runtime configs, the `manual` variant, the provider
+  configs) or `machine-profile.yaml` sets `http.auth_token` to anything but a
+  quoted empty string, or is not valid YAML or UTF-8. A null value counts: the
+  runtime reads `auth_token:`, `~` and `null` as the token `null`. The check
+  reads the files as the runtime's YAML parser does: the first of duplicate
+  keys and of duplicate `http` blocks, merge keys followed, and a tag such as
+  `!!null` does not hide the value. An install whose `runtime.yaml` already
+  carries one warns, and the summary names it as the token in use.
 
 ### Fixed
 
@@ -35,7 +40,8 @@ commit messages only.
   `projects/my-reactor/` with every provider `--config` pointing into
   `projects/bioreactor-v1/`, and exited 0. Such paths now point at the
   directory the project installs to, and one that names a file the bundle does
-  not ship stops the bundle step.
+  not ship stops the bundle step (a path in a YAML comment is rewritten but
+  not checked).
 
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and

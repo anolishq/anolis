@@ -154,11 +154,26 @@ _installed_cfg() {
     [[ "${output}" != *"baked-token-xyz"* ]]
 }
 
-@test "529: no warning when the installed config sets no token, or an empty one" {
+@test "529: a null auth_token is warned about: the runtime reads it as the token \"null\"" {
+    local v
+    for v in 'auth_token:' 'auth_token: ~' 'auth_token: null' 'auth_token:   # none'; do
+        _installed_cfg "auth_enabled: true" "${v}"
+        run _warn_config_api_token
+        [[ "${output}" == *"sets http.auth_token"* ]] || { echo "no warning: ${v}"; return 1; }
+    done
+    _installed_cfg "auth_enabled: true" "auth_token:"
+    run phase_summary
+    [[ "${output}" == *"API token: the http.auth_token in ${PREFIX}/config/runtime.yaml"* ]]
+}
+
+@test "529: no warning when the installed config sets no token, or a quoted empty one" {
     _installed_cfg "auth_enabled: true"
     run _warn_config_api_token
     [ "${output}" == "" ]
     _installed_cfg "auth_enabled: true" 'auth_token: ""'
+    run _warn_config_api_token
+    [ "${output}" == "" ]
+    _installed_cfg "auth_enabled: true" "auth_token: ''  # off"
     run _warn_config_api_token
     [ "${output}" == "" ]
 }

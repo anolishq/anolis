@@ -341,12 +341,99 @@ _assert_token_refused() {
     rm -rf "${PROJECT_DIR}"
 }
 
-@test "#529 an empty auth_token is not a token: staging succeeds" {
+@test "#529 a quoted empty auth_token is not a token: staging succeeds" {
+    local v
+    for v in '""' "''"; do
+        PROJECT_DIR="$(_copy_fixture)"
+        _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "${v}"
+        run assemble_bundle "${OUT}/staging-${#v}" x86_64
+        [ "$status" -eq 0 ] || { echo "refused: ${v}"; return 1; }
+        rm -rf "${PROJECT_DIR}"
+    done
+}
+
+# yaml-cpp, which the runtime parses with, reads a null value as the string
+# "null": the runtime would use "null" as the token, not ANOLIS_API_TOKEN.
+@test "#529 a null auth_token is a token: staging fails" {
+    local v
+    for v in '' '~' 'null' 'Null' '!!null'; do
+        PROJECT_DIR="$(_copy_fixture)"
+        _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "${v}"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -ne 0 ] || { echo "staged: [${v}]"; return 1; }
+        [[ "$output" == *"anolis-runtime.manual.yaml: sets http.auth_token"* ]]
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}
+
+# Where PyYAML's loaded data and yaml-cpp disagree, the check goes by what
+# yaml-cpp reads (tests/shell can't run yaml-cpp; each case names its reading).
+@test "#529 a token PyYAML would overwrite with a later empty duplicate key fails staging" {
+    # yaml-cpp reads the first auth_token; PyYAML's load keeps the last.
     PROJECT_DIR="$(_copy_fixture)"
-    _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" '""'
+    printf 'http:\n  auth_token: %s\n  auth_token: ""\n' "${TOKEN}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_token_refused anolis-runtime.manual.yaml
+}
+
+@test "#529 a token in the first of two http blocks fails staging" {
+    # yaml-cpp reads the first http block; PyYAML's load keeps the last.
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'http:\n  auth_token: %s\nhttp:\n  port: 8080\n' "${TOKEN}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_token_refused anolis-runtime.manual.yaml
+}
+
+@test "#529 a token with an explicit !!null tag fails staging" {
+    # PyYAML loads it as None; yaml-cpp keeps the scalar's text.
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "!!null ${TOKEN}"
+    _assert_token_refused anolis-runtime.manual.yaml
+}
+
+@test "#529 a token brought into http by a merge key fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'base: &b {auth_token: %s}\nhttp:\n  <<: *b\n' "${TOKEN}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_token_refused anolis-runtime.manual.yaml
+}
+
+@test "#529 a token in machine-profile.yaml fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/machine-profile.yaml" "${TOKEN}"
+    _assert_token_refused machine-profile.yaml
+}
+
+# The bundle's config/runtime.yaml is rendered from whatever file
+# runtime_profiles.manual names, which need not match anolis-runtime.*.yaml.
+@test "#529 a token in a manual variant outside anolis-runtime.*.yaml fails staging" {
+    local name
+    for name in manual-runtime.yaml anolis-runtime.manual.yml; do
+        PROJECT_DIR="$(_copy_fixture)"
+        cp "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "${PROJECT_DIR}/config/${name}"
+        _set_token "${PROJECT_DIR}/config/${name}" "${TOKEN}"
+        sed -i "s#manual: config/anolis-runtime.manual.yaml#manual: config/${name}#" "${PROJECT_DIR}/machine-profile.yaml"
+        _assert_token_refused "${name}"
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}
+
+@test "#529 a manual variant outside anolis-runtime.*.yaml that does not parse fails without quoting it" {
+    PROJECT_DIR="$(_copy_fixture)"
+    cp "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "${PROJECT_DIR}/config/manual-runtime.yaml"
+    printf 'http:\n  auth_token: "%s\n' "${TOKEN}" >> "${PROJECT_DIR}/config/manual-runtime.yaml"
+    sed -i "s#manual: config/anolis-runtime.manual.yaml#manual: config/manual-runtime.yaml#" "${PROJECT_DIR}/machine-profile.yaml"
     run assemble_bundle "${OUT}/staging" x86_64
-    [ "$status" -eq 0 ]
-    rm -rf "${PROJECT_DIR}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"manual-runtime.yaml: not valid YAML"* ]]
+    [[ "$output" != *"${TOKEN}"* ]]
+}
+
+@test "#529 a config that is not UTF-8 fails staging cleanly, without quoting it" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'http:\n  auth_token: \xff%s\n' "${TOKEN}" >> "${PROJECT_DIR}/config/provider-foo.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"provider-foo.yaml: not valid UTF-8"* ]]
+    [[ "$output" != *"Traceback"* ]]
+    [[ "$output" != *"${TOKEN}"* ]]
 }
 
 # --- #694: a project copied under a new name installs under that name ---------
@@ -396,6 +483,47 @@ _config_paths() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"anolis-runtime.manual.yaml"* ]]
     [[ "$output" == *"config/provider-gone.yaml"* ]]
+}
+
+@test "#694 an unquoted flow list keeps its commas and brackets" {
+    PROJECT_DIR="$(_copy_fixture_as my-reactor)"
+    local old='../anolis-projects/projects/stage-project/config'
+    sed -i "s#args: \[\"--config\", \"${old}/provider-foo.yaml\"\]#args: [--config, ${old}/provider-foo.yaml, --verbose]#; s#args: \[\"--config\", \"${old}/provider-bar.yaml\"\]#args: [--config, ${old}/provider-bar.yaml]#" \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    grep -q 'args: \[--config, \.\./anolis-projects' "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    grep -qF 'args: [--config, /opt/anolis/projects/my-reactor/config/provider-foo.yaml, --verbose]' "${OUT}/b/config/runtime.yaml"
+    grep -qF 'args: [--config, /opt/anolis/projects/my-reactor/config/provider-bar.yaml]' "${OUT}/b/config/runtime.yaml"
+}
+
+@test "#694 a behaviour tree path is rewritten and checked like a config path" {
+    PROJECT_DIR="$(_copy_fixture_as my-reactor)"
+    printf 'automation:\n  enabled: false\n  behavior_tree: ../anolis-projects/projects/stage-project/behaviors/tree.xml\n' \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    grep -qx '  behavior_tree: /opt/anolis/projects/my-reactor/behaviors/tree.xml' "${OUT}/b/config/runtime.yaml"
+    [ -f "${OUT}/b/projects/my-reactor/behaviors/tree.xml" ]
+    sed -i 's#behaviors/tree.xml#behaviors/gone.xml#' "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b2" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"behaviors/gone.xml"* ]]
+}
+
+@test "#694 a path inside a comment is rewritten but not checked" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '# formerly ../anolis-projects/projects/old-name/config/notes.txt\nnote: x  # ../anolis-projects/projects/x/config/gone.yaml\n' \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    grep -qx '# formerly /opt/anolis/projects/stage-project/config/notes.txt' "${OUT}/b/config/runtime.yaml"
+    # A '#' inside quotes does not start a comment: this path is still checked.
+    sed -i 's%^note: x .*%note: "a # b ../anolis-projects/projects/x/config/gone.yaml"%' "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    grep -q '^note: "a # b' "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b2" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"config/gone.yaml"* ]]
 }
 
 @test "#694 a path that climbs out of the project fails staging" {
