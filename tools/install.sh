@@ -2952,7 +2952,9 @@ from pathlib import Path
 project, out, profile, prefix = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 pd = Path(project)
 cfg = pd / "config"
-pcmd = re.compile(r"\.\./anolis-provider-([a-z0-9-]+)/build/[^/]+/anolis-provider-([a-z0-9-]+)")
+# The build-dir group stops at whitespace and quotes, so a rewrite never spans
+# lines or opens or closes a string.
+pcmd = re.compile(r"\.\./anolis-provider-([a-z0-9-]+)/build/[^/\s\"']+/anolis-provider-([a-z0-9-]+)")
 # The last group stops at YAML flow indicators, so an unquoted flow list
 # (`args: [--config, ../anolis-projects/...]`) keeps its `,` and `]`.
 ppath = re.compile(r"\.\./anolis-projects/projects/([a-z0-9-]+)/(config|behaviors)/([^\s\"',\[\]{}]+)")
@@ -2986,17 +2988,48 @@ def read(f):
 # keeps the text of a scalar whatever its tag (`!!null x` is "x"). A file that
 # does not parse cannot be shown to be free of a token, so it is refused too;
 # the parser's message is not printed, because it quotes the offending line.
-def merged(node):
-    """The (key, value) pairs of a mapping node, with any `<<` merges."""
+class SelfMerge(Exception):
+    pass
+
+
+def merged(node, seen=()):
+    """The (key, value) pairs of a mapping node, with any `<<` merges. A
+    mapping that merges itself (`http: &h {<<: *h}`) cannot be resolved."""
+    if id(node) in seen:
+        raise SelfMerge()
+    seen = seen + (id(node),)
     pairs = []
     for k, v in node.value:
         if isinstance(k, yaml.ScalarNode) and k.value == "<<":
             for m in (v.value if isinstance(v, yaml.SequenceNode) else [v]):
                 if isinstance(m, yaml.MappingNode):
-                    pairs.extend(merged(m))
+                    pairs.extend(merged(m, seen))
         else:
             pairs.append((k, v))
     return pairs
+
+
+# The bundle must not carry a token's text either, whether or not the runtime
+# would read it as one: a commented-out `# auth_token: <secret>`, a flow pair
+# yaml-cpp reads as a plain scalar (`{auth_token:x}`), a key hidden from the
+# parser by a byte-order mark or an odd space. So any `auth_token` followed by
+# a colon must have no value but `""` or `''`, wherever it is in the file.
+TOKEN_TEXT = re.compile(
+    r"auth_token[\"']?[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]*:(?P<v>[^\n\r\x85\u2028\u2029]*)"
+)
+
+
+def check_token_text(text, name):
+    for m in TOKEN_TEXT.finditer(text):
+        v = re.split(r"[,}\]]", m.group("v"), maxsplit=1)[0]
+        v = re.sub(r"(^|\s)#.*$", "", v).strip(" \t\u00a0\ufeff")
+        if v in ("", '""', "''"):
+            continue
+        sys.exit(
+            f"{name}: has a value after an auth_token key (in a comment, or in a form the runtime "
+            f"may not read as one). A bundle must not carry an API token's text; remove it. The "
+            f"install generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
+        )
 
 
 def check_token(text, name):
@@ -3008,6 +3041,13 @@ def check_token(text, name):
         sys.exit(f"{name}: not valid YAML{where}; cannot check it for http.auth_token")
     if not isinstance(root, yaml.MappingNode):
         return
+    try:
+        check_token_nodes(root, name)
+    except SelfMerge:
+        sys.exit(f"{name}: a merge key (<<) brings in its own mapping; cannot check it for http.auth_token")
+
+
+def check_token_nodes(root, name):
     for k, http in merged(root):
         if not (isinstance(k, yaml.ScalarNode) and k.value == "http" and isinstance(http, yaml.MappingNode)):
             continue
@@ -3041,7 +3081,8 @@ def in_comment(text, start):
 
 
 def render(c, source):
-    # Every file rendered is checked, so none can reach the bundle unchecked.
+    # Every file rendered is checked, before the rewrites and again after them
+    # (below): what ships is the text after, and that is what the runtime reads.
     check_token(c, source)
     c = pcmd.sub(lambda m: f"{prefix}/bin/anolis-provider-{m.group(2)}", c)
 
@@ -3076,7 +3117,10 @@ def render(c, source):
         bind = f"{indent}bind: 0.0.0.0"
         return bind if has_auth else f"{bind}\n{indent}auth_enabled: true"
 
-    return re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
+    c = re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
+    check_token(c, source)
+    check_token_text(c, source)
+    return c
 
 
 renamed = set()
@@ -3087,6 +3131,7 @@ if behs:
     bo = out / "projects" / profile / "behaviors"
     bo.mkdir(parents=True, exist_ok=True)
     for f in behs:
+        check_token_text(read(f), f.name)
         shutil.copy2(f, bo / f.name)
 if not rts:
     sys.exit(f"no runtime configs in {cfg}")
@@ -3098,6 +3143,7 @@ if not mp_src.exists():
 # It ships verbatim, beside the project's configs.
 mp_text = read(mp_src)
 check_token(mp_text, mp_src.name)
+check_token_text(mp_text, mp_src.name)
 mp_data = yaml.safe_load(mp_text) or {}
 pinned = set((mp_data.get("components") or {}).get("providers") or {})
 prov_cmd = re.compile(re.escape(prefix) + r"/bin/anolis-provider-([a-z0-9-]+)$")

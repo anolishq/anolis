@@ -28,7 +28,7 @@ is a complete example, and the workbench writes projects in the same layout.
   rendered as `<prefix>/config/runtime.yaml`. The files are copied as written,
   apart from the provider command and project path rewrites and the bind and
   auth change described under [Security](../security.md#defaults); a comment
-  ships as it is.
+  ships as it is, unless it holds a token (below).
 - The directory's name is the installed project's name. A path written as
   `../anolis-projects/projects/<name>/config/<file>` or
   `.../behaviors/<file>`, where `<name>` is lower case letters, digits and `-`,
@@ -45,11 +45,15 @@ is a complete example, and the workbench writes projects in the same layout.
   generates the device's own token into `/etc/anolis/runtime.env`, and a token
   in the config would replace it on every device. A null value counts: the
   runtime reads `auth_token:`, `~` and `null` as the token `null`. The bundle
-  step checks every file it renders and `machine-profile.yaml`, reads them as
-  the runtime's YAML parser does (the first of duplicate keys, a tag does not
-  hide the value), stops and names the file, and never prints the token. A file
-  that is not valid YAML or not UTF-8 stops it too, since it cannot be checked
-  (#529).
+  step checks every file it renders, before and after its rewrites, and
+  `machine-profile.yaml`, reads them as the runtime's YAML parser does (the
+  first of duplicate keys, a tag does not hide the value), stops and names the
+  file, and never prints the token. The bundle carries no token's text either:
+  an `auth_token` followed by a colon and any value but `""` or `''` stops the
+  bundle step wherever it appears in a config, behaviour or the machine profile,
+  in a comment included. A file that is not valid YAML or not UTF-8 stops it
+  too, since it cannot be checked, and so does a merge key (`<<`) that brings in
+  its own mapping (#529).
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set

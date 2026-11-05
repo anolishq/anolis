@@ -426,6 +426,104 @@ _assert_token_refused() {
     [[ "$output" != *"${TOKEN}"* ]]
 }
 
+# A rewrite runs after the first check; it must not be able to uncover a token
+# the check passed. Here, before the provider-command rewrite, `b` is one
+# quoted string that hides the http block; a rewrite whose build-dir group
+# crossed lines and quotes would remove its opening quote.
+#
+# Three things refuse these, each enough alone: the build-dir group cannot
+# cross a line or a quote, so nothing is uncovered; the token check runs again
+# on the rewritten text; and the token's text is refused wherever it is.
+_hidden_by_quote() {
+    printf 'a: ../anolis-provider-q/build/x\nb: %sy/anolis-provider-q\nhttp:\n  auth_token:%s\nc: x%s\n' "$1" "$2" "$1"
+}
+
+_assert_hidden_refused() {
+    local file="$1"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"${file}: "*"auth_token"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" != *"${TOKEN}"* ]]
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
+}
+
+@test "#529 a rewrite cannot uncover a token: double quote, single quote, provider config" {
+    local q
+    for q in '"' "'"; do
+        PROJECT_DIR="$(_copy_fixture)"
+        _hidden_by_quote "${q}" " ${TOKEN}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        _assert_hidden_refused anolis-runtime.manual.yaml || { echo "quote ${q}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+    PROJECT_DIR="$(_copy_fixture)"
+    _hidden_by_quote '"' " ${TOKEN}" >> "${PROJECT_DIR}/config/provider-foo.yaml"
+    _assert_hidden_refused provider-foo.yaml
+}
+
+# With no value there is no token text, and inside the string it is no key:
+# the file stages, and the rewrite leaves the string as it was.
+@test "#529 a rewrite leaves a quoted string whole" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _hidden_by_quote '"' "" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ]
+    grep -qx 'a: ../anolis-provider-q/build/x' "${OUT}/staging/config/runtime.yaml"
+    grep -qx 'b: "y/anolis-provider-q' "${OUT}/staging/config/runtime.yaml"
+}
+
+# The bundle carries no token's text at all, whether or not the runtime would
+# read it as a token.
+_assert_token_text_refused() {
+    local file="$1"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"${file}: has a value after an auth_token key"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" != *"${TOKEN}"* ]]
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
+}
+
+@test "#529 a token's text is refused in any form: comment, flow, BOM, odd space, behaviour, profile" {
+    local form
+    while IFS= read -r form; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf "${form}\n" "${TOKEN}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        _assert_token_text_refused anolis-runtime.manual.yaml || { echo "form: ${form}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done <<'FORMS'
+# auth_token: %s
+# auth_token: "%s"
+# auth_token: %s#1
+http: {auth_token:%s}
+http: [auth_token: %s]
+\xef\xbb\xbfhttp:\n  \xef\xbb\xbfauth_token: %s
+http:\n  auth_token\xc2\xa0: %s
+FORMS
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '<!-- auth_token: %s -->\n' "${TOKEN}" >> "${PROJECT_DIR}/behaviors/tree.xml"
+    _assert_token_text_refused tree.xml
+    rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '# auth_token: %s\n' "${TOKEN}" >> "${PROJECT_DIR}/machine-profile.yaml"
+    _assert_token_text_refused machine-profile.yaml
+}
+
+@test "#529 the word auth_token with no value, or a quoted empty one, still stages" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '# auth_token comes from runtime.env\nhttp:\n  auth_token: ""  # per device\n' \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ]
+}
+
+@test "#529 a merge key that brings in its own mapping fails staging cleanly" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'http: &h\n  <<: *h\n  auth_token: ""\n' >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"anolis-runtime.manual.yaml: a merge key (<<) brings in its own mapping"* ]]
+    [[ "$output" != *"Traceback"* && "$output" != *"RecursionError"* ]]
+}
+
 @test "#529 a config that is not UTF-8 fails staging cleanly, without quoting it" {
     PROJECT_DIR="$(_copy_fixture)"
     printf 'http:\n  auth_token: \xff%s\n' "${TOKEN}" >> "${PROJECT_DIR}/config/provider-foo.yaml"

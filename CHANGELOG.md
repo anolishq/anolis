@@ -28,8 +28,12 @@ commit messages only.
   runtime reads `auth_token:`, `~` and `null` as the token `null`. The check
   reads the files as the runtime's YAML parser does: the first of duplicate
   keys and of duplicate `http` blocks, merge keys followed, and a tag such as
-  `!!null` does not hide the value. An install whose `runtime.yaml` already
-  carries one warns, and the summary names it as the token in use.
+  `!!null` does not hide the value. It runs on each file again after the
+  bundle step's rewrites, which is the text that ships. No token's text ships
+  either: an `auth_token` followed by a colon and any value but `""` or `''`
+  stops the bundle step in any config, behaviour or the machine profile, in a
+  comment included. An install whose `runtime.yaml` already carries one warns,
+  and the summary names it as the token in use.
 
 ### Fixed
 
