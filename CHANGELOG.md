@@ -15,6 +15,14 @@ commit messages only.
 
 ### Fixed
 
+- **`install.sh` no longer fails a healthy install on a target without
+  `curl`** (#536). The offline `--local` route does not need `curl`, but the
+  health check is made of `curl` calls, so it used to poll for the full 30 s,
+  print `health: runtime not responding`, point at the runtime's logs and exit
+  1 while the runtime was answering. It now warns at once that `curl` was not
+  found, names the four checks it skipped, and does not fail the install,
+  unless `systemctl restart anolis-runtime` failed.
+
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and
   `examples/anolis-runtime-telemetry.yaml` run

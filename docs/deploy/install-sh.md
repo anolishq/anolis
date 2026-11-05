@@ -72,7 +72,10 @@ works directly.
 
 **The bundle carries its own `install.sh`.** You do not need this repository on
 the target: unpack the tarball and use the copy inside it, as above. This route
-needs no internet and no `python3` on the target. `--stage` checks that
+needs no internet and no `python3` on the target. It does not need `curl`
+either, but the install's health check does: without `curl` the install skips
+the check, says so, and does not fail on it (see
+[After installing](#after-installing)). `--stage` checks that
 copy against the runtime release's `SHA256SUMS`, as it does each tarball, and
 stops on a mismatch. A release before 0.1.50, whose `SHA256SUMS` has no line for
 `install.sh`, is staged with a warning that names it.
@@ -238,6 +241,15 @@ For providers it reads `/v0/providers/health` until every provider is
 `providers: N of M running` and one warning per provider that is not running,
 with its id and lifecycle state. Like the run registry, a shortfall is a
 warning and does not fail the install. It counts providers, not devices.
+
+Every one of these checks is an HTTP request made with `curl`. On a target
+without `curl`, which the offline route allows, the install warns `health: not
+checked: curl not found`, names the four checks it did not run (runtime status,
+run registry, startup safe state, provider liveness), and goes on without
+waiting for the runtime. The skipped check does not fail the install, so the
+exit status says nothing about whether the runtime came up; check it by hand
+with the `systemctl` and `journalctl` commands above. The install still fails
+if `systemctl restart anolis-runtime` itself failed (#536).
 
 It also reports what `safety.on_startup` did at the runtime's restart. A safe
 state that ran and did not take, such as on a board that came up tripped, is a

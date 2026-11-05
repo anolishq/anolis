@@ -185,3 +185,85 @@ summary_text() { sed 's/\x1b\[[0-9;]*m//g' <<< "$1" | sed '/^[[:space:]]*$/d'; }
     [[ "${summary}" != *"NOT ready"* ]]
     [[ "${summary}" != *"did NOT succeed"* ]]
 }
+
+# #536: the offline --local route needs no curl on the target, but every
+# health check is a curl call. PATH here is a directory of links to every
+# command on the test's own PATH except curl, so `command -v curl` finds
+# nothing, as on such a target. sleep is a stub that counts the polls, so a
+# health check that waits out its timeout shows up as polls, not as minutes.
+path_without_curl() {
+    local bin="${BATS_TEST_TMPDIR}/bin" dir i
+    local -a dirs
+    mkdir -p "${bin}"
+    IFS=: read -ra dirs <<< "${PATH}"
+    # Last directory first, with -f: the first PATH entry for a name wins.
+    for ((i = ${#dirs[@]} - 1; i >= 0; i--)); do
+        dir="${dirs[i]}"
+        [[ -d "${dir}" ]] || continue
+        compgen -G "${dir}/*" >/dev/null || continue
+        ln -sf "${dir}"/* "${bin}/"
+    done
+    rm -f "${bin}/curl"
+    printf '%s' "${bin}"
+}
+
+health_without_curl() {
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    _runtime_port() { echo 8080; }
+    _runtime_api_token() { :; }
+    NO_START=0
+    HEALTH_FAILED=0
+    SAFE_STATE_UNPLANNABLE=0
+    POLLS="${BATS_TEST_TMPDIR}/polls"
+    : > "${POLLS}"
+    sleep() { echo poll >> "${POLLS}"; }
+    NO_CURL_PATH=$(path_without_curl)
+}
+
+@test "536: no curl on the target: the health check is skipped at once, naming what it did not check" {
+    health_without_curl
+    PATH="${NO_CURL_PATH}" run phase_health
+    PATH="${NO_CURL_PATH}" command -v curl && return 1  # the PATH really has no curl
+    [ "${status}" -eq 0 ]
+    plain=$(sed 's/\x1b\[[0-9;]*m//g' <<< "${output}")
+    [[ "${plain}" == *"⚠ health: not checked: curl not found"* ]]
+    [[ "${plain}" == *"runtime status, run registry, startup safe state and provider liveness"* ]]
+    [[ "${plain}" != *"not responding"* ]]
+    [[ "${plain}" != *"systemctl"* && "${plain}" != *"journalctl"* ]]
+    [ ! -s "${POLLS}" ]
+}
+
+@test "536: no curl on the target: the install does not fail on it" {
+    health_without_curl
+    PATH="${NO_CURL_PATH}" phase_health >/dev/null
+    [ "${HEALTH_FAILED}" -eq 0 ]
+    ! _install_failed
+    run phase_summary
+    [[ "$(summary_text "${output}")" == *"Anolis installation complete"* ]]
+}
+
+@test "536: no curl, and the restart itself failed: the install still fails" {
+    health_without_curl
+    systemctl() { return 1; }
+    phase_start >/dev/null
+    unset -f systemctl
+    PATH="${NO_CURL_PATH}" phase_health >/dev/null
+    [ "${HEALTH_FAILED}" -eq 1 ]
+    _install_failed
+    [ ! -s "${POLLS}" ]
+}
+
+@test "536: control: the same PATH with a curl on it runs the health check" {
+    health_without_curl
+    cat > "${NO_CURL_PATH}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s' '{"version":"0.1.99","status":"ok"}'
+SH
+    chmod +x "${NO_CURL_PATH}/curl"
+    _run_registry_available() { return 0; }
+    _check_provider_liveness() { :; }
+    PATH="${NO_CURL_PATH}" run phase_health
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"health: runtime responding (v0.1.99)"* ]]
+    [[ "${output}" != *"not checked"* ]]
+}
