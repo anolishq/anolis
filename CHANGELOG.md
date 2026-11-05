@@ -46,8 +46,11 @@ commit messages only.
   in the prefix, and a failure exited with them in place, so the next restart
   or reboot started binaries the preflight had refused, and `manifest.json` no
   longer described `bin/`. The install now copies `bin/`, `config/`,
-  `projects/` and `.prev/` aside before replacing them, and any error it
-  reports before the preflight passes puts them back and says so.
+  `projects/` and `.prev/` aside before replacing them. A reported error, a
+  command that fails, or SIGINT, SIGTERM or SIGHUP before the preflight passes
+  puts them back and says so. If a copy is left behind (a restore that failed,
+  a SIGKILL), the next install refuses to start before it changes anything,
+  and says how to put the copy back or remove it.
 
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal

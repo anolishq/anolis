@@ -21,10 +21,24 @@ setup() {
     PFX="${BATS_TEST_TMPDIR}/prefix"
     BUNDLE="${BATS_TEST_TMPDIR}/bundle"
     LATER="${BATS_TEST_TMPDIR}/later.log"
+    UNPACKED="${BATS_TEST_TMPDIR}/unpacked-bundle"
+    _stubs
+    _old_install
+    _new_bundle "${UNMET_EXIT}"
+}
 
+# The stubs, as one function, so a test can also write them into a script that
+# runs main in a process of its own (see _run_main_process).
+_stubs() {
     phase_root_check() { :; }
     phase_detect() { ARCH=x86_64; }
-    phase_prepare_bundle() { BUNDLE_DIR="${BUNDLE}"; }
+    # As the real phase does for a tarball: a temp dir the EXIT trap removes.
+    phase_prepare_bundle() {
+        BUNDLE_DIR="${BUNDLE}"
+        mkdir -p "${UNPACKED}"
+        INSTALL_TMP="${UNPACKED}"
+        trap _install_on_exit EXIT
+    }
     phase_verify() { :; }
     phase_version_check() { :; }
     phase_system_user() { :; }
@@ -36,9 +50,25 @@ setup() {
         phase_hostname phase_start phase_health phase_summary; do
         eval "${p}() { echo ${p} >> '${LATER}'; }"
     done
+}
 
-    _old_install
-    _new_bundle "${UNMET_EXIT}"
+# bats `run` evaluates its command where errexit is off, so a `set -e` abort
+# or a signal can only be seen with main in a process of its own, with
+# install.sh's own `set -euo pipefail`. <fault> is shell code run in place of
+# phase_runtime_auth, after the binaries and project were replaced.
+_run_main_process() {
+    local fault="$1" driver="${BATS_TEST_TMPDIR}/driver.sh"
+    {
+        echo '#!/usr/bin/env bash'
+        echo 'export ANOLIS_INSTALL_SH_NO_MAIN=1'
+        printf 'source %q\n' "${INSTALL_SH}"
+        printf 'PFX=%q BUNDLE=%q LATER=%q UNPACKED=%q\n' "${PFX}" "${BUNDLE}" "${LATER}" "${UNPACKED}"
+        declare -f _stubs
+        echo '_stubs'
+        printf 'phase_runtime_auth() { %s; }\n' "${fault}"
+        echo 'main --local "${BUNDLE}" --prefix "${PFX}" --no-start'
+    } > "${driver}"
+    run bash "${driver}"
 }
 
 UNMET_EXIT=1
@@ -86,10 +116,10 @@ _new_bundle() {
         > "${BUNDLE}/projects/demo/machine-profile.yaml"
 }
 
-# Path, mode and content of every file and directory under the prefix's
-# bin/, config/, projects/ and .prev/.
+# Path, mode, mtime and content of every file and directory under the
+# prefix's bin/, config/, projects/ and .prev/.
 _tree() {
-    ( cd "${PFX}" && find bin config projects .prev -printf '%p %M\n' | LC_ALL=C sort \
+    ( cd "${PFX}" && find bin config projects .prev -printf '%p %M %T@\n' | LC_ALL=C sort \
         && find bin config projects .prev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum )
 }
 
@@ -119,8 +149,9 @@ _main() {
 
 @test "535: a refused runtime config after the binaries were replaced is restored too" {
     # A kept runtime.yaml the runtime would refuse: phase_config_runtime dies,
-    # after phase_install_binaries has replaced bin/.
-    printf 'http:\n  bind: 0.0.0.0\n' >> "${PFX}/config/runtime.yaml"
+    # after phase_install_binaries has replaced bin/. (The kept config's http
+    # block is its last, so this line joins it.)
+    printf '  bind: 0.0.0.0\n' >> "${PFX}/config/runtime.yaml"
     before=$(_tree)
     _main
     [ "$status" -ne 0 ]
@@ -157,14 +188,111 @@ _main() {
     [[ "${output}" != *"restored"* ]]
 }
 
-@test "535: a die in a subshell does not restore under the install's shell" {
+# Run under `run`, so the EXIT trap _install_txn_begin sets stays in its subshell.
+_subshell_die() {
     PREFIX="${PFX}"
     _install_txn_begin
     echo changed > "${PFX}/bin/anolis-runtime"
     ( die "in a subshell" ) || true
-    grep -qx changed "${PFX}/bin/anolis-runtime"
-    [ -d "${INSTALL_TXN}" ]
+    grep -qx changed "${PFX}/bin/anolis-runtime" || return 11
+    [ -d "${INSTALL_TXN}" ] || return 12
     _install_txn_restore >/dev/null
-    grep -q '1.0.0' "${PFX}/bin/anolis-runtime"
+    grep -q '1.0.0' "${PFX}/bin/anolis-runtime" || return 13
+    [ ! -e "${PFX}/.install-txn" ] || return 14
+}
+
+@test "535: a die in a subshell does not restore under the install's shell" {
+    run _subshell_die
+    [ "$status" -eq 0 ]
+}
+
+@test "535: a copy left by an earlier install is never overwritten: the install refuses before it changes anything" {
+    mkdir -p "${PFX}/.install-txn/bin"
+    echo "the only record" > "${PFX}/.install-txn/bin/anolis-runtime"
+    # The first phase that changes the host must not run.
+    phase_system_user() { echo phase_system_user >> "${LATER}"; }
+    before=$(_tree)
+    _main
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"install: ${PFX}/.install-txn exists: an earlier install stopped before its host preflight passed"* ]]
+    [[ "${output}" == *"sudo rm -rf ${PFX}/<dir> && sudo mv ${PFX}/.install-txn/<dir> ${PFX}/<dir>"* ]]
+    [[ "${output}" == *"sudo rm -rf ${PFX}/.install-txn"* ]]
+    [[ "${output}" == *"refusing to install over an unfinished install"* ]]
+    [[ "${output}" != *"install: restored"* ]]
+    grep -qx "the only record" "${PFX}/.install-txn/bin/anolis-runtime"
+    _tree_is "${before}"
+    [ ! -e "${LATER}" ]
+}
+
+@test "535: a die after the preflight passed keeps the new install, and restores nothing" {
+    _new_bundle 0
+    phase_systemd() { die "systemd: failed"; }
+    _main --no-start
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"systemd: failed"* ]]
+    [[ "${output}" != *"install: restored"* ]]
+    [[ "${output}" != *"could not restore"* ]]
+    grep -q '2.0.0' "${PFX}/bin/anolis-runtime"
+    grep -q 'device: new' "${PFX}/projects/demo/config/provider-demo.yaml"
     [ ! -e "${PFX}/.install-txn" ]
+    [ ! -e "${UNPACKED}" ]
+}
+
+@test "535: a restore whose copy is missing deletes nothing, says so, and keeps the rest of the copy" {
+    _missing_copy() {
+        PREFIX="${PFX}"
+        _install_txn_begin
+        rm -rf "${PFX}/.install-txn/projects"
+        echo "written by this run" > "${PFX}/projects/demo/new"
+        echo changed > "${PFX}/bin/anolis-runtime"
+        die "preflight failed"
+    }
+    run _missing_copy
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"install: could not restore projects under ${PFX}; the copies taken before this run are in ${PFX}/.install-txn"* ]]
+    [[ "${output}" != *"install: restored"* ]]
+    # projects/ had no copy, so it was left alone, not deleted.
+    grep -qx "written by this run" "${PFX}/projects/demo/new"
+    # The others came back.
+    grep -q '1.0.0' "${PFX}/bin/anolis-runtime"
+    [ -d "${PFX}/.install-txn" ]
+    # And the next install refuses to go on over it.
+    _main
+    [[ "${output}" == *"${PFX}/.install-txn exists"* ]]
+}
+
+@test "535: a command that fails under set -e restores the prefix, and the temp dir is still removed" {
+    before=$(_tree)
+    _run_main_process 'false'
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"install: restored ${PFX}/bin, config/, projects/ and .prev/ as they were before this run"* ]]
+    _tree_is "${before}"
+    [ ! -e "${PFX}/.install-txn" ]
+    [ ! -e "${UNPACKED}" ]
+}
+
+@test "535: SIGTERM, SIGHUP and SIGINT restore the prefix and exit with the signal's status" {
+    local sig want
+    for sig in TERM:143 HUP:129 INT:130; do
+        want="${sig#*:}"; sig="${sig%%:*}"
+        rm -rf "${PFX}"
+        _old_install
+        before=$(_tree)
+        _run_main_process "kill -${sig} \$\$"
+        [ "$status" -eq "${want}" ] || { echo "${sig}: status ${status}"; return 1; }
+        [[ "${output}" == *"install: restored"* ]] || { echo "${sig}: ${output}"; return 1; }
+        _tree_is "${before}" || { echo "${sig}: tree differs"; return 1; }
+        [ ! -e "${PFX}/.install-txn" ]
+        [ ! -e "${UNPACKED}" ]
+    done
+}
+
+@test "535: in a process of its own, a passing install drops the copy and still removes the temp dir" {
+    _new_bundle 0
+    _run_main_process ':'
+    [ "$status" -eq 0 ]
+    grep -q '2.0.0' "${PFX}/bin/anolis-runtime"
+    [ ! -e "${PFX}/.install-txn" ]
+    [ ! -e "${UNPACKED}" ]
+    [[ "${output}" != *"install: restored"* ]]
 }

@@ -132,7 +132,7 @@ log_warn() { _yellow "⚠ $*"; }
 log_err()  { _red    "✗ $*"; }
 log_info() { printf  "  %s\n" "$*"; }
 
-die() { log_err "$*"; _install_txn_restore; exit 1; }
+die() { log_err "$*"; exit 1; }
 
 # apt with no terminal to ask on. Without it debconf warns "unable to
 # initialize frontend" on every package (#515).
@@ -289,7 +289,8 @@ phase_prepare_bundle() {
         # Config-driven online install: build the bundle from the config, here.
         stage_check_deps
         BUNDLE_DIR=$(mktemp -d)
-        trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+        INSTALL_TMP="${BUNDLE_DIR}"
+        trap _install_on_exit EXIT
         assemble_bundle "${BUNDLE_DIR}" "${ARCH}"
         log_ok "prepare: assembled bundle from ${PROJECT_DIR}"
         return
@@ -300,7 +301,8 @@ phase_prepare_bundle() {
             BUNDLE_DIR="${LOCAL_PATH}"
         elif [[ -f "${LOCAL_PATH}" ]]; then
             BUNDLE_DIR=$(mktemp -d)
-            trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+            INSTALL_TMP="${BUNDLE_DIR}"
+            trap _install_on_exit EXIT
             tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
         else
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
@@ -473,14 +475,47 @@ phase_directories() {
 # installed. A preflight that then fails, or any die between them, would leave
 # an upgrade half-installed: the next restart or reboot starts binaries the
 # preflight has just refused (#535). So the directories those phases write are
-# copied aside first, and a die before the preflight passes puts them back.
+# copied aside first, and anything that ends the install before the preflight
+# passes puts them back, through the install's one EXIT trap: a die, a command
+# that fails under `set -e`, or SIGINT, SIGTERM or SIGHUP (a dropped ssh
+# session; bash runs the EXIT trap when one of these ends it).
 INSTALL_TXN_DIRS=(bin config projects .prev)
 INSTALL_TXN=""
 INSTALL_TXN_SHELL=""
+# A temp dir of the install's own (the bundle, when it was unpacked or built
+# here) that the EXIT trap removes.
+INSTALL_TMP=""
+
+# The install's EXIT trap. Restore the prefix if the copy is still held, then
+# remove the temp dir. Nothing may stop the restore half way: not errexit, not
+# a signal, not a closed stdout.
+_install_on_exit() {
+    local rc=$?
+    set +e
+    trap '' INT TERM HUP PIPE
+    _install_txn_restore
+    [[ -z "${INSTALL_TMP}" ]] || rm -rf "${INSTALL_TMP}"
+    exit "${rc}"
+}
+
+# A copy left by an install that ended without restoring (a restore that
+# failed, or a kill nothing can trap) is the only record of the prefix before
+# that install: never overwrite it. main() asks before the first change to the
+# host, and _install_txn_begin again before it copies.
+_install_txn_refuse_stale() {
+    local txn="${PREFIX}/.install-txn"
+    [[ -e "${txn}" || -L "${txn}" ]] || return 0
+    log_err "install: ${txn} exists: an earlier install stopped before its host preflight passed and did not put the prefix back"
+    log_info "It holds bin/, config/, projects/ and .prev/ as they were before that install. To put back each one it holds:"
+    log_info "  sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
+    log_info "then remove it: sudo rmdir ${txn}"
+    log_info "Or, if ${PREFIX} is as you want it, remove the copy: sudo rm -rf ${txn}"
+    die "refusing to install over an unfinished install"
+}
 
 _install_txn_begin() {
     local txn="${PREFIX}/.install-txn" d
-    rm -rf "${txn}"
+    _install_txn_refuse_stale
     install -d -m 700 "${txn}" || die "install: cannot create ${txn}"
     for d in "${INSTALL_TXN_DIRS[@]}"; do
         cp -a "${PREFIX}/${d}" "${txn}/${d}" || {
@@ -490,28 +525,35 @@ _install_txn_begin() {
     done
     INSTALL_TXN="${txn}"
     INSTALL_TXN_SHELL="${BASHPID}"
+    trap _install_on_exit EXIT
 }
 
-# The host preflight passed: keep what was installed.
+# The host preflight passed: keep what was installed. The EXIT trap stays, for
+# the temp dir; with the copy dropped it restores nothing.
 _install_txn_commit() {
     [[ -n "${INSTALL_TXN}" ]] || return 0
     rm -rf "${INSTALL_TXN}"
     INSTALL_TXN=""
 }
 
-# Put back what _install_txn_begin saved. Called by die, so it runs at most
-# once and only in the shell that began the transaction: a die in a subshell
-# must not restore under a parent that goes on.
+# Put back what _install_txn_begin saved. Called by the EXIT trap, so it runs
+# at most once and only in the shell that began the transaction: a subshell
+# that exits must not restore under a parent that goes on. A directory is
+# deleted only once its copy is known to be there.
 _install_txn_restore() {
     [[ -n "${INSTALL_TXN}" && "${BASHPID}" == "${INSTALL_TXN_SHELL}" ]] || return 0
     local txn="${INSTALL_TXN}" d unrestored=()
     INSTALL_TXN=""
     for d in "${INSTALL_TXN_DIRS[@]}"; do
-        rm -rf "${PREFIX:?}/${d}" && mv "${txn}/${d}" "${PREFIX}/${d}" || unrestored+=("${d}")
+        if [[ -d "${txn}/${d}" && ! -L "${txn}/${d}" ]] \
+            && rm -rf "${PREFIX:?}/${d}" && mv "${txn}/${d}" "${PREFIX}/${d}"; then
+            continue
+        fi
+        unrestored+=("${d}")
     done
     if [[ ${#unrestored[@]} -gt 0 ]]; then
         log_err "install: could not restore ${unrestored[*]} under ${PREFIX}; the copies taken before this run are in ${txn}"
-        log_info "Binaries replaced by this run can also be restored with: sudo install.sh --rollback --prefix ${PREFIX}"
+        log_info "Put each one back by hand: sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
         return 0
     fi
     rm -rf "${txn}"
@@ -3864,6 +3906,7 @@ main() {
     phase_verify
     preflight_variant_selection
     phase_version_check
+    _install_txn_refuse_stale
     phase_system_user
     phase_directories
     _install_txn_begin

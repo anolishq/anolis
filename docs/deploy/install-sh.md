@@ -384,19 +384,29 @@ ask for anyway). A binary that cannot
 run always stops the install. A provider that gives no answer (one that predates
 `--check-host`) is reported and skipped.
 
-The check runs the binaries and configs this install has just put in the prefix,
-so by then they have replaced the old ones. Before replacing anything, the install
-copies `<prefix>/bin/`, `config/`, `projects/` and `.prev/` to
-`<prefix>/.install-txn/`. If the check fails, or the install stops on any other
-error it reports (`✗ ...`) before the check passes, those four are put back as they were and the
-install says `install: restored <prefix>/bin, config/, projects/ and .prev/ as
-they were before this run`. The running service was never restarted, and the
-next restart or reboot starts the previous install. Left in place: the `anolis`
-user and the prefix's directories on a fresh install, and an API token the run
-generated in `/etc/anolis/runtime.env`, which the next install reuses. Should a
-restore itself fail, the install names what it could not put back and where the
-copies are (#535). The copy costs disk space for one more set of binaries while
-the install runs.
+The check runs the binaries and configs this install has just put in the
+prefix, so by then they have replaced the old ones. Before replacing anything,
+the install copies four directories of the prefix, `bin/`, `.prev/`,
+`projects/` (every project in it) and `config/`, to `<prefix>/.install-txn/`.
+That needs room for two more sets of binaries and the configs while the install
+runs. If the check fails, or the install stops before the check passes, on an
+error it reports (`✗ ...`), a command that fails, or SIGINT, SIGTERM or SIGHUP
+(a dropped ssh session), those four are put back from the copy and the install
+says `install: restored <prefix>/bin, config/, projects/ and .prev/ as they
+were before this run`. The running service was never restarted, so the next
+restart or reboot starts the previous install. The copy is taken after the
+install has set the prefix's directories to mode 755 and owner `anolis`, which
+it does on every run, so those are not put back. A runtime data directory
+under `config/` (a relative `runtime.data_dir` without `../`) is put back to its
+state at the copy too. Left in place: the `anolis` user and the empty prefix
+directories on a fresh install, and an API token the run generated in
+`/etc/anolis/runtime.env`, which the next install reuses.
+
+Should a restore itself fail, or the install be killed in a way nothing can
+catch (SIGKILL, a power cut), the install names what it could not put back and
+leaves the copy in `<prefix>/.install-txn/`. The next install then refuses to
+start, before it changes anything, and says how to put each directory back or,
+if the prefix is as you want it, to remove the copy (#535).
 
 ## What a provider release must provide
 
