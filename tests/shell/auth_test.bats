@@ -85,17 +85,21 @@ _http_cfg() {
     printf '%s' "${TMP}/runtime.yaml"
 }
 
-@test "530: a flow-style http block with a non-loopback bind and no auth is refused" {
-    run preflight_runtime_config "$(_http_cfg $'http: {bind: 0.0.0.0, port: 8080}\n')"
-    [ "$status" -ne 0 ]
-    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
-}
-
-@test "530: a flow-style http block over several lines is read" {
-    run preflight_runtime_config "$(_http_cfg $'http: {\n  port: 8080,\n  bind: "0.0.0.0"\n}\n')"
-    [ "$status" -ne 0 ]
-    run preflight_runtime_config "$(_http_cfg $'http: {\n  bind: 0.0.0.0,\n  auth_enabled: true\n}\n')"
-    [ "$status" -eq 0 ]
+# http must be written in block style: a flow mapping or sequence is refused,
+# whatever it holds, so the reader never has to follow flow syntax.
+@test "530: a flow-style http cannot be verified: write http: in block style" {
+    local f="http in flow style (write http: in block style)"
+    _cannot_verify $'http: {bind: 0.0.0.0, port: 8080}\n' "${f}"
+    _cannot_verify $'http: {bind: 0.0.0.0, auth_enabled: true}\n' "${f}"
+    _cannot_verify $'http: {bind: 0.0.0.0, auth_enabled: true}  # exposed\n' "${f}"
+    _cannot_verify $'http: {enabled: off, bind: 0.0.0.0}\n' "${f}"
+    _cannot_verify $'http: {\n  bind: 0.0.0.0,\n  auth_enabled: true\n}\n' "${f}"
+    _cannot_verify $'http: {\n  port: 8080, # api\n  bind: 0.0.0.0\n}\n' "${f}"
+    _cannot_verify $'http: {"bind":"0.0.0.0"}\n' "${f}"
+    _cannot_verify $'http: {x: "\\"}", bind: 0.0.0.0}\n' "${f}"
+    _cannot_verify $'http: [bind, 0.0.0.0]\n' "${f}"
+    # R4-B2: an apostrophe in a plain value, as a quote-tracking reader saw it.
+    _cannot_verify $'http: {x: it\'s, y: \'q\', bind: 0.0.0.0, w: z\'}\n' "${f}"
 }
 
 @test "530: a quoted loopback bind is accepted" {
@@ -135,7 +139,7 @@ _http_cfg() {
 @test "530: http.enabled: false skips the bind check, as the runtime does" {
     run preflight_runtime_config "$(_http_cfg $'http:\n  enabled: false\n  bind: 0.0.0.0\n')"
     [ "$status" -eq 0 ]
-    run preflight_runtime_config "$(_http_cfg $'http: {enabled: off, bind: 0.0.0.0}\n')"
+    run preflight_runtime_config "$(_http_cfg $'http:\n  enabled: off\n  bind: 0.0.0.0\n')"
     [ "$status" -eq 0 ]
 }
 
@@ -174,19 +178,6 @@ _cannot_verify() {
     [[ "${output}" == *"anolis-runtime --check-config"* ]]
 }
 
-@test "530: a comment inside a multi-line flow mapping cannot be verified" {
-    _cannot_verify $'http: {\n  port: 8080, # api\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
-    _cannot_verify $'http: {\n  port: 8080, # don\'t expose\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
-    _cannot_verify $'http: {\n  port: 8080, # see {docs}\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
-    _cannot_verify $'http: { # the api\n  bind: 0.0.0.0\n}\n' "a comment inside a flow mapping"
-    _cannot_verify $'http: {\n  bind: 0.0.0.0, # exposed\n  auth_enabled: true\n}\n' "a comment inside a flow mapping"
-}
-
-@test "530: a comment after a one-line flow mapping is read" {
-    run preflight_runtime_config "$(_http_cfg $'http: {bind: 0.0.0.0, auth_enabled: true}  # exposed\n')"
-    [ "$status" -eq 0 ]
-}
-
 @test "530: an anchor, alias or tag on http or on a key it reads cannot be verified" {
     _cannot_verify $'http: &h\n  bind: 0.0.0.0\n' "an anchor, alias or tag on http"
     _cannot_verify $'http: !!map\n  bind: 0.0.0.0\n' "an anchor, alias or tag on http"
@@ -219,7 +210,6 @@ _cannot_verify() {
 }
 
 @test "530: other forms the reader does not follow cannot be verified" {
-    _cannot_verify $'http: {"bind":"0.0.0.0"}\n' "a flow entry in http not written name: value"
     _cannot_verify $'http:\n  {bind: 0.0.0.0}\n' "a line in http not written name: value"
     _cannot_verify $'http:\n  bind: 127.0.0.1\nhttp:\n  auth_enabled: true\n' "a second top-level http"
     _cannot_verify $'http:\n  bind: >-\n    0.0.0.0\n' "a block scalar for http.bind"
@@ -247,17 +237,6 @@ _cannot_verify() {
     _cannot_verify $'http:\n  bind: 127.0.0.1\n...\n' "a document end marker"
 }
 
-@test "530: flow entries split only at top-level commas outside quotes" {
-    # A comma or brace in a nested list or a quoted value does not end an entry.
-    run preflight_runtime_config "$(_http_cfg $'http: {cors_allowed_origins: [a, b], bind: 0.0.0.0}\n')"
-    [ "$status" -ne 0 ]
-    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
-    run preflight_runtime_config "$(_http_cfg $'http: {auth_token: "a,b}c", bind: 0.0.0.0}\n')"
-    [ "$status" -ne 0 ]
-    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
-    [ "$(_http_value "${TMP}/runtime.yaml" auth_token)" = 'a,b}c' ]
-}
-
 @test "530: the reader takes the '' escape and the first of duplicate keys" {
     cfg=$(_http_cfg $'http:\n  bind: 0.0.0.0\n  port: 9090\n  auth_token: \'it\'\'s\'\n  auth_enabled: false\n  auth_enabled: true\n')
     [ "$(_http_value "${cfg}" bind)" = "0.0.0.0" ]
@@ -274,7 +253,6 @@ _cannot_verify() {
     _cannot_verify $'http:\n  \'bind\': 0.0.0.0\n' "a line in http not written name: value"
     _cannot_verify $'http:\n  "bin\\x64": 0.0.0.0\n' "a line in http not written name: value"
     _cannot_verify $'"htt\\x70":\n  bind: 0.0.0.0\n' "a top-level line not written name: value"
-    _cannot_verify $'http: {"bind": 0.0.0.0}\n' "a flow entry in http not written name: value"
 }
 
 # Constructs that would hide http from the reader, or hide lines inside a
@@ -349,11 +327,17 @@ _cannot_verify_file() {
     _cannot_verify $'http:\n\tbind: 0.0.0.0\n' "a tab in the indentation"
 }
 
-@test "530: an escaped quote in a flow mapping does not end it" {
-    run preflight_runtime_config "$(_http_cfg $'http: {x: "\\"}", bind: 0.0.0.0}\n')"
-    [ "$status" -ne 0 ]
-    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
-    [ "$(_http_value "${TMP}/runtime.yaml" bind)" = "0.0.0.0" ]
+@test "530: a tag or anchor written with a quote or flow character cannot be verified" {
+    local t="a tag or anchor written with a quote or flow character"
+    # R4-B1: the quote right after the tag opens a string that hides the auth line.
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: !!str"abc\n  auth_enabled: true\n  zzz: end"\n' "${t}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: &a\'abc\n  auth_enabled: true\n  zzz: end\'\n' "${t}"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: !x[1] v\n' "${t}"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: &a,b v\n' "${t}"
+}
+
+@test "530: a single-quoted key with its value right after the colon cannot be verified" {
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    \'a\':\'b\'\n' "a quoted key with no space after its colon"
 }
 
 @test "530: a watched value with anything after its closing quote cannot be verified" {

@@ -75,8 +75,7 @@ failure surfaces as an actionable install error rather than a service that
 crash-loops while the install reports success. That mirroring is itself worth
 preserving: the two checks are meant to agree, and a change to one needs the
 other. The preflight reads `http` as the runtime does, without python: a block
-mapping, or a flow mapping on one line or several, quoted or plain values,
-every boolean spelling the runtime accepts (`true`, `yes`, `on`, `y` and their
+mapping with quoted or plain values, every boolean spelling the runtime accepts (`true`, `yes`, `on`, `y` and their
 negatives, lower case, upper case or capitalised), and it skips the bind check
 when `http.enabled` is false. An `http.enabled`, `http.auth_enabled` or
 `http.allow_insecure_bind` that is present but not one of those booleans,
@@ -93,9 +92,9 @@ reader` rather than guess. The subset:
   directive, no byte-order mark, and LF or CRLF line endings;
 - top-level keys at column 0, each a plain name (letters, digits, `_`, `-`)
   followed by a colon, and nothing else at column 0;
-- `http:` once, either as a block whose children sit at one indentation, each a
-  plain name and a colon, or as a flow mapping opened on the `http:` line, with
-  `name: value` entries and no comment inside it;
+- `http:` once, in block style, its children at one indentation, each a plain
+  name and a colon. A flow mapping or sequence (`http: {...}`, `http: [...]`) is
+  refused whatever it holds: write `http:` in block style;
 - `enabled`, `bind`, `port`, `auth_enabled` and `allow_insecure_bind` written as
   a plain value or a value quoted on one line, with no escape but `\"` and `\\`,
   no anchor, alias, tag, block scalar or collection, nothing after the closing
@@ -103,10 +102,11 @@ reader` rather than guess. The subset:
   decimal number;
 - everywhere: no tab in the indentation, and no quote or bracket left open at
   the end of a line (a tag or anchor in front of a quoted value counts), except
-  inside a block scalar (`|`, `>`), whose lines are passed over; no explicit
-  key (`?` followed by a space), no quoted key with its value right after the colon (`"a":"b"`),
-  and no NEL, line separator or paragraph separator character; comments on
-  their own line or after a value.
+  inside a block scalar (`|`, `>`), whose lines are passed over; no tag or
+  anchor written with a quote or a flow character (`"'[]{},`); no explicit key
+  (`?` followed by a space); no quoted key with its value right after the colon
+  (`"a":"b"`, `'a':'b'`); and no NEL, line separator or paragraph separator
+  character; comments on their own line or after a value.
 
 Quoted key names, `?` keys, merge keys and an indented first line are outside
 it. Simplify the config, or check it with `anolis-runtime --check-config <file>`.
