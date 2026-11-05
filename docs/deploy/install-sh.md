@@ -384,6 +384,20 @@ ask for anyway). A binary that cannot
 run always stops the install. A provider that gives no answer (one that predates
 `--check-host`) is reported and skipped.
 
+The check runs the binaries and configs this install has just put in the prefix,
+so by then they have replaced the old ones. Before replacing anything, the install
+copies `<prefix>/bin/`, `config/`, `projects/` and `.prev/` to
+`<prefix>/.install-txn/`. If the check fails, or the install stops on any other
+error it reports (`✗ ...`) before the check passes, those four are put back as they were and the
+install says `install: restored <prefix>/bin, config/, projects/ and .prev/ as
+they were before this run`. The running service was never restarted, and the
+next restart or reboot starts the previous install. Left in place: the `anolis`
+user and the prefix's directories on a fresh install, and an API token the run
+generated in `/etc/anolis/runtime.env`, which the next install reuses. Should a
+restore itself fail, the install names what it could not put back and where the
+copies are (#535). The copy costs disk space for one more set of binaries while
+the install runs.
+
 ## What a provider release must provide
 
 `install.sh` holds no list of providers. For each entry under

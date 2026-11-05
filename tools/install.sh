@@ -132,7 +132,7 @@ log_warn() { _yellow "⚠ $*"; }
 log_err()  { _red    "✗ $*"; }
 log_info() { printf  "  %s\n" "$*"; }
 
-die() { log_err "$*"; exit 1; }
+die() { log_err "$*"; _install_txn_restore; exit 1; }
 
 # apt with no terminal to ask on. Without it debconf warns "unable to
 # initialize frontend" on every package (#515).
@@ -462,6 +462,60 @@ phase_directories() {
         "${PREFIX}/anolis-data"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
+}
+
+# =============================================================================
+# Install transaction: from the backup to a passed host preflight
+# =============================================================================
+#
+# The phases from phase_backup to phase_host_preflight replace bin/, the
+# project and the runtime config, and the host preflight can only run what they
+# installed. A preflight that then fails, or any die between them, would leave
+# an upgrade half-installed: the next restart or reboot starts binaries the
+# preflight has just refused (#535). So the directories those phases write are
+# copied aside first, and a die before the preflight passes puts them back.
+INSTALL_TXN_DIRS=(bin config projects .prev)
+INSTALL_TXN=""
+INSTALL_TXN_SHELL=""
+
+_install_txn_begin() {
+    local txn="${PREFIX}/.install-txn" d
+    rm -rf "${txn}"
+    install -d -m 700 "${txn}" || die "install: cannot create ${txn}"
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        cp -a "${PREFIX}/${d}" "${txn}/${d}" || {
+            rm -rf "${txn}"
+            die "install: cannot save ${PREFIX}/${d} before replacing it"
+        }
+    done
+    INSTALL_TXN="${txn}"
+    INSTALL_TXN_SHELL="${BASHPID}"
+}
+
+# The host preflight passed: keep what was installed.
+_install_txn_commit() {
+    [[ -n "${INSTALL_TXN}" ]] || return 0
+    rm -rf "${INSTALL_TXN}"
+    INSTALL_TXN=""
+}
+
+# Put back what _install_txn_begin saved. Called by die, so it runs at most
+# once and only in the shell that began the transaction: a die in a subshell
+# must not restore under a parent that goes on.
+_install_txn_restore() {
+    [[ -n "${INSTALL_TXN}" && "${BASHPID}" == "${INSTALL_TXN_SHELL}" ]] || return 0
+    local txn="${INSTALL_TXN}" d unrestored=()
+    INSTALL_TXN=""
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        rm -rf "${PREFIX:?}/${d}" && mv "${txn}/${d}" "${PREFIX}/${d}" || unrestored+=("${d}")
+    done
+    if [[ ${#unrestored[@]} -gt 0 ]]; then
+        log_err "install: could not restore ${unrestored[*]} under ${PREFIX}; the copies taken before this run are in ${txn}"
+        log_info "Binaries replaced by this run can also be restored with: sudo install.sh --rollback --prefix ${PREFIX}"
+        return 0
+    fi
+    rm -rf "${txn}"
+    log_info "install: restored ${PREFIX}/bin, config/, projects/ and .prev/ as they were before this run"
 }
 
 # =============================================================================
@@ -3812,12 +3866,14 @@ main() {
     phase_version_check
     phase_system_user
     phase_directories
+    _install_txn_begin
     phase_backup
     phase_install_binaries
     phase_config_project
     phase_config_runtime
     phase_runtime_auth
     phase_host_preflight
+    _install_txn_commit
     phase_manifest
     phase_systemd
     phase_telemetry_export

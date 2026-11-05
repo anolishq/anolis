@@ -41,6 +41,14 @@ commit messages only.
 
 ### Fixed
 
+- **A failed host preflight no longer leaves an upgrade half-installed**
+  (#535). The preflight runs the binaries and configs the install has just put
+  in the prefix, and a failure exited with them in place, so the next restart
+  or reboot started binaries the preflight had refused, and `manifest.json` no
+  longer described `bin/`. The install now copies `bin/`, `config/`,
+  `projects/` and `.prev/` aside before replacing them, and any error it
+  reports before the preflight passes puts them back and says so.
+
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal
   `true`, so it passed a flow-style `http: {bind: 0.0.0.0}` the runtime

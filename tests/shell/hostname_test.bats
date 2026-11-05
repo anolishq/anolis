@@ -31,7 +31,8 @@ _stub_phases() {
     _stub_cmd hostnamectl check_prefix \
         phase_root_check phase_detect phase_prepare_bundle phase_verify \
         preflight_variant_selection phase_version_check phase_system_user \
-        phase_directories phase_backup phase_install_binaries \
+        phase_directories _install_txn_begin _install_txn_commit \
+        phase_backup phase_install_binaries \
         phase_config_project phase_config_runtime phase_runtime_auth \
         phase_config_providers phase_host_preflight phase_manifest \
         phase_systemd phase_telemetry_export phase_observability \
