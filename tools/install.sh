@@ -2871,6 +2871,14 @@ stage_check_deps() {
         || die "python3 'pyyaml' is required to build from a config (pip install pyyaml)"
 }
 
+# The project's directory name is its installed name, and the bundle step
+# writes it into the rendered configs as projects/<name>/, as it is: outside
+# letters, digits, `.`, `_` and `-` it could change what those configs mean.
+_check_project_name() {
+    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] \
+        || die "project directory name '$1' has characters other than letters, digits, '.', '_' and '-'; rename the directory"
+}
+
 # Assemble a bundle (bin + rendered config + systemd + manifest + checksums)
 # from the --project config into <dest> for <arch>. Shared by --stage (offline
 # build) and config-driven online install. Generic over the profile's providers.
@@ -2880,6 +2888,7 @@ assemble_bundle() {
 
     [[ -n "${PROJECT_DIR}" ]] || die "--project <config-dir> is required"
     [[ -d "${PROJECT_DIR}" ]] || die "project dir not found: ${PROJECT_DIR}"
+    _check_project_name "$(basename "$(cd "${PROJECT_DIR}" && pwd)")"
     local mp="${PROJECT_DIR}/machine-profile.yaml"
     [[ -f "${mp}" ]] || die "machine-profile.yaml not found in ${PROJECT_DIR}"
 
@@ -3010,26 +3019,25 @@ def merged(node, seen=()):
 
 
 # The bundle must not carry a token's text either, whether or not the runtime
-# would read it as one: a commented-out `# auth_token: <secret>`, a flow pair
-# yaml-cpp reads as a plain scalar (`{auth_token:x}`), a key hidden from the
-# parser by a byte-order mark or an odd space. So any `auth_token` followed by
-# a colon must have no value but `""` or `''`, wherever it is in the file.
-TOKEN_TEXT = re.compile(
-    r"auth_token[\"']?[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]*:(?P<v>[^\n\r\x85\u2028\u2029]*)"
-)
+# would read it as one, in a comment or a string included. So a line that
+# names auth_token anywhere (any case; not as the end of a longer name such as
+# mqtt_auth_token) is refused, unless the whole line is exactly the key set to
+# an empty quoted string: `auth_token: ""` or `auth_token: ''`, indented, with
+# nothing after it. That is block style only: the flow form
+# `http: {auth_token: ""}` is refused too.
+TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token", re.IGNORECASE)
+TOKEN_EMPTY_LINE = re.compile(r"[ \t]*auth_token:[ \t]*(\"\"|'')[ \t]*")
 
 
 def check_token_text(text, name):
-    for m in TOKEN_TEXT.finditer(text):
-        v = re.split(r"[,}\]]", m.group("v"), maxsplit=1)[0]
-        v = re.sub(r"(^|\s)#.*$", "", v).strip(" \t\u00a0\ufeff")
-        if v in ("", '""', "''"):
-            continue
-        sys.exit(
-            f"{name}: has a value after an auth_token key (in a comment, or in a form the runtime "
-            f"may not read as one). A bundle must not carry an API token's text; remove it. The "
-            f"install generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
-        )
+    for line in re.split(r"\r\n|\r|\n", text):
+        if TOKEN_WORD.search(line) and not TOKEN_EMPTY_LINE.fullmatch(line):
+            sys.exit(
+                f"{name}: names auth_token in a line other than `auth_token: \"\"` on its own. "
+                f"A bundle must not carry an API token's text, in a comment or string either; "
+                f"remove it. The install generates a token per device into "
+                f"/etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
+            )
 
 
 def check_token(text, name):
@@ -3131,7 +3139,7 @@ if behs:
     bo = out / "projects" / profile / "behaviors"
     bo.mkdir(parents=True, exist_ok=True)
     for f in behs:
-        check_token_text(read(f), f.name)
+        check_token_text(f.read_bytes().decode("latin-1"), f.name)
         shutil.copy2(f, bo / f.name)
 if not rts:
     sys.exit(f"no runtime configs in {cfg}")

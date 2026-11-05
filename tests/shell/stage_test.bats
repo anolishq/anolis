@@ -460,11 +460,12 @@ _assert_hidden_refused() {
     _assert_hidden_refused provider-foo.yaml
 }
 
-# With no value there is no token text, and inside the string it is no key:
-# the file stages, and the rewrite leaves the string as it was.
+# A string that runs over lines, with no token in it: the file stages, and the
+# rewrite leaves the string as it was.
 @test "#529 a rewrite leaves a quoted string whole" {
     PROJECT_DIR="$(_copy_fixture)"
-    _hidden_by_quote '"' "" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    printf 'a: ../anolis-provider-q/build/x\nb: "y/anolis-provider-q\nhttp:\n  port: 1\nc: x"\n' \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
     run assemble_bundle "${OUT}/staging" x86_64
     [ "$status" -eq 0 ]
     grep -qx 'a: ../anolis-provider-q/build/x' "${OUT}/staging/config/runtime.yaml"
@@ -477,7 +478,7 @@ _assert_token_text_refused() {
     local file="$1"
     run assemble_bundle "${OUT}/staging" x86_64
     [ "$status" -ne 0 ]
-    [[ "$output" == *"${file}: has a value after an auth_token key"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" == *"${file}: names auth_token in a line other than"* ]] || { echo "${output}"; return 1; }
     [[ "$output" != *"${TOKEN}"* ]]
     ! grep -rqF -- "${TOKEN}" "${OUT}"
 }
@@ -497,6 +498,13 @@ http: {auth_token:%s}
 http: [auth_token: %s]
 \xef\xbb\xbfhttp:\n  \xef\xbb\xbfauth_token: %s
 http:\n  auth_token\xc2\xa0: %s
+# auth_token: ""}%s
+http:\n  auth_token: ""  # was %s
+# auth_token: #%s
+# auth_token: '', %s
+# AUTH_TOKEN: %s
+# auth_token = %s
+description: "set auth_token: %s"
 FORMS
     PROJECT_DIR="$(_copy_fixture)"
     printf '<!-- auth_token: %s -->\n' "${TOKEN}" >> "${PROJECT_DIR}/behaviors/tree.xml"
@@ -507,12 +515,82 @@ FORMS
     _assert_token_text_refused machine-profile.yaml
 }
 
-@test "#529 the word auth_token with no value, or a quoted empty one, still stages" {
+@test "#529 only a block-style auth_token: \"\" or '' line, alone, stages" {
+    local form
+    # LF, CRLF and CR-only line endings all count as line ends.
+    for form in 'http:\n  auth_token: ""\n' "http:\n  auth_token: ''   \n" \
+        'http:\r\n  auth_token: ""\r\n' 'http:\r  auth_token: ""\r'; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf -- "${form}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -eq 0 ] || { echo "refused: ${form}"; echo "${output}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+    # A longer key that ends in auth_token is not the token.
     PROJECT_DIR="$(_copy_fixture)"
-    printf '# auth_token comes from runtime.env\nhttp:\n  auth_token: ""  # per device\n' \
-        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    printf 'mqtt_auth_token: x\n' >> "${PROJECT_DIR}/config/provider-foo.yaml"
     run assemble_bundle "${OUT}/staging" x86_64
     [ "$status" -eq 0 ]
+}
+
+@test "#529 a mention of auth_token, or the flow form, is refused: write it in block style" {
+    local form
+    for form in '# auth_token comes from runtime.env\n' 'http: {auth_token: "", port: 8080}\n'; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf -- "${form}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -ne 0 ] || { echo "staged: ${form}"; return 1; }
+        [[ "$output" == *"anolis-runtime.manual.yaml: names auth_token in a line other than"* ]]
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}
+
+@test "#529 behaviour files need not be text; their bytes are still scanned for auth_token" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '\x89PNG\r\n\x1a\n\xff\xfe\x00' > "${PROJECT_DIR}/behaviors/diagram.png"
+    printf '<!-- caf\xe9 -->\n' >> "${PROJECT_DIR}/behaviors/tree.xml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ]
+    printf '<!-- caf\xe9 auth_token: %s -->\n' "${TOKEN}" >> "${PROJECT_DIR}/behaviors/tree.xml"
+    _assert_token_text_refused tree.xml
+}
+
+@test "#529 a behaviour's CRLF or CR line ends are line ends too" {
+    # Behaviours are read as bytes, so their line ends are not translated.
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '<x/>\r\nauth_token: ""\r\n' > "${PROJECT_DIR}/behaviors/a.txt"
+    printf "<x/>\rauth_token: ''\r" > "${PROJECT_DIR}/behaviors/b.txt"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+}
+
+# --- #529/#694: the directory name is written into the configs ---------------
+
+@test "#529 a project directory name outside [A-Za-z0-9._-] is refused before anything is staged" {
+    local name
+    for name in 'p" #' "p' #" 'my #reactor' 'a b' 'x:y'; do
+        PROJECT_DIR="$(_copy_fixture_as "${name}")"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -ne 0 ] || { echo "staged: ${name}"; return 1; }
+        [[ "$output" == *"project directory name '${name}' has characters other than letters, digits, '.', '_' and '-'"* ]]
+        [ ! -e "${OUT}/staging" ]
+    done
+}
+
+# With the name check off, a quote in the name can close a string the token
+# was hidden in, by a key the text check does not see (an escaped one). Only
+# the check on the rendered text is left to refuse it.
+@test "#529 the check on the rendered text catches what a rewrite uncovers" {
+    _check_project_name() { :; }
+    PROJECT_DIR="$(_copy_fixture_as "p' #")"
+    sed -i 's#\.\./anolis-projects/projects/stage-project/config/#/etc/x/#' \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+    printf "b: '../anolis-projects/projects/stage-project/config/provider-foo.yaml\nhttp:\n  \"auth\\\\x5ftoken\": %s\nc: x'\n" "${TOKEN}" \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"anolis-runtime.manual.yaml: sets http.auth_token"* ]] || { echo "${output}"; return 1; }
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
 }
 
 @test "#529 a merge key that brings in its own mapping fails staging cleanly" {

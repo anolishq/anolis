@@ -30,9 +30,11 @@ commit messages only.
   keys and of duplicate `http` blocks, merge keys followed, and a tag such as
   `!!null` does not hide the value. It runs on each file again after the
   bundle step's rewrites, which is the text that ships. No token's text ships
-  either: an `auth_token` followed by a colon and any value but `""` or `''`
-  stops the bundle step in any config, behaviour or the machine profile, in a
-  comment included. An install whose `runtime.yaml` already carries one warns,
+  either: a line naming `auth_token` (any case, in a comment or string too) in
+  any config, behaviour or the machine profile stops the bundle step, unless
+  the whole line is `auth_token: ""` or `auth_token: ''` in block style with
+  nothing after it. A project directory name outside letters, digits, `.`, `_`
+  and `-` is refused, since the name is written into the configs. An install whose `runtime.yaml` already carries one warns,
   and the summary names it as the token in use.
 
 ### Fixed

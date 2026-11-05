@@ -49,11 +49,18 @@ is a complete example, and the workbench writes projects in the same layout.
   `machine-profile.yaml`, reads them as the runtime's YAML parser does (the
   first of duplicate keys, a tag does not hide the value), stops and names the
   file, and never prints the token. The bundle carries no token's text either:
-  an `auth_token` followed by a colon and any value but `""` or `''` stops the
-  bundle step wherever it appears in a config, behaviour or the machine profile,
-  in a comment included. A file that is not valid YAML or not UTF-8 stops it
-  too, since it cannot be checked, and so does a merge key (`<<`) that brings in
-  its own mapping (#529).
+  a line that names `auth_token`, in any case and in a comment or string too,
+  stops the bundle step, unless the whole line is the key set to an empty
+  quoted string, `auth_token: ""` or `auth_token: ''`, indented, with nothing
+  after it, not even a comment. That holds in every config, behaviour (scanned
+  byte by byte, so a behaviour need not be text) and the machine profile. Write
+  an empty token in block style: the flow form `http: {auth_token: ""}` is
+  refused. A longer name that ends in `auth_token`, such as `mqtt_auth_token`,
+  is not the token. A config that is not valid YAML or not UTF-8 stops the
+  bundle step too, since it cannot be checked, and so does a merge key (`<<`)
+  that brings in its own mapping (#529).
+- The directory name must be letters, digits, `.`, `_` and `-`: the bundle step
+  writes it into the configs as it is, and stops on any other name.
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set
