@@ -213,6 +213,8 @@ health_without_curl() {
     _runtime_api_token() { :; }
     NO_START=0
     HEALTH_FAILED=0
+    HEALTH_NOT_CHECKED=0
+    RUNTIME_RESTART_FAILED=0
     SAFE_STATE_UNPLANNABLE=0
     POLLS="${BATS_TEST_TMPDIR}/polls"
     : > "${POLLS}"
@@ -238,11 +240,15 @@ health_without_curl() {
     PATH="${NO_CURL_PATH}" phase_health >/dev/null
     [ "${HEALTH_FAILED}" -eq 0 ]
     ! _install_failed
+    # The summary's headline says the checks were skipped, not that all is well.
     run phase_summary
-    [[ "$(summary_text "${output}")" == *"Anolis installation complete"* ]]
+    summary=$(summary_text "${output}")
+    [[ "${summary}" == *"Anolis installed — health NOT checked (curl not found)"* ]]
+    [[ "${summary}" != *"Anolis installation complete"* ]]
+    [[ "${summary}" != *"did NOT succeed"* ]]
 }
 
-@test "536: no curl, and the restart itself failed: the install still fails" {
+@test "536: no curl, and the restart itself failed: the install still fails, saying why" {
     health_without_curl
     systemctl() { return 1; }
     phase_start >/dev/null
@@ -251,6 +257,11 @@ health_without_curl() {
     [ "${HEALTH_FAILED}" -eq 1 ]
     _install_failed
     [ ! -s "${POLLS}" ]
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
+    [[ "$(tail -1 <<< "${summary}")" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+    [[ "${summary}" != *"Runtime did not come up"* ]]
 }
 
 @test "536: control: the same PATH with a curl on it runs the health check" {

@@ -21,7 +21,9 @@ commit messages only.
   print `health: runtime not responding`, point at the runtime's logs and exit
   1 while the runtime was answering. It now warns at once that `curl` was not
   found, names the four checks it skipped, and does not fail the install,
-  unless `systemctl restart anolis-runtime` failed.
+  unless `systemctl restart anolis-runtime` failed. The summary's headline
+  says the health check was not run, so an unplannable safe state (#616) or a
+  runtime that did not come up is not reported as a complete install.
 
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and

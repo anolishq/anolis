@@ -242,15 +242,6 @@ For providers it reads `/v0/providers/health` until every provider is
 with its id and lifecycle state. Like the run registry, a shortfall is a
 warning and does not fail the install. It counts providers, not devices.
 
-Every one of these checks is an HTTP request made with `curl`. On a target
-without `curl`, which the offline route allows, the install warns `health: not
-checked: curl not found`, names the four checks it did not run (runtime status,
-run registry, startup safe state, provider liveness), and goes on without
-waiting for the runtime. The skipped check does not fail the install, so the
-exit status says nothing about whether the runtime came up; check it by hand
-with the `systemctl` and `journalctl` commands above. The install still fails
-if `systemctl restart anolis-runtime` itself failed (#536).
-
 It also reports what `safety.on_startup` did at the runtime's restart. A safe
 state that ran and did not take, such as on a board that came up tripped, is a
 warning: `health: startup safe state NOT achieved`, then each failed and
@@ -265,6 +256,18 @@ written `<prefix>/config/runtime.yaml`, and a re-run keeps it, so fix
 `safety.safe_state` there and run the install again; or fix the project's
 config and re-run with `--replace-config` (#616). A runtime before 0.2.0 marks
 no call, so against one every failure stays a warning.
+
+Every one of these checks is an HTTP request made with `curl`. On a target
+without `curl`, which the offline route allows, the install warns `health: not
+checked: curl not found`, names the four checks it did not run (runtime status,
+run registry, startup safe state, provider liveness), and goes on without
+waiting for the runtime. The skipped checks do not fail the install, so its exit
+status says nothing about whether the runtime came up, or whether its startup
+safe state can run: a safe state the config cannot express, which fails the
+install above, goes undetected. The summary's headline says the health check was
+not run. Check the runtime by hand with the `systemctl` and `journalctl`
+commands above. The install still fails if `systemctl restart anolis-runtime`
+itself failed, and the summary then says so (#536).
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is
