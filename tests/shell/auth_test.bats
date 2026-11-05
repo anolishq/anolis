@@ -78,6 +78,91 @@ _cfg() {
     [ "$status" -eq 0 ]
 }
 
+# #530: the preflight reads the http block as the runtime's YAML parser does.
+# Each case's verdict is the runtime's own for that http block.
+_http_cfg() {
+    printf 'runtime:\n  name: test\n%sproviders:\n  - id: p0\n' "$1" > "${TMP}/runtime.yaml"
+    printf '%s' "${TMP}/runtime.yaml"
+}
+
+@test "530: a flow-style http block with a non-loopback bind and no auth is refused" {
+    run preflight_runtime_config "$(_http_cfg $'http: {bind: 0.0.0.0, port: 8080}\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
+}
+
+@test "530: a flow-style http block over several lines is read" {
+    run preflight_runtime_config "$(_http_cfg $'http: {\n  port: 8080,\n  bind: "0.0.0.0"\n}\n')"
+    [ "$status" -ne 0 ]
+    run preflight_runtime_config "$(_http_cfg $'http: {\n  bind: 0.0.0.0,\n  auth_enabled: true\n}\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a quoted loopback bind is accepted" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: "127.0.0.1"\n')"
+    [ "$status" -eq 0 ]
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: \'::1\'\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: allow_insecure_bind: yes is a true the runtime accepts" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 0.0.0.0\n  allow_insecure_bind: yes\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: auth_enabled: True is a true the runtime accepts" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 0.0.0.0\n  auth_enabled: True\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: every spelling of true yaml-cpp accepts counts, quoted or not" {
+    local v
+    for v in y Y yes Yes YES true True TRUE on On ON '"yes"' "'on'"; do
+        run preflight_runtime_config "$(_http_cfg "http:"$'\n'"  bind: 0.0.0.0"$'\n'"  auth_enabled: ${v}"$'\n')"
+        [ "$status" -eq 0 ] || { echo "refused: ${v}"; return 1; }
+    done
+}
+
+@test "530: a spelling of false still refuses the exposed bind" {
+    local v
+    for v in n N no No NO false False FALSE off Off OFF; do
+        run preflight_runtime_config "$(_http_cfg "http:"$'\n'"  bind: 0.0.0.0"$'\n'"  auth_enabled: ${v}"$'\n')"
+        [ "$status" -ne 0 ] || { echo "accepted: ${v}"; return 1; }
+        [[ "${output}" == *"is non-loopback"* ]]
+    done
+}
+
+@test "530: http.enabled: false skips the bind check, as the runtime does" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  enabled: false\n  bind: 0.0.0.0\n')"
+    [ "$status" -eq 0 ]
+    run preflight_runtime_config "$(_http_cfg $'http: {enabled: off, bind: 0.0.0.0}\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a block-style non-loopback bind with no auth is still refused" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 0.0.0.0\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
+}
+
+@test "530: a value the runtime cannot read as a boolean is refused, naming it" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1\n  auth_enabled: tRue\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.auth_enabled 'tRue'"*"is not a boolean the runtime accepts"* ]]
+}
+
+@test "530: _http_value unquotes, drops comments, and reads only direct children" {
+    cfg=$(_http_cfg $'http:\n    bind: \'0.0.0.0\'   # all interfaces\n    tls:\n      port: 1\n    port: 8080 # the API\n    auth_token: "a \\"q\\" b"\n')
+    [ "$(_http_value "${cfg}" bind)" = "0.0.0.0" ]
+    [ "$(_http_value "${cfg}" port)" = "8080" ]
+    [ "$(_http_value "${cfg}" auth_token)" = 'a "q" b' ]
+}
+
+@test "530: _http_value reads a CRLF file without the CR" {
+    printf 'http:\r\n  port: 9090\r\n' > "${TMP}/crlf.yaml"
+    [ "$(_http_value "${TMP}/crlf.yaml" port)" = "9090" ]
+}
+
 # ---------------------------------------------------------------------------
 # _http_value — scoped to the top-level http: block
 # ---------------------------------------------------------------------------

@@ -792,7 +792,20 @@ warn_kept_provider_configs() {
 # across upgrades too.
 preflight_runtime_config() {
     local cfg="$1"
-    local bind
+    local bind key value
+    # The runtime reads these with yaml-cpp's as<bool>() and refuses the whole
+    # config when one is not a boolean it accepts. An empty value is read as
+    # unset here.
+    for key in enabled auth_enabled allow_insecure_bind; do
+        value=$(_http_value "${cfg}" "${key}")
+        if [[ -n "${value}" && -z "$(_yaml_bool "${value}")" ]]; then
+            die "config (runtime): http.${key} '${value}' in ${cfg} is not a boolean the runtime accepts (true/false, yes/no, on/off)"
+        fi
+    done
+
+    # validate_config checks the bind only with the HTTP server on.
+    [[ "$(_yaml_bool "$(_http_value "${cfg}" enabled)")" != false ]] || return 0
+
     bind=$(_http_value "${cfg}" bind)
 
     # Matches is_loopback_bind() in core/runtime/config.cpp.
@@ -800,8 +813,8 @@ preflight_runtime_config() {
         127.* | ::1 | localhost) return 0 ;;
     esac
 
-    if [[ "$(_http_value "${cfg}" auth_enabled)" == "true" ]] \
-        || [[ "$(_http_value "${cfg}" allow_insecure_bind)" == "true" ]]; then
+    if [[ "$(_yaml_bool "$(_http_value "${cfg}" auth_enabled)")" == true ]] \
+        || [[ "$(_yaml_bool "$(_http_value "${cfg}" allow_insecure_bind)")" == true ]]; then
         return 0
     fi
 
@@ -1878,17 +1891,124 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
-# Read a 2-space-indented scalar `key` from a named top-level `block` of a YAML
-# file. Prints the empty string when absent. Dependency-free (awk, no python) so
-# it works on an offline --local host that has no pyyaml. Assumes canonical
-# top-level blocks with 2-space scalars (as install.sh already renders them).
+# Read the scalar `key` of a top-level mapping `block` of a YAML file, as the
+# runtime's YAML parser reads it (#530): the block may be block style (`key`
+# a direct child, at any indentation) or a flow mapping (`block: {key: v}`,
+# on one line or several); a quoted value loses its quotes, and a plain one its
+# trailing comment. Prints the empty string when absent. Dependency-free (awk,
+# no python) so it works on an offline --local host that has no pyyaml. Not a
+# YAML parser: anchors, aliases, tags, block scalars and escapes other than
+# \" and \\ are not resolved.
 _yaml_block_value() {
     local cfg="$1" block="$2" key="$3"
     [[ -f "${cfg}" ]] || return 0
-    awk -v blk="${block}:" -v key="${key}:" '
-        /^[[:alpha:]]/ { in_blk = ($1 == blk) }
-        in_blk && $1 == key { print $2; exit }
+    awk -v blk="${block}" -v key="${key}" '
+        # A scalar: quotes removed ('' is a quote in single quotes), or a plain
+        # one up to a comment.
+        function scalar(s,   q, i, c, out) {
+            sub(/^[ \t]+/, "", s)
+            q = substr(s, 1, 1)
+            if (q == "\"" || q == "\047") {
+                out = ""
+                for (i = 2; i <= length(s); i++) {
+                    c = substr(s, i, 1)
+                    if (q == "\"" && c == "\\") { i++; out = out substr(s, i, 1); continue }
+                    if (c == q) {
+                        if (q == "\047" && substr(s, i + 1, 1) == q) { out = out q; i++; continue }
+                        return out
+                    }
+                    out = out c
+                }
+                return out
+            }
+            sub(/[ \t]+#.*$/, "", s)
+            sub(/[ \t]+$/, "", s)
+            return s
+        }
+        # The key of a "key: value" entry, unquoted; empty when it is not one.
+        function entry_key(s,   k) {
+            sub(/^[ \t]+/, "", s)
+            if (s ~ /^"[^"]*"[ \t]*:([ \t]|$)/ || s ~ /^\047[^\047]*\047[ \t]*:([ \t]|$)/) {
+                k = substr(s, 2); sub(/["\047][ \t]*:.*$/, "", k); return k
+            }
+            if (s !~ /^[^ \t:#][^:]*:([ \t]|$)/) return ""
+            k = s; sub(/[ \t]*:([ \t].*)?$/, "", k); return k
+        }
+        # The value of a "key: value" entry.
+        function entry_value(s) {
+            sub(/^[ \t]+/, "", s)
+            if (s ~ /^["\047]/) { sub(/^("[^"]*"|\047[^\047]*\047)[ \t]*:/, "", s) }
+            else { sub(/^[^:]*:/, "", s) }
+            return scalar(s)
+        }
+        # A flow mapping body: split at commas outside quotes and brackets.
+        function flow_lookup(body,   i, c, q, depth, item) {
+            q = ""; depth = 0; item = ""
+            for (i = 1; i <= length(body); i++) {
+                c = substr(body, i, 1)
+                if (q != "") { if (c == q) q = ""; item = item c; continue }
+                if (c == "\"" || c == "\047") q = c
+                else if (c == "[" || c == "{") depth++
+                else if (c == "]" || c == "}") depth--
+                else if (c == "," && depth == 0) {
+                    if (entry_key(item) == key) { print entry_value(item); return 1 }
+                    item = ""; continue
+                }
+                item = item c
+            }
+            if (entry_key(item) == key) { print entry_value(item); return 1 }
+            return 0
+        }
+        { sub(/\r$/, "") }
+        flow {
+            # Collect a multi-line flow mapping up to its closing brace.
+            body = body " " $0
+            if (flow_end()) { flow_lookup(body); exit }
+            next
+        }
+        # The text of an open flow mapping ends at a "}" outside quotes and
+        # nested brackets; cut it there and say whether it was found.
+        function flow_end(   i, c, q, depth) {
+            q = ""; depth = 0
+            for (i = 1; i <= length(body); i++) {
+                c = substr(body, i, 1)
+                if (q != "") { if (c == q) q = ""; continue }
+                if (c == "\"" || c == "\047") q = c
+                else if (c == "[" || c == "{") depth++
+                else if (c == "]") depth--
+                else if (c == "}") { if (depth == 0) { body = substr(body, 1, i - 1); return 1 } depth-- }
+            }
+            return 0
+        }
+        /^[^ \t#]/ {
+            in_blk = 0
+            if (entry_key($0) != blk) next
+            rest = $0; sub(/^[^:]*:[ \t]*/, "", rest)
+            if (rest ~ /^\{/) {
+                body = substr(rest, 2); flow = 1
+                if (flow_end()) { flow_lookup(body); exit }
+                next
+            }
+            if (rest == "" || rest ~ /^#/) { in_blk = 1; indent = -1 }
+            next
+        }
+        in_blk && /^[ \t]*(#|$)/ { next }
+        in_blk {
+            match($0, /^ */)
+            if (indent < 0) indent = RLENGTH
+            if (RLENGTH == indent && entry_key($0) == key) { print entry_value($0); exit }
+        }
     ' "${cfg}"
+}
+
+# A YAML boolean as the runtime's as<bool>() reads it (yaml-cpp: y, yes, true,
+# on and their negatives, all lower case, all upper case, or capitalised; a
+# quoted one counts). Prints true or false, or nothing for any other value.
+_yaml_bool() {
+    case "$1" in
+        y | Y | yes | Yes | YES | true | True | TRUE | on | On | ON) printf 'true' ;;
+        n | N | no | No | NO | false | False | FALSE | off | Off | OFF) printf 'false' ;;
+    esac
 }
 
 # Read a scalar key from the top-level `http:` block of a runtime config.

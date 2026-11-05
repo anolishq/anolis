@@ -74,7 +74,12 @@ only way to get that combination.
 failure surfaces as an actionable install error rather than a service that
 crash-loops while the install reports success. That mirroring is itself worth
 preserving: the two checks are meant to agree, and a change to one needs the
-other.
+other. The preflight reads `http` as the runtime does, without python: block or
+flow style, quoted or plain values, every boolean spelling the runtime accepts
+(`true`, `yes`, `on`, `y` and their negatives, lower case, upper case or
+capitalised), and it skips the bind check when `http.enabled` is false. A value
+the runtime cannot read as a boolean fails the preflight, as it fails the
+runtime.
 
 The API token is generated **per device at install time**, never baked into a
 bundle — a bundle is a redistributable artifact that may be installed on many

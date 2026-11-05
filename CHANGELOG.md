@@ -15,6 +15,19 @@ commit messages only.
 
 ### Fixed
 
+- **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
+  It read the `http` block line by line and compared booleans to the literal
+  `true`, so it passed a flow-style `http: {bind: 0.0.0.0}` the runtime
+  refuses, and refused configs the runtime starts with: a quoted
+  `bind: "127.0.0.1"`, `auth_enabled: True`, `allow_insecure_bind: yes`, and
+  any bind under `http.enabled: false`. The refusal killed upgrades over
+  working configs. The reader now takes block and flow mappings, quoted values
+  and trailing comments; booleans are read as yaml-cpp reads them; the bind is
+  checked only with the HTTP server enabled; and a value the runtime cannot
+  read as a boolean fails the preflight. The health check's reads of
+  `http.port`, `http.bind` and `http.auth_token`, and the install's read of
+  `runtime.data_dir`, use the same reader.
+
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and
   `examples/anolis-runtime-telemetry.yaml` run
