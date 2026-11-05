@@ -57,7 +57,7 @@ _stubs() {
 # install.sh's own `set -euo pipefail`. <fault> is shell code run in place of
 # phase_runtime_auth, after the binaries and project were replaced.
 _run_main_process() {
-    local fault="$1" driver="${BATS_TEST_TMPDIR}/driver.sh"
+    local fault="$1" prelude="${2:-}" driver="${BATS_TEST_TMPDIR}/driver.sh"
     {
         echo '#!/usr/bin/env bash'
         echo 'export ANOLIS_INSTALL_SH_NO_MAIN=1'
@@ -66,6 +66,8 @@ _run_main_process() {
         declare -f _stubs
         echo '_stubs'
         printf 'phase_runtime_auth() { %s; }\n' "${fault}"
+        printf 'MARK=%q\n' "${BATS_TEST_TMPDIR}/mark"
+        printf '%s\n' "${prelude}"
         echo 'main --local "${BUNDLE}" --prefix "${PFX}" --no-start'
     } > "${driver}"
     run bash "${driver}"
@@ -295,4 +297,87 @@ _subshell_die() {
     [ ! -e "${PFX}/.install-txn" ]
     [ ! -e "${UNPACKED}" ]
     [[ "${output}" != *"install: restored"* ]]
+}
+
+# SIGKILL while the copy is taken, part way through projects/: nothing can trap
+# it. The partial copy must never be offered as a source to restore from.
+KILL_IN_COPY='cp() {
+    if [[ "${3:-}" == *"/.install-txn.partial/projects" ]]; then
+        command cp -a "$2" "$3"; command rm -rf "$3/demo/config"
+        kill -KILL $$
+    fi
+    command cp "$@"
+}'
+
+@test "535: a kill while the copy is taken leaves it partial, and the next install says not to restore from it" {
+    before=$(_tree)
+    _run_main_process ':' "${KILL_IN_COPY}"
+    [ "$status" -eq 137 ]
+    # The live prefix was never touched, and the copy was never named as complete.
+    _tree_is "${before}"
+    [ -d "${PFX}/.install-txn.partial" ]
+    [ ! -e "${PFX}/.install-txn" ]
+    _main
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"${PFX}/.install-txn.partial exists: an earlier install was stopped while it saved the prefix, before it changed anything there"* ]]
+    [[ "${output}" == *"That copy is incomplete; do not restore from it."* ]]
+    [[ "${output}" == *"sudo rm -rf ${PFX}/.install-txn.partial"* ]]
+    [[ "${output}" != *"mv ${PFX}/.install-txn"* ]]
+    _tree_is "${before}"
+    # Following the instruction leaves the prefix as it was, and installs again.
+    rm -rf "${PFX}/.install-txn.partial"
+    _tree_is "${before}"
+}
+
+@test "535: the stale copy's message lists only the directories it holds" {
+    mkdir -p "${PFX}/.install-txn/projects"
+    _main
+    [[ "${output}" == *"It holds projects/ as they were before that install; the others were put back."* ]]
+    [[ "${output}" != *"bin/, config/"* ]]
+}
+
+@test "535: a symlink at .install-txn or .install-txn.partial is refused too, and left alone" {
+    ln -s "${BATS_TEST_TMPDIR}/nowhere" "${PFX}/.install-txn"
+    _main
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"${PFX}/.install-txn exists"* ]]
+    [[ "${output}" == *"It holds none of bin/, config/, projects/ or .prev/"* ]]
+    [ -L "${PFX}/.install-txn" ]
+    rm "${PFX}/.install-txn"
+    ln -s "${BATS_TEST_TMPDIR}/nowhere" "${PFX}/.install-txn.partial"
+    _main
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"${PFX}/.install-txn.partial exists"* ]]
+    [ -L "${PFX}/.install-txn.partial" ]
+}
+
+# The restore is a run of rm and mv; a signal in the middle must not end it.
+TERM_IN_RESTORE='mv() {
+    if [[ "${2:-}" == "${PFX}/bin" && ! -e "${MARK}" ]]; then : > "${MARK}"; kill -TERM $$; fi
+    command mv "$@"
+}'
+
+@test "535: a signal during the restore does not stop it" {
+    before=$(_tree)
+    _run_main_process 'false' "${TERM_IN_RESTORE}"
+    [ -e "${BATS_TEST_TMPDIR}/mark" ]  # the signal was sent, from inside the restore
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"install: restored"* ]]
+    _tree_is "${before}"
+    [ ! -e "${PFX}/.install-txn" ]
+}
+
+# A command in the handler that fails must not end it under errexit: here the
+# removal of the emptied copy fails, after a SIGTERM.
+RM_COPY_FAILS='rm() {
+    if [[ "$*" == "-rf ${PFX}/.install-txn" ]]; then return 1; fi
+    command rm "$@"
+}'
+
+@test "535: the exit handler runs to the end with errexit off" {
+    _run_main_process 'kill -TERM $$' "${RM_COPY_FAILS}"
+    [ "$status" -eq 143 ]
+    [[ "${output}" == *"install: restored"* ]]
+    # The step after the failed one still ran: the temp dir is gone.
+    [ ! -e "${UNPACKED}" ]
 }

@@ -48,9 +48,11 @@ commit messages only.
   longer described `bin/`. The install now copies `bin/`, `config/`,
   `projects/` and `.prev/` aside before replacing them. A reported error, a
   command that fails, or SIGINT, SIGTERM or SIGHUP before the preflight passes
-  puts them back and says so. If a copy is left behind (a restore that failed,
-  a SIGKILL), the next install refuses to start before it changes anything,
-  and says how to put the copy back or remove it.
+  puts them back and says so. The copy is taken under a temporary name and
+  renamed only once complete. If one is left behind (a restore that failed, a
+  SIGKILL), the next install refuses to start before it changes anything: an
+  incomplete copy it says not to restore from, and a complete one it names
+  the directories of and says how to put back or remove.
 
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal

@@ -498,31 +498,52 @@ _install_on_exit() {
     exit "${rc}"
 }
 
-# A copy left by an install that ended without restoring (a restore that
-# failed, or a kill nothing can trap) is the only record of the prefix before
-# that install: never overwrite it. main() asks before the first change to the
-# host, and _install_txn_begin again before it copies.
+# Copies left by an install that did not finish, refused before the first
+# change to the host (main) and again before copying (_install_txn_begin).
+#
+# The copy is taken into .install-txn.partial and renamed to .install-txn only
+# once all four directories are in it. So a .partial left behind is an install
+# killed while it saved the prefix, before it changed anything there: it is
+# incomplete, and never a source to restore from. A .install-txn left behind
+# (a restore that failed, or a kill nothing can trap) holds the copy from
+# before that install of each directory still in it; the restore had already
+# put back any that are missing. It is the only record of them: never
+# overwrite or delete it.
 _install_txn_refuse_stale() {
-    local txn="${PREFIX}/.install-txn"
+    local txn="${PREFIX}/.install-txn" d held=()
+    if [[ -e "${txn}.partial" || -L "${txn}.partial" ]]; then
+        log_err "install: ${txn}.partial exists: an earlier install was stopped while it saved the prefix, before it changed anything there"
+        log_info "That copy is incomplete; do not restore from it. ${PREFIX} is as it was before that install. Remove the copy:"
+        log_info "  sudo rm -rf ${txn}.partial"
+        die "refusing to install over an unfinished install"
+    fi
     [[ -e "${txn}" || -L "${txn}" ]] || return 0
-    log_err "install: ${txn} exists: an earlier install stopped before its host preflight passed and did not put the prefix back"
-    log_info "It holds bin/, config/, projects/ and .prev/ as they were before that install. To put back each one it holds:"
-    log_info "  sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
-    log_info "then remove it: sudo rmdir ${txn}"
-    log_info "Or, if ${PREFIX} is as you want it, remove the copy: sudo rm -rf ${txn}"
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        if [[ -d "${txn}/${d}" && ! -L "${txn}/${d}" ]]; then held+=("${d}/"); fi
+    done
+    log_err "install: ${txn} exists: an earlier install stopped before its host preflight passed and did not put all of the prefix back"
+    if [[ ${#held[@]} -gt 0 ]]; then
+        log_info "It holds ${held[*]} as they were before that install; the others were put back. To put back each one it holds:"
+        log_info "  sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
+        log_info "then remove it: sudo rm -rf ${txn}"
+        log_info "Or, if ${PREFIX} is as you want it, remove the copy: sudo rm -rf ${txn}"
+    else
+        log_info "It holds none of bin/, config/, projects/ or .prev/: there is nothing to put back. Look at it, then remove it: sudo rm -rf ${txn}"
+    fi
     die "refusing to install over an unfinished install"
 }
 
 _install_txn_begin() {
     local txn="${PREFIX}/.install-txn" d
     _install_txn_refuse_stale
-    install -d -m 700 "${txn}" || die "install: cannot create ${txn}"
+    install -d -m 700 "${txn}.partial" || die "install: cannot create ${txn}.partial"
     for d in "${INSTALL_TXN_DIRS[@]}"; do
-        cp -a "${PREFIX}/${d}" "${txn}/${d}" || {
-            rm -rf "${txn}"
+        cp -a "${PREFIX}/${d}" "${txn}.partial/${d}" || {
+            rm -rf "${txn}.partial"
             die "install: cannot save ${PREFIX}/${d} before replacing it"
         }
     done
+    mv "${txn}.partial" "${txn}" || { rm -rf "${txn}.partial"; die "install: cannot rename ${txn}.partial to ${txn}"; }
     INSTALL_TXN="${txn}"
     INSTALL_TXN_SHELL="${BASHPID}"
     trap _install_on_exit EXIT

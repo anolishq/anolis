@@ -402,11 +402,17 @@ state at the copy too. Left in place: the `anolis` user and the empty prefix
 directories on a fresh install, and an API token the run generated in
 `/etc/anolis/runtime.env`, which the next install reuses.
 
-Should a restore itself fail, or the install be killed in a way nothing can
-catch (SIGKILL, a power cut), the install names what it could not put back and
-leaves the copy in `<prefix>/.install-txn/`. The next install then refuses to
-start, before it changes anything, and says how to put each directory back or,
-if the prefix is as you want it, to remove the copy (#535).
+The copy is taken into `<prefix>/.install-txn.partial/` and renamed to
+`.install-txn/` only once all four directories are in it. An install killed
+in a way nothing can catch (SIGKILL, a power cut) while it copies leaves the
+`.partial` behind. The prefix itself was not yet changed, and the next install
+refuses to start, says the copy is incomplete and not to restore from it, and
+asks for it to be removed. Should a restore itself fail, or the install be
+killed that way after the copy was complete, the install leaves
+`<prefix>/.install-txn/` with the copy from before that install of each
+directory not yet put back. The next install then refuses to start, before it
+changes anything, names the directories the copy holds, and says how to put
+each one back or, if the prefix is as you want it, to remove the copy (#535).
 
 ## What a provider release must provide
 
