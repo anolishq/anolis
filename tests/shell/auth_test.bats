@@ -137,6 +137,52 @@ YAML
     [[ "${output}" != *"ANOLIS_API_TOKEN="* ]]
 }
 
+# #529: a literal http.auth_token in the installed runtime.yaml shadows the
+# per-device token. The install warns, naming the file and never the value.
+_installed_cfg() {
+    PREFIX="${TMP}/prefix"
+    mkdir -p "${PREFIX}/config"
+    cp "$(_cfg "$@")" "${PREFIX}/config/runtime.yaml"
+}
+
+@test "529: a literal auth_token in the installed config is warned about, without its value" {
+    _installed_cfg "auth_enabled: true" 'auth_token: "baked-token-xyz"'
+    run _warn_config_api_token
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"${PREFIX}/config/runtime.yaml sets http.auth_token"* ]]
+    [[ "${output}" == *"/etc/anolis/runtime.env"* ]]
+    [[ "${output}" != *"baked-token-xyz"* ]]
+}
+
+@test "529: no warning when the installed config sets no token, or an empty one" {
+    _installed_cfg "auth_enabled: true"
+    run _warn_config_api_token
+    [ "${output}" == "" ]
+    _installed_cfg "auth_enabled: true" 'auth_token: ""'
+    run _warn_config_api_token
+    [ "${output}" == "" ]
+}
+
+@test "529: phase_runtime_auth warns before it provisions the token" {
+    _installed_cfg "auth_enabled: true" "auth_token: baked-token-xyz"
+    # Nothing here may touch the host: the primitives are stubs, and token
+    # generation fails, so the function stops before it writes runtime.env.
+    install() { :; }
+    chmod() { :; }
+    chown() { :; }
+    _generate_api_token() { return 1; }
+    run phase_runtime_auth
+    [[ "${output}" == *"sets http.auth_token"* ]]
+    [[ "${output}" != *"baked-token-xyz"* ]]
+}
+
+@test "529: the summary names the config token as the one in use, without its value" {
+    _installed_cfg "auth_enabled: true" "auth_token: baked-token-xyz"
+    run phase_summary
+    [[ "${output}" == *"API token: the http.auth_token in ${PREFIX}/config/runtime.yaml"* ]]
+    [[ "${output}" != *"baked-token-xyz"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # /etc/hosts — a renamed host must still resolve its own name
 # ---------------------------------------------------------------------------

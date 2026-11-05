@@ -22,10 +22,19 @@ is a complete example, and the workbench writes projects in the same layout.
 
 - The profile must have a `components:` block naming the runtime and provider
   versions.
-- Only `config/anolis-runtime.*.yaml` and `config/provider-*.yaml` are installed.
-- The directory's name is the installed project's name. Provider config paths
-  in the runtime config name it too (`../anolis-projects/projects/<name>/config/...`),
-  so a copy under a new name must update those paths.
+- Only `config/anolis-runtime.*.yaml`, `config/provider-*.yaml` and the files
+  directly in `behaviors/` are installed.
+- The directory's name is the installed project's name. A path written as
+  `../anolis-projects/projects/<name>/config/...` or `.../behaviors/...` is
+  installed as `<prefix>/projects/<directory's name>/...`, whatever `<name>` it
+  was written with, so a project copied under a new name needs no edits; the
+  bundle step prints a `note:` for each other name it rewrote (#694). Such a path
+  must name one of the installed files, or the bundle step stops and names it.
+- No config may set `http.auth_token`. Each install generates the device's own
+  token into `/etc/anolis/runtime.env`, and a token in the config would replace
+  it on every device. The bundle step stops and names the file, without printing
+  the token. A runtime config, provider config or `machine-profile.yaml` that
+  is not valid YAML stops it too, since it cannot be checked (#529).
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set

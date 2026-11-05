@@ -13,7 +13,29 @@ commit messages only.
 
 ## [Unreleased]
 
+### Security
+
+- **`install.sh` no longer bakes a literal API token into a bundle** (#529).
+  Staging, and the online `--project` install, copied a project's
+  `http.auth_token` into the bundle's `config/runtime.yaml` and
+  `projects/<name>/config/`. The runtime prefers that token to
+  `ANOLIS_API_TOKEN`, so every device installed from the bundle accepted the
+  same token, and the per-device one in `/etc/anolis/runtime.env` was ignored.
+  The bundle step now stops, naming the file and never the token, when a
+  runtime config, provider config or `machine-profile.yaml` sets a non-empty
+  `http.auth_token`, or is not valid YAML. An install whose `runtime.yaml`
+  already carries one warns, and the summary names it as the token in use.
+
 ### Fixed
+
+- **A project copied under a new name installs with paths to its own
+  directory** (#694). The bundle step rewrote
+  `../anolis-projects/projects/<name>/...` with the name written in the path,
+  so a copy of `bioreactor-v1` named `my-reactor` installed under
+  `projects/my-reactor/` with every provider `--config` pointing into
+  `projects/bioreactor-v1/`, and exited 0. Such paths now point at the
+  directory the project installs to, and one that names a file the bundle does
+  not ship stops the bundle step.
 
 - **The example runtime configs start provider-sim where its presets build
   it** (#586): `examples/anolis-runtime.yaml` and

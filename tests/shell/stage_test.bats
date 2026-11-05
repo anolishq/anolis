@@ -271,3 +271,138 @@ YAML
     [ "$status" -eq 0 ]
     [[ "$output" == *"sha256sum -c"* ]]
 }
+
+# --- #529: a literal http.auth_token never reaches a bundle -------------------
+
+TOKEN="shared-literal-token-123"
+
+# Give the fixture's <file> an http block that sets auth_token to <value>.
+_set_token() {
+    local file="$1" value="$2"
+    printf 'http:\n  bind: 127.0.0.1\n  auth_enabled: true\n  auth_token: %s\n' "${value}" >> "${file}"
+}
+
+# Staging must fail naming <file>, point at the per-device token, never print
+# the token, and leave no file holding it, in the output dir or the staging dir.
+_assert_token_refused() {
+    local file="$1"
+    STAGE_DIR="${OUT}"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"${file}"* ]]
+    [[ "$output" == *"http.auth_token"* ]]
+    [[ "$output" == *"ANOLIS_API_TOKEN"* ]]
+    [[ "$output" == *"runtime.env"* ]]
+    [[ "$output" != *"${TOKEN}"* ]]
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
+}
+
+@test "#529 a literal auth_token in the manual runtime config fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "\"${TOKEN}\""
+    _assert_token_refused anolis-runtime.manual.yaml
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#529 a literal auth_token in another variant fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml" "${TOKEN}"
+    _assert_token_refused anolis-runtime.telemetry.yaml
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#529 a literal auth_token in a provider config fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/provider-foo.yaml" "'${TOKEN}'"
+    _assert_token_refused provider-foo.yaml
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#529 do_stage writes no bundle when a config carries a token" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" "\"${TOKEN}\""
+    STAGE_DIR="${OUT}"
+    run do_stage
+    [ "$status" -ne 0 ]
+    [ ! -e "${OUT}/anolis-stage-project-9.9.9-x86_64.tar.gz" ]
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#529 a config that does not parse fails staging, without quoting it" {
+    PROJECT_DIR="$(_copy_fixture)"
+    # An unclosed quote: the parser's own message quotes this line in full.
+    printf 'http:\n  auth_token: "%s\n' "${TOKEN}" >> "${PROJECT_DIR}/config/provider-bar.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"provider-bar.yaml: not valid YAML"* ]]
+    [[ "$output" != *"${TOKEN}"* ]]
+    ! grep -rqF -- "${TOKEN}" "${OUT}"
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#529 an empty auth_token is not a token: staging succeeds" {
+    PROJECT_DIR="$(_copy_fixture)"
+    _set_token "${PROJECT_DIR}/config/anolis-runtime.manual.yaml" '""'
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ]
+    rm -rf "${PROJECT_DIR}"
+}
+
+# --- #694: a project copied under a new name installs under that name ---------
+
+# Copy the fixture project into a temp dir named <name>. Its paths still name
+# stage-project, as a copied project's do.
+_copy_fixture_as() {
+    local d; d="$(mktemp -d)/$1"
+    cp -r "${PROJECT}" "${d}"
+    printf '%s' "${d}"
+}
+
+# Every --config path in the rendered runtime configs, one per line.
+_config_paths() {
+    grep -ho -- '"--config", "[^"]*"' "$@" | sed 's/^"--config", "//; s/"$//' | sort -u
+}
+
+@test "#694 a project copied under a new name: provider paths point at its own directory" {
+    PROJECT_DIR="$(_copy_fixture_as my-reactor)"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    local paths p
+    paths=$(_config_paths "${OUT}/b/config/runtime.yaml" "${OUT}/b/projects/my-reactor/config/"anolis-runtime.*.yaml)
+    [ "$(wc -l <<< "${paths}")" -eq 2 ]
+    while IFS= read -r p; do
+        [[ "${p}" == /opt/anolis/projects/my-reactor/config/* ]]
+        # The file it names is in the bundle, where the install puts it.
+        [ -f "${OUT}/b/${p#/opt/anolis/}" ]
+    done <<< "${paths}"
+    ! grep -rq 'projects/stage-project' "${OUT}/b/config" "${OUT}/b/projects"
+    [[ "$output" == *"note: paths naming project 'stage-project' point at projects/my-reactor/"* ]]
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#694 a project under its own name stages without a rename note" {
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"note: paths naming project"* ]]
+    grep -q '/opt/anolis/projects/stage-project/config/provider-foo.yaml' "${OUT}/b/config/runtime.yaml"
+}
+
+@test "#694 a path to a file the project does not have fails staging, naming it" {
+    PROJECT_DIR="$(_copy_fixture)"
+    sed -i 's#config/provider-bar.yaml#config/provider-gone.yaml#' \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"anolis-runtime.manual.yaml"* ]]
+    [[ "$output" == *"config/provider-gone.yaml"* ]]
+}
+
+@test "#694 a path that climbs out of the project fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    sed -i 's#config/provider-bar.yaml#config/../../other/config/provider-bar.yaml#' \
+        "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"config/../../other/config/provider-bar.yaml"* ]]
+}
