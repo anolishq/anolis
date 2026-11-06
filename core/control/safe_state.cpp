@@ -283,24 +283,23 @@ WorkedPlan work_out_plan(const registry::DeviceRegistry &registry, const CallRou
     // targets no registered ACTUATE function, as before. One for an ACTUATE
     // function that does not dispatch is not sent; that function is driven by
     // another setpoint or its zero, or reported not driven above.
-    bool sent_setpoint = false;
     for (size_t i = 0; i < setpoints.size(); ++i) {
         if (dispatches[i] != 0 || targets_actuator[i] == 0) {
             plan.steps.push_back({PlanStep::Kind::Call, &setpoints[i], {}, {}, {}});
-            sent_setpoint = true;
         }
     }
     plan.steps.insert(plan.steps.end(), per_output.begin(), per_output.end());
 
-    const bool uses_setpoints = by_setpoint || sent_setpoint;
-    if (uses_setpoints && zeroed) {
+    // The kind says how the actuating outputs are driven. A setpoint sent to
+    // anything else (another category, a device not present) does not change it.
+    if (by_setpoint && zeroed) {
         plan.summary.kind = SafeStateKind::Mixed;
-    } else if (uses_setpoints) {
+    } else if (by_setpoint) {
         plan.summary.kind = SafeStateKind::Setpoints;
     } else if (zeroed) {
         plan.summary.kind = SafeStateKind::Zero;
     } else {
-        // Nothing dispatches: name what was declared.
+        // No output is driven: name what was declared.
         plan.summary.kind = setpoints.empty() ? SafeStateKind::Zero : SafeStateKind::Setpoints;
     }
     return plan;

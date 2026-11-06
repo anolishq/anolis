@@ -928,15 +928,17 @@ components:
     SoftwareSafeState:
       type: string
       description: >-
-        Where the calls of a POST /v0/estop would come from now. "hooks": the
+        How a POST /v0/estop would drive the outputs now. "hooks": the
         declared hooks, alone. Otherwise each ACTUATE function gets its
         setpoint if one passes validation, else its zero if zero_is_safe is
         set and the zero passes validation, else it is reported not driven.
-        "setpoints" or "zero" when every call comes from that source (and,
-        when nothing passes, "setpoints" if any are declared, else "zero");
-        "mixed" when some outputs get their setpoint and others their zero.
-        "none" means no software
-        safe-state is declared (hardware cut only).
+        "setpoints" or "zero" when every driven ACTUATE output gets that;
+        "mixed" when some get their setpoint and others their zero. A
+        setpoint sent to anything else does not count. When no output is
+        driven: "setpoints" if any are declared, else "zero". "none" means
+        no software safe-state is declared (hardware cut only). Clients
+        should treat a value they do not know as a declared safe state they
+        cannot describe, not as "none".
       enum: [none, hooks, setpoints, zero, mixed]
     EstopStatus:
       type: object
@@ -1003,7 +1005,10 @@ components:
             every call is false with no failed actions.
         failed_actions:
           type: array
-          description: The calls of the startup run that failed. Empty when none did.
+          description: >-
+            The calls of the startup run that failed, and the ACTUATE outputs
+            it could not drive, for which nothing was sent (cause config).
+            Empty when there are none.
           items:
             $ref: '#/components/schemas/EstopAction'
         skipped_actions:
@@ -1067,6 +1072,10 @@ components:
           $ref: '#/components/schemas/SoftwareSafeState'
         actions:
           type: array
+          description: >-
+            One entry per call the stop sent, and one per ACTUATE output it
+            could not drive, for which nothing was sent (success false, cause
+            config, error saying why).
           items:
             $ref: '#/components/schemas/EstopAction'
         safe_state_achieved:
@@ -1079,7 +1088,8 @@ components:
             it can be true while actuating functions no hook drives remain. A
             call succeeds when its provider reports it OK, which confirms the
             command was accepted, not that the device was seen in the
-            commanded state. The per-call outcomes are in actions.
+            commanded state. The per-call outcomes, and the outputs not
+            driven, are in actions.
         warning:
           type: string
           description: Present when software_safe_state is "none".

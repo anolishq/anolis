@@ -230,9 +230,10 @@ Without hooks, the stop plans each actuating (`ACTUATE`) function on its own:
 A setpoint that names a function but cannot dispatch is not sent; another
 setpoint for the same function, or its zero, can still drive it. A setpoint
 that targets no actuating function (another category, or a device that is not
-present) is sent as declared. `software_safe_state` is `setpoints` or `zero`
-when every call comes from one source, `mixed` when some outputs get their
-setpoint and others their zero, and, when nothing dispatches, `setpoints` if
+present) is sent as declared. `software_safe_state` says how the actuating
+outputs are driven: `setpoints` or `zero` when every driven output gets that,
+`mixed` when some get their setpoint and others their zero. A setpoint sent to
+anything else does not count. When no output is driven, it is `setpoints` if
 any are declared, else `zero`. It is `none` only when nothing is declared.
 
 `safety.on_startup` (`safe_state` or `leave`, default `safe_state`) - what

@@ -44,9 +44,11 @@ class CallRouter;
  * @brief What a software stop would drive, by where its calls come from.
  *
  * `Hooks`: the declared hooks, and nothing else. Otherwise the plan is per
- * output: `Setpoints` or `Zero` when every call comes from one source,
- * `Mixed` when some outputs get their setpoint and others their zero, and
- * `None` when no software safe state is declared at all.
+ * output, and the kind says how the ACTUATE outputs are driven: `Setpoints`
+ * or `Zero` when every driven output gets that, `Mixed` when some get their
+ * setpoint and others their zero. A setpoint sent to anything else does not
+ * count. When no output is driven, it names what is declared: `Setpoints` if
+ * any are, else `Zero`. `None` when no software safe state is declared at all.
  */
 enum class SafeStateKind { None, Hooks, Setpoints, Zero, Mixed };
 

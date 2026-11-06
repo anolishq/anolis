@@ -335,6 +335,39 @@ TEST_F(SafeStateTest, AGoodSetpointDrivesAnOutputThatAlsoHasABadOne) {
     EXPECT_TRUE(controller->capability().uncovered_functions.empty());
 }
 
+// With no ACTUATE function in the inventory, a declared plan does not count as
+// "drives no output": it has no outputs to drive. That keeps the e-stop's
+// FAULT hooks refused and the gate note off, as they were before #640 for a
+// zero rung on such an inventory. Only an undeclared safe state does.
+TEST_F(SafeStateTest, APlanOnAnInventoryWithNoActuatorsIsNotOneThatDrivesNothing) {
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("panel");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device("panel", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("panel");
+            auto* fn = response.mutable_capabilities()->add_functions();
+            fn->set_name("set_mode");  // untagged: actuating to the latch, not to the plan
+            fn->set_function_id(1);
+            return true;
+        }));
+    registry->discover_provider("sim0", *mock_provider);
+
+    safety.safe_state.zero_is_safe = true;
+    const auto zero = control::plan_safe_state(*registry, *call_router, safety);
+    EXPECT_EQ(zero.kind, control::SafeStateKind::Zero);
+    EXPECT_EQ(zero.actuating_functions, 0u);
+    EXPECT_FALSE(zero.drives_no_output());
+
+    safety.safe_state.zero_is_safe = false;
+    const auto none = control::plan_safe_state(*registry, *call_router, safety);
+    EXPECT_EQ(none.kind, control::SafeStateKind::None);
+    EXPECT_TRUE(none.drives_no_output());
+}
+
 // #634: an install fails when safety.on_startup cannot run the safe state the
 // config declares. The startup run must report the undriven output as a config
 // failure, not "no safe state declared".
@@ -1049,6 +1082,11 @@ protected:
                     auto* value = add_arg(add_function("set_setpoint"), "value", VALUE_TYPE_DOUBLE);
                     value->set_min_double(-50.0);
                     value->set_max_double(400.0);
+                    // A CONFIG function: not an output the plan drives.
+                    auto* units = add_function("set_units");
+                    units->mutable_policy()->set_category(
+                        anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_CONFIG);
+                    add_arg(units, "units", anolis::deviceprovider::v1::VALUE_TYPE_STRING);
                 }
                 return true;
             }));
@@ -1162,6 +1200,59 @@ TEST_F(SafeStateInventoryTest, ZeroAloneReportsTheOutputsItCannotZero) {
             EXPECT_THAT(action.error, HasSubstr("cannot zero required non-numeric argument 'enabled'"));
         }
     }
+}
+
+// A setpoint for a CONFIG function is sent, but it drives no output, so it
+// does not make the kind `mixed`: every output that is driven gets its zero.
+TEST_F(SafeStateInventoryTest, ASetpointForANonActuatingFunctionDoesNotMakeThePlanMixed) {
+    runtime::ModeTransitionCallConfig units;
+    units.device_handle = "sim0/temp0";
+    units.function_name = "set_units";
+    units.args["units"] = automation::ParameterValue{std::string("C")};
+    safety.safe_state.setpoints = {units};
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().software_safe_state, control::SafeStateKind::Zero);
+    EXPECT_CALL(*mock_provider, call("temp0", _, "set_units", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("temp0", _, "set_setpoint", _, _)).WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    EXPECT_THAT(
+        outcomes(result),
+        UnorderedElementsAre("sim0/temp0/set_units ok", "sim0/temp0/set_setpoint ok", "sim0/relay0/set_relay_ch1 FAIL",
+                             "sim0/relay0/set_relay_ch2 FAIL", "sim0/motor0/set_motor_duty FAIL"));
+}
+
+// The cost of a per-output plan on an automation machine: once the plan
+// drives any output, the latch refuses the e-stop's -> FAULT hooks, so an
+// output only such a hook would drive is left as it was. Here setpoints cover
+// the relays and nothing else; a FAULT hook would zero the motor and is
+// refused. The motor is reported not driven.
+TEST_F(SafeStateInventoryTest, APartialPlanRefusesTheFaultHookForAnOutputItLeavesUndriven) {
+    safety.safe_state.setpoints = {relay("set_relay_ch1"), relay("set_relay_ch2")};
+    auto controller = make_controller();
+    automation::ModeManager mode{automation::RuntimeMode::MANUAL};
+    call_router->set_mode_manager(&mode, "BLOCK");
+    call_router->set_actuation_latch(controller.get());
+    controller->set_mode_manager(&mode);
+    std::vector<control::CallResult> hook_results;
+    mode.on_before_mode_change([&](automation::RuntimeMode, automation::RuntimeMode next, std::string&) {
+        hook_results.push_back(
+            call_router->execute_call(runtime::mode_hook_request(motor(0.0), next), *provider_registry));
+        return true;
+    });
+
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch1", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch2", _, _)).WillOnce(Return(true));
+    // StrictMock: no call to motor0.
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    EXPECT_FALSE(result.drives_no_output);
+    ASSERT_EQ(hook_results.size(), 1u);
+    EXPECT_FALSE(hook_results[0].success);
+    EXPECT_THAT(hook_results[0].error_message, HasSubstr("Actuation latched by e-stop"));
+    EXPECT_THAT(outcomes(result), Contains("sim0/motor0/set_motor_duty FAIL"));
 }
 
 // Setpoints that all dispatch win over zero_is_safe for every output: a

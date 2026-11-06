@@ -18,10 +18,16 @@ Upgrade notes:
 - **`software_safe_state` can be `mixed`** (#640), in `GET /v0/runtime/status`
   (`estop`, `startup_safe_state`) and the `POST /v0/estop` response: some
   outputs get their setpoint and others their zero. A client that validates
-  against an earlier `schemas/http/runtime-http.openapi.v0.yaml`, or switches
-  on the four earlier values, rejects it. A config that declares a safe state
-  no longer plans `none`, and an output it cannot drive is a `cause: config`
-  action, which fails an install (see Fixed). A new failure for an existing
+  against an earlier `schemas/http/runtime-http.openapi.v0.yaml` rejects the
+  response. The released anolis-workbench does not reject it: Operate maps a
+  value it does not know to `none` and tells the operator that no software
+  safe state is declared, that the stop drives nothing, and to use the
+  hardware emergency stop. That is false for a `mixed` stop, which drives
+  outputs. Update the workbench to a release that knows `mixed` before or
+  with this one (anolishq/anolis-workbench, follow-up to #640). A config
+  that declares a safe state no longer plans `none`. `actions` can now hold
+  an output the stop could not drive, with `cause: config` and nothing sent,
+  and that fails an install (see Fixed). A new failure for an existing
   client or install makes this release MINOR (`docs/dependencies.md`).
 
 ### Security
@@ -76,6 +82,11 @@ Upgrade notes:
     did under `none`. That now also covers a zero rung that can zero none of
     the outputs (for example only boolean arguments), where those hooks were
     refused before. Hooks declared in `safety.safe_state` are unchanged.
+    The other direction: when the plan drives at least one output, those
+    hooks are refused, so an output that only a `-> FAULT` hook drove, beside
+    setpoints for the others, is no longer driven on e-stop. Such a config
+    used to plan `none`; it now reports that output not driven and fails
+    the install.
   - The startup preflight logs every setpoint that cannot be dispatched at
     ERROR and counts it unless hooks are declared, names each actuating
     function the plan leaves undriven at ERROR, and logs

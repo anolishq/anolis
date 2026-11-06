@@ -127,9 +127,12 @@ Notes:
    validation, else it is reported in `actions` as not driven, with
    `cause: "config"` and the reason, and nothing is sent for it
    ([configuration-schema.md](configuration-schema.md#safety)).
-   `software_safe_state` names where the calls come from: `hooks`,
+   `software_safe_state` says how the outputs are driven: `hooks`,
    `setpoints`, `zero`, `mixed` (some outputs get their setpoint, others
-   their zero), or `none` when nothing is declared. On an automation machine
+   their zero), or `none` when nothing is declared
+   ([configuration-schema.md](configuration-schema.md#safety) has the exact
+   rule). An entry in `actions` with `cause: "config"` may be an output for
+   which no call was sent. On an automation machine
    it also drives `FAULT`. The response
    carries `safe_state_achieved`: `true` only when there is at least one
    action and every action succeeded, `false` when any call failed, when an
