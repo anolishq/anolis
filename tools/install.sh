@@ -2056,7 +2056,6 @@ _config_sets_api_token() {
             v = $0
             sub(/^[^:]*:[[:space:]]*/, "", v)
             sub(/[[:space:]]+#.*$/, "", v)
-            sub(/^#.*$/, "", v)
             sub(/[[:space:]]+$/, "", v)
             found = (v != "\"\"" && v != "\047\047")
             exit
@@ -2899,7 +2898,7 @@ assemble_bundle() {
     local parsed
     parsed=$(python3 - "${mp}" <<'PY'
 import sys, yaml
-mp = yaml.safe_load(open(sys.argv[1]))
+mp = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 c = (mp or {}).get("components")
 if not c:
     sys.exit("no 'components:' block")
@@ -2977,7 +2976,7 @@ shipped = {f"config/{f.name}" for f in rts + pcs} | {f"behaviors/{f.name}" for f
 
 def read(f):
     try:
-        return f.read_text()
+        return f.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         sys.exit(f"{f.name}: not valid UTF-8; cannot check it for http.auth_token")
 
@@ -3020,12 +3019,12 @@ def merged(node, seen=()):
 
 # The bundle must not carry a token's text either, whether or not the runtime
 # would read it as one, in a comment or a string included. So a line that
-# names auth_token anywhere (any case; not as the end of a longer name such as
-# mqtt_auth_token) is refused, unless the whole line is exactly the key set to
+# names auth_token anywhere (any case; not as part of a longer name such as
+# mqtt_auth_token or auth_token_file) is refused, unless the whole line is exactly the key set to
 # an empty quoted string: `auth_token: ""` or `auth_token: ''`, indented, with
 # nothing after it. That is block style only: the flow form
 # `http: {auth_token: ""}` is refused too.
-TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token", re.IGNORECASE)
+TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token(?![A-Za-z0-9_])", re.IGNORECASE)
 TOKEN_EMPTY_LINE = re.compile(r"[ \t]*auth_token:[ \t]*(\"\"|'')[ \t]*")
 
 
@@ -3173,7 +3172,7 @@ for rc in rts:
                 f"components.providers in machine-profile.yaml or fix the config"
             )
         referenced.add(m.group(1))
-    (pcfg / rc.name).write_text(text)
+    (pcfg / rc.name).write_text(text, encoding="utf-8")
 for extra in sorted(pinned - referenced):
     print(f"warning: pinned provider '{extra}' is referenced by no runtime config", file=sys.stderr)
 # Bake the inert default (the reserved `manual` runtime_profiles key) as the
@@ -3199,11 +3198,11 @@ check_token(default_text, default_src.name)
 _auto = (yaml.safe_load(default_text) or {}).get("automation") or {}
 if _auto.get("enabled") or "mode_transition_hooks" in _auto:
     sys.exit(f"the 'manual' variant is not inert (automation enabled or hooks present): {default_src}")
-(out / "config" / "runtime.yaml").write_text(render(default_text, default_src.name))
+(out / "config" / "runtime.yaml").write_text(render(default_text, default_src.name), encoding="utf-8")
 # Provider configs ship once, under projects/, where the rendered runtime
 # configs point. A config/providers/ copy was written and never read (#515).
 for pc in pcs:
-    (pcfg / pc.name).write_text(render(read(pc), pc.name))
+    (pcfg / pc.name).write_text(render(read(pc), pc.name), encoding="utf-8")
 for name in sorted(renamed):
     print(f"note: paths naming project '{name}' point at projects/{profile}/, where it installs", file=sys.stderr)
 mp = pd / "machine-profile.yaml"

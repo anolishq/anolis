@@ -55,12 +55,18 @@ is a complete example, and the workbench writes projects in the same layout.
   after it, not even a comment. That holds in every config, behaviour (scanned
   byte by byte, so a behaviour need not be text) and the machine profile. Write
   an empty token in block style: the flow form `http: {auth_token: ""}` is
-  refused. A longer name that ends in `auth_token`, such as `mqtt_auth_token`,
-  is not the token. A config that is not valid YAML or not UTF-8 stops the
+  refused. A longer name that holds `auth_token`, such as `mqtt_auth_token` or
+  `auth_token_file`, is not the token. A config that is not valid YAML or not UTF-8 stops the
   bundle step too, since it cannot be checked, and so does a merge key (`<<`)
   that brings in its own mapping (#529).
 - The directory name must be letters, digits, `.`, `_` and `-`: the bundle step
-  writes it into the configs as it is, and stops on any other name.
+  writes it into the configs as it is, and stops on any other name. A directory
+  name may hold upper case letters, `.` or `_`, but a path's `<name>` may not:
+  in a project directory named `my_reactor`, a path written with
+  `projects/my_reactor/` is left as it is, relative, and will not resolve on
+  the device. Write such a path with a `<name>` of lower case letters, digits
+  and `-` (`projects/my-reactor/`, say), and it is installed under
+  `projects/my_reactor/`.
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set

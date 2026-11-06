@@ -19,6 +19,9 @@ setup() {
     PREFIX="/opt/anolis"
     GITHUB_TOKEN=""
     OUT="$(mktemp -d)"
+    # Every fixture copy a test makes goes under here, so teardown removes it
+    # whether or not the test reached its own cleanup.
+    FIXTURES="$(mktemp -d)"
 
     # Mock the release download: fabricate tarballs with the expected bin/ layout.
     _stage_fetch() {
@@ -39,7 +42,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "${OUT:-}" "${STAGE_TMP:-}"
+    rm -rf "${OUT:-}" "${STAGE_TMP:-}" "${FIXTURES:-}"
 }
 
 @test "--stage requires --project" {
@@ -102,7 +105,7 @@ teardown() {
 # Keeps the "stage-project" basename so the produced bundle name is stable
 # (the profile is derived from the project dir's basename).
 _copy_fixture() {
-    local d; d="$(mktemp -d)/stage-project"
+    local d; d="$(mktemp -d "${FIXTURES}/copy.XXXXXX")/stage-project"
     cp -r "${PROJECT}" "${d}"
     printf '%s' "${d}"
 }
@@ -533,6 +536,50 @@ FORMS
     [ "$status" -eq 0 ]
 }
 
+@test "#529 a longer key that starts with auth_token is not the token; auth_token itself still is" {
+    local key
+    for key in auth_token_file auth_tokens AUTH_TOKEN_PATH auth_token1; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf 'http:\n  %s: /etc/anolis/token\n' "${key}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -eq 0 ] || { echo "refused: ${key}"; echo "${output}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'http:\n  auth_token_file: /etc/anolis/token\n  auth_token: %s\n' "${TOKEN}" \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_token_refused anolis-runtime.manual.yaml
+}
+
+# A project copied from this repo's example configs must not be refused for
+# its comments. A behaviour gets the same line rule and nothing else, so the
+# examples are staged as behaviours here.
+@test "#529 the example runtime configs pass the auth_token line rule" {
+    PROJECT_DIR="$(_copy_fixture)"
+    cp "${BATS_TEST_DIRNAME}/../../examples/"anolis-runtime*.yaml "${PROJECT_DIR}/behaviors/"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    [ -f "${OUT}/staging/projects/stage-project/behaviors/anolis-runtime.yaml" ]
+}
+
+# Python reads text in the locale's encoding unless told otherwise. With
+# LC_ALL=C and UTF-8 mode off that is ASCII, and a valid UTF-8 config would be
+# refused as "not valid UTF-8".
+@test "#529 a UTF-8 config stages under the C locale, and ships unchanged" {
+    PROJECT_DIR="$(_copy_fixture)"
+    local f
+    for f in config/anolis-runtime.manual.yaml config/anolis-runtime.telemetry.yaml \
+        config/provider-foo.yaml machine-profile.yaml; do
+        printf '# caf\xc3\xa9\n' >> "${PROJECT_DIR}/${f}"
+    done
+    export LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    grep -qx $'# caf\xc3\xa9' "${OUT}/staging/config/runtime.yaml"
+    grep -qx $'# caf\xc3\xa9' "${OUT}/staging/projects/stage-project/config/provider-foo.yaml"
+    grep -qx $'# caf\xc3\xa9' "${OUT}/staging/projects/stage-project/config/anolis-runtime.telemetry.yaml"
+}
+
 @test "#529 a mention of auth_token, or the flow form, is refused: write it in block style" {
     local form
     for form in '# auth_token comes from runtime.env\n' 'http: {auth_token: "", port: 8080}\n'; do
@@ -617,7 +664,7 @@ FORMS
 # Copy the fixture project into a temp dir named <name>. Its paths still name
 # stage-project, as a copied project's do.
 _copy_fixture_as() {
-    local d; d="$(mktemp -d)/$1"
+    local d; d="$(mktemp -d "${FIXTURES}/copy.XXXXXX")/$1"
     cp -r "${PROJECT}" "${d}"
     printf '%s' "${d}"
 }
@@ -642,6 +689,20 @@ _config_paths() {
     ! grep -rq 'projects/stage-project' "${OUT}/b/config" "${OUT}/b/projects"
     [[ "$output" == *"note: paths naming project 'stage-project' point at projects/my-reactor/"* ]]
     rm -rf "${PROJECT_DIR}"
+}
+
+# A directory name may hold `_`; a path's project name may not, so a path
+# written with the directory's own name is not rewritten.
+@test "#694 a directory named with _: a path must name the project in lower case, digits and -" {
+    PROJECT_DIR="$(_copy_fixture_as my_reactor)"
+    run assemble_bundle "${OUT}/b" x86_64
+    [ "$status" -eq 0 ]
+    grep -q '/opt/anolis/projects/my_reactor/config/provider-foo.yaml' "${OUT}/b/config/runtime.yaml"
+    [ -f "${OUT}/b/projects/my_reactor/config/provider-foo.yaml" ]
+    sed -i 's#projects/stage-project/#projects/my_reactor/#' "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    run assemble_bundle "${OUT}/b2" x86_64
+    [ "$status" -eq 0 ]
+    grep -q '\.\./anolis-projects/projects/my_reactor/config/provider-foo.yaml' "${OUT}/b2/config/runtime.yaml"
 }
 
 @test "#694 a project under its own name stages without a rename note" {

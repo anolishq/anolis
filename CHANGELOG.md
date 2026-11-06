@@ -33,9 +33,11 @@ commit messages only.
   either: a line naming `auth_token` (any case, in a comment or string too) in
   any config, behaviour or the machine profile stops the bundle step, unless
   the whole line is `auth_token: ""` or `auth_token: ''` in block style with
-  nothing after it. A project directory name outside letters, digits, `.`, `_`
-  and `-` is refused, since the name is written into the configs. An install whose `runtime.yaml` already carries one warns,
-  and the summary names it as the token in use.
+  nothing after it; a longer name such as `auth_token_file` is not the token.
+  Configs are read as UTF-8 whatever the locale. A project directory name
+  outside letters, digits, `.`, `_` and `-` is refused, since the name is
+  written into the configs. An install whose `runtime.yaml` already carries a
+  token warns, and the summary names it as the token in use.
 
 ### Fixed
 
