@@ -56,7 +56,7 @@ _stubs() {
 # or a signal can only be seen with main in a process of its own, with
 # install.sh's own `set -euo pipefail`. <fault> is shell code run in place of
 # phase_runtime_auth, after the binaries and project were replaced.
-_run_main_process() {
+_write_driver() {
     local fault="$1" prelude="${2:-}" driver="${BATS_TEST_TMPDIR}/driver.sh"
     {
         echo '#!/usr/bin/env bash'
@@ -70,7 +70,31 @@ _run_main_process() {
         printf '%s\n' "${prelude}"
         echo 'main --local "${BUNDLE}" --prefix "${PFX}" --no-start'
     } > "${driver}"
-    run bash "${driver}"
+}
+
+_run_main_process() {
+    _write_driver "$@"
+    run bash "${BATS_TEST_TMPDIR}/driver.sh"
+}
+
+# As _run_main_process, but in the background, in a process group of its own
+# with job control on, so that a signal can be sent to the whole group from
+# outside, as ^C or a dropped ssh session sends it (with job control off, a
+# background job would ignore SIGINT). Sets BGPID; output goes to BGOUT.
+_start_main_process() {
+    _write_driver "$@"
+    BGOUT="${BATS_TEST_TMPDIR}/bg.out"
+    set -m
+    bash "${BATS_TEST_TMPDIR}/driver.sh" > "${BGOUT}" 2>&1 &
+    BGPID=$!
+    set +m
+}
+
+# _wait_for <file>: up to 30 s.
+_wait_for() {
+    local i
+    for i in $(seq 1 600); do [[ -e "$1" ]] && return 0; sleep 0.05; done
+    return 1
 }
 
 UNMET_EXIT=1
@@ -216,7 +240,7 @@ _subshell_die() {
     before=$(_tree)
     _main
     [ "$status" -ne 0 ]
-    [[ "${output}" == *"install: ${PFX}/.install-txn exists: an earlier install stopped before its host preflight passed"* ]]
+    [[ "${output}" == *"install: ${PFX}/.install-txn exists: an earlier install stopped before it committed (once its host preflight passed)"* ]]
     [[ "${output}" == *"sudo rm -rf ${PFX}/<dir> && sudo mv ${PFX}/.install-txn/<dir> ${PFX}/<dir>"* ]]
     [[ "${output}" == *"sudo rm -rf ${PFX}/.install-txn"* ]]
     [[ "${output}" == *"refusing to install over an unfinished install"* ]]
@@ -387,4 +411,127 @@ RM_COPY_FAILS='rm() {
     [[ "${output}" == *"install: restored"* ]]
     # The step after the failed one still ran: the temp dir is gone.
     [ ! -e "${UNPACKED}" ]
+}
+
+# The commit's delete, held open: the first part of the copy is gone (bin/),
+# then it waits for a signal from outside. It matches the copy under either
+# name, so it finds the window whichever name the commit deletes it under.
+SLOW_COMMIT_DELETE='rm() {
+    if [[ "$1" == "-rf" && "${2:-}" == "${PFX}/.install-txn"* && -d "${2}/bin" && ! -e "${MARK}" ]]; then
+        command rm -rf "${2}/bin"; : > "${MARK}"; sleep 30
+    fi
+    command rm "$@"
+}'
+
+_is_new_install() {
+    grep -q '2.0.0' "${PFX}/bin/anolis-runtime" || { echo "bin: $(cat "${PFX}/bin/anolis-runtime")"; return 1; }
+    grep -qx 'device: new' "${PFX}/projects/demo/config/provider-demo.yaml" || { echo "project is old"; return 1; }
+    grep -q '1.0.0' "${PFX}/.prev/anolis-runtime" || { echo ".prev is not the backup of v1"; return 1; }
+}
+
+@test "535: a signal to the install's process group during the commit's delete keeps the new install" {
+    local sig want
+    for sig in INT:130 HUP:129 TERM:143; do
+        want="${sig#*:}"; sig="${sig%%:*}"
+        rm -rf "${PFX}" "${BATS_TEST_TMPDIR}/mark" "${LATER}"
+        _old_install
+        _new_bundle 0
+        _start_main_process ':' "${SLOW_COMMIT_DELETE}"
+        _wait_for "${BATS_TEST_TMPDIR}/mark" || { kill -KILL -- -"${BGPID}"; echo "${sig}: commit window not reached"; cat "${BGOUT}"; return 1; }
+        kill -"${sig}" -- -"${BGPID}"
+        status=0; wait "${BGPID}" || status=$?
+        [ "${status}" -eq "${want}" ] || { echo "${sig}: status ${status}"; cat "${BGOUT}"; return 1; }
+        ! grep -q -e 'install: restored' -e 'could not restore' "${BGOUT}" || { echo "${sig}: restored"; cat "${BGOUT}"; return 1; }
+        _is_new_install || { echo "${sig}: mixed prefix"; return 1; }
+        [ ! -e "${PFX}/.install-txn" ] || { echo "${sig}: .install-txn left"; return 1; }
+        # The next install removes what the commit left, and goes on.
+        _main --no-start
+        [ "$status" -eq 0 ] || { echo "${sig}: next install: ${output}"; return 1; }
+        [[ "${output}" == *"install: removing ${PFX}/.install-txn.done"* ]] || { echo "${sig}: ${output}"; return 1; }
+        [ ! -e "${PFX}/.install-txn.done" ]
+    done
+}
+
+@test "535: a kill during the commit's delete leaves a copy the next install removes, not one it offers to restore" {
+    _new_bundle 0
+    _start_main_process ':' "${SLOW_COMMIT_DELETE}"
+    _wait_for "${BATS_TEST_TMPDIR}/mark" || { kill -KILL -- -"${BGPID}"; cat "${BGOUT}"; return 1; }
+    kill -KILL -- -"${BGPID}"
+    status=0; wait "${BGPID}" || status=$?
+    [ "${status}" -eq 137 ]
+    _is_new_install
+    [ ! -e "${PFX}/.install-txn" ]
+    _main --no-start
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"install: removing ${PFX}/.install-txn.done"* ]]
+    [[ "${output}" != *"before it committed"* ]]
+    [[ "${output}" != *"mv ${PFX}/.install-txn"* ]]
+    [ ! -e "${PFX}/.install-txn.done" ]
+}
+
+@test "535: a failed rename at the commit keeps the new install and says the copy is the old prefix" {
+    _new_bundle 0
+    mv() {
+        if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then return 1; fi
+        command mv "$@"
+    }
+    _main --no-start
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"install: cannot rename ${PFX}/.install-txn to ${PFX}/.install-txn.done. The install is in place"* ]]
+    [[ "${output}" != *"install: restored"* ]]
+    _is_new_install
+    [ -d "${PFX}/.install-txn/bin" ]
+}
+
+@test "535: a symlinked bin, config, projects or .prev is refused before anything changes" {
+    local d
+    phase_system_user() { echo phase_system_user >> "${LATER}"; }
+    for d in bin config projects .prev; do
+        rm -rf "${PFX}" "${BATS_TEST_TMPDIR}/real" "${LATER}"
+        _old_install
+        mkdir -p "${BATS_TEST_TMPDIR}/real"
+        mv "${PFX}/${d}" "${BATS_TEST_TMPDIR}/real/${d}"
+        ln -s "${BATS_TEST_TMPDIR}/real/${d}" "${PFX}/${d}"
+        before=$(cd "${BATS_TEST_TMPDIR}/real" && find . -printf '%p %M %T@\n' | LC_ALL=C sort)
+        _main
+        [ "$status" -ne 0 ] || { echo "${d}: installed"; return 1; }
+        [[ "${output}" == *"install: ${PFX}/${d} is a symlink"* ]] || { echo "${d}: ${output}"; return 1; }
+        [[ "${output}" == *"refusing to install over a symlinked ${PFX}/${d}"* ]]
+        [ "$(cd "${BATS_TEST_TMPDIR}/real" && find . -printf '%p %M %T@\n' | LC_ALL=C sort)" == "${before}" ]
+        [ -L "${PFX}/${d}" ]
+        [ ! -e "${PFX}/.install-txn" ] && [ ! -e "${PFX}/.install-txn.partial" ]
+        [ ! -e "${LATER}" ] || { echo "${d}: a change ran"; return 1; }
+    done
+}
+
+# A signal sent while the commit renames the copy: held off, so the install
+# neither restores (it has passed) nor stops with the copy still named as one
+# to restore from.
+INT_IN_COMMIT_RENAME='mv() {
+    if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then : > "${MARK}"; kill -INT $$; fi
+    command mv "$@"
+}'
+
+@test "535: a signal during the commit's rename is held off: the install finishes" {
+    _new_bundle 0
+    _run_main_process ':' "${INT_IN_COMMIT_RENAME}"
+    [ -e "${BATS_TEST_TMPDIR}/mark" ]  # the signal was sent, from inside the rename
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    [[ "${output}" != *"install: restored"* ]]
+    _is_new_install
+    [ ! -e "${PFX}/.install-txn" ]
+    [ ! -e "${PFX}/.install-txn.done" ]
+}
+
+@test "535: a .install-txn.done left behind is removed at the start, even by an install that then fails" {
+    mkdir -p "${PFX}/.install-txn.done/config"
+    echo "part of a finished install's copy" > "${PFX}/.install-txn.done/config/runtime.yaml"
+    before=$(_tree)
+    _main
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"install: removing ${PFX}/.install-txn.done, the copy an earlier install took and no longer needed: that install had committed"* ]]
+    [[ "${output}" != *"refusing to install over an unfinished install"* ]]
+    [[ "${output}" == *"install: restored"* ]]
+    _tree_is "${before}"
+    [ ! -e "${PFX}/.install-txn.done" ]
 }

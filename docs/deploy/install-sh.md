@@ -414,6 +414,20 @@ directory not yet put back. The next install then refuses to start, before it
 changes anything, names the directories the copy holds, and says how to put
 each one back or, if the prefix is as you want it, to remove the copy (#535).
 
+Once the check passes, the install commits: it stops treating the copy as one
+to restore, renames it to `<prefix>/.install-txn.done/` (one rename, with
+SIGINT, SIGTERM and SIGHUP held off for it), and only then deletes it. A signal
+while it deletes, or after, leaves the new install in place and puts nothing
+back. A `.install-txn.done/` left behind (SIGKILL or a power cut while it
+deletes) is the copy of an install that finished; the next install says so and
+removes it.
+
+The install refuses to start, before it changes anything, when `bin/`,
+`config/`, `projects/` or `.prev/` under the prefix is a symlink: the copy
+would hold the link, not what it points to, so there would be nothing to put
+back. Replace the link with the directory it points to, and run the install
+again.
+
 ## What a provider release must provide
 
 `install.sh` holds no list of providers. For each entry under

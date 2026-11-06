@@ -52,7 +52,12 @@ commit messages only.
   renamed only once complete. If one is left behind (a restore that failed, a
   SIGKILL), the next install refuses to start before it changes anything: an
   incomplete copy it says not to restore from, and a complete one it names
-  the directories of and says how to put back or remove.
+  the directories of and says how to put back or remove. Once the preflight
+  passes, the copy is set aside under another name before it is deleted, so
+  a signal then keeps the new install whole; a copy left under that name is
+  removed by the next install. A symlinked `bin/`, `config/`, `projects/` or
+  `.prev/` is refused before anything changes, since the copy would hold
+  only the link.
 
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal

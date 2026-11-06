@@ -498,19 +498,36 @@ _install_on_exit() {
     exit "${rc}"
 }
 
-# Copies left by an install that did not finish, refused before the first
-# change to the host (main) and again before copying (_install_txn_begin).
+# What the transaction cannot work over, refused before the first change to
+# the host (main) and again before copying (_install_txn_begin).
 #
-# The copy is taken into .install-txn.partial and renamed to .install-txn only
-# once all four directories are in it. So a .partial left behind is an install
-# killed while it saved the prefix, before it changed anything there: it is
-# incomplete, and never a source to restore from. A .install-txn left behind
-# (a restore that failed, or a kill nothing can trap) holds the copy from
-# before that install of each directory still in it; the restore had already
-# put back any that are missing. It is the only record of them: never
-# overwrite or delete it.
+# A symlink at bin/, config/, projects/ or .prev: `cp -a` would save the link,
+# not what it points to, and the install would write through it, so there
+# would be nothing to put back.
+#
+# Copies left by an install that did not finish. The copy is taken into
+# .install-txn.partial and renamed to .install-txn only once all four
+# directories are in it. So a .partial left behind is an install killed while
+# it saved the prefix, before it changed anything there: it is incomplete, and
+# never a source to restore from. A .install-txn left behind (a restore that
+# failed, or a kill nothing can trap, before the install committed) holds the
+# copy from before that install of each directory still in it; the restore had
+# already put back any that are missing. It is the only record of them: never
+# overwrite or delete it. A .install-txn.done is the copy of an install that
+# committed, part deleted: nothing in it is needed, and it is removed.
 _install_txn_refuse_stale() {
     local txn="${PREFIX}/.install-txn" d held=()
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        if [[ -L "${PREFIX}/${d}" ]]; then
+            log_err "install: ${PREFIX}/${d} is a symlink. The install saves ${d} before it replaces it, so that it can put it back; it would save the link, not what it points to"
+            log_info "Replace the link with the directory it points to, then run the install again."
+            die "refusing to install over a symlinked ${PREFIX}/${d}"
+        fi
+    done
+    if [[ -e "${txn}.done" || -L "${txn}.done" ]]; then
+        log_info "install: removing ${txn}.done, the copy an earlier install took and no longer needed: that install had committed"
+        rm -rf "${txn}.done" || die "install: cannot remove ${txn}.done; remove it: sudo rm -rf ${txn}.done"
+    fi
     if [[ -e "${txn}.partial" || -L "${txn}.partial" ]]; then
         log_err "install: ${txn}.partial exists: an earlier install was stopped while it saved the prefix, before it changed anything there"
         log_info "That copy is incomplete; do not restore from it. ${PREFIX} is as it was before that install. Remove the copy:"
@@ -521,7 +538,7 @@ _install_txn_refuse_stale() {
     for d in "${INSTALL_TXN_DIRS[@]}"; do
         if [[ -d "${txn}/${d}" && ! -L "${txn}/${d}" ]]; then held+=("${d}/"); fi
     done
-    log_err "install: ${txn} exists: an earlier install stopped before its host preflight passed and did not put all of the prefix back"
+    log_err "install: ${txn} exists: an earlier install stopped before it committed (once its host preflight passed) and did not put all of the prefix back"
     if [[ ${#held[@]} -gt 0 ]]; then
         local others=""
         if [[ ${#held[@]} -lt ${#INSTALL_TXN_DIRS[@]} ]]; then others="; the others were put back"; fi
@@ -551,12 +568,24 @@ _install_txn_begin() {
     trap _install_on_exit EXIT
 }
 
-# The host preflight passed: keep what was installed. The EXIT trap stays, for
-# the temp dir; with the copy dropped it restores nothing.
+# The host preflight passed: keep what was installed. The copy stops being one
+# to restore before any of it is deleted: INSTALL_TXN is cleared, then
+# .install-txn is renamed to .install-txn.done (one rename), with INT, TERM and
+# HUP held off for those two steps. Only then is it deleted, so a signal during
+# the delete restores nothing, and a .done left behind (a kill, a power cut) is
+# the copy of an install that committed, which the next install removes. The
+# EXIT trap stays, for the temp dir.
 _install_txn_commit() {
-    [[ -n "${INSTALL_TXN}" ]] || return 0
-    rm -rf "${INSTALL_TXN}"
+    local txn="${INSTALL_TXN}"
+    [[ -n "${txn}" ]] || return 0
+    trap '' INT TERM HUP
     INSTALL_TXN=""
+    if ! mv "${txn}" "${txn}.done"; then
+        trap - INT TERM HUP
+        die "install: cannot rename ${txn} to ${txn}.done. The install is in place; ${txn} is the copy of the prefix from before it: remove it: sudo rm -rf ${txn}"
+    fi
+    trap - INT TERM HUP
+    rm -rf "${txn}.done" || log_warn "install: could not remove ${txn}.done; the next install removes it"
 }
 
 # Put back what _install_txn_begin saved. Called by the EXIT trap, so it runs
