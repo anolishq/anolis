@@ -928,9 +928,18 @@ components:
     SoftwareSafeState:
       type: string
       description: >-
-        Which rung of the safe-state ladder a POST /v0/estop would run now.
-        "none" means no software safe-state is declared (hardware cut only).
-      enum: [none, hooks, setpoints, zero]
+        How a POST /v0/estop would drive the outputs now. "hooks": the
+        declared hooks, alone. Otherwise each ACTUATE function gets its
+        setpoint if one passes validation, else its zero if zero_is_safe is
+        set and the zero passes validation, else it is reported not driven.
+        "setpoints" or "zero" when every driven ACTUATE output gets that;
+        "mixed" when some get their setpoint and others their zero. A
+        setpoint sent to anything else does not count. When no output is
+        driven: "setpoints" if any are declared, else "zero". "none" means
+        no software safe-state is declared (hardware cut only). Clients
+        should treat a value they do not know as a declared safe state they
+        cannot describe, not as "none".
+      enum: [none, hooks, setpoints, zero, mixed]
     EstopStatus:
       type: object
       additionalProperties: false
@@ -954,13 +963,14 @@ components:
         uncovered_actuating_functions:
           type: integer
           description: >-
-            Count of ACTUATE functions the active rung cannot drive. For hooks
-            and setpoints, a function is covered only by a call that targets
-            it and passes the same dispatch check as the startup preflight; for
-            zero, only if the zero rung can build its call and that call
-            passes the same check. Every ACTUATE function counts when
-            software_safe_state is "none". Covered means a call drives the
-            function, not that the value it sends is safe.
+            Count of ACTUATE functions a POST /v0/estop would not drive. A
+            function is covered only by a hook, setpoint or zero call that
+            targets it and passes the same dispatch check as the startup
+            preflight; a zero also has to be buildable. Outside "hooks", each
+            of these is reported as a not-driven action when the stop runs.
+            Every ACTUATE function counts when software_safe_state is "none".
+            Covered means a call drives the function, not that the value it
+            sends is safe.
         uncovered_functions:
           type: array
           items:
@@ -982,20 +992,23 @@ components:
         ran:
           type: boolean
           description: >-
-            True when a safe-state rung ran at startup. False for leave, and for
-            safe_state when no software safe-state is declared.
+            True when the software safe state ran at startup. False for leave,
+            and for safe_state when no software safe-state is declared.
         software_safe_state:
           $ref: '#/components/schemas/SoftwareSafeState'
         safe_state_achieved:
           type: boolean
           description: >-
-            The POST /v0/estop verdict for the startup run: true only when the
-            rung issued at least one call and every call succeeded. False
-            when ran is false. Skipped calls are not issued, so a run that
-            skips every call is false with no failed actions.
+            The POST /v0/estop verdict for the startup run: true only when it
+            had at least one action and every action succeeded. False when
+            ran is false. Skipped calls are not issued, so a run that skips
+            every call is false with no failed actions.
         failed_actions:
           type: array
-          description: The calls of the startup run that failed. Empty when none did.
+          description: >-
+            The calls of the startup run that failed, and the ACTUATE outputs
+            it could not drive, for which nothing was sent (cause config; see
+            EstopResponse.actions). Empty when there are none.
           items:
             $ref: '#/components/schemas/EstopAction'
         skipped_actions:
@@ -1041,7 +1054,9 @@ components:
             be planned from the config on these devices, and fails the same way
             on every run (the zero rung could not build its arguments, or the
             call was refused before reaching its provider because the device or
-            function does not exist or an argument is invalid). Fix
+            function does not exist or an argument is invalid, or an ACTUATE
+            function has no setpoint or zero that passes validation and is
+            reported not driven, with nothing sent; error says why). Fix
             safety.safe_state. run: anything else, such as a provider that
             failed the call.
     EstopResponse:
@@ -1057,19 +1072,26 @@ components:
           $ref: '#/components/schemas/SoftwareSafeState'
         actions:
           type: array
+          description: >-
+            One entry per call the stop sent, and one per ACTUATE output it
+            could not drive, for which nothing was sent (success false, cause
+            config, error saying why). A setpoint that failed validation while
+            another setpoint for the same function was sent is such an entry
+            too.
           items:
             $ref: '#/components/schemas/EstopAction'
         safe_state_achieved:
           type: boolean
           description: >-
-            True only when a rung ran, issued at least one call, and every
-            call succeeded. False when any call of the active rung failed,
-            when the rung issued no call, and when software_safe_state is
-            "none". It covers only the calls the rung issued: under hooks it
-            can be true while actuating functions no hook drives remain. A
+            True only when there is at least one action and every action
+            succeeded. False when any call failed, when an output is reported
+            not driven, when nothing was issued, and when software_safe_state
+            is "none". Under hooks it covers only the calls the hooks make, so
+            it can be true while actuating functions no hook drives remain. A
             call succeeds when its provider reports it OK, which confirms the
             command was accepted, not that the device was seen in the
-            commanded state. The per-call outcomes are in actions.
+            commanded state. The per-call outcomes, and the outputs not
+            driven, are in actions.
         warning:
           type: string
           description: Present when software_safe_state is "none".

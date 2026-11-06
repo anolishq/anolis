@@ -210,14 +210,44 @@ independently of `automation`, so a pure-manual machine can declare one.
 
 `safety.safe_state` fields (all optional):
 
-1. `hooks` (array of call objects) - run first when present.
-2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
-   only when they cover every actuating output (fail closed).
-3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
-   outputs when neither hooks nor full-coverage setpoints apply. Only
-   numeric required arguments are zeroed. A function with a required boolean,
-   string or bytes argument is not called and is reported as not driven:
-   the runtime cannot know which boolean value is safe.
+1. `hooks` (array of call objects) - when present, the software stop runs
+   these and nothing else.
+2. `setpoints` (array of call objects) - per-actuator safe setpoints.
+3. `zero_is_safe` (boolean, default `false`) - permits driving an actuating
+   output to zero. Only numeric required arguments are zeroed. A function
+   with a required boolean, string or bytes argument has no zero: the runtime
+   cannot know which boolean value is safe.
+
+Without hooks, the stop plans each actuating (`ACTUATE`) function on its own:
+
+1. its setpoint, if one targets it and dispatches: the device and function
+   exist and the arguments pass validation (type, range, required, allowed
+   values) against the inventory as it stands;
+2. else its zero, if `zero_is_safe` is set and the zero call dispatches;
+3. else it is not driven. The stop reports it as a failed action with
+   `cause: config`, naming why, and sends nothing for it.
+
+A setpoint that names a function but cannot dispatch is never sent. The
+startup preflight logs it at ERROR, and what the stop reports depends on the
+function:
+
+- Another setpoint for the same function dispatches: one function can drive
+  several outputs, one setpoint per index (`motor_index: 1` and `2`), so the
+  refused setpoint is reported in `actions` as not driven, `cause: config`.
+- No setpoint for the function dispatches and its zero does: the zero drives
+  the function, and the stop reports nothing for the refused setpoint. The
+  run can be achieved.
+- Nothing drives the function: it is reported not driven, as in step 3.
+
+A not-driven entry makes `safe_state_achieved` false. In the startup run
+(`safety.on_startup: safe_state`), `install.sh` fails the install on it.
+
+A setpoint that targets no actuating function (another category, or a device
+that is not present) is sent as declared, alongside a zero plan too. `software_safe_state` says how the actuating
+outputs are driven: `setpoints` or `zero` when every driven output gets that,
+`mixed` when some get their setpoint and others their zero. A setpoint sent to
+anything else does not count. When no output is driven, it is `setpoints` if
+any are declared, else `zero`. It is `none` only when nothing is declared.
 
 `safety.on_startup` (`safe_state` or `leave`, default `safe_state`) - what
 happens to outputs at startup. `safe_state` runs `safety.safe_state` once,

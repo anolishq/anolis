@@ -289,7 +289,9 @@ warning: `health: startup safe state NOT achieved`, then each failed and
 skipped call. A safe state the config cannot express on this machine's devices
 fails the install, with exit 1: the runtime marks such a call `cause: config`
 (the zero rung cannot build its arguments, or the call names a device or
-function that does not exist, or an argument out of range), and it fails the
+function that does not exist, or an argument out of range, or an actuating
+function has no setpoint or zero that can be sent and is reported not
+driven), and it fails the
 same way on every restart and every e-stop. The install logs `health:
 safety.safe_state cannot run on this machine's devices: <first refused call>`,
 and the summary says the install did not succeed. The install has already
@@ -332,8 +334,9 @@ limits:
   state is the one that reports nothing.
 - Passing means *dispatchable*, not *will run*. Runtime gating — IDLE/AUTO mode,
   the actuation latch — is deliberately not simulated.
-- The derived `zero` rung has no declared calls, so a machine relying on it gets a
-  clean preflight having checked nothing.
+- Zero calls are derived, not declared. The preflight does not list them, but
+  it names every actuating function the plan cannot drive, whether by a
+  setpoint or a zero, at ERROR (#640).
 
 ## Host requirements
 

@@ -886,7 +886,7 @@
     },
     "safe_state": {
       "type": "object",
-      "description": "Declared software safe-state for POST /v0/estop. Ladder: run hooks; else drive setpoints (must cover every actuating output); else zero all actuating outputs only if zero_is_safe.",
+      "description": "Declared software safe-state for POST /v0/estop. Hooks, when declared, are run alone. Otherwise each actuating output gets its setpoint if one passes validation, else its zero if zero_is_safe and the zero passes validation, else it is reported not driven.",
       "properties": {
         "hooks": {
           "type": "array",
