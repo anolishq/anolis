@@ -214,10 +214,16 @@ nlohmann::json encode_signal_spec(const registry::SignalSpec &spec) {
 }
 
 nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
-    // Build args structure with full ArgSpec metadata
+    // Build args structure with full ArgSpec metadata. The object is keyed by
+    // name and so holds no order (nlohmann sorts its keys); `position` carries
+    // each arg's index in the order the provider declared them (#731). A name
+    // declared twice keeps the last ArgSpec, with that ArgSpec's own index;
+    // CallRouter still checks a call against every duplicate.
     nlohmann::json args = nlohmann::json::object();
-    for (const auto &arg : spec.args) {
-        nlohmann::json arg_info = {{"type", value_type_to_string(arg.type())}, {"required", arg.required()}};
+    for (size_t position = 0; position < spec.args.size(); ++position) {
+        const auto &arg = spec.args[position];
+        nlohmann::json arg_info = {
+            {"type", value_type_to_string(arg.type())}, {"required", arg.required()}, {"position", position}};
 
         // Add description if present
         if (!arg.description().empty()) {

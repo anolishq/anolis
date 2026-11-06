@@ -1188,6 +1188,19 @@ components:
           $ref: '#/components/schemas/ValueType'
         required:
           type: boolean
+        position:
+          type: integer
+          minimum: 0
+          description: >-
+            0-based index of this argument in the order the provider declared
+            the function's arguments. `args` is an object, which holds no
+            order, so sort by `position` to recover it. The runtime always
+            sends it; it is not in `required` so that responses recorded before
+            it existed still validate. Positions are 0..n-1 unless the provider
+            declares two arguments with one name: the object then holds the
+            last of them, with its own index, and the index of the earlier one
+            is absent. A call is still checked against every one of them (see
+            docs/http-api.md).
         description:
           type: string
         unit:
@@ -1214,6 +1227,9 @@ components:
           type: string
         args:
           type: object
+          description: >-
+            Arguments keyed by name. Key order is not the declared order; each
+            ArgSpec's `position` is.
           additionalProperties:
             $ref: '#/components/schemas/ArgSpec'
         category:

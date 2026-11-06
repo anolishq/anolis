@@ -511,6 +511,46 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"{name}: {exc}"))
 
+    def run_arg_position_check(*, devices: list[Any]) -> None:
+        # The schema declares ArgSpec.position but does not require it, so the
+        # schema check alone passes a runtime that drops it (#731). This runtime
+        # always sends it: every arg of every function of every device carries
+        # an integer position >= 0, distinct within its function.
+        nonlocal checks_run, checks_passed
+        checks_run += 1
+        name = "device_capabilities_arg_positions"
+        try:
+            for device in devices:
+                path = f"/v0/devices/{device.get('provider_id')}/{device.get('device_id')}/capabilities"
+                resp = _invoke_json("GET", f"{fixture.base_url}{path}")
+                if resp.status_code != 200:
+                    failures.append(Failure("status", f"{name}: expected HTTP 200, got {resp.status_code} ({path})"))
+                    return
+                for function in resp.json().get("capabilities", {}).get("functions", []):
+                    seen: set[int] = set()
+                    for arg_name, arg in (function.get("args") or {}).items():
+                        position = arg.get("position") if isinstance(arg, dict) else None
+                        if not isinstance(position, int) or isinstance(position, bool) or position < 0:
+                            failures.append(
+                                Failure(
+                                    "response",
+                                    f"{name}: {path} {function.get('name')}.{arg_name} has no integer "
+                                    f"position >= 0 (got {position!r})",
+                                )
+                            )
+                            return
+                        if position in seen:
+                            failures.append(
+                                Failure(
+                                    "response", f"{name}: {path} {function.get('name')} repeats position {position}"
+                                )
+                            )
+                            return
+                        seen.add(position)
+            checks_passed += 1
+        except Exception as exc:  # noqa: BLE001
+            failures.append(Failure("check", f"{name}: {exc}"))
+
     def run_events_check(*, name: str) -> None:
         nonlocal checks_run, checks_passed
         checks_run += 1
@@ -723,6 +763,7 @@ def main() -> int:
             path_template="/v0/devices/{provider_id}/{device_id}/capabilities",
             actual_path=f"/v0/devices/{provider_id}/{device_id}/capabilities",
         )
+        run_arg_position_check(devices=devices)
         run_json_check(name="state_collection", method="GET", path_template="/v0/state", actual_path="/v0/state")
         run_json_check(
             name="device_state",
