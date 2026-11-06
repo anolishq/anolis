@@ -568,24 +568,37 @@ _install_txn_begin() {
     trap _install_on_exit EXIT
 }
 
-# The host preflight passed: keep what was installed. The copy stops being one
-# to restore before any of it is deleted: INSTALL_TXN is cleared, then
-# .install-txn is renamed to .install-txn.done (one rename), with INT, TERM and
-# HUP held off for those two steps. Only then is it deleted, so a signal during
-# the delete restores nothing, and a .done left behind (a kill, a power cut) is
-# the copy of an install that committed, which the next install removes. The
-# EXIT trap stays, for the temp dir.
+# The host preflight passed: keep what was installed. The rename of
+# .install-txn to .install-txn.done is the commit. The copy stops being one to
+# restore before any of it is deleted: INSTALL_TXN is cleared, then the copy is
+# renamed. An INT, TERM or HUP in those two steps is recorded, not acted on;
+# once the copy is deleted the install says so and stops with that signal, the
+# new install in place. A signal during the delete restores nothing, and a
+# .done left behind (a kill, a power cut) is the copy of an install that
+# committed, which the next install removes. A rename that fails is a commit
+# that failed: the install stops, and the EXIT trap puts the prefix back, as
+# for any stop before the commit. The EXIT trap stays, for the temp dir.
 _install_txn_commit() {
-    local txn="${INSTALL_TXN}"
+    local txn="${INSTALL_TXN}" sig=""
     [[ -n "${txn}" ]] || return 0
-    trap '' INT TERM HUP
+    trap 'sig=INT' INT
+    trap 'sig=TERM' TERM
+    trap 'sig=HUP' HUP
     INSTALL_TXN=""
     if ! mv "${txn}" "${txn}.done"; then
+        INSTALL_TXN="${txn}"
         trap - INT TERM HUP
-        die "install: cannot rename ${txn} to ${txn}.done. The install is in place; ${txn} is the copy of the prefix from before it: remove it: sudo rm -rf ${txn}"
+        die "install: cannot rename ${txn} to ${txn}.done, so the install cannot commit; putting the prefix back"
     fi
     trap - INT TERM HUP
-    rm -rf "${txn}.done" || log_warn "install: could not remove ${txn}.done; the next install removes it"
+    if ! rm -rf "${txn}.done"; then
+        log_warn "install: could not remove ${txn}.done, the copy this install took before it changed the prefix. The install is complete, and nothing in the copy is needed: remove it: sudo rm -rf ${txn}.done"
+        log_info "  Until it is removed, the next install tries to remove it, and stops if it cannot."
+    fi
+    if [[ -n "${sig}" ]]; then
+        log_warn "install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here, before its remaining steps"
+        kill -s "${sig}" "${BASHPID}"
+    fi
 }
 
 # Put back what _install_txn_begin saved. Called by the EXIT trap, so it runs

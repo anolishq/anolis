@@ -469,18 +469,58 @@ _is_new_install() {
     [ ! -e "${PFX}/.install-txn.done" ]
 }
 
-@test "535: a failed rename at the commit keeps the new install and says the copy is the old prefix" {
+# A rename that fails is a commit that failed: the prefix is put back, and the
+# next install, with nothing left over, says nothing about a copy.
+@test "535: a failed rename at the commit puts the prefix back, and says so" {
     _new_bundle 0
+    before=$(_tree)
     mv() {
         if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then return 1; fi
         command mv "$@"
     }
     _main --no-start
     [ "$status" -ne 0 ]
-    [[ "${output}" == *"install: cannot rename ${PFX}/.install-txn to ${PFX}/.install-txn.done. The install is in place"* ]]
-    [[ "${output}" != *"install: restored"* ]]
+    [[ "${output}" == *"install: cannot rename ${PFX}/.install-txn to ${PFX}/.install-txn.done, so the install cannot commit; putting the prefix back"* ]]
+    [[ "${output}" == *"install: restored ${PFX}/bin, config/, projects/ and .prev/ as they were before this run"* ]]
+    _tree_is "${before}"
+    [ ! -e "${PFX}/.install-txn" ] && [ ! -e "${PFX}/.install-txn.done" ]
+    [ ! -e "${LATER}" ]
+    unset -f mv
+    _main --no-start
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    [[ "${output}" != *".install-txn"* ]]
     _is_new_install
-    [ -d "${PFX}/.install-txn/bin" ]
+}
+
+# A delete at the commit that fails: the install is complete, and the warning
+# says what is true: the copy is not needed, how to remove it, and that the
+# next install stops if it cannot remove it either.
+@test "535: a failed delete at the commit says the copy is not needed and how to remove it" {
+    _new_bundle 0
+    rm() {
+        if [[ "$1" == "-rf" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then return 1; fi
+        command rm "$@"
+    }
+    _main --no-start
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    [[ "${output}" == *"install: could not remove ${PFX}/.install-txn.done, the copy this install took before it changed the prefix. The install is complete, and nothing in the copy is needed: remove it: sudo rm -rf ${PFX}/.install-txn.done"* ]]
+    [[ "${output}" == *"Until it is removed, the next install tries to remove it, and stops if it cannot."* ]]
+    [[ "${output}" != *"the next install removes it"* ]]
+    _is_new_install
+    [ -d "${PFX}/.install-txn.done" ]
+    # The cause persists: the next install cannot remove it either, and stops
+    # before it changes anything, as the warning said.
+    phase_system_user() { echo phase_system_user >> "${LATER}"; }
+    : > "${LATER}"
+    _main --no-start
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"install: cannot remove ${PFX}/.install-txn.done; remove it: sudo rm -rf ${PFX}/.install-txn.done"* ]]
+    ! grep -qx phase_system_user "${LATER}"
+    # Once it can be removed, the next install does, and goes on.
+    unset -f rm
+    _main --no-start
+    [ "$status" -eq 0 ]
+    [ ! -e "${PFX}/.install-txn.done" ]
 }
 
 @test "535: a symlinked bin, config, projects or .prev is refused before anything changes" {
@@ -504,23 +544,33 @@ _is_new_install() {
     done
 }
 
-# A signal sent while the commit renames the copy: held off, so the install
-# neither restores (it has passed) nor stops with the copy still named as one
-# to restore from.
-INT_IN_COMMIT_RENAME='mv() {
-    if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then : > "${MARK}"; kill -INT $$; fi
+# A signal sent while the commit renames the copy: recorded, not acted on, so
+# the install neither restores (it has passed) nor stops with the copy still
+# named as one to restore from. Once the copy is deleted, it says so and stops
+# with that signal.
+SIG_IN_COMMIT_RENAME='mv() {
+    if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then : > "${MARK}"; kill -${SIG} $$; fi
     command mv "$@"
 }'
 
-@test "535: a signal during the commit's rename is held off: the install finishes" {
-    _new_bundle 0
-    _run_main_process ':' "${INT_IN_COMMIT_RENAME}"
-    [ -e "${BATS_TEST_TMPDIR}/mark" ]  # the signal was sent, from inside the rename
-    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
-    [[ "${output}" != *"install: restored"* ]]
-    _is_new_install
-    [ ! -e "${PFX}/.install-txn" ]
-    [ ! -e "${PFX}/.install-txn.done" ]
+@test "535: a signal during the commit's rename takes effect after the commit, and says so" {
+    local sig want
+    for sig in INT:130 TERM:143 HUP:129; do
+        want="${sig#*:}"; sig="${sig%%:*}"
+        rm -rf "${PFX}" "${BATS_TEST_TMPDIR}/mark" "${LATER}"
+        _old_install
+        _new_bundle 0
+        _run_main_process ':' "SIG=${sig}"$'\n'"${SIG_IN_COMMIT_RENAME}"
+        [ -e "${BATS_TEST_TMPDIR}/mark" ] || { echo "${sig}: rename not reached"; return 1; }
+        [ "$status" -eq "${want}" ] || { echo "${sig}: status ${status}: ${output}"; return 1; }
+        [[ "${output}" == *"install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here"* ]] \
+            || { echo "${sig}: ${output}"; return 1; }
+        [[ "${output}" != *"install: restored"* ]]
+        _is_new_install
+        [ ! -e "${PFX}/.install-txn" ] && [ ! -e "${PFX}/.install-txn.done" ]
+        # It stopped there: the phases after the commit did not run.
+        [ ! -e "${LATER}" ]
+    done
 }
 
 @test "535: a .install-txn.done left behind is removed at the start, even by an install that then fails" {
@@ -534,4 +584,17 @@ INT_IN_COMMIT_RENAME='mv() {
     [[ "${output}" == *"install: restored"* ]]
     _tree_is "${before}"
     [ ! -e "${PFX}/.install-txn.done" ]
+}
+
+# After the commit, a signal acts as it does anywhere else: the install stops.
+TERM_AFTER_COMMIT='phase_manifest() { echo phase_manifest >> "${LATER}"; kill -TERM $$; }'
+
+@test "535: a signal after the commit stops the install there, with the new install in place" {
+    _new_bundle 0
+    _run_main_process ':' "${TERM_AFTER_COMMIT}"
+    [ "$status" -eq 143 ] || { echo "${output}"; return 1; }
+    [[ "${output}" != *"install: restored"* ]]
+    _is_new_install
+    grep -qx phase_manifest "${LATER}"
+    ! grep -qx phase_systemd "${LATER}"
 }

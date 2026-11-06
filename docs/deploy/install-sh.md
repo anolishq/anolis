@@ -415,12 +415,17 @@ changes anything, names the directories the copy holds, and says how to put
 each one back or, if the prefix is as you want it, to remove the copy (#535).
 
 Once the check passes, the install commits: it stops treating the copy as one
-to restore, renames it to `<prefix>/.install-txn.done/` (one rename, with
-SIGINT, SIGTERM and SIGHUP held off for it), and only then deletes it. A signal
-while it deletes, or after, leaves the new install in place and puts nothing
-back. A `.install-txn.done/` left behind (SIGKILL or a power cut while it
-deletes) is the copy of an install that finished; the next install says so and
-removes it.
+to restore, renames it to `<prefix>/.install-txn.done/` (one rename), and only
+then deletes it. A SIGINT, SIGTERM or SIGHUP during the rename takes effect
+once the copy is deleted: the install says so and stops, with the new install
+in place. A signal while it deletes, or after, leaves the new install in place
+and puts nothing back. A
+`.install-txn.done/` left behind (SIGKILL or a power cut while it deletes, or a
+delete that failed) is the copy of an install that finished: nothing in it is
+needed. The next install says so and removes it, or stops, before it changes
+anything, if it cannot. A rename that fails is a commit that failed: the
+install stops and puts the four directories back, as it does when the check
+fails.
 
 The install refuses to start, before it changes anything, when `bin/`,
 `config/`, `projects/` or `.prev/` under the prefix is a symlink: the copy
