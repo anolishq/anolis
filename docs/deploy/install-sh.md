@@ -22,10 +22,51 @@ is a complete example, and the workbench writes projects in the same layout.
 
 - The profile must have a `components:` block naming the runtime and provider
   versions.
-- Only `config/anolis-runtime.*.yaml` and `config/provider-*.yaml` are installed.
-- The directory's name is the installed project's name. Provider config paths
-  in the runtime config name it too (`../anolis-projects/projects/<name>/config/...`),
-  so a copy under a new name must update those paths.
+- What is installed: `config/anolis-runtime.*.yaml`, `config/provider-*.yaml`,
+  the files directly in `behaviors/` and `machine-profile.yaml`, under
+  `<prefix>/projects/<name>/`, and the file `runtime_profiles.manual` names,
+  rendered as `<prefix>/config/runtime.yaml`. The files are copied as written,
+  apart from the provider command and project path rewrites and the bind and
+  auth change described under [Security](../security.md#defaults); a comment
+  ships as it is, unless it holds a token (below).
+- The directory's name is the installed project's name. A path written as
+  `../anolis-projects/projects/<name>/config/<file>` or
+  `.../behaviors/<file>`, where `<name>` is lower case letters, digits and `-`,
+  is installed as `<prefix>/projects/<directory's name>/...`, whatever `<name>`
+  it was written with, so a project copied under a new name needs no edits.
+  That holds for a path naming another project too: it is pointed at this
+  project's file of the same name. The bundle step prints a `note:` for each
+  other name it rewrote (#694). Such a path must name one of the installed
+  files, or the bundle step stops and names it; a path inside a YAML comment is
+  rewritten but not checked. Any other path, such as one under another
+  directory of the project or with upper case letters or `_` in `<name>`, is
+  left as it is and not checked.
+- No config may set `http.auth_token` to anything but `""`. Each install
+  generates the device's own token into `/etc/anolis/runtime.env`, and a token
+  in the config would replace it on every device. A null value counts: the
+  runtime reads `auth_token:`, `~` and `null` as the token `null`. The bundle
+  step checks every file it renders, before and after its rewrites, and
+  `machine-profile.yaml`, reads them as the runtime's YAML parser does (the
+  first of duplicate keys, a tag does not hide the value), stops and names the
+  file, and never prints the token. The bundle carries no token's text either:
+  a line that names `auth_token`, in any case and in a comment or string too,
+  stops the bundle step, unless the whole line is the key set to an empty
+  quoted string, `auth_token: ""` or `auth_token: ''`, indented, with nothing
+  after it, not even a comment. That holds in every config, behaviour (scanned
+  byte by byte, so a behaviour need not be text) and the machine profile. Write
+  an empty token in block style: the flow form `http: {auth_token: ""}` is
+  refused. A longer name that holds `auth_token`, such as `mqtt_auth_token` or
+  `auth_token_file`, is not the token. A config that is not valid YAML or not
+  UTF-8 stops the bundle step too, since it cannot be checked, and so does a
+  merge key (`<<`) that brings in its own mapping (#529).
+- The directory name must be letters, digits, `.`, `_` and `-`: the bundle step
+  writes it into the configs as it is, and stops on any other name. A directory
+  name may hold upper case letters, `.` or `_`, but a path's `<name>` may not:
+  in a project directory named `my_reactor`, a path written with
+  `projects/my_reactor/` is left as it is, relative, and will not resolve on
+  the device. Write such a path with a `<name>` of lower case letters, digits
+  and `-` (`projects/my-reactor/`, say), and it is installed under
+  `projects/my_reactor/`.
 
 **This machine needs internet**, plus `curl`, `tar`, `sha256sum`, and `python3`
 with `pyyaml` (`sudo apt install python3-yaml`) to resolve the profile. Set

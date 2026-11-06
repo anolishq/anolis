@@ -13,8 +13,43 @@ commit messages only.
 
 ## [Unreleased]
 
+### Security
+
+- **`install.sh` no longer bakes a literal API token into a bundle** (#529).
+  Staging, and the online `--project` install, copied a project's
+  `http.auth_token` into the bundle's `config/runtime.yaml` and
+  `projects/<name>/config/`. The runtime prefers that token to
+  `ANOLIS_API_TOKEN`, so every device installed from the bundle accepted the
+  same token, and the per-device one in `/etc/anolis/runtime.env` was ignored.
+  The bundle step now stops, naming the file and never the token, when any
+  config it renders (the runtime configs, the `manual` variant, the provider
+  configs) or `machine-profile.yaml` sets `http.auth_token` to anything but a
+  quoted empty string, or is not valid YAML or UTF-8. A null value counts: the
+  runtime reads `auth_token:`, `~` and `null` as the token `null`. The check
+  reads the files as the runtime's YAML parser does: the first of duplicate
+  keys and of duplicate `http` blocks, merge keys followed, and a tag such as
+  `!!null` does not hide the value. It runs on each file again after the
+  bundle step's rewrites, which is the text that ships. No token's text ships
+  either: a line naming `auth_token` (any case, in a comment or string too) in
+  any config, behaviour or the machine profile stops the bundle step, unless
+  the whole line is `auth_token: ""` or `auth_token: ''` in block style with
+  nothing after it; a longer name such as `auth_token_file` is not the token.
+  Configs are read as UTF-8 whatever the locale. A project directory name
+  outside letters, digits, `.`, `_` and `-` is refused, since the name is
+  written into the configs. An install whose `runtime.yaml` already carries a
+  token warns, and the summary names it as the token in use.
+
 ### Fixed
 
+- **A project copied under a new name installs with paths to its own
+  directory** (#694). The bundle step rewrote
+  `../anolis-projects/projects/<name>/...` with the name written in the path,
+  so a copy of `bioreactor-v1` named `my-reactor` installed under
+  `projects/my-reactor/` with every provider `--config` pointing into
+  `projects/bioreactor-v1/`, and exited 0. Such paths now point at the
+  directory the project installs to, and one that names a file the bundle does
+  not ship stops the bundle step (a path in a YAML comment is rewritten but
+  not checked).
 - **`install.sh` no longer fails a healthy install on a target without
   `curl`** (#536). The offline `--local` route does not need `curl`, but the
   health check is made of `curl` calls, so it used to poll for the full 30 s,

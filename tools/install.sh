@@ -821,6 +821,7 @@ preflight_runtime_config() {
 # on many machines. Reused when already present, so upgrading does not invalidate
 # tokens already issued to clients.
 phase_runtime_auth() {
+    _warn_config_api_token
     install -d -m 755 /etc/anolis
 
     if [[ -f "${RUNTIME_ENV_FILE}" ]] \
@@ -839,6 +840,17 @@ phase_runtime_auth() {
     install -m 600 -o root -g root /dev/null "${RUNTIME_ENV_FILE}"
     printf 'ANOLIS_API_TOKEN=%s\n' "${token}" > "${RUNTIME_ENV_FILE}"
     log_ok "auth: API token generated (${RUNTIME_ENV_FILE})"
+}
+
+# The runtime reads ANOLIS_API_TOKEN only when the config sets no
+# http.auth_token, so a literal one in the installed runtime.yaml replaces the
+# per-device token in runtime.env (#529). Staging refuses such a config; a
+# bundle staged before that, or a config edited on the device, can still carry
+# one. Warn, naming the file and never the value.
+_warn_config_api_token() {
+    _config_sets_api_token || return 0
+    log_warn "auth: ${PREFIX}/config/runtime.yaml sets http.auth_token; the runtime uses it, not the token in ${RUNTIME_ENV_FILE}"
+    log_info "  Every device with this config accepts that same token. Remove the key to use this device's own."
 }
 
 # 256 bits of hex. openssl is not guaranteed on a minimal image; /dev/urandom is.
@@ -2024,6 +2036,39 @@ _runtime_probe_host() {
     esac
 }
 
+# http.auth_token as the installed runtime.yaml sets it, quotes removed. Prints
+# nothing when the config sets none.
+_config_api_token() {
+    local token
+    token=$(_http_value "${PREFIX}/config/runtime.yaml" auth_token)
+    token="${token#[\"\']}"
+    token="${token%[\"\']}"
+    printf '%s' "${token}"
+}
+
+# True when the installed runtime.yaml's http block has an auth_token key whose
+# value is anything but a quoted empty string. yaml-cpp reads a key with no
+# value, `~` or `null` as the token "null", so those count (#529). Reads the
+# block style install.sh renders; a flow-style http block is not seen here
+# (the bundle step checks every form before a config is shipped).
+_config_sets_api_token() {
+    local cfg="${PREFIX}/config/runtime.yaml"
+    [[ -f "${cfg}" ]] || return 1
+    awk '
+        { sub(/\r$/, "") }
+        /^[^[:space:]#]/ { in_blk = ($1 == "http:") }
+        in_blk && $1 == "auth_token:" {
+            v = $0
+            sub(/^[^:]*:[[:space:]]*/, "", v)
+            sub(/[[:space:]]+#.*$/, "", v)
+            sub(/[[:space:]]+$/, "", v)
+            found = (v != "\"\"" && v != "\047\047")
+            exit
+        }
+        END { exit !found }
+    ' "${cfg}"
+}
+
 # The runtime's API token, resolved as the runtime resolves it: http.auth_token
 # in runtime.yaml, else ANOLIS_API_TOKEN from runtime.env. Prints nothing when
 # neither is set (auth off, or a config this install did not provision).
@@ -2032,9 +2077,7 @@ _runtime_probe_host() {
 # removed.
 _runtime_api_token() {
     local token
-    token=$(_http_value "${PREFIX}/config/runtime.yaml" auth_token)
-    token="${token#[\"\']}"
-    token="${token%[\"\']}"
+    token=$(_config_api_token)
     if [[ -z "${token}" && -r "${RUNTIME_ENV_FILE}" ]]; then
         # shellcheck disable=SC2016  # sed's $ (last line), not a shell expansion
         token=$(sed -n '/^ANOLIS_API_TOKEN=/{s///;h;}; ${x;p;}' "${RUNTIME_ENV_FILE}")
@@ -2356,7 +2399,9 @@ phase_summary() {
 
     # Deliberately prints the path, never the token — installs are routinely piped
     # through `tee` into a logfile, and a secret must not land there.
-    if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+    if _config_sets_api_token; then
+        log_warn "API token: the http.auth_token in ${PREFIX}/config/runtime.yaml, not ${RUNTIME_ENV_FILE} (see the auth warning above)"
+    elif [[ -f "${RUNTIME_ENV_FILE}" ]]; then
         log_info "API token: ${RUNTIME_ENV_FILE} (read it with: sudo cat ${RUNTIME_ENV_FILE})"
         log_info "           Clients must send it as: Authorization: Bearer <token>"
         log_info "           This includes requests from the device itself, unless http.auth_exempt_loopback is true."
@@ -2851,6 +2896,14 @@ stage_check_deps() {
         || die "python3 'pyyaml' is required to build from a config (pip install pyyaml)"
 }
 
+# The project's directory name is its installed name, and the bundle step
+# writes it into the rendered configs as projects/<name>/, as it is: outside
+# letters, digits, `.`, `_` and `-` it could change what those configs mean.
+_check_project_name() {
+    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] \
+        || die "project directory name '$1' has characters other than letters, digits, '.', '_' and '-'; rename the directory"
+}
+
 # Assemble a bundle (bin + rendered config + systemd + manifest + checksums)
 # from the --project config into <dest> for <arch>. Shared by --stage (offline
 # build) and config-driven online install. Generic over the profile's providers.
@@ -2860,6 +2913,7 @@ assemble_bundle() {
 
     [[ -n "${PROJECT_DIR}" ]] || die "--project <config-dir> is required"
     [[ -d "${PROJECT_DIR}" ]] || die "project dir not found: ${PROJECT_DIR}"
+    _check_project_name "$(basename "$(cd "${PROJECT_DIR}" && pwd)")"
     local mp="${PROJECT_DIR}/machine-profile.yaml"
     [[ -f "${mp}" ]] || die "machine-profile.yaml not found in ${PROJECT_DIR}"
 
@@ -2870,7 +2924,7 @@ assemble_bundle() {
     local parsed
     parsed=$(python3 - "${mp}" <<'PY'
 import sys, yaml
-mp = yaml.safe_load(open(sys.argv[1]))
+mp = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 c = (mp or {}).get("components")
 if not c:
     sys.exit("no 'components:' block")
@@ -2932,13 +2986,157 @@ from pathlib import Path
 project, out, profile, prefix = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 pd = Path(project)
 cfg = pd / "config"
-pcmd = re.compile(r"\.\./anolis-provider-([a-z0-9-]+)/build/[^/]+/anolis-provider-([a-z0-9-]+)")
-ppath = re.compile(r"\.\./anolis-projects/projects/([a-z0-9-]+)/(config|behaviors)/([^\s\"']+)")
+# The build-dir group stops at whitespace and quotes, so a rewrite never spans
+# lines or opens or closes a string.
+pcmd = re.compile(r"\.\./anolis-provider-([a-z0-9-]+)/build/[^/\s\"']+/anolis-provider-([a-z0-9-]+)")
+# The last group stops at YAML flow indicators, so an unquoted flow list
+# (`args: [--config, ../anolis-projects/...]`) keeps its `,` and `]`.
+ppath = re.compile(r"\.\./anolis-projects/projects/([a-z0-9-]+)/(config|behaviors)/([^\s\"',\[\]{}]+)")
+rts = sorted(cfg.glob("anolis-runtime.*.yaml"))
+pcs = sorted(cfg.glob("provider-*.yaml"))
+beh = pd / "behaviors"
+behs = sorted(f for f in beh.iterdir() if f.is_file()) if beh.is_dir() else []
+# What the bundle ships under projects/<profile>/, as project-relative paths.
+shipped = {f"config/{f.name}" for f in rts + pcs} | {f"behaviors/{f.name}" for f in behs}
 
 
-def render(c):
+def read(f):
+    try:
+        return f.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        sys.exit(f"{f.name}: not valid UTF-8; cannot check it for http.auth_token")
+
+
+# #529: the API token is generated per device at install time, into
+# /etc/anolis/runtime.env. A literal http.auth_token in a shipped config would
+# reach every device installed from the bundle and, since the runtime prefers
+# it over ANOLIS_API_TOKEN, shadow each device's own token. Refuse it, naming
+# the file and never the value.
+#
+# The runtime reads YAML with yaml-cpp, and the check must not see less than it
+# does. So it walks the node graph, not the loaded data: every top-level `http`
+# key and every `auth_token` key in each, duplicates included (PyYAML keeps the
+# last of a duplicate key, yaml-cpp the first), and the mappings a `<<` merge
+# key brings in. The only value that is no token is a quoted empty string;
+# yaml-cpp reads a null (`auth_token:`, `~`, `null`) as the string "null", and
+# keeps the text of a scalar whatever its tag (`!!null x` is "x"). A file that
+# does not parse cannot be shown to be free of a token, so it is refused too;
+# the parser's message is not printed, because it quotes the offending line.
+class SelfMerge(Exception):
+    pass
+
+
+def merged(node, seen=()):
+    """The (key, value) pairs of a mapping node, with any `<<` merges. A
+    mapping that merges itself (`http: &h {<<: *h}`) cannot be resolved."""
+    if id(node) in seen:
+        raise SelfMerge()
+    seen = seen + (id(node),)
+    pairs = []
+    for k, v in node.value:
+        if isinstance(k, yaml.ScalarNode) and k.value == "<<":
+            for m in (v.value if isinstance(v, yaml.SequenceNode) else [v]):
+                if isinstance(m, yaml.MappingNode):
+                    pairs.extend(merged(m, seen))
+        else:
+            pairs.append((k, v))
+    return pairs
+
+
+# The bundle must not carry a token's text either, whether or not the runtime
+# would read it as one, in a comment or a string included. So a line that
+# names auth_token anywhere (any case; not as part of a longer name such as
+# mqtt_auth_token or auth_token_file) is refused, unless the whole line is
+# exactly the key set to an empty quoted string: `auth_token: ""` or
+# `auth_token: ''`, indented, with nothing after it. That is block style only:
+# the flow form `http: {auth_token: ""}` is refused too.
+TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token(?![A-Za-z0-9_])", re.IGNORECASE)
+TOKEN_EMPTY_LINE = re.compile(r"[ \t]*auth_token:[ \t]*(\"\"|'')[ \t]*")
+
+
+def check_token_text(text, name):
+    for line in re.split(r"\r\n|\r|\n", text):
+        if TOKEN_WORD.search(line) and not TOKEN_EMPTY_LINE.fullmatch(line):
+            sys.exit(
+                f"{name}: names auth_token in a line other than `auth_token: \"\"` on its own. "
+                f"A bundle must not carry an API token's text, in a comment or string either; "
+                f"remove it. The install generates a token per device into "
+                f"/etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
+            )
+
+
+def check_token(text, name):
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError as e:
+        line = getattr(getattr(e, "problem_mark", None), "line", None)
+        where = f" (line {line + 1})" if line is not None else ""
+        sys.exit(f"{name}: not valid YAML{where}; cannot check it for http.auth_token")
+    if not isinstance(root, yaml.MappingNode):
+        return
+    try:
+        check_token_nodes(root, name)
+    except SelfMerge:
+        sys.exit(f"{name}: a merge key (<<) brings in its own mapping; cannot check it for http.auth_token")
+
+
+def check_token_nodes(root, name):
+    for k, http in merged(root):
+        if not (isinstance(k, yaml.ScalarNode) and k.value == "http" and isinstance(http, yaml.MappingNode)):
+            continue
+        for k2, tok in merged(http):
+            if not (isinstance(k2, yaml.ScalarNode) and k2.value == "auth_token"):
+                continue
+            if isinstance(tok, yaml.ScalarNode) and tok.style in ("'", '"') and tok.value == "":
+                continue
+            sys.exit(
+                f"{name}: sets http.auth_token. A bundle must not carry an API token: every device "
+                f"installed from it would accept that token, in place of its own. Remove the key "
+                f"(a null value is a token too: the runtime reads it as \"null\"); the install "
+                f"generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
+            )
+
+
+# A path inside a YAML comment is rewritten with the rest, but never checked:
+# nothing reads it.
+def in_comment(text, start):
+    line = text[text.rfind("\n", 0, start) + 1:start]
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return True
+    return False
+
+
+def render(c, source):
+    # Every file rendered is checked, before the rewrites and again after them
+    # (below): what ships is the text after, and that is what the runtime reads.
+    check_token(c, source)
     c = pcmd.sub(lambda m: f"{prefix}/bin/anolis-provider-{m.group(2)}", c)
-    c = ppath.sub(lambda m: f"{prefix}/projects/{m.group(1)}/{m.group(2)}/{m.group(3)}", c)
+
+    # #694: the project installs under projects/<profile>/, the directory's
+    # name, whatever project name the path was written with: a project copied
+    # under a new name keeps its old name in its paths. Only this project's
+    # files are installed, so a path must name one of them.
+    def project_path(m):
+        rel = f"{m.group(2)}/{m.group(3)}"
+        if in_comment(m.string, m.start()):
+            return f"{prefix}/projects/{profile}/{rel}"
+        if rel not in shipped:
+            sys.exit(
+                f"{source}: '{m.group(0)}' names {rel}, which is not a file this bundle "
+                f"ships from {pd}"
+            )
+        if m.group(1) != profile:
+            renamed.add(m.group(1))
+        return f"{prefix}/projects/{profile}/{rel}"
+
+    c = ppath.sub(project_path, c)
     # The appliance is LAN-reachable, and the runtime refuses a non-loopback bind
     # when auth is off (the startup guard in core/runtime/config.cpp). Emit the two
     # together — never the bind without the auth, or the runtime will not start
@@ -2952,20 +3150,22 @@ def render(c):
         bind = f"{indent}bind: 0.0.0.0"
         return bind if has_auth else f"{bind}\n{indent}auth_enabled: true"
 
-    return re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
+    c = re.sub(r"^([ \t]*)bind:[ \t]*127\.0\.0\.1[ \t]*$", expose, c, flags=re.M)
+    check_token(c, source)
+    check_token_text(c, source)
+    return c
 
 
+renamed = set()
 (out / "config").mkdir(parents=True, exist_ok=True)
 pcfg = out / "projects" / profile / "config"
 pcfg.mkdir(parents=True, exist_ok=True)
-beh = pd / "behaviors"
-if beh.is_dir():
+if behs:
     bo = out / "projects" / profile / "behaviors"
     bo.mkdir(parents=True, exist_ok=True)
-    for f in beh.iterdir():
-        if f.is_file():
-            shutil.copy2(f, bo / f.name)
-rts = sorted(cfg.glob("anolis-runtime.*.yaml"))
+    for f in behs:
+        check_token_text(f.read_bytes().decode("latin-1"), f.name)
+        shutil.copy2(f, bo / f.name)
 if not rts:
     sys.exit(f"no runtime configs in {cfg}")
 # Load the machine-profile once: pinned providers (#226 cross-validation) and
@@ -2973,12 +3173,16 @@ if not rts:
 mp_src = pd / "machine-profile.yaml"
 if not mp_src.exists():
     sys.exit(f"machine profile not found: {mp_src}")
-mp_data = yaml.safe_load(mp_src.read_text()) or {}
+# It ships verbatim, beside the project's configs.
+mp_text = read(mp_src)
+check_token(mp_text, mp_src.name)
+check_token_text(mp_text, mp_src.name)
+mp_data = yaml.safe_load(mp_text) or {}
 pinned = set((mp_data.get("components") or {}).get("providers") or {})
 prov_cmd = re.compile(re.escape(prefix) + r"/bin/anolis-provider-([a-z0-9-]+)$")
 referenced = set()
 for rc in rts:
-    text = render(rc.read_text())
+    text = render(read(rc), rc.name)
     # #226: every provider command in the rendered config must resolve to a
     # pinned/bundled provider binary. A config naming an unpinned provider would
     # produce a bundle whose checksums pass but whose runtime crash-loops.
@@ -2994,7 +3198,7 @@ for rc in rts:
                 f"components.providers in machine-profile.yaml or fix the config"
             )
         referenced.add(m.group(1))
-    (pcfg / rc.name).write_text(text)
+    (pcfg / rc.name).write_text(text, encoding="utf-8")
 for extra in sorted(pinned - referenced):
     print(f"warning: pinned provider '{extra}' is referenced by no runtime config", file=sys.stderr)
 # Bake the inert default (the reserved `manual` runtime_profiles key) as the
@@ -3013,14 +3217,20 @@ if not default_src.exists():
 # install.sh is fetched from the pinned release and may predate the install-time
 # gate, so this pyyaml check (a real parser, robust to true/yes/on/quoting) is
 # the belt-and-suspenders that also protects the offline --local path.
-_auto = (yaml.safe_load(default_src.read_text()) or {}).get("automation") or {}
+# The 'manual' variant need not be one of the anolis-runtime.*.yaml files, so
+# check it before anything parses it.
+default_text = read(default_src)
+check_token(default_text, default_src.name)
+_auto = (yaml.safe_load(default_text) or {}).get("automation") or {}
 if _auto.get("enabled") or "mode_transition_hooks" in _auto:
     sys.exit(f"the 'manual' variant is not inert (automation enabled or hooks present): {default_src}")
-(out / "config" / "runtime.yaml").write_text(render(default_src.read_text()))
+(out / "config" / "runtime.yaml").write_text(render(default_text, default_src.name), encoding="utf-8")
 # Provider configs ship once, under projects/, where the rendered runtime
 # configs point. A config/providers/ copy was written and never read (#515).
-for pc in sorted(cfg.glob("provider-*.yaml")):
-    (pcfg / pc.name).write_text(render(pc.read_text()))
+for pc in pcs:
+    (pcfg / pc.name).write_text(render(read(pc), pc.name), encoding="utf-8")
+for name in sorted(renamed):
+    print(f"note: paths naming project '{name}' point at projects/{profile}/, where it installs", file=sys.stderr)
 mp = pd / "machine-profile.yaml"
 if mp.exists():
     shutil.copy2(mp, out / "projects" / profile / "machine-profile.yaml")

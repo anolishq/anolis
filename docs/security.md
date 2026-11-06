@@ -85,7 +85,14 @@ http:
 ```
 
 Prefer the **`ANOLIS_API_TOKEN`** environment variable over putting the secret
-in the YAML file. Generate a token with e.g. `openssl rand -hex 32`.
+in the YAML file. Generate a token with e.g. `openssl rand -hex 32`. A literal
+`auth_token` in the YAML is for a single host in development: the runtime
+reads `ANOLIS_API_TOKEN` only when the config sets no token, so the config's
+token wins. A key with no value, `~` or `null` is a token too: the runtime reads
+it as the string `null`; only `auth_token: ""` leaves the token to
+`ANOLIS_API_TOKEN`. `install.sh` therefore refuses to build a bundle from a project
+whose configs set one, and an install whose `runtime.yaml` carries one warns
+that the per-device token in `/etc/anolis/runtime.env` is not in use (#529).
 
 Clients send it as a Bearer header:
 
