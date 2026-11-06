@@ -85,6 +85,29 @@ _http_cfg() {
     printf '%s' "${TMP}/runtime.yaml"
 }
 
+# An awk that fails has read nothing: refuse, with a message, whether or not
+# the caller runs under errexit. Each mode runs in a new bash, because `run`
+# calls a function where errexit does not apply.
+_preflight_errexit() {
+    # shellcheck disable=SC2016  # expanded by the inner bash
+    bash -c 'source "$1"; if [[ "$2" == on ]]; then set -e; else set +e; fi; preflight_runtime_config "$3"' \
+        _ "${INSTALL_SH}" "$1" "$2"
+}
+
+@test "530: an awk that fails refuses the config, with or without errexit" {
+    local cfg mode
+    cfg=$(_http_cfg $'http:\n  bind: 0.0.0.0\n')
+    mkdir -p "${TMP}/badawk"
+    printf '#!/bin/sh\nexit 2\n' > "${TMP}/badawk/awk"
+    chmod +x "${TMP}/badawk/awk"
+    for mode in on off; do
+        PATH="${TMP}/badawk:${PATH}" run _preflight_errexit "${mode}" "${cfg}"
+        [ "$status" -ne 0 ] || { echo "accepted, errexit ${mode}"; return 1; }
+        [[ "${output}" == *"cannot verify the http settings in ${cfg}: the installer's reader failed (awk)"* ]] \
+            || { echo "errexit ${mode}: ${output}"; return 1; }
+    done
+}
+
 # http must be written in block style: a flow mapping or sequence is refused,
 # whatever it holds, so the reader never has to follow flow syntax.
 @test "530: a flow-style http cannot be verified: write http: in block style" {

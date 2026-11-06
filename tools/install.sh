@@ -793,8 +793,11 @@ preflight_runtime_config() {
     local cfg="$1"
     local bind="127.0.0.1" key value reason
     # The reader is not a YAML parser: where it cannot read the http block as
-    # the runtime does, refuse rather than guess (#530).
-    reason=$(_http_config_check "${cfg}" "enabled bind port auth_enabled allow_insecure_bind")
+    # the runtime does, refuse rather than guess (#530). An awk that fails has
+    # read nothing, so that is refused too.
+    if ! reason=$(_http_config_check "${cfg}" "enabled bind port auth_enabled allow_insecure_bind"); then
+        die "config (runtime): cannot verify the http settings in ${cfg}: the installer's reader failed (awk); check it with: anolis-runtime --check-config ${cfg}"
+    fi
     if [[ -n "${reason}" ]]; then
         die "config (runtime): cannot verify the http settings in ${cfg}: ${reason} is not supported by the installer's reader; simplify it, or check it with: anolis-runtime --check-config ${cfg}"
     fi

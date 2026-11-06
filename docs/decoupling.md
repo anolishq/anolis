@@ -111,7 +111,8 @@ reader` rather than guess. The subset:
   line or after a value.
 
 Quoted key names, `?` keys, merge keys and an indented first line are outside
-it. Simplify the config, or check it with `anolis-runtime --check-config <file>`.
+it. Simplify the config, or check it with
+`anolis-runtime --check-config <file>`.
 
 The API token is generated **per device at install time**, never baked into a
 bundle — a bundle is a redistributable artifact that may be installed on many
