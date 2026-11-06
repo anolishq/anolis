@@ -99,6 +99,17 @@ Notes:
 1. `GET /v0/devices`
 2. `GET /v0/devices/{provider_id}/{device_id}/capabilities`
 
+Notes:
+
+1. A function's `args` is an object keyed by argument name, so it does not
+   hold the order the provider declared the arguments in: key order on the
+   wire is alphabetical. Each arg carries `position`, its 0-based index in the
+   declared order; sort by it to list or prompt for arguments in that order.
+   A call still names each argument, so order never changes what a call sends.
+   If a provider declares two arguments with one name, `args` holds the last
+   of them, which is the one a call is validated against, and the earlier
+   one's index is missing from the positions.
+
 ### State reads
 
 1. `GET /v0/state`

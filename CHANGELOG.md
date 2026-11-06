@@ -39,6 +39,25 @@ commit messages only.
   written into the configs. An install whose `runtime.yaml` already carries a
   token warns, and the summary names it as the token in use.
 
+### Added
+
+- **Function arguments carry their declared position** (#731). In
+  `GET /v0/devices/{provider_id}/{device_id}/capabilities`, a function's
+  `args` is an object keyed by name, and its keys arrive in alphabetical
+  order, not the order the provider declared. A consumer that listed them as
+  they came, as Operate did for anolis-provider-bread's `set_pid_x10`
+  (declared `kp1, ki1, kd1, kp2, ki2, kd2`, shown `kd1, kd2, ki1, ...`), put
+  gains in the wrong fields. Each arg now carries `position`, its 0-based
+  index in the declared order, and `ArgSpec` in
+  `schemas/http/runtime-http.openapi.v0.yaml` declares it. The runtime always
+  sends it; it is not in the schema's `required`, so recorded responses
+  without it still validate against the new schema. Not additive for a
+  strict validator: `ArgSpec` has `additionalProperties: false`, so a client
+  that validates responses against an earlier copy of the schema rejects them
+  until it takes this one, so the release that carries this is MINOR
+  (`docs/dependencies.md`). Function results are not
+  encoded as ArgSpecs and are unchanged.
+
 ### Fixed
 
 - **A failed host preflight no longer leaves an upgrade half-installed**

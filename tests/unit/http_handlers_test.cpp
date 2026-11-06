@@ -476,6 +476,83 @@ TEST(SignalSpecEncoding, OmitsEmptyUnitAndDescription) {
     EXPECT_EQ("Count", json["label"]);
 }
 
+namespace {
+
+// A function declaring its arguments in an order that is not alphabetical,
+// the shape of anolis-provider-bread's set_pid_x10 (#731).
+registry::FunctionSpec make_pid_spec() {
+    registry::FunctionSpec spec;
+    spec.function_id = 7;
+    spec.function_name = "set_pid_x10";
+    for (const char* name : {"kp1", "ki1", "kd1", "kp2", "ki2", "kd2"}) {
+        anolis::deviceprovider::v1::ArgSpec arg;
+        arg.set_name(name);
+        arg.set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
+        arg.set_required(true);
+        spec.args.push_back(arg);
+    }
+    return spec;
+}
+
+}  // namespace
+
+// Each arg carries its 0-based index in the provider's declared order, so a
+// consumer can restore the order the object form cannot hold (#731).
+TEST(FunctionSpecEncoding, ArgsCarryDeclaredPosition) {
+    const auto json = encode_function_spec(make_pid_spec());
+    const auto& args = json["args"];
+
+    const std::vector<std::string> declared = {"kp1", "ki1", "kd1", "kp2", "ki2", "kd2"};
+    ASSERT_EQ(declared.size(), args.size());
+    for (size_t i = 0; i < declared.size(); ++i) {
+        SCOPED_TRACE(declared[i]);
+        ASSERT_TRUE(args.contains(declared[i]));
+        ASSERT_TRUE(args[declared[i]].contains("position"));
+        EXPECT_TRUE(args[declared[i]]["position"].is_number_unsigned());
+        EXPECT_EQ(i, args[declared[i]]["position"].get<size_t>());
+    }
+}
+
+// Why `position` is needed at all: the args object iterates, and serialises,
+// in key order rather than declared order.
+TEST(FunctionSpecEncoding, ArgsObjectDoesNotKeepDeclaredOrder) {
+    const auto json = encode_function_spec(make_pid_spec());
+
+    std::vector<std::string> iterated;
+    for (const auto& [name, arg] : json["args"].items()) {
+        (void)arg;
+        iterated.push_back(name);
+    }
+    EXPECT_EQ((std::vector<std::string>{"kd1", "kd2", "ki1", "ki2", "kp1", "kp2"}), iterated);
+
+    const auto wire = json["args"].dump();
+    EXPECT_LT(wire.find("\"kd1\""), wire.find("\"kp1\""));
+}
+
+// The protocol does not forbid two args with one name. The object keeps the
+// last one, which is the one CallRouter validates a call against, and its
+// position is that arg's own index.
+TEST(FunctionSpecEncoding, DuplicateArgNameKeepsTheLastDeclaredArgAndItsPosition) {
+    registry::FunctionSpec spec;
+    spec.function_name = "f";
+    for (auto type : {anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, anolis::deviceprovider::v1::VALUE_TYPE_BOOL,
+                      anolis::deviceprovider::v1::VALUE_TYPE_INT64}) {
+        anolis::deviceprovider::v1::ArgSpec arg;
+        arg.set_name(type == anolis::deviceprovider::v1::VALUE_TYPE_BOOL ? "other" : "x");
+        arg.set_type(type);
+        spec.args.push_back(arg);
+    }
+
+    const auto json = encode_function_spec(spec);
+    const auto& args = json["args"];
+    ASSERT_EQ(2u, args.size());
+    EXPECT_EQ("int64", args["x"]["type"]);
+    ASSERT_TRUE(args["x"].contains("position"));
+    ASSERT_TRUE(args["other"].contains("position"));
+    EXPECT_EQ(2u, args["x"]["position"].get<size_t>());
+    EXPECT_EQ(1u, args["other"]["position"].get<size_t>());
+}
+
 TEST_F(HttpHandlersTest, GetDeviceCapabilitiesCarriesSignalUnitAndDescription) {
     EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
         Device dev;
@@ -1712,6 +1789,26 @@ TEST_F(HttpHandlersTest, GetDeviceCapabilitiesCarriesAllowedValues) {
     ASSERT_TRUE(args["mode"].contains("allowed_values"));
     EXPECT_EQ(nlohmann::json::array({"open_loop", "closed_speed"}), args["mode"]["allowed_values"]);
     EXPECT_FALSE(args["label"].contains("allowed_values"));
+}
+
+// On the wire, through the real handler: the body lists `label` before `mode`
+// (key order), and `position` gives back the declared order mode, label (#731).
+TEST_F(HttpHandlersTest, GetDeviceCapabilitiesArgsCarryDeclaredPosition) {
+    RegisterMockDeviceWithAllowedValues(*mock_provider, *registry);
+
+    auto res = client->Get("/v0/devices/test_provider/test_device/capabilities");
+
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    const auto args_at = res->body.find("\"args\"");
+    ASSERT_NE(std::string::npos, args_at);
+    EXPECT_LT(res->body.find("\"label\"", args_at), res->body.find("\"mode\"", args_at));
+    const auto json = nlohmann::json::parse(res->body);
+    const auto& args = json["capabilities"]["functions"][0]["args"];
+    ASSERT_TRUE(args["mode"].contains("position"));
+    ASSERT_TRUE(args["label"].contains("position"));
+    EXPECT_EQ(0, args["mode"]["position"]);
+    EXPECT_EQ(1, args["label"]["position"]);
 }
 
 TEST_F(HttpHandlersTest, PostCallRefusesValueOutsideAllowedValues) {
