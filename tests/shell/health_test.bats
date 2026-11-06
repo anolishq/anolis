@@ -153,6 +153,25 @@ UNPLANNABLE='{"version":"0.2.0","startup_safe_state":{"on_startup":"safe_state",
     grep -q '^    if _install_failed; then$' "${INSTALL_SH}"  # main() decides the exit with it
 }
 
+# #640: the stop plans each output on its own. A plan that mixes setpoints and
+# zeroes is reported by name, and an output it cannot drive is a cause
+# "config" action, which fails the install as #634 promised.
+@test "640: a mixed plan that was achieved: one ok line naming it" {
+    status_body '{"version":"0.11.0","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"mixed","safe_state_achieved":true,"failed_actions":[],"skipped_actions":[]}}'
+    run_both_parsers
+    [ "${status}" -eq 0 ]
+    [ "${output}" == "✓ health: startup safe state achieved (mixed)" ]
+}
+
+@test "640: an output no setpoint or zero can drive fails the install, naming it and why" {
+    health_with '{"version":"0.11.0","startup_safe_state":{"on_startup":"safe_state","ran":true,"software_safe_state":"setpoints","safe_state_achieved":false,"failed_actions":[{"device_handle":"sim0/motorctl0","function":"set_motor_duty","success":false,"error":"setpoint: Argument '\''duty'\'': Value -5 below minimum 0","cause":"config"}],"skipped_actions":[]}}'
+    run_both_parsers
+    [[ "${output}" == *"safety.safe_state cannot run on this machine's devices: sim0/motorctl0 set_motor_duty: setpoint: Argument 'duty': Value -5 below minimum 0"* ]]
+    phase_health >/dev/null
+    [ "${SAFE_STATE_UNPLANNABLE}" -eq 1 ]
+    _install_failed
+}
+
 # The summary of an install that is going to exit 1 must not say it is
 # complete, and the failure stays the last thing it shows (#616).
 summary_text() { sed 's/\x1b\[[0-9;]*m//g' <<< "$1" | sed '/^[[:space:]]*$/d'; }

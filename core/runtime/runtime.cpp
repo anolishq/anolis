@@ -333,13 +333,13 @@ void Runtime::preflight_declared_calls() const {
     // dispatch until the device comes up: a warning, not an error (#461).
     const control::AbsentDevices absent = devices_reported_missing();
 
-    // Which rung `POST /v0/estop` would actually run. The ladder runs exactly one
-    // (safe_state.cpp), so a broken call in an unselected rung is worth a warning
-    // but is not the emergency an ERROR implies.
-    const std::string active_rung =
-        safe_state_controller_ != nullptr
-            ? control::safe_state_kind_to_string(safe_state_controller_->capability().software_safe_state)
-            : "none";
+    // What `POST /v0/estop` would do. Declared hooks are the whole plan, so a
+    // broken setpoint beside them is worth a warning but is not the emergency
+    // an ERROR implies. Without hooks every setpoint is part of the plan: one
+    // that does not dispatch leaves its output to its zero, or undriven (#640).
+    const control::SafeStatePlan plan = control::plan_safe_state(*registry_, *call_router_, config_.safety);
+    const std::string active_rung = control::safe_state_kind_to_string(plan.kind);
+    const bool hooks_plan = plan.kind == control::SafeStateKind::Hooks;
 
     const auto check = [&](const std::string &where, bool active, const ModeTransitionCallConfig &call) {
         control::CallRequest request;
@@ -373,15 +373,15 @@ void Runtime::preflight_declared_calls() const {
                                    << err);
         } else {
             LOG_WARN("[Runtime] " << where << " cannot be dispatched: " << call.device_handle << "/" << target << " - "
-                                  << err << " (not the active e-stop rung; declared but unused)");
+                                  << err << " (unused: safety.safe_state.hooks are the e-stop's whole plan)");
         }
     };
 
     for (const auto &call : config_.safety.safe_state.hooks) {
-        check("safety.safe_state.hooks", active_rung == "hooks", call);
+        check("safety.safe_state.hooks", hooks_plan, call);
     }
     for (const auto &call : config_.safety.safe_state.setpoints) {
-        check("safety.safe_state.setpoints", active_rung == "setpoints", call);
+        check("safety.safe_state.setpoints", !hooks_plan, call);
     }
 
     // Mode-transition hooks only ever fire on an automation machine.
@@ -411,10 +411,22 @@ void Runtime::preflight_declared_calls() const {
 
     // Stated unconditionally: "no software safe state" and "preflight did not run"
     // are otherwise indistinguishable, and the first is the one worth knowing.
-    // The `zero` rung is derived from the live registry rather than declared, so
-    // it has no calls to dry-run here.
-    LOG_INFO("[Runtime] preflight: e-stop ladder would run rung '" << active_rung << "'");
-    if (active_rung == "none") {
+    // Zero calls are derived from the live registry rather than declared; the
+    // plan has already dry-run them, and any output it cannot drive is named.
+    LOG_INFO("[Runtime] preflight: e-stop plan '" << active_rung << "'");
+    if (!hooks_plan && plan.kind != control::SafeStateKind::None && !plan.uncovered.empty()) {
+        std::string names;
+        for (const auto &function : plan.uncovered) {
+            names += (names.empty() ? "" : ", ") + function;
+        }
+        LOG_ERROR("[Runtime] preflight: safety.safe_state leaves " << plan.uncovered.size() << " of "
+                                                                   << plan.actuating_functions
+                                                                   << " actuating function(s) undriven; POST /v0/estop "
+                                                                      "and safety.on_startup report them as not "
+                                                                      "driven: "
+                                                                   << names);
+    }
+    if (plan.kind == control::SafeStateKind::None) {
         // The sharp case (#251): the machine DOES declare a fault safe-state --
         // it had to, or the refuse-hookless gate would not have permitted AUTO --
         // but declared it in the section the e-stop does not read. With no rung
@@ -438,7 +450,7 @@ void Runtime::preflight_declared_calls() const {
     if (failed > 0) {
         LOG_ERROR("[Runtime] " << failed << " of " << checked
                                << " declared call(s) could not be dispatched against the device inventory as it "
-                                  "stands now. They will fail at the moment they are needed.");
+                                  "stands now. None of them will run as declared.");
     } else if (absent_calls > 0) {
         LOG_WARN("[Runtime] preflight: " << absent_calls << " of " << checked
                                          << " declared call(s) target devices absent at startup; the rest are "

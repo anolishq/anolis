@@ -122,12 +122,13 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     // already scrolled past. Text only: the verdict does not depend on
     // safety.safe_state, because the ladder fires on operator request, never
     // autonomously.
-    if (control::planned_safe_state_kind(registry, call_router, safety) == control::SafeStateKind::None) {
+    if (control::plan_safe_state(registry, call_router, safety).drives_no_output()) {
         msg << ". Note: that hook satisfies this gate but is NOT the e-stop's safe state — POST /v0/estop runs "
-               "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would run "
-               "only the -> FAULT hooks that match the mode it is pressed in (in IDLE, only after_transition "
+               "safety.safe_state, and on this inventory it would drive no actuating output, so the e-stop would "
+               "run only the -> FAULT hooks that match the mode it is pressed in (in IDLE, only after_transition "
                "hooks: the IDLE gate refuses before_transition calls) and report safe_state_achieved=false. "
-               "Declare safety.safe_state (setpoints count only if they cover every actuating output)";
+               "Declare safety.safe_state that drives these outputs (a setpoint, or zero_is_safe, counts for an "
+               "output only if its call passes validation)";
     }
 
     result.message = msg.str();

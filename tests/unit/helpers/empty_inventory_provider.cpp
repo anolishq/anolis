@@ -7,7 +7,8 @@
 // dcmt2 OK without listing it: neither is a device its provider says is missing.
 // With `--allowed-values` it also lists dcmt3, reported OK, whose CONFIG set_mode takes
 // a `mode` limited to open_loop or closed_speed (anolis#467), and answers every
-// call OK.
+// call OK. With `--heater` it lists heater0, reported OK, whose ACTUATE set_pwm
+// takes an int64 `pwm` in 0..100, and answers every call OK (#640).
 // With `--stop-chain <dir>` it lists gpio0, whose bool signal chain_open reads
 // <dir>/chain ("1" true, "0" false, "stale" with stale quality; missing reads
 // as a FAULT-quality false), and motor0, an ACTUATE set_pwm. It answers every
@@ -168,6 +169,7 @@ int main(int argc, char **argv) {
     std::string slow_ready_when;
     bool mixed = false;
     bool allowed_values = false;
+    bool heater = false;
     std::string stop_chain_dir;
     bool stop_chain_actuating = false;
     bool stop_chain_no_hint = false;
@@ -184,6 +186,8 @@ int main(int argc, char **argv) {
             mixed = true;
         } else if (std::string(argv[i]) == "--allowed-values") {
             allowed_values = true;
+        } else if (std::string(argv[i]) == "--heater") {
+            heater = true;
         } else if (std::string(argv[i]) == "--stop-chain" && i + 1 < argc) {
             stop_chain_dir = argv[i + 1];
         } else if (std::string(argv[i]) == "--stop-chain-actuating") {
@@ -260,6 +264,9 @@ int main(int argc, char **argv) {
             if (allowed_values) {
                 list->add_devices()->set_device_id("dcmt3");
             }
+            if (heater) {
+                list->add_devices()->set_device_id("heater0");
+            }
             if (!stop_chain_dir.empty()) {
                 list->add_devices()->set_device_id("gpio0");
                 list->add_devices()->set_device_id("motor0");
@@ -284,6 +291,19 @@ int main(int argc, char **argv) {
             mode->set_required(true);
             mode->add_allowed_values("open_loop");
             mode->add_allowed_values("closed_speed");
+        } else if (heater && request.has_describe_device() && request.describe_device().device_id() == "heater0") {
+            auto *describe = response.mutable_describe_device();
+            describe->mutable_device()->set_device_id("heater0");
+            auto *fn = describe->mutable_capabilities()->add_functions();
+            fn->set_name("set_pwm");
+            fn->set_function_id(1);
+            fn->mutable_policy()->set_category(adpp::FunctionPolicy_Category_CATEGORY_ACTUATE);
+            auto *pwm = fn->add_args();
+            pwm->set_name("pwm");
+            pwm->set_type(adpp::VALUE_TYPE_INT64);
+            pwm->set_required(true);
+            pwm->set_min_int64(0);
+            pwm->set_max_int64(100);
         } else if (!stop_chain_dir.empty() && request.has_describe_device() &&
                    (request.describe_device().device_id() == "gpio0" ||
                     request.describe_device().device_id() == "motor0")) {
@@ -337,7 +357,7 @@ int main(int argc, char **argv) {
             std::ofstream(std::filesystem::path(stop_chain_dir) / "calls", std::ios::app)
                 << request.call().device_id() << "/" << request.call().function_id() << "\n";
             response.mutable_call();
-        } else if (allowed_values && request.has_call()) {
+        } else if ((allowed_values || heater) && request.has_call()) {
             response.mutable_call();
         } else if (request.has_get_health()) {
             auto *health = response.mutable_get_health();
@@ -367,6 +387,11 @@ int main(int argc, char **argv) {
                 auto *enum_device = health->add_devices();
                 enum_device->set_device_id("dcmt3");
                 enum_device->set_state(adpp::DeviceHealth::STATE_OK);
+            }
+            if (heater) {
+                auto *heater_device = health->add_devices();
+                heater_device->set_device_id("heater0");
+                heater_device->set_state(adpp::DeviceHealth::STATE_OK);
             }
         } else {
             response.mutable_status()->set_code(adpp::Status_Code_CODE_NOT_FOUND);

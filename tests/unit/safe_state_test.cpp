@@ -210,16 +210,30 @@ TEST_F(SafeStateTest, SetpointsApplyOnlyWithFullCoverage) {
     EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
 }
 
-TEST_F(SafeStateTest, PartialSetpointCoverageFailsClosedToNone) {
+// The plan is per output (#640): an actuating function no setpoint drives,
+// with no zero to fall back on, is reported as not driven, a config failure,
+// without a call. The declared setpoint still goes out; here it names a
+// function the device does not have, so it fails before the provider too.
+TEST_F(SafeStateTest, AnOutputNoSetpointDrivesIsReportedNotDriven) {
     RegisterActuator();
-    // Setpoint targets a different function, so the actuator is uncovered.
     safety.safe_state.setpoints.push_back(make_call("sim0/heater", "some_other_fn"));
     auto controller = make_controller();
 
-    // StrictMock: no call() expected — must not actuate under partial coverage.
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Setpoints);
+    EXPECT_EQ(cap.uncovered_functions, std::vector<std::string>{"sim0/heater/set_output"});
+
+    // StrictMock: no call() expected.
     const auto result = controller->trigger("test");
-    EXPECT_EQ(result.kind, control::SafeStateKind::None);
-    EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    ASSERT_EQ(result.actions.size(), 2u);
+    EXPECT_EQ(result.actions[0].function, "some_other_fn");
+    EXPECT_FALSE(result.actions[0].success);
+    EXPECT_EQ(result.actions[1].function, "set_output");
+    EXPECT_FALSE(result.actions[1].success);
+    EXPECT_EQ(result.actions[1].cause, control::FailureCause::Config);
+    EXPECT_THAT(result.actions[1].error, HasSubstr("no setpoint drives it and zero_is_safe is not set"));
+    EXPECT_FALSE(result.safe_state_achieved);
 }
 
 // A setpoint that names every actuating function but cannot dispatch covers
@@ -251,28 +265,33 @@ TEST_F(SafeStateTest, UndispatchableSetpointsDoNotShadowZero) {
     EXPECT_TRUE(result.safe_state_achieved);
 }
 
-// The same setpoint without a zero rung to fall back to: nothing can drive the
-// actuator, so the plan is None (fail closed), and the ladder issues no call.
-TEST_F(SafeStateTest, UndispatchableSetpointsWithoutZeroPlanNone) {
+// The same setpoint with no zero to fall back on: the output is reported not
+// driven, a config failure naming why, with no call. The plan is not `none`:
+// a safe state is declared, it cannot drive this output.
+TEST_F(SafeStateTest, AnUndispatchableSetpointWithoutZeroIsReportedNotDriven) {
     RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
     auto setpoint = make_call("sim0/heater", "set_output");
     setpoint.args["pwm"] = automation::ParameterValue{-5.0};
     safety.safe_state.setpoints.push_back(setpoint);
     auto controller = make_controller();
 
-    EXPECT_EQ(controller->capability().software_safe_state, control::SafeStateKind::None);
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Setpoints);
+    EXPECT_EQ(cap.uncovered_functions, std::vector<std::string>{"sim0/heater/set_output"});
 
     // StrictMock: no call() expected.
     const auto result = controller->trigger("test");
-    EXPECT_EQ(result.kind, control::SafeStateKind::None);
-    EXPECT_TRUE(result.actions.empty());
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_FALSE(result.actions[0].success);
+    EXPECT_EQ(result.actions[0].cause, control::FailureCause::Config);
+    EXPECT_THAT(result.actions[0].error, HasSubstr("Value -5 below minimum 0"));
     EXPECT_FALSE(result.safe_state_achieved);
 }
 
-// The capability surface must not contradict itself: a planned setpoints rung
-// is one that covers every actuating output, so it never reports an uncovered
-// function. Checked for each way a setpoint can fail to dispatch.
-TEST_F(SafeStateTest, PlannedSetpointsRungNeverReportsUncoveredFunctions) {
+// Whatever makes the setpoint undispatchable, the capability and the e-stop
+// say the same thing: the output is not driven, and why.
+TEST_F(SafeStateTest, AnUndispatchableSetpointIsReportedTheSameWayForEveryReason) {
     RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
     auto below_min = make_call("sim0/heater", "set_output");
     below_min.args["pwm"] = automation::ParameterValue{-5.0};
@@ -281,18 +300,59 @@ TEST_F(SafeStateTest, PlannedSetpointsRungNeverReportsUncoveredFunctions) {
     auto missing = make_call("sim0/heater", "set_output");
     missing.args.clear();
 
-    for (const auto& [label, setpoint] :
-         {std::pair<const char*, runtime::ModeTransitionCallConfig>{"below_min", below_min},
-          {"wrong_type", wrong_type},
-          {"missing", missing}}) {
-        SCOPED_TRACE(label);
+    for (const auto& [setpoint, why] :
+         {std::pair<runtime::ModeTransitionCallConfig, std::string>{below_min, "below minimum"},
+          {wrong_type, "Type mismatch"},
+          {missing, "Missing required argument: pwm"}}) {
+        SCOPED_TRACE(why);
         safety.safe_state.setpoints = {setpoint};
         auto controller = make_controller();
         const auto cap = controller->capability();
-        EXPECT_NE(cap.software_safe_state, control::SafeStateKind::Setpoints)
-            << "planned setpoints with " << cap.uncovered_actuating_functions << " uncovered";
-        EXPECT_EQ(cap.uncovered_actuating_functions, 1u);
+        EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Setpoints);
+        EXPECT_EQ(cap.uncovered_functions, std::vector<std::string>{"sim0/heater/set_output"});
+        const auto result = controller->trigger("test");
+        ASSERT_EQ(result.actions.size(), 1u);
+        EXPECT_EQ(result.actions[0].cause, control::FailureCause::Config);
+        EXPECT_THAT(result.actions[0].error, HasSubstr(why));
+        controller->clear();
     }
+}
+
+// An output with a bad and a good setpoint is driven by the good one, and the
+// bad one is not sent: it would be refused before the provider anyway.
+TEST_F(SafeStateTest, AGoodSetpointDrivesAnOutputThatAlsoHasABadOne) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto bad = make_call("sim0/heater", "set_output");
+    bad.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints = {bad, make_call("sim0/heater", "set_output")};
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_TRUE(result.safe_state_achieved);
+    EXPECT_TRUE(controller->capability().uncovered_functions.empty());
+}
+
+// #634: an install fails when safety.on_startup cannot run the safe state the
+// config declares. The startup run must report the undriven output as a config
+// failure, not "no safe state declared".
+TEST_F(SafeStateTest, StartupRunReportsAnUndispatchableSetpointAsAConfigFailure) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto setpoint = make_call("sim0/heater", "set_output");
+    setpoint.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints.push_back(setpoint);
+    auto controller = make_controller();
+
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    EXPECT_TRUE(report.ran);
+    EXPECT_EQ(report.kind, control::SafeStateKind::Setpoints);
+    EXPECT_FALSE(report.safe_state_achieved);
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].device_handle, "sim0/heater");
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Config);
 }
 
 TEST_F(SafeStateTest, ZeroRungZeroesActuatorsWhenDeclaredSafe) {
@@ -789,6 +849,25 @@ TEST_F(EstopFaultHookTest, RungSetpointsStillRefusesTheFaultEntryHooks) {
     TriggerUnderRungAndExpectHookRefused(control::SafeStateKind::Setpoints);
 }
 
+// A declared plan that drives no actuating output leaves those actuators as
+// they were, as rung none does, so the e-stop's FAULT entry runs the hooks
+// (#251). Here the only setpoint cannot dispatch and there is no zero.
+TEST_F(EstopFaultHookTest, APlanThatDrivesNoOutputRunsTheFaultEntryHooks) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto setpoint = make_call("sim0/heater", "set_output");
+    setpoint.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints.push_back(setpoint);
+    auto controller = make_controller();
+    Wire(*controller);
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
+
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    EXPECT_FALSE(result.safe_state_achieved);
+    ASSERT_EQ(hook_results.size(), 1u);
+    EXPECT_TRUE(hook_results[0].success) << hook_results[0].error_message;
+}
+
 TEST_F(EstopFaultHookTest, RungZeroStillRefusesTheFaultEntryHooks) {
     RegisterActuator();
     safety.safe_state.zero_is_safe = true;
@@ -916,6 +995,196 @@ TEST_F(EstopFaultHookTest, PressedInIdleAfterHookRuns) {
 }
 
 // The shared builder tags only calls into FAULT.
+// The per-output plan on an inventory shaped like provider-sim's (#640): two
+// relays whose only argument is a bool, a motor whose index starts at 1, and a
+// temperature setpoint whose zero is in range. Every function is ACTUATE.
+class SafeStateInventoryTest : public SafeStateTest {
+protected:
+    void SetUp() override {
+        SafeStateTest::SetUp();
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            for (const char* id : {"relay0", "motor0", "temp0"}) {
+                Device dev;
+                dev.set_device_id(id);
+                devices.push_back(dev);
+            }
+            return true;
+        }));
+        EXPECT_CALL(*mock_provider, describe_device(_, _))
+            .WillRepeatedly(Invoke([](const std::string& id, DescribeDeviceResponse& response) {
+                using anolis::deviceprovider::v1::VALUE_TYPE_BOOL;
+                using anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE;
+                using anolis::deviceprovider::v1::VALUE_TYPE_INT64;
+                response.mutable_device()->set_device_id(id);
+                auto* caps = response.mutable_capabilities();
+                uint32_t next_id = 1;
+                const auto add_function = [&](const char* name) {
+                    auto* fn = caps->add_functions();
+                    fn->set_name(name);
+                    fn->set_function_id(next_id++);
+                    fn->mutable_policy()->set_category(
+                        anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+                    return fn;
+                };
+                const auto add_arg = [](anolis::deviceprovider::v1::FunctionSpec* fn, const char* name,
+                                        anolis::deviceprovider::v1::ValueType type) {
+                    auto* arg = fn->add_args();
+                    arg->set_name(name);
+                    arg->set_type(type);
+                    arg->set_required(true);
+                    return arg;
+                };
+                if (id == "relay0") {
+                    add_arg(add_function("set_relay_ch1"), "enabled", VALUE_TYPE_BOOL);
+                    add_arg(add_function("set_relay_ch2"), "enabled", VALUE_TYPE_BOOL);
+                } else if (id == "motor0") {
+                    auto* fn = add_function("set_motor_duty");
+                    auto* index = add_arg(fn, "motor_index", VALUE_TYPE_INT64);
+                    index->set_min_int64(1);
+                    index->set_max_int64(2);
+                    auto* duty = add_arg(fn, "duty", VALUE_TYPE_DOUBLE);
+                    duty->set_min_double(0.0);
+                    duty->set_max_double(1.0);
+                } else {
+                    auto* value = add_arg(add_function("set_setpoint"), "value", VALUE_TYPE_DOUBLE);
+                    value->set_min_double(-50.0);
+                    value->set_max_double(400.0);
+                }
+                return true;
+            }));
+        registry->discover_provider("sim0", *mock_provider);
+    }
+
+    static runtime::ModeTransitionCallConfig relay(const char* function) {
+        runtime::ModeTransitionCallConfig call;
+        call.device_handle = "sim0/relay0";
+        call.function_name = function;
+        call.args["enabled"] = automation::ParameterValue{false};
+        return call;
+    }
+
+    static runtime::ModeTransitionCallConfig motor(double duty) {
+        runtime::ModeTransitionCallConfig call;
+        call.device_handle = "sim0/motor0";
+        call.function_name = "set_motor_duty";
+        call.args["motor_index"] = automation::ParameterValue{int64_t{1}};
+        call.args["duty"] = automation::ParameterValue{duty};
+        return call;
+    }
+
+    static runtime::ModeTransitionCallConfig temp(double value) {
+        runtime::ModeTransitionCallConfig call;
+        call.device_handle = "sim0/temp0";
+        call.function_name = "set_setpoint";
+        call.args["value"] = automation::ParameterValue{value};
+        return call;
+    }
+
+    // "<device>/<function>" of each action, and whether it succeeded.
+    static std::vector<std::string> outcomes(const control::EstopResult& result) {
+        std::vector<std::string> out;
+        for (const auto& action : result.actions) {
+            out.push_back(action.device_handle + "/" + action.function + (action.success ? " ok" : " FAIL"));
+        }
+        return out;
+    }
+};
+
+// Setpoints for both relays, a stale motor setpoint (duty below 0), none for
+// the temperature, and zero_is_safe. The relays get their setpoints, the
+// temperature its zero, and the motor nothing: its setpoint does not dispatch
+// and neither does its zero (motor_index 0 is below 1).
+TEST_F(SafeStateInventoryTest, MixedPlanDrivesEachOutputItCan) {
+    safety.safe_state.setpoints = {relay("set_relay_ch1"), relay("set_relay_ch2"), motor(-5.0)};
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Mixed);
+    EXPECT_EQ(cap.uncovered_functions, std::vector<std::string>{"sim0/motor0/set_motor_duty"});
+
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch1", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch2", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider,
+                call("temp0", _, "set_setpoint",
+                     Truly([](const ValueMap& args) { return args.at("value").double_value() == 0.0; }), _))
+        .WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Mixed);
+    EXPECT_THAT(outcomes(result),
+                UnorderedElementsAre("sim0/relay0/set_relay_ch1 ok", "sim0/relay0/set_relay_ch2 ok",
+                                     "sim0/temp0/set_setpoint ok", "sim0/motor0/set_motor_duty FAIL"));
+    for (const auto& action : result.actions) {
+        if (!action.success) {
+            EXPECT_EQ(action.cause, control::FailureCause::Config);
+            EXPECT_THAT(action.error, HasSubstr("Argument 'duty': Value -5 below minimum 0"));
+            EXPECT_THAT(action.error, HasSubstr("Argument 'motor_index': Value 0 below minimum 1"));
+        }
+    }
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// The same setpoints without zero_is_safe: the relays are still driven. The
+// motor and the temperature are reported not driven, without a call.
+TEST_F(SafeStateInventoryTest, WithoutZeroTheSetpointsThatDispatchAreStillDriven) {
+    safety.safe_state.setpoints = {relay("set_relay_ch1"), relay("set_relay_ch2"), motor(-5.0)};
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Setpoints);
+    EXPECT_THAT(cap.uncovered_functions, UnorderedElementsAre("sim0/motor0/set_motor_duty", "sim0/temp0/set_setpoint"));
+
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch1", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch2", _, _)).WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    EXPECT_THAT(outcomes(result),
+                UnorderedElementsAre("sim0/relay0/set_relay_ch1 ok", "sim0/relay0/set_relay_ch2 ok",
+                                     "sim0/motor0/set_motor_duty FAIL", "sim0/temp0/set_setpoint FAIL"));
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// zero_is_safe alone: a bool argument has no zero, so the relays are reported
+// not driven; the motor's zero is out of range; only the temperature is
+// zeroed. A uniform plan keeps the kind `zero`.
+TEST_F(SafeStateInventoryTest, ZeroAloneReportsTheOutputsItCannotZero) {
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("temp0", _, "set_setpoint", _, _)).WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    EXPECT_THAT(outcomes(result),
+                UnorderedElementsAre("sim0/relay0/set_relay_ch1 FAIL", "sim0/relay0/set_relay_ch2 FAIL",
+                                     "sim0/motor0/set_motor_duty FAIL", "sim0/temp0/set_setpoint ok"));
+    for (const auto& action : result.actions) {
+        if (action.function.starts_with("set_relay")) {
+            EXPECT_THAT(action.error, HasSubstr("cannot zero required non-numeric argument 'enabled'"));
+        }
+    }
+}
+
+// Setpoints that all dispatch win over zero_is_safe for every output: a
+// uniform plan keeps the kind `setpoints`, and no zero is sent.
+TEST_F(SafeStateInventoryTest, DispatchableSetpointsDriveEveryOutputAndZeroIsUnused) {
+    safety.safe_state.setpoints = {relay("set_relay_ch1"), relay("set_relay_ch2"), motor(0.0), temp(20.0)};
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch1", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch2", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider, call("motor0", _, "set_motor_duty", _, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mock_provider,
+                call("temp0", _, "set_setpoint",
+                     Truly([](const ValueMap& args) { return args.at("value").double_value() == 20.0; }), _))
+        .WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+    EXPECT_EQ(result.actions.size(), 4u);
+    EXPECT_TRUE(result.safe_state_achieved);
+    EXPECT_TRUE(controller->capability().uncovered_functions.empty());
+}
+
 TEST(ModeHookRequestTest, TagsOnlyTransitionsIntoFault) {
     runtime::ModeTransitionCallConfig call;
     call.device_handle = "sim0/heater";

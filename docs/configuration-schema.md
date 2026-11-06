@@ -210,19 +210,30 @@ independently of `automation`, so a pure-manual machine can declare one.
 
 `safety.safe_state` fields (all optional):
 
-1. `hooks` (array of call objects) - run first when present.
-2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
-   only when they cover every actuating output (fail closed). A setpoint
-   covers a function only if it can dispatch: its device and function exist
-   and its arguments pass validation (type, range, required, allowed values)
-   against the inventory as it stands. A setpoint that names a function but
-   cannot dispatch covers nothing, so the ladder goes on to `zero_is_safe`, or
-   plans `none`.
-3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
-   outputs when neither hooks nor full-coverage setpoints apply. Only
-   numeric required arguments are zeroed. A function with a required boolean,
-   string or bytes argument is not called and is reported as not driven:
-   the runtime cannot know which boolean value is safe.
+1. `hooks` (array of call objects) - when present, the software stop runs
+   these and nothing else.
+2. `setpoints` (array of call objects) - per-actuator safe setpoints.
+3. `zero_is_safe` (boolean, default `false`) - permits driving an actuating
+   output to zero. Only numeric required arguments are zeroed. A function
+   with a required boolean, string or bytes argument has no zero: the runtime
+   cannot know which boolean value is safe.
+
+Without hooks, the stop plans each actuating (`ACTUATE`) function on its own:
+
+1. its setpoint, if one targets it and dispatches: the device and function
+   exist and the arguments pass validation (type, range, required, allowed
+   values) against the inventory as it stands;
+2. else its zero, if `zero_is_safe` is set and the zero call dispatches;
+3. else it is not driven. The stop reports it as a failed action with
+   `cause: config`, naming why, and sends nothing for it.
+
+A setpoint that names a function but cannot dispatch is not sent; another
+setpoint for the same function, or its zero, can still drive it. A setpoint
+that targets no actuating function (another category, or a device that is not
+present) is sent as declared. `software_safe_state` is `setpoints` or `zero`
+when every call comes from one source, `mixed` when some outputs get their
+setpoint and others their zero, and, when nothing dispatches, `setpoints` if
+any are declared, else `zero`. It is `none` only when nothing is declared.
 
 `safety.on_startup` (`safe_state` or `leave`, default `safe_state`) - what
 happens to outputs at startup. `safe_state` runs `safety.safe_state` once,

@@ -478,11 +478,11 @@ TEST_F(ActuationGateTest, SafeStateDoesNotChangeTheVerdict) {
 
 TEST_F(ActuationGateTest, SetpointsCoveringNothingStillGetTheNote) {
     // The hole a config-level "is safe_state non-empty?" check would leave.
-    // SafeStateController honours the setpoints rung only when it covers EVERY
-    // actuating output; partial coverage plans None and the ladder drives
-    // nothing (see safe_state_test PartialSetpointCoverageFailsClosedToNone).
-    // A gate that inspected the config itself would see a non-empty setpoints
-    // list, stay quiet, and hand back exactly the #251 machine.
+    // The e-stop drives an output only with a setpoint or zero that dispatches;
+    // a setpoint for another device drives nothing here (see safe_state_test
+    // AnOutputNoSetpointDrivesIsReportedNotDriven). A gate that inspected the
+    // config itself would see a non-empty setpoints list, stay quiet, and hand
+    // back exactly the #251 machine.
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     runtime::ModeTransitionCallConfig setpoint;
@@ -490,7 +490,7 @@ TEST_F(ActuationGateTest, SetpointsCoveringNothingStillGetTheNote) {
     setpoint.function_name = "set_output";
     safety.safe_state.setpoints.push_back(setpoint);
 
-    ASSERT_EQ(control::planned_safe_state_kind(*registry, *call_router, safety), control::SafeStateKind::None);
+    ASSERT_TRUE(control::plan_safe_state(*registry, *call_router, safety).drives_no_output());
 
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, *call_router, automation, safety);
     ASSERT_TRUE(gate.refused);
@@ -506,7 +506,9 @@ TEST_F(ActuationGateTest, SetpointsCoveringEverythingSuppressTheNote) {
     setpoint.function_name = "set_output";
     safety.safe_state.setpoints.push_back(setpoint);
 
-    ASSERT_EQ(control::planned_safe_state_kind(*registry, *call_router, safety), control::SafeStateKind::Setpoints);
+    const auto plan = control::plan_safe_state(*registry, *call_router, safety);
+    ASSERT_EQ(plan.kind, control::SafeStateKind::Setpoints);
+    ASSERT_FALSE(plan.drives_no_output());
 
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, *call_router, automation, safety);
     ASSERT_TRUE(gate.refused);
@@ -516,7 +518,7 @@ TEST_F(ActuationGateTest, SetpointsCoveringEverythingSuppressTheNote) {
 TEST_F(ActuationGateTest, SetpointsThatCannotDispatchStillGetTheNote) {
     // A setpoint that names the only actuating function but cannot dispatch
     // (set_output takes no arguments, so "pwm" is refused) drives nothing
-    // (#640). The ladder plans None, and the note must say so.
+    // (#640), and the note must say so, and say what counts.
     RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
     automation.enabled = true;
     runtime::ModeTransitionCallConfig setpoint;
@@ -525,11 +527,28 @@ TEST_F(ActuationGateTest, SetpointsThatCannotDispatchStillGetTheNote) {
     setpoint.args["pwm"] = automation::ParameterValue{0.0};
     safety.safe_state.setpoints.push_back(setpoint);
 
-    ASSERT_EQ(control::planned_safe_state_kind(*registry, *call_router, safety), control::SafeStateKind::None);
+    const auto plan = control::plan_safe_state(*registry, *call_router, safety);
+    ASSERT_EQ(plan.kind, control::SafeStateKind::Setpoints);
+    ASSERT_TRUE(plan.drives_no_output());
 
     const auto gate = runtime::evaluate_hookless_auto_gate(*registry, *call_router, automation, safety);
     ASSERT_TRUE(gate.refused);
     EXPECT_THAT(gate.message, HasSubstr("safety.safe_state"));
+    EXPECT_THAT(gate.message, HasSubstr("only if its call passes validation"));
+}
+
+TEST_F(ActuationGateTest, ZeroThatCannotDriveAnyOutputKeepsTheNote) {
+    // zero_is_safe drives set_output only if its zero dispatches; set_output
+    // takes no arguments, so there is nothing to zero and the note stays on.
+    RegisterFunction(anolis::deviceprovider::v1::FunctionPolicy_Category_CATEGORY_ACTUATE);
+    automation.enabled = true;
+    safety.safe_state.zero_is_safe = true;
+
+    const auto plan = control::plan_safe_state(*registry, *call_router, safety);
+    ASSERT_EQ(plan.kind, control::SafeStateKind::Zero);
+    ASSERT_TRUE(plan.drives_no_output());
+    EXPECT_THAT(runtime::evaluate_hookless_auto_gate(*registry, *call_router, automation, safety).message,
+                HasSubstr("safety.safe_state"));
 }
 
 // --- #246: startup warning for actuating outputs no FAULT hook drives -------

@@ -103,11 +103,11 @@ struct HooklessAutoGate {
  * drive nothing the message says so rather than leaving the operator to
  * discover it (#258).
  *
- * "Would drive nothing" is `control::planned_safe_state_kind`, not a local
- * inspection of the config: the setpoints rung counts only when it covers every
- * actuating output with calls that pass `call_router.validate_call`, so a
- * config with setpoints covering nothing, or naming every output but unable to
- * dispatch, declares a safe state that plans `None` (#640). Answering this
+ * "Would drive nothing" is `control::plan_safe_state(...).drives_no_output()`,
+ * not a local inspection of the config: an output counts as driven only by a
+ * setpoint or zero whose call passes `call_router.validate_call`, so a config
+ * with setpoints covering nothing, or naming every output but unable to
+ * dispatch, declares a safe state that drives nothing (#640). Answering this
  * question twice is how a machine gets reported as safe while its e-stop does
  * nothing.
  *

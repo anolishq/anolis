@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- **`software_safe_state` can be `mixed`** (#640), in `GET /v0/runtime/status`
+  (`estop`, `startup_safe_state`) and the `POST /v0/estop` response: some
+  outputs get their setpoint and others their zero. A client that validates
+  against an earlier `schemas/http/runtime-http.openapi.v0.yaml`, or switches
+  on the four earlier values, rejects it. A config that declares a safe state
+  no longer plans `none`, and an output it cannot drive is a `cause: config`
+  action, which fails an install (see Fixed). A new failure for an existing
+  client or install makes this release MINOR (`docs/dependencies.md`).
+
 ### Security
 
 - **`install.sh` no longer bakes a literal API token into a bundle** (#529).
@@ -41,26 +52,38 @@ commit messages only.
 
 ### Fixed
 
-- **Setpoints that cannot dispatch no longer shadow `zero_is_safe`** (#640).
-  The e-stop ladder chose the setpoints rung when setpoints named every
-  actuating function, without checking that they could be sent. A setpoint
-  with an argument out of range, of the wrong type or missing was refused at
-  `POST /v0/estop` before it reached its provider, so nothing was driven and
-  `safe_state_achieved` was `false`, even with `zero_is_safe: true` declared.
-  `GET /v0/runtime/status` contradicted itself meanwhile:
-  `software_safe_state: "setpoints"` with `uncovered_actuating_functions: 1`.
-  Rung selection now uses the rule the uncovered count already used (#253):
-  a setpoint covers a function only if it passes the same validation as the
-  call itself, and the setpoints rung applies only when that leaves nothing
-  uncovered. Such a config now plans `zero` when `zero_is_safe` is set, and
-  `none` otherwise. Under `none`, as for any machine with no plannable rung,
-  the e-stop's own entry into FAULT runs the matching `-> FAULT` mode
-  transition hooks rather than refusing them, and the refuse-hookless AUTO
-  gate's refusal adds its note that the e-stop would drive nothing; the
-  gate's verdict does not depend on `safety` and is unchanged. The
-  validation reads the device inventory, so a provider restart that
-  republishes narrower argument ranges can move the plan off the setpoints
-  rung.
+- **The software stop plans each output on its own** (#640). It chose one
+  rung for the whole machine: setpoints when they named every actuating
+  function, without checking that they could be sent, else the zero rung for
+  every output, else nothing. A setpoint refused before its provider (an
+  argument out of range, of the wrong type or missing) left its output
+  undriven even with `zero_is_safe: true`; status reported
+  `software_safe_state: "setpoints"` with an uncovered function; and
+  setpoints that named only some outputs dropped the whole plan to the zero
+  rung, or to `none`. Without declared hooks, each actuating function now
+  gets its setpoint if one passes validation, else its zero if
+  `zero_is_safe` is set and the zero passes validation, else it is reported
+  in `actions` as not driven, with `cause: config` and the reason, and
+  nothing is sent for it. A setpoint that fails validation is not sent. A
+  declared safe state therefore never plans `none`. Consequences:
+  - A setpoint that fails validation and an output no setpoint or zero
+    drives are now config failures in the startup run, so `install.sh`
+    fails the install on them (#634). An output that nothing at all was
+    declared for, beside setpoints for others, used to plan `none` and pass;
+    it now fails the install too.
+  - When the plan drives no actuating output, the e-stop's own entry into
+    FAULT runs the matching `-> FAULT` mode-transition hooks (#251), as it
+    did under `none`. That now also covers a zero rung that can zero none of
+    the outputs (for example only boolean arguments), where those hooks were
+    refused before. Hooks declared in `safety.safe_state` are unchanged.
+  - The startup preflight logs every setpoint that cannot be dispatched at
+    ERROR and counts it unless hooks are declared, names each actuating
+    function the plan leaves undriven at ERROR, and logs
+    `preflight: e-stop plan '<kind>'` (was `... would run rung '<kind>'`).
+  - The refuse-hookless AUTO gate's verdict is unchanged; its note that the
+    e-stop would drive nothing now fires whenever the plan drives no output.
+  Validation reads the device inventory, so a provider restart that
+  republishes narrower argument ranges can change the plan.
 - **A failed host preflight no longer leaves an upgrade half-installed**
   (#535). The preflight runs the binaries and configs the install has just put
   in the prefix, and a failure exited with them in place, so the next restart
