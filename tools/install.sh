@@ -700,7 +700,6 @@ _pin_runtime_data_dir() {
     local cfg="$1" how="$2"
     local current
     current=$(_yaml_block_value "${cfg}" runtime data_dir)
-    current=${current//[\"\']/}
     [[ "${current}" == /* ]] && return 0
     local want="${PREFIX}/anolis-data"
     [[ -n "${current}" ]] && want=$(_relative_data_dir "${cfg}" "${current}" "${how}")
@@ -796,16 +795,44 @@ warn_kept_provider_configs() {
 # across upgrades too.
 preflight_runtime_config() {
     local cfg="$1"
-    local bind
-    bind=$(_http_value "${cfg}" bind)
+    local bind="127.0.0.1" key value reason
+    # The reader is not a YAML parser: where it cannot read the http block as
+    # the runtime does, refuse rather than guess (#530). An awk that fails has
+    # read nothing, so that is refused too.
+    if ! reason=$(_http_config_check "${cfg}" "enabled bind port auth_enabled allow_insecure_bind"); then
+        die "config (runtime): cannot verify the http settings in ${cfg}: the installer's reader failed (awk); check it with: anolis-runtime --check-config ${cfg}"
+    fi
+    if [[ -n "${reason}" ]]; then
+        die "config (runtime): cannot verify the http settings in ${cfg}: ${reason} is not supported by the installer's reader; simplify it, or check it with: anolis-runtime --check-config ${cfg}"
+    fi
+
+    # The runtime reads these with yaml-cpp's as<bool>() and refuses the whole
+    # config when one that is present is not a boolean it accepts, an empty
+    # value included.
+    for key in enabled auth_enabled allow_insecure_bind; do
+        [[ -n "$(_yaml_block_value "${cfg}" http "${key}" present)" ]] || continue
+        value=$(_http_value "${cfg}" "${key}")
+        if [[ -z "$(_yaml_bool "${value}")" ]]; then
+            die "config (runtime): http.${key} '${value}' in ${cfg} is not a boolean the runtime accepts (true/false, yes/no, on/off)"
+        fi
+    done
+
+    # validate_config checks the bind only with the HTTP server on.
+    [[ "$(_yaml_bool "$(_http_value "${cfg}" enabled)")" != false ]] || return 0
+
+    # Only an absent bind is the loopback default: `bind: ""` binds "", and a
+    # key with no value is "null" to the runtime, both non-loopback.
+    if [[ -n "$(_yaml_block_value "${cfg}" http bind present)" ]]; then
+        bind=$(_http_value "${cfg}" bind)
+    fi
 
     # Matches is_loopback_bind() in core/runtime/config.cpp.
-    case "${bind:-127.0.0.1}" in
+    case "${bind}" in
         127.* | ::1 | localhost) return 0 ;;
     esac
 
-    if [[ "$(_http_value "${cfg}" auth_enabled)" == "true" ]] \
-        || [[ "$(_http_value "${cfg}" allow_insecure_bind)" == "true" ]]; then
+    if [[ "$(_yaml_bool "$(_http_value "${cfg}" auth_enabled)")" == true ]] \
+        || [[ "$(_yaml_bool "$(_http_value "${cfg}" allow_insecure_bind)")" == true ]]; then
         return 0
     fi
 
@@ -1895,17 +1922,344 @@ phase_start() {
 # Phase 19: Health check
 # =============================================================================
 
-# Read a 2-space-indented scalar `key` from a named top-level `block` of a YAML
-# file. Prints the empty string when absent. Dependency-free (awk, no python) so
-# it works on an offline --local host that has no pyyaml. Assumes canonical
-# top-level blocks with 2-space scalars (as install.sh already renders them).
+# Read the top-level mapping `block` of a YAML file the way the runtime's YAML
+# parser (yaml-cpp) reads it, without python, so it works on an offline
+# --local host that has no pyyaml (#530). The block is read in block style
+# only (`key` a direct child, at any indentation); a flow mapping reads as
+# nothing. The first of duplicate keys counts, as in yaml-cpp, and
+# the file ends at a second `---` or at `...`, as yaml-cpp reads only its first
+# document. A quoted value loses its quotes (`''` is a quote inside single
+# quotes; `\"` and `\\` are resolved in double quotes, and any other escape is
+# left as written), and a plain one its trailing comment.
+#
+#   _yaml_block_value <file> <block> <key>            the value; empty if absent
+#   _yaml_block_value <file> <block> <key> present    "1" if the key is there
+#
+# The reader is not a YAML parser: it reads as yaml-cpp does only the subset
+# _http_config_check describes, and a caller that must not guess checks the
+# file with that first.
 _yaml_block_value() {
-    local cfg="$1" block="$2" key="$3"
+    local cfg="$1" block="$2" key="$3" mode="${4:-value}"
     [[ -f "${cfg}" ]] || return 0
-    awk -v blk="${block}:" -v key="${key}:" '
-        /^[[:alpha:]]/ { in_blk = ($1 == blk) }
-        in_blk && $1 == key { print $2; exit }
+    # Bytes, not characters: the byte-order mark is three of them.
+    LC_ALL=C awk -v blk="${block}" -v key="${key}" -v mode="${mode}" '
+        BEGIN {
+            state = 0       # 0: outside the block, 1: in it, 3: done
+        }
+        # A scalar: quotes removed, or a plain one up to a comment.
+        function scalar(s,   q, i, c, n, out) {
+            sub(/^[ \t]+/, "", s)
+            q = substr(s, 1, 1)
+            if (q == "\"" || q == "\047") {
+                out = ""
+                for (i = 2; i <= length(s); i++) {
+                    c = substr(s, i, 1)
+                    if (q == "\"" && c == "\\") {
+                        i++; n = substr(s, i, 1)
+                        out = out ((n == "\\" || n == "\"") ? n : "\\" n)
+                        continue
+                    }
+                    if (c == q) {
+                        if (q == "\047" && substr(s, i + 1, 1) == q) { out = out q; i++; continue }
+                        return out
+                    }
+                    out = out c
+                }
+                return out
+            }
+            sub(/[ \t]+#.*$/, "", s)
+            sub(/[ \t]+$/, "", s)
+            return s
+        }
+        # The key of a "key: value" entry, unquoted; empty when it is not one.
+        function entry_key(s,   k) {
+            sub(/^[ \t]+/, "", s)
+            if (s ~ /^"[^"]*"[ \t]*:([ \t]|$)/ || s ~ /^\047[^\047]*\047[ \t]*:([ \t]|$)/) {
+                k = substr(s, 2); sub(/["\047][ \t]*:.*$/, "", k); return k
+            }
+            if (s !~ /^[^ \t:#][^:]*:([ \t]|$)/) return ""
+            k = s; sub(/[ \t]*:([ \t].*)?$/, "", k); return k
+        }
+        # The raw value text of a "key: value" entry.
+        function entry_raw(s) {
+            sub(/^[ \t]+/, "", s)
+            if (s ~ /^["\047]/) { sub(/^("[^"]*"|\047[^\047]*\047)[ \t]*:/, "", s) }
+            else { sub(/^[^:]*:/, "", s) }
+            sub(/^[ \t]+/, "", s)
+            return s
+        }
+        # One entry of the block. The first of duplicate keys is kept.
+        function entry(k, raw) {
+            if (!(k in seen)) { seen[k] = 1; val[k] = raw }
+        }
+        { sub(/\r$/, "") }
+        NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
+        done { next }
+        /^(---|\.\.\.)([ \t]|$)/ { if (started) done = 1; next }
+        /^[^ \t#]/ {
+            started = 1
+            if (state == 1) state = 3
+            if (entry_key($0) != blk || ++headers > 1) next
+            rest = entry_raw($0)
+            if (rest == "" || rest ~ /^#/) { state = 1; indent = -1; next }
+            state = 3
+            next
+        }
+        state == 1 && /^[ \t]*(#|$)/ { next }
+        state == 1 {
+            match($0, /^ */)
+            line = substr($0, RLENGTH + 1)
+            if (indent < 0) indent = RLENGTH
+            if (RLENGTH == indent && entry_key(line) != "") entry(entry_key(line), entry_raw(line))
+        }
+        END {
+            if (key in seen) {
+                if (mode == "present") print 1
+                else print scalar(val[key])
+            }
+        }
     ' "${cfg}"
+}
+
+# Can _yaml_block_value read <file>'s http block as the runtime (yaml-cpp) reads
+# it? It can for a strict subset of YAML, and this prints the first thing in
+# the file outside that subset, or nothing (#530). The subset:
+#
+#   - at most one `---`, on the first content line, with nothing after it but
+#     a comment; no `...`, no `%` directive, no byte-order mark, no CR left
+#     inside a line, no NUL byte;
+#   - at column 0, only a name and a colon (a name: a letter or `_`, then
+#     letters, digits, `_` or `-`), at least one; or a sequence entry (`-`
+#     then a blank or the end) as the value of the key just above it, when
+#     that key is not http and has nothing after its colon but a comment
+#     (PyYAML writes `providers:` then `- id: ...`);
+#   - `http:` once, in block style: its children at one consistent
+#     indentation, each a name and a colon; a sequence entry at that
+#     indentation only as the value of the child just above it, when that
+#     child is not one of <keys> and has nothing after its colon but a
+#     comment. A flow mapping or sequence for http is refused, whatever it
+#     holds, and so is a sequence as http's own value;
+#   - for the keys named in <keys>: a plain value or a value quoted on one line
+#     (with only the escapes \" and \\), and no anchor, alias, tag, block
+#     scalar, collection, sequence entry or value continued on the next line;
+#     a `port` that is a plain decimal number. A plain value is the text after
+#     the colon, up to a comment, that does not start with a quote, `[`, `{`,
+#     `&`, `!`, `*`, `|`, `>`, or a `-` followed by a blank or the end, and
+#     holds no `:` followed by a blank or the end;
+#   - anywhere in the file: no quote or bracket left open at the end of a line
+#     (a tag or anchor before a value does not hide its quote, and one
+#     written with a quote or a flow character `"'[]{},` is refused), no `? `
+#     explicit key, no alias, no quoted mapping key, no block scalar with an
+#     indentation indicator or a line less indented than its first, no tab
+#     in the indentation, and no NEL, line or paragraph separator character; a
+#     `#` comment on its own line, or after a value outside quotes.
+#
+# Block scalars (`|`, `>`) are allowed outside http's watched keys, after a
+# key that is a name; of their lines only the indentation is checked, and
+# they must be indented past the key (under `- key: |`, past `key`).
+#
+#   _http_config_check <file> "<k1 k2 ...>"
+_http_config_check() {
+    local cfg="$1" keys="$2"
+    [[ -f "${cfg}" ]] || { printf 'a file that does not exist'; return 0; }
+    LC_ALL=C awk -v keys="${keys}" '
+        BEGIN { n = split(keys, kl, " "); for (i = 1; i <= n; i++) watched[kl[i]] = 1; reason = "" }
+        function bad(r) { if (reason == "") reason = r }
+        function indent_of(s) { match(s, /^ */); return RLENGTH }
+        # Scan a line from `from`: leave it with no quote or bracket open, or
+        # say it does. A quote opens a scalar only where a value starts.
+        # A tag (!...) or anchor (&...) where a value starts is a property of
+        # that value: skipped to the next blank, the value still starts after
+        # it. An explicit key (? ) is outside the subset: it sets `shape`.
+        function open_at_end(s, from,   i, c, prev, q, depth, vs, nx) {
+            q = ""; depth = 0; vs = 1; prev = " "; shape = ""
+            for (i = from; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                nx = substr(s, i + 1, 1)
+                if (q == "\"") {
+                    if (c == "\\") i++
+                    else if (c == q) { q = ""; vs = 0; if (substr(s, i + 1) ~ /^[ \t]*:/) shape = "a quoted mapping key" }
+                    prev = c; continue
+                }
+                if (q == "\047") {
+                    if (c == q) {
+                        if (nx == q) i++
+                        else { q = ""; vs = 0; if (substr(s, i + 1) ~ /^[ \t]*:/) shape = "a quoted mapping key" }
+                    }
+                    prev = c; continue
+                }
+                if (c == " " || c == "\t") { prev = c; continue }
+                if (c == "#" && (prev == " " || prev == "\t")) break
+                if ((c == "!" || c == "&") && vs) {
+                    while (i < length(s) && substr(s, i + 1, 1) !~ /[ \t]/) {
+                        i++
+                        if (substr(s, i, 1) ~ /["\047[\]{},]/) shape = "a tag or anchor written with a quote or flow character"
+                    }
+                    prev = substr(s, i, 1); continue
+                }
+                if (c == "?" && vs && (nx == "" || nx ~ /[ \t]/)) { shape = "an explicit key (?)"; vs = 1; prev = c; continue }
+                if (c == "*" && vs) { shape = "an alias (*)"; vs = 0; prev = c; continue }
+                if ((c == "\"" || c == "\047") && vs) q = c
+                else if ((c == "[" || c == "{") && (vs || depth > 0)) { depth++; vs = 1 }
+                else if ((c == "]" || c == "}") && depth > 0) { depth--; vs = 0 }
+                else if (c == "," && depth > 0) vs = 1
+                else if (c == ":" && (i == length(s) || substr(s, i + 1, 1) ~ /[ \t]/)) vs = 1
+                else if (c == "-" && vs && (i == length(s) || substr(s, i + 1, 1) ~ /[ \t]/)) vs = 1
+                else vs = 0
+                prev = c
+            }
+            return (q != "" || depth != 0)
+        }
+        # A value quoted on one line, closed, with only a comment after it.
+        function closed_alone(t,   q, i, c) {
+            q = substr(t, 1, 1)
+            for (i = 2; i <= length(t); i++) {
+                c = substr(t, i, 1)
+                if (q == "\"" && c == "\\") { i++; continue }
+                if (c == q) {
+                    if (q == "\047" && substr(t, i + 1, 1) == q) { i++; continue }
+                    return substr(t, i + 1) ~ /^[ \t]*(#.*)?$/
+                }
+            }
+            return 0
+        }
+        function plain_of(t) { sub(/[ \t]+#.*$/, "", t); sub(/[ \t]+$/, "", t); return t }
+        # A block scalar starts here only after a plain-name key: a quoted key
+        # whose text holds ": |" is not a header.
+        function bs_header(l) { return l ~ /^(- )?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[|>]/ }
+        # Start passing over a block scalar whose header sits at indentation
+        # `at`. Its lines must all be indented past its key (two columns right
+        # of the dash, under `- key: |`), and at least as far as its first.
+        function start_bs(l, at) {
+            if (l ~ /:[ \t]*[|>][-+]?[0-9]/) bad("a block scalar with an indentation indicator")
+            if (l ~ /^- /) at += 2
+            in_bs = 1; bs_ind = at; bs_cind = -1
+        }
+        # A watched key: what its value must be.
+        function watched_value(k, t,   e) {
+            if (t ~ /^[&!*]/) { bad("an anchor, alias or tag on http." k); return }
+            if (t ~ /^[|>]/) { bad("a block scalar for http." k); return }
+            if (t ~ /^[[{]/ || t ~ /^-([ \t]|$)/) { bad("http." k " written as other than a scalar"); return }
+            if (t ~ /^["\047]/) {
+                if (!closed_alone(t)) { bad("http." k " not quoted on one line, alone"); return }
+                if (t ~ /^"/) { e = t; gsub(/\\\\/, "", e); gsub(/\\"/, "", e); if (e ~ /\\/) bad("an escape sequence in http." k) }
+                return
+            }
+            if (plain_of(t) ~ /:([ \t]|$)/) bad("http." k " written as other than a plain scalar")
+            if (k == "port" && plain_of(t) !~ /^([1-9][0-9]*|0)$/) bad("http." k " written as other than a plain decimal number")
+        }
+        {
+            sub(/\r$/, "")
+            if (index($0, "\r")) bad("a carriage return inside a line (CR line endings)")
+            if (index($0, "\000")) bad("a NUL byte")
+            # NEL, LS and PS in UTF-8: yaml-cpp breaks no line on them, and refuses the file.
+            if (index($0, "\302\205") || index($0, "\342\200\250") || index($0, "\342\200\251"))
+                bad("a NEL, line separator or paragraph separator character")
+        }
+        NR == 1 && substr($0, 1, 3) == "\357\273\277" { bad("a byte-order mark"); $0 = substr($0, 4) }
+        # The lines of a block scalar are its text.
+        in_bs {
+            if ($0 ~ /^ *$/) next
+            if (indent_of($0) > bs_ind) {
+                if (bs_cind < 0) bs_cind = indent_of($0)
+                else if (indent_of($0) < bs_cind) bad("a block scalar line less indented than its first")
+                next
+            }
+            in_bs = 0
+        }
+        /^[ \t]*(#|$)/ { next }
+        /^ *\t/ { bad("a tab in the indentation"); next }
+        /^---([ \t]|$)/ {
+            if (started || dashes++) bad("a second document marker")
+            else if ($0 !~ /^---[ \t]*(#.*)?$/) bad("content on the --- line")
+            next
+        }
+        /^\.\.\.([ \t]|$)/ { bad("a document end marker"); next }
+        /^%/ { bad("a directive"); next }
+        {
+            ind = indent_of($0)
+            line = substr($0, ind + 1)
+            if (ind > 0 && !started) { bad("an indented first line"); next }
+            # (A flow http is refused below, by name, whatever its lines hold.)
+            if (!(ind == 0 && line ~ /^http:[ \t]*[[{]/)) {
+                if (open_at_end(line, 1)) bad("a quoted value or a collection over several lines")
+                # An alias is refused at the end, so that one on http or on a
+                # key it reads is named for that key.
+                if (shape == "an alias (*)") alias = shape
+                else if (shape != "") bad(shape)
+            }
+            rest = line; sub(/^[^:]*:[ \t]*/, "", rest)
+        }
+        ind == 0 && line ~ /^-([ \t]|$)/ {
+            started = 1
+            if (state == 1) { bad("a sequence under http"); state = 3; next }
+            if (!seq_ok) { bad("a top-level line not written name: value"); next }
+            seq_on = 1
+            if (bs_header(line)) start_bs(line, 0)
+            next
+        }
+        ind == 0 {
+            started = 1
+            if (state == 1) { if (!children) bad("an empty http"); state = 3 }
+            if (line !~ /^[A-Za-z_][A-Za-z0-9_-]*:([ \t]|$)/) { bad("a top-level line not written name: value"); next }
+            k = line; sub(/:.*$/, "", k)
+            # With nothing after its colon, its value may be a sequence written
+            # at column 0 (http refuses that above, as state 1).
+            seq_ok = (rest == "" || rest ~ /^#/); seq_on = 0
+            if (bs_header(line)) start_bs(line, 0)
+            if (k != "http") next
+            if (++headers > 1) { bad("a second top-level http"); next }
+            if (rest ~ /^[[{]/) { bad("http in flow style (write http: in block style)"); state = 3; next }
+            if (rest == "" || rest ~ /^#/) { state = 1; cind = -1; children = 0; next }
+            if (rest ~ /^[&!*]/) bad("an anchor, alias or tag on http")
+            else bad("http written as other than a mapping")
+            state = 3
+            next
+        }
+        state == 1 {
+            if (cind < 0) cind = ind
+            if (ind == cind && line ~ /^-([ \t]|$)/) {
+                if (last in watched) bad("a value of http." last " on the next line")
+                else if (!hseq_ok) bad("a line in http not written name: value")
+                hseq_on = 1
+                if (bs_header(line)) start_bs(line, ind)
+            } else if (ind == cind) {
+                children++
+                if (line !~ /^[A-Za-z_][A-Za-z0-9_-]*:([ \t]|$)/) { bad("a line in http not written name: value"); last = ""; next }
+                k = line; sub(/:.*$/, "", k)
+                if (k in watched) watched_value(k, rest)
+                else if (bs_header(line)) start_bs(line, ind)
+                last = k
+                hseq_ok = (rest == "" || rest ~ /^#/); hseq_on = 0
+            } else if (ind > cind) {
+                if (last in watched) bad("a value of http." last " on the next line")
+                if (!hseq_on) hseq_ok = 0
+                if (bs_header(line)) start_bs(line, ind)
+            } else {
+                bad("an indentation in http the reader does not follow")
+            }
+            next
+        }
+        # A line of another top-level block: only its block scalars matter here,
+        # and whether its key still takes a sequence at column 0.
+        { if (!seq_on) seq_ok = 0; if (bs_header(line)) start_bs(line, ind) }
+        END {
+            if (!started) bad("a file with no top-level key")
+            if (state == 1 && !children) bad("an empty http")
+            if (alias != "") bad(alias)
+            if (reason != "") print reason
+        }
+    ' "${cfg}"
+}
+
+# A YAML boolean as the runtime's as<bool>() reads it (yaml-cpp: y, yes, true,
+# on and their negatives, all lower case, all upper case, or capitalised; a
+# quoted one counts). Prints true or false, or nothing for any other value.
+_yaml_bool() {
+    case "$1" in
+        y | Y | yes | Yes | YES | true | True | TRUE | on | On | ON) printf 'true' ;;
+        n | N | no | No | NO | false | False | FALSE | off | Off | OFF) printf 'false' ;;
+    esac
 }
 
 # Read a scalar key from the top-level `http:` block of a runtime config.
@@ -2023,8 +2377,6 @@ _ipv6_available() {
 _runtime_probe_host() {
     local bind
     bind=$(_http_value "${PREFIX}/config/runtime.yaml" bind)
-    bind="${bind//\"/}"
-    bind="${bind//\'/}"
     case "${bind}" in
         "" | 0.0.0.0) printf '127.0.0.1' ;;
         :: | ::1) printf '[::1]' ;;
@@ -2036,14 +2388,11 @@ _runtime_probe_host() {
     esac
 }
 
-# http.auth_token as the installed runtime.yaml sets it, quotes removed. Prints
-# nothing when the config sets none.
+# http.auth_token as the installed runtime.yaml sets it, quotes removed (the
+# reader removes them: what is left is the token). Prints nothing when the
+# config sets none.
 _config_api_token() {
-    local token
-    token=$(_http_value "${PREFIX}/config/runtime.yaml" auth_token)
-    token="${token#[\"\']}"
-    token="${token%[\"\']}"
-    printf '%s' "${token}"
+    _http_value "${PREFIX}/config/runtime.yaml" auth_token
 }
 
 # True when the installed runtime.yaml's http block has an auth_token key whose

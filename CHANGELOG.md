@@ -41,6 +41,28 @@ commit messages only.
 
 ### Fixed
 
+- **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
+  It read the `http` block line by line and compared booleans to the literal
+  `true`, so it passed a flow-style `http: {bind: 0.0.0.0}` the runtime
+  refuses, and refused configs the runtime starts with: a quoted
+  `bind: "127.0.0.1"`, `auth_enabled: True`, `allow_insecure_bind: yes`, and
+  any bind under `http.enabled: false`. The refusal killed upgrades over
+  working configs. The reader now takes a block-style `http` with plain or
+  quoted values and a comment after a value, and sequences written at their
+  key's column, as PyYAML (and so the workbench) writes them; booleans are
+  read as yaml-cpp reads them; the bind is checked only with the HTTP server
+  enabled, and `bind: ""` as the non-loopback address it is; and an
+  `enabled`, `auth_enabled` or `allow_insecure_bind` that is present but not
+  a boolean the runtime accepts, empty included, fails the preflight. The
+  reader accepts only a strict, documented subset of YAML
+  (docs/decoupling.md); for any config outside it (a flow-style `http`, which
+  must be rewritten in block style, a directive, a second document, an
+  indented or quoted key, a quote or bracket left open across lines, an
+  anchor, alias, tag or merge key, a byte-order mark, CR line endings, a NUL
+  byte, and more), the preflight refuses with "cannot verify" instead of
+  guessing. The health check's reads of `http.port`, `http.bind` and
+  `http.auth_token`, and the install's read of `runtime.data_dir`, use the
+  same reader, and no longer strip a second layer of quotes from its value.
 - **A project copied under a new name installs with paths to its own
   directory** (#694). The bundle step rewrote
   `../anolis-projects/projects/<name>/...` with the name written in the path,
