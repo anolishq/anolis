@@ -13,6 +13,32 @@ commit messages only.
 
 ## [Unreleased]
 
+### Security
+
+- **`install.sh` no longer bakes a literal API token into a bundle** (#529).
+  Staging, and the online `--project` install, copied a project's
+  `http.auth_token` into the bundle's `config/runtime.yaml` and
+  `projects/<name>/config/`. The runtime prefers that token to
+  `ANOLIS_API_TOKEN`, so every device installed from the bundle accepted the
+  same token, and the per-device one in `/etc/anolis/runtime.env` was ignored.
+  The bundle step now stops, naming the file and never the token, when any
+  config it renders (the runtime configs, the `manual` variant, the provider
+  configs) or `machine-profile.yaml` sets `http.auth_token` to anything but a
+  quoted empty string, or is not valid YAML or UTF-8. A null value counts: the
+  runtime reads `auth_token:`, `~` and `null` as the token `null`. The check
+  reads the files as the runtime's YAML parser does: the first of duplicate
+  keys and of duplicate `http` blocks, merge keys followed, and a tag such as
+  `!!null` does not hide the value. It runs on each file again after the
+  bundle step's rewrites, which is the text that ships. No token's text ships
+  either: a line naming `auth_token` (any case, in a comment or string too) in
+  any config, behaviour or the machine profile stops the bundle step, unless
+  the whole line is `auth_token: ""` or `auth_token: ''` in block style with
+  nothing after it; a longer name such as `auth_token_file` is not the token.
+  Configs are read as UTF-8 whatever the locale. A project directory name
+  outside letters, digits, `.`, `_` and `-` is refused, since the name is
+  written into the configs. An install whose `runtime.yaml` already carries a
+  token warns, and the summary names it as the token in use.
+
 ### Fixed
 
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
@@ -25,19 +51,27 @@ commit messages only.
   quoted values and a comment after a value, and sequences written at their
   key's column, as PyYAML (and so the workbench) writes them; booleans are
   read as yaml-cpp reads them; the bind is checked only with the HTTP server
-  enabled, and
-  `bind: ""` as the non-loopback address it is; and an `enabled`,
-  `auth_enabled` or `allow_insecure_bind` that is present but not a boolean
-  the runtime accepts, empty included, fails the preflight. The reader accepts
-  only a strict, documented subset of YAML (docs/decoupling.md); for any
-  config outside it (a flow-style `http`, which must be rewritten in block
-  style, a directive, a second document, an indented or quoted key, a quote or
-  bracket left open across lines, an anchor, alias, tag or merge key, a
-  byte-order mark, CR line endings, a NUL byte, and more), the preflight
-  refuses with "cannot verify" instead of guessing. The health check's reads of
-  `http.port`, `http.bind` and `http.auth_token`, and the install's read of
-  `runtime.data_dir`, use the same reader, and no longer strip a second layer
-  of quotes from its value.
+  enabled, and `bind: ""` as the non-loopback address it is; and an
+  `enabled`, `auth_enabled` or `allow_insecure_bind` that is present but not
+  a boolean the runtime accepts, empty included, fails the preflight. The
+  reader accepts only a strict, documented subset of YAML
+  (docs/decoupling.md); for any config outside it (a flow-style `http`, which
+  must be rewritten in block style, a directive, a second document, an
+  indented or quoted key, a quote or bracket left open across lines, an
+  anchor, alias, tag or merge key, a byte-order mark, CR line endings, a NUL
+  byte, and more), the preflight refuses with "cannot verify" instead of
+  guessing. The health check's reads of `http.port`, `http.bind` and
+  `http.auth_token`, and the install's read of `runtime.data_dir`, use the
+  same reader, and no longer strip a second layer of quotes from its value.
+- **A project copied under a new name installs with paths to its own
+  directory** (#694). The bundle step rewrote
+  `../anolis-projects/projects/<name>/...` with the name written in the path,
+  so a copy of `bioreactor-v1` named `my-reactor` installed under
+  `projects/my-reactor/` with every provider `--config` pointing into
+  `projects/bioreactor-v1/`, and exited 0. Such paths now point at the
+  directory the project installs to, and one that names a file the bundle does
+  not ship stops the bundle step (a path in a YAML comment is rewritten but
+  not checked).
 - **`install.sh` no longer fails a healthy install on a target without
   `curl`** (#536). The offline `--local` route does not need `curl`, but the
   health check is made of `curl` calls, so it used to poll for the full 30 s,
