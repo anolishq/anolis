@@ -87,6 +87,10 @@ PREFIX_EXPLICIT=0
 # inert default `manual`. install.sh only ever installs an inert variant.
 RUNTIME_VARIANT=""
 HEALTH_FAILED=0
+# `systemctl restart anolis-runtime` failed in phase_start.
+RUNTIME_RESTART_FAILED=0
+# phase_health ran none of its checks: curl is not on this host (#536).
+HEALTH_NOT_CHECKED=0
 # The startup safe state cannot be planned from the config on this machine's
 # devices (#616): the install fails, naming the first refused action.
 SAFE_STATE_UNPLANNABLE=0
@@ -1896,6 +1900,7 @@ phase_start() {
 
     systemctl restart anolis-runtime 2>/dev/null || {
         log_warn "start: failed to restart anolis-runtime"
+        RUNTIME_RESTART_FAILED=1
         return
     }
     log_ok "start: anolis-runtime restarted"
@@ -2559,6 +2564,22 @@ phase_health() {
         return
     fi
 
+    # The offline --local route does not need curl on the target, and every
+    # check below is a curl call. Without it each poll fails as if the runtime
+    # were down: the install would wait out the timeout and fail a runtime
+    # that is up (#536). Say what was not checked, at once. The restart's exit
+    # status is the one signal left, and a weak one: the unit is Type=simple,
+    # so a restart fails on a start job systemd cannot run (no such unit, for
+    # one), never on a runtime that crashes after it starts.
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "health: not checked: curl not found"
+        log_info "  Not verified: runtime status, run registry, startup safe state and provider liveness."
+        log_info "  Install curl (sudo apt install curl) for the install to check them."
+        HEALTH_NOT_CHECKED=1
+        [[ ${RUNTIME_RESTART_FAILED} -eq 0 ]] || HEALTH_FAILED=1
+        return
+    fi
+
     local base
     base="http://$(_runtime_probe_host):$(_runtime_port)"
     local url="${base}/v0/runtime/status"
@@ -2604,6 +2625,8 @@ phase_summary() {
     # failed is printed last, below the summary.
     if _install_failed; then
         echo " Anolis installed, but NOT ready — see the end of this summary"
+    elif [[ ${HEALTH_NOT_CHECKED} -eq 1 ]]; then
+        echo " Anolis installed — health NOT checked (curl not found)"
     else
         echo " Anolis installation complete"
     fi
@@ -2657,7 +2680,10 @@ phase_summary() {
         log_info "           This includes requests from the device itself, unless http.auth_exempt_loopback is true."
     fi
 
-    if [[ ${HEALTH_FAILED} -eq 1 ]]; then
+    if [[ ${HEALTH_FAILED} -eq 1 && ${HEALTH_NOT_CHECKED} -eq 1 ]]; then
+        echo ""
+        log_err "systemctl restart anolis-runtime failed — the install did NOT succeed."
+    elif [[ ${HEALTH_FAILED} -eq 1 ]]; then
         echo ""
         log_err "Runtime did not come up — the install did NOT succeed."
     fi

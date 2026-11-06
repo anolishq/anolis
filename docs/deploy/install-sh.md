@@ -72,7 +72,10 @@ works directly.
 
 **The bundle carries its own `install.sh`.** You do not need this repository on
 the target: unpack the tarball and use the copy inside it, as above. This route
-needs no internet and no `python3` on the target. `--stage` checks that
+needs no internet and no `python3` on the target. It does not need `curl`
+either, but the install's health check does: without `curl` the install skips
+the check, says so, and does not fail on it (see
+[After installing](#after-installing)). `--stage` checks that
 copy against the runtime release's `SHA256SUMS`, as it does each tarball, and
 stops on a mismatch. A release before 0.1.50, whose `SHA256SUMS` has no line for
 `install.sh`, is staged with a warning that names it.
@@ -253,6 +256,18 @@ written `<prefix>/config/runtime.yaml`, and a re-run keeps it, so fix
 `safety.safe_state` there and run the install again; or fix the project's
 config and re-run with `--replace-config` (#616). A runtime before 0.2.0 marks
 no call, so against one every failure stays a warning.
+
+Every one of these checks is an HTTP request made with `curl`. On a target
+without `curl`, which the offline route allows, the install warns `health: not
+checked: curl not found`, names the four checks it did not run (runtime status,
+run registry, startup safe state, provider liveness), and goes on without
+waiting for the runtime. The skipped checks do not fail the install, so its exit
+status says nothing about whether the runtime came up, or whether its startup
+safe state can run: a safe state the config cannot express, which fails the
+install above, goes undetected. The summary's headline says the health check was
+not run. Check the runtime by hand with the `systemctl` and `journalctl`
+commands above. The install still fails if `systemctl restart anolis-runtime`
+itself failed, and the summary then says so (#536).
 
 > **A provider's stdout is the protocol pipe, not the log.** The runtime `dup2`s
 > each provider's stdout onto the ADPP framing channel; only **stderr** is
