@@ -121,7 +121,8 @@ _preflight_errexit() {
     _cannot_verify $'http: {"bind":"0.0.0.0"}\n' "${f}"
     _cannot_verify $'http: {x: "\\"}", bind: 0.0.0.0}\n' "${f}"
     _cannot_verify $'http: [bind, 0.0.0.0]\n' "${f}"
-    # R4-B2: an apostrophe in a plain value, as a quote-tracking reader saw it.
+    # An apostrophe inside a plain flow value opens no quote; a reader that
+    # took it for one would skip `bind` up to the next apostrophe.
     _cannot_verify $'http: {x: it\'s, y: \'q\', bind: 0.0.0.0, w: z\'}\n' "${f}"
 }
 
@@ -377,7 +378,7 @@ _cannot_verify_file() {
 
 @test "530: a tag or anchor written with a quote or flow character cannot be verified" {
     local t="a tag or anchor written with a quote or flow character"
-    # R4-B1: the quote right after the tag opens a string that hides the auth line.
+    # A quote glued to a tag opens a string that runs over the auth line.
     _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: !!str"abc\n  auth_enabled: true\n  zzz: end"\n' "${t}"
     _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: &a\'abc\n  auth_enabled: true\n  zzz: end\'\n' "${t}"
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: !x[1] v\n' "${t}"
@@ -392,7 +393,7 @@ _cannot_verify_file() {
 }
 
 # A quoted key whose text holds ": |" or ": >" is no block-scalar header: the
-# quote opened under it must still be checked (corpus5).
+# quote opened under it must still be checked.
 @test "530: a quoted key that looks like a block-scalar header does not hide the quote under it" {
     _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    "a: |b":\n      "zzz\n  auth_enabled: true\n  q: w"\n' "a quoted mapping key"
     _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    \'a: |b\':\n      "zzz\n  auth_enabled: true\n  q: w"\n' "a quoted mapping key"
@@ -411,6 +412,86 @@ _cannot_verify_file() {
 @test "530: block scalars outside the watched keys are read past" {
     run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: |\n    it\'s "fine\n    [ok\nhttp:\n  bind: 127.0.0.1\n')"
     [ "$status" -eq 0 ]
+}
+
+# PyYAML's safe_dump, which the workbench saves projects with, writes a
+# sequence at its key's own column: `providers:` then `- id: ...`, and
+# `cors_allowed_origins:` then `  - ...` beside it. The runtime loads that.
+_pyyaml_cfg() {
+    printf 'runtime:\n  name: anolis-main\n  shutdown_timeout_ms: 2000\nhttp:\n  enabled: true\n  bind: %s\n  port: 8080\n  cors_allow_credentials: false\n  cors_allowed_origins:\n  - http://localhost:3000\n  - http://127.0.0.1:3000\nproviders:\n- id: sim0\n  command: ../anolis-provider-sim/build/dev-release/anolis-provider-sim\n  args:\n  - --config\n  - ../anolis-projects/projects/demo/config/provider-sim.sim0.yaml\n  timeout_ms: 5000\n  restart_policy:\n    enabled: false\npolling:\n  interval_ms: 500\n' "$1" > "${TMP}/runtime.yaml"
+    printf '%s' "${TMP}/runtime.yaml"
+}
+
+@test "530: a sequence at its key's column (PyYAML's style) is read: the e2e and workbench configs" {
+    local f
+    for f in "${BATS_TEST_DIRNAME}/../e2e/e2e-sim/config/"anolis-runtime.*.yaml; do
+        run preflight_runtime_config "${f}"
+        [ "$status" -eq 0 ] || { echo "${f}: ${output}"; return 1; }
+    done
+    run preflight_runtime_config "$(_pyyaml_cfg 127.0.0.1)"
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    # The guard still reads http around the sequence in it.
+    run preflight_runtime_config "$(_pyyaml_cfg 0.0.0.0)"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '0.0.0.0' is non-loopback"* ]]
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 0.0.0.0\n  cors_allowed_origins:\n  - a\n  auth_enabled: true\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a sequence at a key's column is read only as the value of the key just above it" {
+    local top="a top-level line not written name: value" child="a line in http not written name: value"
+    _cannot_verify_file 'providers:\n  x: 1\n- id: p0\nhttp:\n  bind: 127.0.0.1\n' "${top}"
+    _cannot_verify_file 'providers: x\n- id: p0\nhttp:\n  bind: 127.0.0.1\n' "${top}"
+    _cannot_verify_file '- id: p0\nhttp:\n  bind: 127.0.0.1\n' "${top}"
+    _cannot_verify_file 'runtime:\n  name: t\nhttp:\n- bind: 0.0.0.0\n' "a sequence under http"
+    _cannot_verify_file 'http:\n  bind: 0.0.0.0\n- auth_enabled: true\n' "a sequence under http"
+    _cannot_verify_file 'http:\n  bind: 0.0.0.0\n  x:\n  - a\n- b\n  auth_enabled: true\n' "a sequence under http"
+    _cannot_verify $'http:\n  bind:\n  - 0.0.0.0\n' "a value of http.bind on the next line"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  auth_enabled:\n  - true\n' "a value of http.auth_enabled on the next line"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    a: 1\n  - auth_enabled: true\n' "${child}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: x\n  - auth_enabled: true\n' "${child}"
+    _cannot_verify $'http:\n  - bind: 0.0.0.0\n' "${child}"
+}
+
+# Under `- key: |`, the key sits two columns right of the dash, and the block
+# scalar's text must be indented past the key. A line at the key's column is
+# not its text: yaml-cpp reads it as the next key, so its quote is tracked.
+@test "530: a block scalar under a sequence entry ends at its key's column" {
+    local q="a quoted value or a collection over several lines"
+    _cannot_verify_file 'x:\n- b: |\n  "q\nhttp:\n  bind: 0.0.0.0\n  auth_enabled: true\n  z: w"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  x:\n  - k: |\n    "abc\n  auth_enabled: true\n  z: w"\n' "${q}"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  list:\n    - k: |\n      "abc\n  auth_enabled: true\n  z: w"\n' "${q}"
+    run preflight_runtime_config "$(_http_cfg $'x:\n- b: |\n   "q\nhttp:\n  bind: 127.0.0.1\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a watched plain value holding ': ', ':<tab>', a final ':' or a '- ' entry cannot be verified" {
+    _cannot_verify $'http:\n  bind: 127.0.0.1:\tx\n' "http.bind written as other than a plain scalar"
+    _cannot_verify $'http:\n  bind: 127.0.0.1: x\n' "http.bind written as other than a plain scalar"
+    _cannot_verify $'http:\n  bind: 127.0.0.1:\n' "http.bind written as other than a plain scalar"
+    _cannot_verify $'http:\n  bind: - 0.0.0.0\n  auth_enabled: true\n' "http.bind written as other than a scalar"
+    _cannot_verify $'http:\n  bind: -\n  auth_enabled: true\n' "http.bind written as other than a scalar"
+    # A dash glued to the value is part of it: a non-loopback bind.
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: -0.0.0.0\n')"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"http.bind '-0.0.0.0' is non-loopback"* ]]
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1:8080\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: a NUL byte anywhere in the file cannot be verified" {
+    _cannot_verify_file 'http:\n  bind: 1\00027.0.0.1\n' "a NUL byte"
+    _cannot_verify_file 'http:\n  bind: 0.0.0.0\n  auth_enabled: tr\000ue\n' "a NUL byte"
+    _cannot_verify_file 'http:\n  bind: 127.0.0.1\n# a\000b\n' "a NUL byte"
+}
+
+@test "530: a dashed child name in http and a comment after --- are read" {
+    run preflight_runtime_config "$(_http_cfg $'http:\n  bind: 127.0.0.1\n  x-y: 1\n')"
+    [ "$status" -eq 0 ]
+    printf -- '--- # c\nhttp:\n  bind: 0.0.0.0\n' > "${TMP}/runtime.yaml"
+    run preflight_runtime_config "${TMP}/runtime.yaml"
+    [ "$status" -ne 0 ]
+    [[ "${output}" == *"is non-loopback"* ]]
 }
 
 @test "530: callers take the reader's value as it is, without a second unquote" {

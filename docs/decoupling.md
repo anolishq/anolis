@@ -83,32 +83,46 @@ present but not one of those booleans, an empty value included, fails the
 preflight, as it fails the runtime. Only an absent `http.bind` is the loopback
 default: `bind: ""` is checked as the non-loopback address it is.
 
-Its reader is not a YAML parser. It reads a strict subset of YAML, the one
-`install.sh` itself writes, and refuses everything else with `cannot verify
-the http settings in <file>: <construct> is not supported by the installer's
-reader` rather than guess. The subset:
+Its reader is not a YAML parser. It reads a strict subset of YAML: enough for
+the configs `install.sh` writes, and for the sequences PyYAML writes at their
+key's column, as the workbench saves projects. It refuses everything else
+with `cannot verify the http settings in <file>: <construct> is not supported
+by the installer's reader` rather than guess. The subset:
 
-- at most one `---`, alone on the first content line; no `...`, no `%`
-  directive, no byte-order mark, and LF or CRLF line endings;
-- top-level keys at column 0, each a plain name (letters, digits, `_`, `-`)
-  followed by a colon, and nothing else at column 0;
-- `http:` once, in block style, its children at one indentation, each a plain
-  name and a colon. A flow mapping or sequence (`http: {...}`, `http: [...]`) is
-  refused whatever it holds: write `http:` in block style;
+- at most one `---`, on the first content line, with nothing after it but a
+  comment (`--- # c`); no `...`, no `%` directive, no byte-order mark, no NUL
+  byte, and LF or CRLF line endings;
+- at column 0, a name followed by a colon: a letter or `_`, then letters,
+  digits, `_` or `-`. A sequence entry (`- `) may also sit at column 0 as the
+  value of the key just above it, when that key is not `http` and has nothing
+  after its colon but a comment. That is how PyYAML, and so the workbench,
+  writes `providers:` and its `- id: ...` entries. Nothing else may be at
+  column 0;
+- `http:` once, in block style, its children at one indentation, each a name
+  as above and a colon. A sequence entry may sit at that indentation as the
+  value of the child just above it, when that child is not one of the keys
+  below and has nothing after its colon but a comment (`cors_allowed_origins:`
+  then `- http://...`). A flow mapping or sequence (`http: {...}`,
+  `http: [...]`), or a sequence as `http`'s own value, is refused whatever it
+  holds: write `http:` in block style;
 - `enabled`, `bind`, `port`, `auth_enabled` and `allow_insecure_bind` written as
   a plain value or a value quoted on one line, with no escape but `\"` and `\\`,
-  no anchor, alias, tag, block scalar or collection, nothing after the closing
-  quote but a comment, and nothing on the lines under them; `port` a plain
-  decimal number;
+  no anchor, alias, tag, block scalar, collection or sequence entry, nothing
+  after the closing quote but a comment, and nothing on the lines under them;
+  `port` a plain decimal number. A plain value is the text after the colon, up
+  to a comment, that does not start with a quote, `[`, `{`, `&`, `!`, `*`, `|`,
+  `>`, or a `-` followed by a blank or the end of the line, and holds no `:`
+  followed by a blank or the end of the line;
 - everywhere: no tab in the indentation, and no quote or bracket left open at
   the end of a line (a tag or anchor in front of a quoted value counts), except
-  inside a block scalar (`|`, `>`) under a plain-name key, whose lines are
-  passed over; a block scalar with no indentation indicator (`|4`) and no line
-  less indented than its first; no quoted mapping key (`"a": b`, `'a':'b'`);
-  no alias (`*name`); no tag or anchor written with a quote or a flow
-  character (`"'[]{},`); no explicit key (`?` followed by a space); and no
-  NEL, line separator or paragraph separator character; comments on their own
-  line or after a value.
+  inside a block scalar (`|`, `>`) after a key that is a name, whose lines are
+  passed over. Its lines must be indented past that key (under `- key: |`,
+  past `key`, two columns right of the dash), none less than its first, and it
+  has no indentation indicator (`|4`). No quoted mapping key (`"a": b`,
+  `'a':'b'`); no alias (`*name`); no tag or anchor written with a quote or a
+  flow character (`"'[]{},`); no explicit key (`?` followed by a space); and
+  no NEL, line separator or paragraph separator character; comments on their
+  own line or after a value.
 
 Quoted key names, `?` keys, merge keys and an indented first line are outside
 it. Simplify the config, or check it with

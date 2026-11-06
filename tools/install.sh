@@ -2013,17 +2013,27 @@ _yaml_block_value() {
 # it? It can for a strict subset of YAML, and this prints the first thing in
 # the file outside that subset, or nothing (#530). The subset:
 #
-#   - at most one `---`, on the first content line and alone; no `...`, no
-#     `%` directive, no byte-order mark, no CR left inside a line;
-#   - top-level lines at column 0, each a plain name (letters, digits, `_`,
-#     `-`) and a colon, nothing else at column 0; at least one of them;
+#   - at most one `---`, on the first content line, with nothing after it but
+#     a comment; no `...`, no `%` directive, no byte-order mark, no CR left
+#     inside a line, no NUL byte;
+#   - at column 0, only a name and a colon (a name: a letter or `_`, then
+#     letters, digits, `_` or `-`), at least one; or a sequence entry (`-`
+#     then a blank or the end) as the value of the key just above it, when
+#     that key is not http and has nothing after its colon but a comment
+#     (PyYAML writes `providers:` then `- id: ...`);
 #   - `http:` once, in block style: its children at one consistent
-#     indentation, each a plain name and a colon (a flow mapping or sequence
-#     is refused, whatever it holds);
+#     indentation, each a name and a colon; a sequence entry at that
+#     indentation only as the value of the child just above it, when that
+#     child is not one of <keys> and has nothing after its colon but a
+#     comment. A flow mapping or sequence for http is refused, whatever it
+#     holds, and so is a sequence as http's own value;
 #   - for the keys named in <keys>: a plain value or a value quoted on one line
 #     (with only the escapes \" and \\), and no anchor, alias, tag, block
-#     scalar, collection or value continued on the next line; a `port` that is
-#     a plain decimal number;
+#     scalar, collection, sequence entry or value continued on the next line;
+#     a `port` that is a plain decimal number. A plain value is the text after
+#     the colon, up to a comment, that does not start with a quote, `[`, `{`,
+#     `&`, `!`, `*`, `|`, `>`, or a `-` followed by a blank or the end, and
+#     holds no `:` followed by a blank or the end;
 #   - anywhere in the file: no quote or bracket left open at the end of a line
 #     (a tag or anchor before a value does not hide its quote, and one
 #     written with a quote or a flow character `"'[]{},` is refused), no `? `
@@ -2032,8 +2042,9 @@ _yaml_block_value() {
 #     in the indentation, and no NEL, line or paragraph separator character; a
 #     `#` comment on its own line, or after a value outside quotes.
 #
-# Block scalars (`|`, `>`) are allowed outside http's watched keys; of their
-# lines only the indentation is checked.
+# Block scalars (`|`, `>`) are allowed outside http's watched keys, after a
+# key that is a name; of their lines only the indentation is checked, and
+# they must be indented past the key (under `- key: |`, past `key`).
 #
 #   _http_config_check <file> "<k1 k2 ...>"
 _http_config_check() {
@@ -2105,27 +2116,30 @@ _http_config_check() {
         # whose text holds ": |" is not a header.
         function bs_header(l) { return l ~ /^(- )?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[|>]/ }
         # Start passing over a block scalar whose header sits at indentation
-        # `at`. Its lines must all be indented at least as far as its first.
+        # `at`. Its lines must all be indented past its key (two columns right
+        # of the dash, under `- key: |`), and at least as far as its first.
         function start_bs(l, at) {
             if (l ~ /:[ \t]*[|>][-+]?[0-9]/) bad("a block scalar with an indentation indicator")
+            if (l ~ /^- /) at += 2
             in_bs = 1; bs_ind = at; bs_cind = -1
         }
         # A watched key: what its value must be.
         function watched_value(k, t,   e) {
             if (t ~ /^[&!*]/) { bad("an anchor, alias or tag on http." k); return }
             if (t ~ /^[|>]/) { bad("a block scalar for http." k); return }
-            if (t ~ /^[[{]/) { bad("http." k " written as other than a scalar"); return }
+            if (t ~ /^[[{]/ || t ~ /^-([ \t]|$)/) { bad("http." k " written as other than a scalar"); return }
             if (t ~ /^["\047]/) {
                 if (!closed_alone(t)) { bad("http." k " not quoted on one line, alone"); return }
                 if (t ~ /^"/) { e = t; gsub(/\\\\/, "", e); gsub(/\\"/, "", e); if (e ~ /\\/) bad("an escape sequence in http." k) }
                 return
             }
-            if (plain_of(t) ~ /: /) bad("http." k " written as other than a plain scalar")
+            if (plain_of(t) ~ /:([ \t]|$)/) bad("http." k " written as other than a plain scalar")
             if (k == "port" && plain_of(t) !~ /^([1-9][0-9]*|0)$/) bad("http." k " written as other than a plain decimal number")
         }
         {
             sub(/\r$/, "")
             if (index($0, "\r")) bad("a carriage return inside a line (CR line endings)")
+            if (index($0, "\000")) bad("a NUL byte")
             # NEL, LS and PS in UTF-8: yaml-cpp breaks no line on them, and refuses the file.
             if (index($0, "\302\205") || index($0, "\342\200\250") || index($0, "\342\200\251"))
                 bad("a NEL, line separator or paragraph separator character")
@@ -2164,11 +2178,22 @@ _http_config_check() {
             }
             rest = line; sub(/^[^:]*:[ \t]*/, "", rest)
         }
+        ind == 0 && line ~ /^-([ \t]|$)/ {
+            started = 1
+            if (state == 1) { bad("a sequence under http"); state = 3; next }
+            if (!seq_ok) { bad("a top-level line not written name: value"); next }
+            seq_on = 1
+            if (bs_header(line)) start_bs(line, 0)
+            next
+        }
         ind == 0 {
             started = 1
             if (state == 1) { if (!children) bad("an empty http"); state = 3 }
             if (line !~ /^[A-Za-z_][A-Za-z0-9_-]*:([ \t]|$)/) { bad("a top-level line not written name: value"); next }
             k = line; sub(/:.*$/, "", k)
+            # With nothing after its colon, its value may be a sequence written
+            # at column 0 (http refuses that above, as state 1).
+            seq_ok = (rest == "" || rest ~ /^#/); seq_on = 0
             if (bs_header(line)) start_bs(line, 0)
             if (k != "http") next
             if (++headers > 1) { bad("a second top-level http"); next }
@@ -2181,23 +2206,31 @@ _http_config_check() {
         }
         state == 1 {
             if (cind < 0) cind = ind
-            if (ind == cind) {
+            if (ind == cind && line ~ /^-([ \t]|$)/) {
+                if (last in watched) bad("a value of http." last " on the next line")
+                else if (!hseq_ok) bad("a line in http not written name: value")
+                hseq_on = 1
+                if (bs_header(line)) start_bs(line, ind)
+            } else if (ind == cind) {
                 children++
-                if (line !~ /^[A-Za-z_][A-Za-z0-9_]*:([ \t]|$)/) { bad("a line in http not written name: value"); last = ""; next }
+                if (line !~ /^[A-Za-z_][A-Za-z0-9_-]*:([ \t]|$)/) { bad("a line in http not written name: value"); last = ""; next }
                 k = line; sub(/:.*$/, "", k)
                 if (k in watched) watched_value(k, rest)
                 else if (bs_header(line)) start_bs(line, ind)
                 last = k
+                hseq_ok = (rest == "" || rest ~ /^#/); hseq_on = 0
             } else if (ind > cind) {
                 if (last in watched) bad("a value of http." last " on the next line")
+                if (!hseq_on) hseq_ok = 0
                 if (bs_header(line)) start_bs(line, ind)
             } else {
                 bad("an indentation in http the reader does not follow")
             }
             next
         }
-        # A line of another top-level block: only its block scalars matter here.
-        { if (bs_header(line)) start_bs(line, ind) }
+        # A line of another top-level block: only its block scalars matter here,
+        # and whether its key still takes a sequence at column 0.
+        { if (!seq_on) seq_ok = 0; if (bs_header(line)) start_bs(line, ind) }
         END {
             if (!started) bad("a file with no top-level key")
             if (state == 1 && !children) bad("an empty http")
