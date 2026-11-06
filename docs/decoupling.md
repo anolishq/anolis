@@ -93,11 +93,11 @@ by the installer's reader` rather than guess. The subset:
   comment (`--- # c`); no `...`, no `%` directive, no byte-order mark, no NUL
   byte, and LF or CRLF line endings;
 - at column 0, a name followed by a colon: a letter or `_`, then letters,
-  digits, `_` or `-`. A sequence entry (`- `) may also sit at column 0 as the
-  value of the key just above it, when that key is not `http` and has nothing
-  after its colon but a comment. That is how PyYAML, and so the workbench,
-  writes `providers:` and its `- id: ...` entries. Nothing else may be at
-  column 0;
+  digits, `_` or `-`. A sequence entry (a `-` and then a blank or the end of
+  the line) may also sit at column 0 as the value of the key just above it,
+  when that key is not `http` and has nothing after its colon but a comment.
+  That is how PyYAML, and so the workbench, writes `providers:` and its
+  `- id: ...` entries. Nothing else may be at column 0;
 - `http:` once, in block style, its children at one indentation, each a name
   as above and a colon. A sequence entry may sit at that indentation as the
   value of the child just above it, when that child is not one of the keys
