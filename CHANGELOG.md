@@ -41,6 +41,23 @@ commit messages only.
 
 ### Fixed
 
+- **A failed host preflight no longer leaves an upgrade half-installed**
+  (#535). The preflight runs the binaries and configs the install has just put
+  in the prefix, and a failure exited with them in place, so the next restart
+  or reboot started binaries the preflight had refused, and `manifest.json` no
+  longer described `bin/`. The install now copies `bin/`, `config/`,
+  `projects/` and `.prev/` aside before replacing them. A reported error, a
+  command that fails, or SIGINT, SIGTERM or SIGHUP before the preflight passes
+  puts them back and says so. The copy is taken under a temporary name and
+  renamed only once complete. If one is left behind (a restore that failed, a
+  SIGKILL), the next install refuses to start before it changes anything: an
+  incomplete copy it says not to restore from, and a complete one it names
+  the directories of and says how to put back or remove. Once the preflight
+  passes, the copy is set aside under another name before it is deleted, so
+  a signal then keeps the new install whole; a copy left under that name is
+  removed by the next install. A symlinked `bin/`, `config/`, `projects/` or
+  `.prev/` is refused before anything changes, since the copy would hold
+  only the link.
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal
   `true`, so it passed a flow-style `http: {bind: 0.0.0.0}` the runtime

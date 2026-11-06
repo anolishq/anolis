@@ -384,6 +384,58 @@ ask for anyway). A binary that cannot
 run always stops the install. A provider that gives no answer (one that predates
 `--check-host`) is reported and skipped.
 
+The check runs the binaries and configs this install has just put in the
+prefix, so by then they have replaced the old ones. Before replacing anything,
+the install copies four directories of the prefix, `bin/`, `.prev/`,
+`projects/` (every project in it) and `config/`, to `<prefix>/.install-txn/`.
+That needs room for two more sets of binaries and the configs while the install
+runs. If the check fails, or the install stops before the check passes, on an
+error it reports (`✗ ...`), a command that fails, or SIGINT, SIGTERM or SIGHUP
+(a dropped ssh session), those four are put back from the copy and the install
+says `install: restored <prefix>/bin, config/, projects/ and .prev/ as they
+were before this run`. The running service was never restarted, so the next
+restart or reboot starts the previous install. The copy is taken after the
+install has set the prefix's directories to mode 755 and owner `anolis`, which
+it does on every run, so those are not put back. A runtime data directory
+under `config/` (a relative `runtime.data_dir` without `../`) is put back to its
+state at the copy too. Left in place: the `anolis` user and the empty prefix
+directories on a fresh install, and an API token the run generated in
+`/etc/anolis/runtime.env`, which the next install reuses.
+
+The copy is taken into `<prefix>/.install-txn.partial/` and renamed to
+`.install-txn/` only once all four directories are in it. An install killed
+in a way nothing can catch (SIGKILL, a power cut) while it copies leaves the
+`.partial` behind. The prefix itself was not yet changed, and the next install
+refuses to start, says the copy is incomplete and not to restore from it, and
+asks for it to be removed. Should a restore itself fail, or the install be
+killed that way after the copy was complete, the install leaves
+`<prefix>/.install-txn/` with the copy from before that install of each
+directory not yet put back. The next install then refuses to start, before it
+changes anything, names the directories the copy holds, and says how to put
+each one back or, if the prefix is as you want it, to remove the copy (#535).
+
+Once the check passes, the install commits: it stops treating the copy as one
+to restore, renames it to `<prefix>/.install-txn.done/` (one rename), and only
+then deletes it. A SIGINT, SIGTERM or SIGHUP during the rename takes effect
+once the copy is deleted: the install says so and stops, with the new install
+in place and `manifest.json` still describing the previous install until the
+next install. The `mv` that renames ignores those signals, so a ^C or a
+dropped ssh session cannot kill it part way, and a rename that reports failure
+but has happened counts as the commit. A signal while it deletes, or after, leaves the new install in place
+and puts nothing back. A
+`.install-txn.done/` left behind (SIGKILL or a power cut while it deletes, or a
+delete that failed) is the copy of an install that finished: nothing in it is
+needed. The next install says so and removes it, or stops, before it changes
+anything, if it cannot. A rename that fails is a commit that failed: the
+install stops and puts the four directories back, as it does when the check
+fails.
+
+The install refuses to start, before it changes anything, when `bin/`,
+`config/`, `projects/` or `.prev/` under the prefix is a symlink: the copy
+would hold the link, not what it points to, so there would be nothing to put
+back. Replace the link with the directory it points to, and run the install
+again.
+
 ## What a provider release must provide
 
 `install.sh` holds no list of providers. For each entry under

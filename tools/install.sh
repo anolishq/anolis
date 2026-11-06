@@ -289,7 +289,8 @@ phase_prepare_bundle() {
         # Config-driven online install: build the bundle from the config, here.
         stage_check_deps
         BUNDLE_DIR=$(mktemp -d)
-        trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+        INSTALL_TMP="${BUNDLE_DIR}"
+        trap _install_on_exit EXIT
         assemble_bundle "${BUNDLE_DIR}" "${ARCH}"
         log_ok "prepare: assembled bundle from ${PROJECT_DIR}"
         return
@@ -300,7 +301,8 @@ phase_prepare_bundle() {
             BUNDLE_DIR="${LOCAL_PATH}"
         elif [[ -f "${LOCAL_PATH}" ]]; then
             BUNDLE_DIR=$(mktemp -d)
-            trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+            INSTALL_TMP="${BUNDLE_DIR}"
+            trap _install_on_exit EXIT
             tar -xzf "${LOCAL_PATH}" -C "${BUNDLE_DIR}" --strip-components=1
         else
             die "Local path is neither a file nor directory: ${LOCAL_PATH}"
@@ -462,6 +464,173 @@ phase_directories() {
         "${PREFIX}/anolis-data"
     chown -R "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"
     log_ok "directories: ${PREFIX}/"
+}
+
+# =============================================================================
+# Install transaction: from the backup to a passed host preflight
+# =============================================================================
+#
+# The phases from phase_backup to phase_host_preflight replace bin/, the
+# project and the runtime config, and the host preflight can only run what they
+# installed. A preflight that then fails, or any die between them, would leave
+# an upgrade half-installed: the next restart or reboot starts binaries the
+# preflight has just refused (#535). So the directories those phases write are
+# copied aside first, and anything that ends the install before the preflight
+# passes puts them back, through the install's one EXIT trap: a die, a command
+# that fails under `set -e`, or SIGINT, SIGTERM or SIGHUP (a dropped ssh
+# session; bash runs the EXIT trap when one of these ends it).
+INSTALL_TXN_DIRS=(bin config projects .prev)
+INSTALL_TXN=""
+INSTALL_TXN_SHELL=""
+# A temp dir of the install's own (the bundle, when it was unpacked or built
+# here) that the EXIT trap removes.
+INSTALL_TMP=""
+
+# The install's EXIT trap. Restore the prefix if the copy is still held, then
+# remove the temp dir. Nothing may stop the restore half way: not errexit, not
+# a signal, not a closed stdout.
+_install_on_exit() {
+    local rc=$?
+    set +e
+    trap '' INT TERM HUP PIPE
+    _install_txn_restore
+    [[ -z "${INSTALL_TMP}" ]] || rm -rf "${INSTALL_TMP}"
+    exit "${rc}"
+}
+
+# What the transaction cannot work over, refused before the first change to
+# the host (main) and again before copying (_install_txn_begin).
+#
+# A symlink at bin/, config/, projects/ or .prev: `cp -a` would save the link,
+# not what it points to, and the install would write through it, so there
+# would be nothing to put back.
+#
+# Copies left by an install that did not finish. The copy is taken into
+# .install-txn.partial and renamed to .install-txn only once all four
+# directories are in it. So a .partial left behind is an install killed while
+# it saved the prefix, before it changed anything there: it is incomplete, and
+# never a source to restore from. A .install-txn left behind (a restore that
+# failed, or a kill nothing can trap, before the install committed) holds the
+# copy from before that install of each directory still in it; the restore had
+# already put back any that are missing. It is the only record of them: never
+# overwrite or delete it. A .install-txn.done is the copy of an install that
+# committed, part deleted: nothing in it is needed, and it is removed.
+_install_txn_refuse_stale() {
+    local txn="${PREFIX}/.install-txn" d held=()
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        if [[ -L "${PREFIX}/${d}" ]]; then
+            log_err "install: ${PREFIX}/${d} is a symlink. The install saves ${d} before it replaces it, so that it can put it back; it would save the link, not what it points to"
+            log_info "Replace the link with the directory it points to, then run the install again."
+            die "refusing to install over a symlinked ${PREFIX}/${d}"
+        fi
+    done
+    if [[ -e "${txn}.done" || -L "${txn}.done" ]]; then
+        log_info "install: removing ${txn}.done, the copy an earlier install took and no longer needed: that install had committed"
+        rm -rf "${txn}.done" || die "install: cannot remove ${txn}.done; remove it: sudo rm -rf ${txn}.done"
+    fi
+    if [[ -e "${txn}.partial" || -L "${txn}.partial" ]]; then
+        log_err "install: ${txn}.partial exists: an earlier install was stopped while it saved the prefix, before it changed anything there"
+        log_info "That copy is incomplete; do not restore from it. ${PREFIX} is as it was before that install. Remove the copy:"
+        log_info "  sudo rm -rf ${txn}.partial"
+        die "refusing to install over an unfinished install"
+    fi
+    [[ -e "${txn}" || -L "${txn}" ]] || return 0
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        if [[ -d "${txn}/${d}" && ! -L "${txn}/${d}" ]]; then held+=("${d}/"); fi
+    done
+    log_err "install: ${txn} exists: an earlier install stopped before it committed (once its host preflight passed) and did not put all of the prefix back"
+    if [[ ${#held[@]} -gt 0 ]]; then
+        local others=""
+        if [[ ${#held[@]} -lt ${#INSTALL_TXN_DIRS[@]} ]]; then others="; the others were put back"; fi
+        log_info "It holds ${held[*]} as they were before that install${others}. To put back each one it holds:"
+        log_info "  sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
+        log_info "then remove it: sudo rm -rf ${txn}"
+        log_info "Or, if ${PREFIX} is as you want it, remove the copy: sudo rm -rf ${txn}"
+    else
+        log_info "It holds none of bin/, config/, projects/ or .prev/: there is nothing to put back. Look at it, then remove it: sudo rm -rf ${txn}"
+    fi
+    die "refusing to install over an unfinished install"
+}
+
+_install_txn_begin() {
+    local txn="${PREFIX}/.install-txn" d
+    _install_txn_refuse_stale
+    install -d -m 700 "${txn}.partial" || die "install: cannot create ${txn}.partial"
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        cp -a "${PREFIX}/${d}" "${txn}.partial/${d}" || {
+            rm -rf "${txn}.partial"
+            die "install: cannot save ${PREFIX}/${d} before replacing it"
+        }
+    done
+    mv "${txn}.partial" "${txn}" || { rm -rf "${txn}.partial"; die "install: cannot rename ${txn}.partial to ${txn}"; }
+    INSTALL_TXN="${txn}"
+    INSTALL_TXN_SHELL="${BASHPID}"
+    trap _install_on_exit EXIT
+}
+
+# The host preflight passed: keep what was installed. The rename of
+# .install-txn to .install-txn.done is the commit. The copy stops being one to
+# restore before any of it is deleted: INSTALL_TXN is cleared, then the copy is
+# renamed. An INT, TERM or HUP in those two steps is recorded, not acted on;
+# once the copy is deleted the install says so and stops with that signal, the
+# new install in place. The rename itself runs in a subshell that ignores
+# them, so a signal to the whole process group (a ^C, a dropped ssh session)
+# cannot kill `mv` (a recorded trap, unlike an ignored one, is not inherited).
+# A signal during the delete restores nothing, and a .done left behind (a kill,
+# a power cut) is the copy of an install that committed, which the next install
+# removes. A rename that fails is a commit that failed: the install stops, and
+# the EXIT trap puts the prefix back, as for any stop before the commit. What
+# counts is the filesystem, not mv's status: a rename that reports failure but
+# has happened is a commit. The EXIT trap stays, for the temp dir.
+_install_txn_commit() {
+    local txn="${INSTALL_TXN}" sig=""
+    [[ -n "${txn}" ]] || return 0
+    trap 'sig=INT' INT
+    trap 'sig=TERM' TERM
+    trap 'sig=HUP' HUP
+    INSTALL_TXN=""
+    if ! ( trap '' INT TERM HUP; mv "${txn}" "${txn}.done" ); then
+        if [[ -d "${txn}.done" && ! -e "${txn}" ]]; then
+            [[ -n "${sig}" ]] || log_warn "install: the rename of ${txn} to ${txn}.done reported failure but completed; the install is committed"
+        else
+            INSTALL_TXN="${txn}"
+            trap - INT TERM HUP
+            die "install: cannot rename ${txn} to ${txn}.done, so the install cannot commit; putting the prefix back"
+        fi
+    fi
+    trap - INT TERM HUP
+    if ! rm -rf "${txn}.done"; then
+        log_warn "install: could not remove ${txn}.done, the copy this install took before it changed the prefix. The install is complete, and nothing in the copy is needed: remove it: sudo rm -rf ${txn}.done"
+        log_info "  Until it is removed, the next install tries to remove it, and stops if it cannot."
+    fi
+    if [[ -n "${sig}" ]]; then
+        log_warn "install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here, before its remaining steps: ${PREFIX}/manifest.json still describes the previous install until the next install"
+        kill -s "${sig}" "${BASHPID}"
+    fi
+}
+
+# Put back what _install_txn_begin saved. Called by the EXIT trap, so it runs
+# at most once and only in the shell that began the transaction: a subshell
+# that exits must not restore under a parent that goes on. A directory is
+# deleted only once its copy is known to be there.
+_install_txn_restore() {
+    [[ -n "${INSTALL_TXN}" && "${BASHPID}" == "${INSTALL_TXN_SHELL}" ]] || return 0
+    local txn="${INSTALL_TXN}" d unrestored=()
+    INSTALL_TXN=""
+    for d in "${INSTALL_TXN_DIRS[@]}"; do
+        if [[ -d "${txn}/${d}" && ! -L "${txn}/${d}" ]] \
+            && rm -rf "${PREFIX:?}/${d}" && mv "${txn}/${d}" "${PREFIX}/${d}"; then
+            continue
+        fi
+        unrestored+=("${d}")
+    done
+    if [[ ${#unrestored[@]} -gt 0 ]]; then
+        log_err "install: could not restore ${unrestored[*]} under ${PREFIX}; the copies taken before this run are in ${txn}"
+        log_info "Put each one back by hand: sudo rm -rf ${PREFIX}/<dir> && sudo mv ${txn}/<dir> ${PREFIX}/<dir>"
+        return 0
+    fi
+    rm -rf "${txn}"
+    log_info "install: restored ${PREFIX}/bin, config/, projects/ and .prev/ as they were before this run"
 }
 
 # =============================================================================
@@ -3810,14 +3979,17 @@ main() {
     phase_verify
     preflight_variant_selection
     phase_version_check
+    _install_txn_refuse_stale
     phase_system_user
     phase_directories
+    _install_txn_begin
     phase_backup
     phase_install_binaries
     phase_config_project
     phase_config_runtime
     phase_runtime_auth
     phase_host_preflight
+    _install_txn_commit
     phase_manifest
     phase_systemd
     phase_telemetry_export
