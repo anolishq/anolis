@@ -530,8 +530,8 @@ TEST(FunctionSpecEncoding, ArgsObjectDoesNotKeepDeclaredOrder) {
 }
 
 // The protocol does not forbid two args with one name. The object keeps the
-// last one, which is the one CallRouter validates a call against, and its
-// position is that arg's own index.
+// last one, and its position is that arg's own index. (How a call is validated
+// against such a function: CallRouterTest.DuplicateArgumentNames...)
 TEST(FunctionSpecEncoding, DuplicateArgNameKeepsTheLastDeclaredArgAndItsPosition) {
     registry::FunctionSpec spec;
     spec.function_name = "f";

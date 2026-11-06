@@ -103,12 +103,16 @@ Notes:
 
 1. A function's `args` is an object keyed by argument name, so it does not
    hold the order the provider declared the arguments in: key order on the
-   wire is alphabetical. Each arg carries `position`, its 0-based index in the
-   declared order; sort by it to list or prompt for arguments in that order.
-   A call still names each argument, so order never changes what a call sends.
-   If a provider declares two arguments with one name, `args` holds the last
-   of them, which is the one a call is validated against, and the earlier
-   one's index is missing from the positions.
+   wire is sorted by name (bytewise), not declared. Each arg carries
+   `position`, its 0-based index in the declared order; sort by it to list or
+   prompt for arguments in that order. A call still names each argument, so
+   order never changes what a call sends. If a provider declares two
+   arguments with one name, `args` holds only the last of them, at its own
+   index, and the earlier one's index is missing from the positions. A call
+   is still checked against every one of them: each one's `required` applies,
+   and each converts the value in declared order before the last one's type
+   and range are checked, so a call that matches the shown argument can be
+   refused.
 
 ### State reads
 

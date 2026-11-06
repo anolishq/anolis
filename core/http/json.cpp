@@ -217,8 +217,8 @@ nlohmann::json encode_function_spec(const registry::FunctionSpec &spec) {
     // Build args structure with full ArgSpec metadata. The object is keyed by
     // name and so holds no order (nlohmann sorts its keys); `position` carries
     // each arg's index in the order the provider declared them (#731). A name
-    // declared twice keeps the last ArgSpec, the one CallRouter validates
-    // against, and that ArgSpec's own index.
+    // declared twice keeps the last ArgSpec, with that ArgSpec's own index;
+    // CallRouter still checks a call against every duplicate.
     nlohmann::json args = nlohmann::json::object();
     for (size_t position = 0; position < spec.args.size(); ++position) {
         const auto &arg = spec.args[position];

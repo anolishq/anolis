@@ -1179,7 +1179,8 @@ components:
             it existed still validate. Positions are 0..n-1 unless the provider
             declares two arguments with one name: the object then holds the
             last of them, with its own index, and the index of the earlier one
-            is absent.
+            is absent. A call is still checked against every one of them (see
+            docs/http-api.md).
         description:
           type: string
         unit:

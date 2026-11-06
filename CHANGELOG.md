@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- **Capability args carry `position`** (#731). A client that validates
+  `GET /v0/devices/{provider_id}/{device_id}/capabilities` responses against a
+  copy of `schemas/http/runtime-http.openapi.v0.yaml` from before this release
+  rejects them: `ArgSpec` there has `additionalProperties: false`. Update the
+  copy. A new failure for an existing client makes this release MINOR
+  (`docs/dependencies.md`).
+
 ### Security
 
 - **`install.sh` no longer bakes a literal API token into a bundle** (#529).
@@ -52,11 +61,9 @@ commit messages only.
   `schemas/http/runtime-http.openapi.v0.yaml` declares it. The runtime always
   sends it; it is not in the schema's `required`, so recorded responses
   without it still validate against the new schema. Not additive for a
-  strict validator: `ArgSpec` has `additionalProperties: false`, so a client
-  that validates responses against an earlier copy of the schema rejects them
-  until it takes this one, so the release that carries this is MINOR
-  (`docs/dependencies.md`). Function results are not
-  encoded as ArgSpecs and are unchanged.
+  client that validates against an earlier copy of the schema; see the
+  upgrade note. Function results are not encoded as ArgSpecs and are
+  unchanged.
 
 ### Fixed
 

@@ -347,6 +347,63 @@ TEST_F(CallRouterTest, ValidateCallAcceptsWhatExecuteCallWouldDispatch) {
     EXPECT_THAT(error, HasSubstr("negative"));
 }
 
+// The protocol does not forbid two ArgSpecs with one name, and the capabilities
+// response shows only the last of them (#731). Pin what validation does with
+// such a function, as docs/http-api.md states it: every duplicate's `required`
+// is enforced, and each duplicate converts the value in declared order before
+// the last one's type and range are checked. A call that matches the shown arg
+// can still be refused.
+TEST_F(CallRouterTest, DuplicateArgumentNamesAreValidatedAgainstEveryDuplicateInTurn) {
+    EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+        Device dev;
+        dev.set_device_id("dev1");
+        devices.push_back(dev);
+        return true;
+    }));
+    EXPECT_CALL(*mock_provider, describe_device("dev1", _))
+        .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+            response.mutable_device()->set_device_id("dev1");
+            auto* fn = response.mutable_capabilities()->add_functions();
+            fn->set_name("f");
+            fn->set_function_id(1);
+            auto* first = fn->add_args();  // required double
+            first->set_name("x");
+            first->set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            first->set_required(true);
+            auto* last = fn->add_args();  // optional int64, 0..10: what the capabilities response shows
+            last->set_name("x");
+            last->set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
+            last->set_required(false);
+            last->set_min_int64(0);
+            last->set_max_int64(10);
+            return true;
+        }));
+    registry->discover_provider("sim0", *mock_provider);
+
+    std::string error;
+    control::CallRequest omitted;
+    omitted.device_handle = "sim0/dev1";
+    omitted.function_id = 1;
+    EXPECT_FALSE(router->validate_call(omitted, error)) << "the earlier duplicate's required is enforced";
+    EXPECT_THAT(error, HasSubstr("Missing required argument: x"));
+
+    // An int64 that matches the shown (last) arg is first converted to double
+    // by the earlier duplicate, and then fails the last one's type.
+    control::CallRequest as_int = omitted;
+    as_int.args["x"] = Int64Value(3);
+    EXPECT_FALSE(router->validate_call(as_int, error));
+    EXPECT_THAT(error, HasSubstr("Type mismatch: expected int64, got double"));
+
+    // A double satisfies the first duplicate and fails the last.
+    control::CallRequest as_double = omitted;
+    anolis::deviceprovider::v1::Value d;
+    d.set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+    d.set_double_value(3.0);
+    as_double.args["x"] = d;
+    EXPECT_FALSE(router->validate_call(as_double, error));
+    EXPECT_THAT(error, HasSubstr("Type mismatch: expected int64, got double"));
+}
+
 TEST_F(CallRouterTest, ExecuteCallSuccess) {
     RegisterMockDevice();
 
