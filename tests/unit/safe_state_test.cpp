@@ -318,21 +318,53 @@ TEST_F(SafeStateTest, AnUndispatchableSetpointIsReportedTheSameWayForEveryReason
     }
 }
 
-// An output with a bad and a good setpoint is driven by the good one, and the
-// bad one is not sent: it would be refused before the provider anyway.
-TEST_F(SafeStateTest, AGoodSetpointDrivesAnOutputThatAlsoHasABadOne) {
+// A function with a good and a bad setpoint: the good one is sent. The bad one
+// is not sent (it would be refused before the provider), but one function can
+// drive several outputs, one setpoint per index, so the good one does not
+// stand in for it: it is reported not driven, a config failure, and the run is
+// not achieved. The function stays out of the uncovered list: it is driven.
+TEST_F(SafeStateTest, ABadSetpointBesideAGoodOneForTheSameFunctionIsReportedNotDriven) {
     RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
     auto bad = make_call("sim0/heater", "set_output");
     bad.args["pwm"] = automation::ParameterValue{-5.0};
     safety.safe_state.setpoints = {bad, make_call("sim0/heater", "set_output")};
+    // StrictMock: one call per pass, the good setpoint. No zero is sent.
+    EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).Times(2).WillRepeatedly(Return(true));
+    for (const bool zero_is_safe : {false, true}) {
+        SCOPED_TRACE(zero_is_safe ? "zero_is_safe" : "no zero");
+        safety.safe_state.zero_is_safe = zero_is_safe;
+        auto controller = make_controller();
+
+        const auto result = controller->trigger("test");
+        EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+        ASSERT_EQ(result.actions.size(), 2u);
+        EXPECT_TRUE(result.actions[0].success);
+        EXPECT_FALSE(result.actions[1].success);
+        EXPECT_EQ(result.actions[1].cause, control::FailureCause::Config);
+        EXPECT_EQ(result.actions[1].error, "setpoint: Argument 'pwm': Value -5 below minimum 0");
+        EXPECT_FALSE(result.safe_state_achieved);
+        EXPECT_TRUE(controller->capability().uncovered_functions.empty());
+    }
+}
+
+// What install.sh reads (#634): the refused sibling is a config failure in the
+// startup run, so the install fails, as it did before the per-output plan.
+TEST_F(SafeStateTest, StartupRunReportsABadSetpointBesideAGoodOneAsAConfigFailure) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto bad = make_call("sim0/heater", "set_output");
+    bad.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints = {make_call("sim0/heater", "set_output"), bad};
     auto controller = make_controller();
 
     EXPECT_CALL(*mock_provider, call("heater", _, "set_output", _, _)).WillOnce(Return(true));
-    const auto result = controller->trigger("test");
-    EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
-    ASSERT_EQ(result.actions.size(), 1u);
-    EXPECT_TRUE(result.safe_state_achieved);
-    EXPECT_TRUE(controller->capability().uncovered_functions.empty());
+    controller->drive_safe_state();
+    const auto report = controller->startup_report();
+    EXPECT_TRUE(report.ran);
+    EXPECT_FALSE(report.safe_state_achieved);
+    ASSERT_EQ(report.failed_actions.size(), 1u);
+    EXPECT_EQ(report.failed_actions[0].device_handle, "sim0/heater");
+    EXPECT_EQ(report.failed_actions[0].function, "set_output");
+    EXPECT_EQ(report.failed_actions[0].cause, control::FailureCause::Config);
 }
 
 // With no ACTUATE function in the inventory, a declared plan does not count as
@@ -1101,11 +1133,11 @@ protected:
         return call;
     }
 
-    static runtime::ModeTransitionCallConfig motor(double duty) {
+    static runtime::ModeTransitionCallConfig motor(double duty, int64_t index = 1) {
         runtime::ModeTransitionCallConfig call;
         call.device_handle = "sim0/motor0";
         call.function_name = "set_motor_duty";
-        call.args["motor_index"] = automation::ParameterValue{int64_t{1}};
+        call.args["motor_index"] = automation::ParameterValue{index};
         call.args["duty"] = automation::ParameterValue{duty};
         return call;
     }
@@ -1199,6 +1231,43 @@ TEST_F(SafeStateInventoryTest, ZeroAloneReportsTheOutputsItCannotZero) {
         if (action.function.starts_with("set_relay")) {
             EXPECT_THAT(action.error, HasSubstr("cannot zero required non-numeric argument 'enabled'"));
         }
+    }
+}
+
+// One setpoint per motor index, as the e2e configs declare them: motor 1's is
+// good, motor 2's duty is out of range. Motor 1 is driven; motor 2's setpoint
+// is not sent and is reported not driven, with or without zero_is_safe (a
+// sibling setpoint drives the function, so its zero is not used). The stop is
+// not achieved.
+TEST_F(SafeStateInventoryTest, ABadSetpointForOneIndexIsReportedWhileAnotherIndexIsDriven) {
+    safety.safe_state.setpoints = {relay("set_relay_ch1"), relay("set_relay_ch2"), motor(0.0, 1), motor(-5.0, 2),
+                                   temp(20.0)};
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch1", _, _)).Times(2).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_provider, call("relay0", _, "set_relay_ch2", _, _)).Times(2).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_provider,
+                call("motor0", _, "set_motor_duty",
+                     Truly([](const ValueMap& args) { return args.at("motor_index").int64_value() == 1; }), _))
+        .Times(2)
+        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_provider, call("temp0", _, "set_setpoint", _, _)).Times(2).WillRepeatedly(Return(true));
+    for (const bool zero_is_safe : {false, true}) {
+        SCOPED_TRACE(zero_is_safe ? "zero_is_safe" : "no zero");
+        safety.safe_state.zero_is_safe = zero_is_safe;
+        auto controller = make_controller();
+
+        const auto result = controller->trigger("test");
+        EXPECT_EQ(result.kind, control::SafeStateKind::Setpoints);
+        EXPECT_THAT(outcomes(result),
+                    UnorderedElementsAre("sim0/relay0/set_relay_ch1 ok", "sim0/relay0/set_relay_ch2 ok",
+                                         "sim0/motor0/set_motor_duty ok", "sim0/temp0/set_setpoint ok",
+                                         "sim0/motor0/set_motor_duty FAIL"));
+        for (const auto& action : result.actions) {
+            if (!action.success) {
+                EXPECT_EQ(action.cause, control::FailureCause::Config);
+                EXPECT_EQ(action.error, "setpoint: Argument 'duty': Value -5 below minimum 0");
+            }
+        }
+        EXPECT_FALSE(result.safe_state_achieved);
     }
 }
 

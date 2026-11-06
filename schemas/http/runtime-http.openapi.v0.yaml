@@ -1007,8 +1007,8 @@ components:
           type: array
           description: >-
             The calls of the startup run that failed, and the ACTUATE outputs
-            it could not drive, for which nothing was sent (cause config).
-            Empty when there are none.
+            it could not drive, for which nothing was sent (cause config; see
+            EstopResponse.actions). Empty when there are none.
           items:
             $ref: '#/components/schemas/EstopAction'
         skipped_actions:
@@ -1075,7 +1075,9 @@ components:
           description: >-
             One entry per call the stop sent, and one per ACTUATE output it
             could not drive, for which nothing was sent (success false, cause
-            config, error saying why).
+            config, error saying why). A setpoint that failed validation while
+            another setpoint for the same function was sent is such an entry
+            too.
           items:
             $ref: '#/components/schemas/EstopAction'
         safe_state_achieved:

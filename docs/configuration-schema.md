@@ -227,10 +227,23 @@ Without hooks, the stop plans each actuating (`ACTUATE`) function on its own:
 3. else it is not driven. The stop reports it as a failed action with
    `cause: config`, naming why, and sends nothing for it.
 
-A setpoint that names a function but cannot dispatch is not sent; another
-setpoint for the same function, or its zero, can still drive it. A setpoint
-that targets no actuating function (another category, or a device that is not
-present) is sent as declared. `software_safe_state` says how the actuating
+A setpoint that names a function but cannot dispatch is never sent. The
+startup preflight logs it at ERROR, and what the stop reports depends on the
+function:
+
+- Another setpoint for the same function dispatches: one function can drive
+  several outputs, one setpoint per index (`motor_index: 1` and `2`), so the
+  refused setpoint is reported in `actions` as not driven, `cause: config`.
+- No setpoint for the function dispatches and its zero does: the zero drives
+  the function, and the stop reports nothing for the refused setpoint. The
+  run can be achieved.
+- Nothing drives the function: it is reported not driven, as in step 3.
+
+A not-driven entry makes `safe_state_achieved` false. In the startup run
+(`safety.on_startup: safe_state`), `install.sh` fails the install on it.
+
+A setpoint that targets no actuating function (another category, or a device
+that is not present) is sent as declared, alongside a zero plan too. `software_safe_state` says how the actuating
 outputs are driven: `setpoints` or `zero` when every driven output gets that,
 `mixed` when some get their setpoint and others their zero. A setpoint sent to
 anything else does not count. When no output is driven, it is `setpoints` if

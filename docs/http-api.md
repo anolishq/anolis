@@ -140,7 +140,10 @@ Notes:
    actuating function gets its setpoint if one passes validation, else its
    zero if `safety.safe_state.zero_is_safe` is set and the zero passes
    validation, else it is reported in `actions` as not driven, with
-   `cause: "config"` and the reason, and nothing is sent for it
+   `cause: "config"` and the reason, and nothing is sent for it. A setpoint
+   that fails validation is never sent; it is also reported not driven when
+   another setpoint for the same function (another index) is sent, but not
+   when the function's zero drives it instead
    ([configuration-schema.md](configuration-schema.md#safety)).
    `software_safe_state` says how the outputs are driven: `hooks`,
    `setpoints`, `zero`, `mixed` (some outputs get their setpoint, others

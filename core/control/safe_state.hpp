@@ -55,8 +55,10 @@ enum class SafeStateKind { None, Hooks, Setpoints, Zero, Mixed };
 /** @brief What a software stop would do, as `plan_safe_state` works it out. */
 struct SafeStatePlan {
     SafeStateKind kind = SafeStateKind::None;
-    // ACTUATE functions the plan does not drive with a dispatchable call, as
-    // "provider/device/function". Every ACTUATE function under `None`.
+    // ACTUATE functions the plan does not drive with any dispatchable call, as
+    // "provider/device/function". Every ACTUATE function under `None`. A
+    // function one setpoint drives while another of its setpoints is refused
+    // is not listed; the stop reports the refused one as not driven.
     std::vector<std::string> uncovered;
     // ACTUATE functions in the inventory.
     size_t actuating_functions = 0;
@@ -89,6 +91,12 @@ struct SafeStatePlan {
  *  2. else its zero, if `zero_is_safe` is set and the zero call dispatches;
  *  3. else it is not driven: the stop reports it as a config failure without
  *     a call.
+ * A setpoint that does not dispatch is never sent. When another setpoint
+ * drives the same function (one per index, say), the refused one is reported
+ * as a not-driven config failure of its own, since one function can drive
+ * several outputs; that function stays out of `uncovered`. When none does and
+ * the zero drives the function, the refused setpoint is dropped and only the
+ * startup preflight reports it, at ERROR.
  * A setpoint that targets no registered ACTUATE function (another category, a
  * device not present) is sent as declared. Validation reads the live
  * registry, so the plan can change when a provider restart republishes its
@@ -141,6 +149,9 @@ struct CallOutcome {
     bool success = false;
     std::string error;
     FailureCause cause = FailureCause::Run;  // meaningful only when !success
+    // False for an entry no call was made for: an output the plan cannot
+    // drive, or a zero it could not build. Such an entry is never a success.
+    bool sent = true;
 };
 
 /**

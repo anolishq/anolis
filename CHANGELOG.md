@@ -94,26 +94,45 @@ Upgrade notes:
   gets its setpoint if one passes validation, else its zero if
   `zero_is_safe` is set and the zero passes validation, else it is reported
   in `actions` as not driven, with `cause: config` and the reason, and
-  nothing is sent for it. A setpoint that fails validation is not sent. A
+  nothing is sent for it. A setpoint that fails validation is never sent. A
   declared safe state therefore never plans `none`. Consequences:
-  - A setpoint that fails validation and an output no setpoint or zero
-    drives are now config failures in the startup run, so `install.sh`
-    fails the install on them (#634). An output that nothing at all was
-    declared for, beside setpoints for others, used to plan `none` and pass;
-    it now fails the install too.
+  - A setpoint that fails validation is logged at ERROR by the startup
+    preflight in every case. What the stop reports for it depends on its
+    function:
+    - another setpoint for that function (another index, say) dispatches:
+      it is a not-driven action with `cause: config`;
+    - no setpoint for it dispatches and its zero does: nothing is reported,
+      and the zero drives the function;
+    - nothing drives the function: the function is a not-driven action.
+  - Any not-driven action makes `safe_state_achieved` false. With
+    `safety.on_startup: safe_state` (the default), it is a config failure of
+    the startup run, so `install.sh` fails the install (#634). Under
+    `leave` the startup run does not run, and nothing fails at install.
+  - In the second case (the issue's own: a bad setpoint whose zero
+    dispatches) the install passes; the preflight ERROR is the only report.
+  - An output that nothing at all was declared for, beside setpoints for
+    others, used to plan `none` and pass; it now fails the install (with
+    `on_startup: safe_state`).
+  - A setpoint for a function that is not ACTUATE (a CONFIG function, or a
+    device that is not present) is now also sent alongside a zero plan; the
+    zero rung never sent it.
   - When the plan drives no actuating output, the e-stop's own entry into
     FAULT runs the matching `-> FAULT` mode-transition hooks (#251), as it
     did under `none`. That now also covers a zero rung that can zero none of
     the outputs (for example only boolean arguments), where those hooks were
     refused before. Hooks declared in `safety.safe_state` are unchanged.
-    The other direction: when the plan drives at least one output, those
-    hooks are refused, so an output that only a `-> FAULT` hook drove, beside
-    setpoints for the others, is no longer driven on e-stop. Such a config
-    used to plan `none`; it now reports that output not driven and fails
-    the install.
+  - **Known regression against 0.10.2, for one configuration:** setpoints
+    for some outputs, no `zero_is_safe`, and a `-> FAULT` mode-transition
+    hook that drives another output. That config used to plan `none`, so
+    the e-stop's FAULT entry ran the hook and drove that output. Now the
+    plan drives the setpoint outputs, the latch refuses the hook, and that
+    output is left as it was and reported not driven (which fails the
+    install with `on_startup: safe_state`). Workaround: declare a setpoint
+    for that output too. A follow-up will let `-> FAULT` hooks run for the
+    outputs the plan leaves undriven.
   - The startup preflight logs every setpoint that cannot be dispatched at
-    ERROR and counts it unless hooks are declared, names each actuating
-    function the plan leaves undriven at ERROR, and logs
+    ERROR and counts it unless hooks are declared (then WARN, unused), names
+    each actuating function the plan leaves undriven at ERROR, and logs
     `preflight: e-stop plan '<kind>'` (was `... would run rung '<kind>'`).
   - The refuse-hookless AUTO gate's verdict is unchanged; its note that the
     e-stop would drive nothing now fires whenever the plan drives no output.

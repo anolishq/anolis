@@ -249,6 +249,7 @@ WorkedPlan work_out_plan(const registry::DeviceRegistry &registry, const CallRou
     for (const auto &[handle, spec] : actuating) {
         bool driven = false;
         std::string why;
+        std::vector<size_t> refused;  // this function's setpoints that do not dispatch
         for (size_t i = 0; i < setpoints.size(); ++i) {
             if (!setpoint_matches(setpoints[i], handle, spec)) {
                 continue;
@@ -256,12 +257,23 @@ WorkedPlan work_out_plan(const registry::DeviceRegistry &registry, const CallRou
             targets_actuator[i] = 1;
             if (dispatches[i] != 0) {
                 driven = true;
-            } else if (why.empty()) {
-                why = std::format("setpoint: {}", refusal[i]);
+            } else {
+                refused.push_back(i);
+                if (why.empty()) {
+                    why = std::format("setpoint: {}", refusal[i]);
+                }
             }
         }
         if (driven) {
             by_setpoint = true;
+            // One function can drive several outputs, one setpoint per index
+            // (motor_index 1 and 2). A sibling that dispatches does not drive
+            // the output a refused setpoint was declared for, so each refused
+            // one is reported not driven, and nothing is sent for it.
+            for (const size_t i : refused) {
+                per_output.push_back(
+                    {PlanStep::Kind::NotDriven, nullptr, handle, spec, std::format("setpoint: {}", refusal[i])});
+            }
             continue;
         }
         if (declared.zero_is_safe) {
@@ -281,8 +293,9 @@ WorkedPlan work_out_plan(const registry::DeviceRegistry &registry, const CallRou
 
     // Setpoints go out in declared order: each that dispatches, and each that
     // targets no registered ACTUATE function, as before. One for an ACTUATE
-    // function that does not dispatch is not sent; that function is driven by
-    // another setpoint or its zero, or reported not driven above.
+    // function that does not dispatch is not sent: it is reported not driven
+    // above, unless no setpoint for that function dispatches and its zero
+    // drives the function instead (#640, owner decision).
     for (size_t i = 0; i < setpoints.size(); ++i) {
         if (dispatches[i] != 0 || targets_actuator[i] == 0) {
             plan.steps.push_back({PlanStep::Kind::Call, &setpoints[i], {}, {}, {}});
@@ -372,6 +385,7 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
         outcome.success = false;
         outcome.error = std::move(why);
         outcome.cause = FailureCause::Config;
+        outcome.sent = false;
         return outcome;
     }
 
@@ -420,7 +434,7 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
                 result.actions.push_back(run_zero_call(handle, step.spec));
                 break;
             case PlanStep::Kind::NotDriven:
-                result.actions.push_back({handle, function, false, step.why, FailureCause::Config});
+                result.actions.push_back({handle, function, false, step.why, FailureCause::Config, false});
                 break;
         }
     }

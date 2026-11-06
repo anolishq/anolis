@@ -419,12 +419,12 @@ void Runtime::preflight_declared_calls() const {
         for (const auto &function : plan.uncovered) {
             names += (names.empty() ? "" : ", ") + function;
         }
-        LOG_ERROR("[Runtime] preflight: safety.safe_state leaves " << plan.uncovered.size() << " of "
-                                                                   << plan.actuating_functions
-                                                                   << " actuating function(s) undriven; POST /v0/estop "
-                                                                      "and safety.on_startup report them as not "
-                                                                      "driven: "
-                                                                   << names);
+        const char *reporters = config_.safety.on_startup == StartupOutputs::SafeState
+                                    ? "POST /v0/estop and safety.on_startup report"
+                                    : "POST /v0/estop reports";
+        LOG_ERROR("[Runtime] preflight: safety.safe_state leaves "
+                  << plan.uncovered.size() << " of " << plan.actuating_functions << " actuating function(s) undriven; "
+                  << reporters << " them as not driven: " << names);
     }
     if (plan.kind == control::SafeStateKind::None) {
         // The sharp case (#251): the machine DOES declare a fault safe-state --
@@ -450,7 +450,7 @@ void Runtime::preflight_declared_calls() const {
     if (failed > 0) {
         LOG_ERROR("[Runtime] " << failed << " of " << checked
                                << " declared call(s) could not be dispatched against the device inventory as it "
-                                  "stands now. None of them will run as declared.");
+                                  "stands now. None of them can be dispatched as declared.");
     } else if (absent_calls > 0) {
         LOG_WARN("[Runtime] preflight: " << absent_calls << " of " << checked
                                          << " declared call(s) target devices absent at startup; the rest are "
@@ -1241,8 +1241,9 @@ void Runtime::update_stop_chain() {
 }
 
 void Runtime::reissue_safe_state_for(const std::string &device_handle) {
-    // The controller runs whichever rung the machine actually declares --
-    // hooks, else setpoints, else zero -- filtered to this device. Walking
+    // The controller runs the machine's safe-state plan (plan_safe_state:
+    // hooks, else per output setpoint, zero or not driven), filtered to this
+    // device. Walking
     // safety.safe_state.hooks here would silently do nothing on a machine
     // that declares setpoints or relies on zeroing.
     const auto result = safe_state_controller_->reassert_for(device_handle);
@@ -1251,6 +1252,9 @@ void Runtime::reissue_safe_state_for(const std::string &device_handle) {
     for (const auto &action : result.actions) {
         if (action.success) {
             ++issued;
+        } else if (!action.sent) {
+            LOG_WARN("[Runtime] safe state does not drive " << action.device_handle << "/" << action.function
+                                                            << ", nothing re-issued: " << action.error);
         } else {
             LOG_WARN("[Runtime] safe-state re-issue failed for " << action.device_handle << "/" << action.function
                                                                  << ": " << action.error);
