@@ -476,7 +476,8 @@ bool Runtime::init_automation(std::string &error) {
         // re-evaluated against the live registry, so it holds for the process
         // lifetime and across provider restarts. Manual control and /v0/estop
         // stay available; the veto never blocks FAULT (mode_manager honors that).
-        const auto startup_gate = evaluate_hookless_auto_gate(*registry_, config_.automation, config_.safety);
+        const auto startup_gate =
+            evaluate_hookless_auto_gate(*registry_, *call_router_, config_.automation, config_.safety);
         if (startup_gate.refused) {
             LOG_ERROR("[Runtime] " << startup_gate.message);
             LOG_ERROR(
@@ -486,7 +487,7 @@ bool Runtime::init_automation(std::string &error) {
         // Checked before the transition's hooks run, and again under the mode
         // lock as AUTO is written, so a provider restart that commits a hookless
         // inventory meanwhile cannot slip in between (#239).
-        install_hookless_auto_gate(*mode_manager_, *registry_, config_.automation, config_.safety);
+        install_hookless_auto_gate(*mode_manager_, *registry_, *call_router_, config_.automation, config_.safety);
         // A software stop's latch holds until a deliberate clear, so AUTO waits
         // for it too (#481).
         install_estop_auto_gate(*mode_manager_, *safe_state_controller_);
@@ -1417,7 +1418,7 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // AUTO is written (#239): either it sees this inventory and refuses AUTO,
     // or AUTO was already written and this re-check sees it.
     if (mode_manager_ && config_.automation.enabled) {
-        enforce_hookless_gate_in_auto(*registry_, config_.automation, config_.safety, *mode_manager_,
+        enforce_hookless_gate_in_auto(*registry_, *call_router_, config_.automation, config_.safety, *mode_manager_,
                                       "provider '" + provider_id + "' restart");
     }
 #endif

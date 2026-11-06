@@ -175,26 +175,16 @@ std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController:
     return actuating_functions_for(registry_);
 }
 
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety) {
-    size_t uncovered = 0;
-    for (const auto &[handle, spec] : actuating_functions_for(registry)) {
-        bool covered = false;
-        for (const auto &setpoint : safety.safe_state.setpoints) {
-            if (setpoint_matches(setpoint, handle, spec)) {
-                covered = true;
-                break;
-            }
-        }
-        if (!covered) {
-            ++uncovered;
-        }
-    }
-
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                                      const runtime::SafetyConfig &safety) {
     if (!safety.safe_state.hooks.empty()) {
         return SafeStateKind::Hooks;
     }
-    // Setpoints apply only if they cover every actuating output (fail closed).
-    if (!safety.safe_state.setpoints.empty() && uncovered == 0) {
+    // Setpoints apply only if they cover every actuating output (fail closed),
+    // by the same rule the uncovered count uses: a setpoint that cannot
+    // dispatch covers nothing (#253, #640).
+    if (!safety.safe_state.setpoints.empty() &&
+        uncovered_actuating_functions(registry, call_router, safety.safe_state.setpoints).empty()) {
         return SafeStateKind::Setpoints;
     }
     if (safety.safe_state.zero_is_safe) {
@@ -203,7 +193,9 @@ SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, 
     return SafeStateKind::None;
 }
 
-SafeStateKind SafeStateController::planned_kind() const { return planned_safe_state_kind(registry_, safety_); }
+SafeStateKind SafeStateController::planned_kind() const {
+    return planned_safe_state_kind(registry_, call_router_, safety_);
+}
 
 const char *failure_cause_to_string(FailureCause cause) {
     switch (cause) {

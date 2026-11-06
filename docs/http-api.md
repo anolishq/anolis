@@ -121,7 +121,8 @@ Notes:
 Notes:
 
 1. `/v0/estop` runs the declared safe-state ladder (hooks -> per-actuator
-   setpoints, only when they cover every actuating output -> zero, only when
+   setpoints, only when they cover every actuating output with calls that
+   pass validation -> zero, only when
    `safety.safe_state.zero_is_safe` is set -> otherwise an honest
    `software_safe_state: "none"`) and works whether or not automation is
    enabled. On an automation machine it also drives `FAULT`. The response

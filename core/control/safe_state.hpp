@@ -55,10 +55,17 @@ enum class SafeStateKind { None, Hooks, Setpoints, Zero };
  * weaker answer to this question is precisely how a machine gets reported as
  * safe while its e-stop does nothing (#251, #258).
  *
+ * "Covers" is `uncovered_actuating_functions`'s rule, applied to
+ * `safety.safe_state.setpoints`: a setpoint covers a function only if it can
+ * dispatch, so setpoints that name every function but fail validation do not
+ * shadow `zero_is_safe` (#640). That validation reads the live registry, so
+ * the answer can change when a provider restart republishes its inventory.
+ *
  * How many functions the active rung cannot drive is a separate question,
  * answered by `EstopCapability::uncovered_actuating_functions`.
  */
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety);
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                                      const runtime::SafetyConfig &safety);
 
 const char *safe_state_kind_to_string(SafeStateKind kind);
 

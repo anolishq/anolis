@@ -105,14 +105,17 @@ struct HooklessAutoGate {
  *
  * "Would drive nothing" is `control::planned_safe_state_kind`, not a local
  * inspection of the config: the setpoints rung counts only when it covers every
- * actuating output, so a config with setpoints covering nothing declares a safe
- * state that plans `None`. Answering this question twice is how a machine gets
- * reported as safe while its e-stop does nothing.
+ * actuating output with calls that pass `call_router.validate_call`, so a
+ * config with setpoints covering nothing, or naming every output but unable to
+ * dispatch, declares a safe state that plans `None` (#640). Answering this
+ * question twice is how a machine gets reported as safe while its e-stop does
+ * nothing.
  *
  * Read-only; safe to call on every AUTO transition attempt.
  */
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
-                                             const AutomationConfig &automation, const SafetyConfig &safety);
+                                             const control::CallRouter &call_router, const AutomationConfig &automation,
+                                             const SafetyConfig &safety);
 
 /**
  * @brief Install the refuse-hookless gate on every transition into AUTO.
@@ -127,12 +130,15 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
  *
  * Lock order: the guard takes the registry's shared lock while the mode lock
  * is held. The registry never reaches the ModeManager, so nothing takes them
- * in the other order.
+ * in the other order. `CallRouter::validate_call`, which the refusal text's
+ * safe-state plan uses, reads only the registry and takes no lock of its own.
  *
- * `registry`, `automation` and `safety` must outlive `mode_manager`.
+ * `registry`, `call_router`, `automation` and `safety` must outlive
+ * `mode_manager`.
  */
 void install_hookless_auto_gate(automation::ModeManager &mode_manager, const registry::DeviceRegistry &registry,
-                                const AutomationConfig &automation, const SafetyConfig &safety);
+                                const control::CallRouter &call_router, const AutomationConfig &automation,
+                                const SafetyConfig &safety);
 
 /**
  * @brief Refuse AUTO while the software stop's latch is engaged (#481).
@@ -162,9 +168,9 @@ void install_estop_auto_gate(automation::ModeManager &mode_manager, const contro
  *
  * @return true iff the gate refused and FAULT was requested.
  */
-bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
-                                   const SafetyConfig &safety, automation::ModeManager &mode_manager,
-                                   const std::string &context);
+bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const control::CallRouter &call_router,
+                                   const AutomationConfig &automation, const SafetyConfig &safety,
+                                   automation::ModeManager &mode_manager, const std::string &context);
 
 }  // namespace runtime
 }  // namespace anolis

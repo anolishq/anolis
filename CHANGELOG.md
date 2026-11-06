@@ -41,6 +41,26 @@ commit messages only.
 
 ### Fixed
 
+- **Setpoints that cannot dispatch no longer shadow `zero_is_safe`** (#640).
+  The e-stop ladder chose the setpoints rung when setpoints named every
+  actuating function, without checking that they could be sent. A setpoint
+  with an argument out of range, of the wrong type or missing was refused at
+  `POST /v0/estop` before it reached its provider, so nothing was driven and
+  `safe_state_achieved` was `false`, even with `zero_is_safe: true` declared.
+  `GET /v0/runtime/status` contradicted itself meanwhile:
+  `software_safe_state: "setpoints"` with `uncovered_actuating_functions: 1`.
+  Rung selection now uses the rule the uncovered count already used (#253):
+  a setpoint covers a function only if it passes the same validation as the
+  call itself, and the setpoints rung applies only when that leaves nothing
+  uncovered. Such a config now plans `zero` when `zero_is_safe` is set, and
+  `none` otherwise. Under `none`, as for any machine with no plannable rung,
+  the e-stop's own entry into FAULT runs the matching `-> FAULT` mode
+  transition hooks rather than refusing them, and the refuse-hookless AUTO
+  gate's refusal adds its note that the e-stop would drive nothing; the
+  gate's verdict does not depend on `safety` and is unchanged. The
+  validation reads the device inventory, so a provider restart that
+  republishes narrower argument ranges can move the plan off the setpoints
+  rung.
 - **A failed host preflight no longer leaves an upgrade half-installed**
   (#535). The preflight runs the binaries and configs the install has just put
   in the prefix, and a failure exited with them in place, so the next restart

@@ -212,7 +212,12 @@ independently of `automation`, so a pure-manual machine can declare one.
 
 1. `hooks` (array of call objects) - run first when present.
 2. `setpoints` (array of call objects) - per-actuator safe setpoints; applied
-   only when they cover every actuating output (fail closed).
+   only when they cover every actuating output (fail closed). A setpoint
+   covers a function only if it can dispatch: its device and function exist
+   and its arguments pass validation (type, range, required, allowed values)
+   against the inventory as it stands. A setpoint that names a function but
+   cannot dispatch covers nothing, so the ladder goes on to `zero_is_safe`, or
+   plans `none`.
 3. `zero_is_safe` (boolean, default `false`) - permits zeroing all actuating
    outputs when neither hooks nor full-coverage setpoints apply. Only
    numeric required arguments are zeroed. A function with a required boolean,

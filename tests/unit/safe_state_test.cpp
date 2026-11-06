@@ -222,6 +222,79 @@ TEST_F(SafeStateTest, PartialSetpointCoverageFailsClosedToNone) {
     EXPECT_EQ(controller->capability().uncovered_actuating_functions, 1u);
 }
 
+// A setpoint that names every actuating function but cannot dispatch covers
+// nothing (#253), so it must not be chosen ahead of the zero rung (#640). Here
+// the setpoint's pwm is below the provider's declared minimum of 0.
+TEST_F(SafeStateTest, UndispatchableSetpointsDoNotShadowZero) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);  // pwm >= 0
+    auto setpoint = make_call("sim0/heater", "set_output");
+    setpoint.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints.push_back(setpoint);
+    safety.safe_state.zero_is_safe = true;
+    auto controller = make_controller();
+
+    const auto cap = controller->capability();
+    EXPECT_EQ(cap.software_safe_state, control::SafeStateKind::Zero);
+    EXPECT_EQ(cap.uncovered_actuating_functions, 0u);
+
+    // The zero rung drives pwm to 0; StrictMock fails on any other call.
+    EXPECT_CALL(*mock_provider, call("heater", 1, "set_output", Truly([](const ValueMap& args) {
+                                         const auto it = args.find("pwm");
+                                         return it != args.end() && it->second.double_value() == 0.0;
+                                     }),
+                                     _))
+        .WillOnce(Return(true));
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::Zero);
+    ASSERT_EQ(result.actions.size(), 1u);
+    EXPECT_TRUE(result.actions[0].success);
+    EXPECT_TRUE(result.safe_state_achieved);
+}
+
+// The same setpoint without a zero rung to fall back to: nothing can drive the
+// actuator, so the plan is None (fail closed), and the ladder issues no call.
+TEST_F(SafeStateTest, UndispatchableSetpointsWithoutZeroPlanNone) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto setpoint = make_call("sim0/heater", "set_output");
+    setpoint.args["pwm"] = automation::ParameterValue{-5.0};
+    safety.safe_state.setpoints.push_back(setpoint);
+    auto controller = make_controller();
+
+    EXPECT_EQ(controller->capability().software_safe_state, control::SafeStateKind::None);
+
+    // StrictMock: no call() expected.
+    const auto result = controller->trigger("test");
+    EXPECT_EQ(result.kind, control::SafeStateKind::None);
+    EXPECT_TRUE(result.actions.empty());
+    EXPECT_FALSE(result.safe_state_achieved);
+}
+
+// The capability surface must not contradict itself: a planned setpoints rung
+// is one that covers every actuating output, so it never reports an uncovered
+// function. Checked for each way a setpoint can fail to dispatch.
+TEST_F(SafeStateTest, PlannedSetpointsRungNeverReportsUncoveredFunctions) {
+    RegisterActuator(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE, 0.0);
+    auto below_min = make_call("sim0/heater", "set_output");
+    below_min.args["pwm"] = automation::ParameterValue{-5.0};
+    auto wrong_type = make_call("sim0/heater", "set_output");
+    wrong_type.args["pwm"] = automation::ParameterValue{std::string("high")};
+    auto missing = make_call("sim0/heater", "set_output");
+    missing.args.clear();
+
+    for (const auto& [label, setpoint] :
+         {std::pair<const char*, runtime::ModeTransitionCallConfig>{"below_min", below_min},
+          {"wrong_type", wrong_type},
+          {"missing", missing}}) {
+        SCOPED_TRACE(label);
+        safety.safe_state.setpoints = {setpoint};
+        auto controller = make_controller();
+        const auto cap = controller->capability();
+        EXPECT_NE(cap.software_safe_state, control::SafeStateKind::Setpoints)
+            << "planned setpoints with " << cap.uncovered_actuating_functions << " uncovered";
+        EXPECT_EQ(cap.uncovered_actuating_functions, 1u);
+    }
+}
+
 TEST_F(SafeStateTest, ZeroRungZeroesActuatorsWhenDeclaredSafe) {
     RegisterActuator();
     safety.safe_state.zero_is_safe = true;

@@ -71,7 +71,8 @@ std::vector<std::string> fault_hook_uncovered_functions(const registry::DeviceRe
 }
 
 HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &registry,
-                                             const AutomationConfig &automation, const SafetyConfig &safety) {
+                                             const control::CallRouter &call_router, const AutomationConfig &automation,
+                                             const SafetyConfig &safety) {
     HooklessAutoGate result;
 
     // Only AUTO-capable configs are gated.
@@ -121,7 +122,7 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
     // already scrolled past. Text only: the verdict does not depend on
     // safety.safe_state, because the ladder fires on operator request, never
     // autonomously.
-    if (control::planned_safe_state_kind(registry, safety) == control::SafeStateKind::None) {
+    if (control::planned_safe_state_kind(registry, call_router, safety) == control::SafeStateKind::None) {
         msg << ". Note: that hook satisfies this gate but is NOT the e-stop's safe state — POST /v0/estop runs "
                "safety.safe_state, and on this inventory that ladder would drive nothing, so the e-stop would run "
                "only the -> FAULT hooks that match the mode it is pressed in (in IDLE, only after_transition "
@@ -134,13 +135,14 @@ HooklessAutoGate evaluate_hookless_auto_gate(const registry::DeviceRegistry &reg
 }
 
 void install_hookless_auto_gate(automation::ModeManager &mode_manager, const registry::DeviceRegistry &registry,
-                                const AutomationConfig &automation, const SafetyConfig &safety) {
-    const auto check = [&registry, &automation, &safety](automation::RuntimeMode /*prev*/, automation::RuntimeMode next,
-                                                         std::string &veto_reason) {
+                                const control::CallRouter &call_router, const AutomationConfig &automation,
+                                const SafetyConfig &safety) {
+    const auto check = [&registry, &call_router, &automation, &safety](
+                           automation::RuntimeMode /*prev*/, automation::RuntimeMode next, std::string &veto_reason) {
         if (next != automation::RuntimeMode::AUTO) {
             return true;
         }
-        const auto gate = evaluate_hookless_auto_gate(registry, automation, safety);
+        const auto gate = evaluate_hookless_auto_gate(registry, call_router, automation, safety);
         if (gate.refused) {
             veto_reason = gate.message;
             return false;
@@ -166,9 +168,9 @@ void install_estop_auto_gate(automation::ModeManager &mode_manager, const contro
     mode_manager.add_commit_guard(check);
 }
 
-bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const AutomationConfig &automation,
-                                   const SafetyConfig &safety, automation::ModeManager &mode_manager,
-                                   const std::string &context) {
+bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, const control::CallRouter &call_router,
+                                   const AutomationConfig &automation, const SafetyConfig &safety,
+                                   automation::ModeManager &mode_manager, const std::string &context) {
     // Only autonomous actuation (AUTO) is at risk; cheapest check first, and it
     // skips the O(inventory) scan on the common non-AUTO restart.
     if (mode_manager.current_mode() != automation::RuntimeMode::AUTO) {
@@ -177,7 +179,7 @@ bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, con
 
     // evaluate_hookless_auto_gate already returns non-refused when automation is
     // disabled or nothing actuates, so a same-inventory restart is a no-op here.
-    const auto gate = evaluate_hookless_auto_gate(registry, automation, safety);
+    const auto gate = evaluate_hookless_auto_gate(registry, call_router, automation, safety);
     if (!gate.refused) {
         return false;
     }
