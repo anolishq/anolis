@@ -18,6 +18,7 @@
           "mode": {
             "type": "string",
             "required": true,
+            "position": 0,
             "description": "Control mode",
             "allowed_values": [
               "open_loop",

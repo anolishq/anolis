@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- **Capability args carry `position`** (#731). A client that validates
+  `GET /v0/devices/{provider_id}/{device_id}/capabilities` responses against a
+  copy of `schemas/http/runtime-http.openapi.v0.yaml` from before this release
+  rejects them: `ArgSpec` there has `additionalProperties: false`. Update the
+  copy. A new failure for an existing client makes this release MINOR
+  (`docs/dependencies.md`).
+
 ### Security
 
 - **`install.sh` no longer bakes a literal API token into a bundle** (#529).
@@ -38,6 +47,24 @@ commit messages only.
   outside letters, digits, `.`, `_` and `-` is refused, since the name is
   written into the configs. An install whose `runtime.yaml` already carries a
   token warns, and the summary names it as the token in use.
+
+### Added
+
+- **Function arguments carry their declared position** (#731). In
+  `GET /v0/devices/{provider_id}/{device_id}/capabilities`, a function's
+  `args` is an object keyed by name, and its keys arrive sorted by name
+  (bytewise), not in the order the provider declared. A consumer that listed them as
+  they came, as Operate did for anolis-provider-bread's `set_pid_x10`
+  (declared `kp1, ki1, kd1, kp2, ki2, kd2`, shown `kd1, kd2, ki1, ...`), put
+  gains in the wrong fields. Each arg now carries `position`, its 0-based
+  index in the declared order, and `ArgSpec` in
+  `schemas/http/runtime-http.openapi.v0.yaml` declares it. The runtime always
+  sends it; it is not in the schema's `required`, so recorded responses
+  without it still validate against the new schema. Not additive for a
+  client that validates against an earlier copy of the schema; see the
+  upgrade note. The capabilities response does not carry a function's
+  declared results, so there is nothing to order there. The live conformance
+  smoke now fails a runtime whose args lack an integer `position`.
 
 ### Fixed
 
