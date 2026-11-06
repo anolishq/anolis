@@ -56,9 +56,9 @@ is a complete example, and the workbench writes projects in the same layout.
   byte by byte, so a behaviour need not be text) and the machine profile. Write
   an empty token in block style: the flow form `http: {auth_token: ""}` is
   refused. A longer name that holds `auth_token`, such as `mqtt_auth_token` or
-  `auth_token_file`, is not the token. A config that is not valid YAML or not UTF-8 stops the
-  bundle step too, since it cannot be checked, and so does a merge key (`<<`)
-  that brings in its own mapping (#529).
+  `auth_token_file`, is not the token. A config that is not valid YAML or not
+  UTF-8 stops the bundle step too, since it cannot be checked, and so does a
+  merge key (`<<`) that brings in its own mapping (#529).
 - The directory name must be letters, digits, `.`, `_` and `-`: the bundle step
   writes it into the configs as it is, and stops on any other name. A directory
   name may hold upper case letters, `.` or `_`, but a path's `<name>` may not:

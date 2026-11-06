@@ -3046,10 +3046,10 @@ def merged(node, seen=()):
 # The bundle must not carry a token's text either, whether or not the runtime
 # would read it as one, in a comment or a string included. So a line that
 # names auth_token anywhere (any case; not as part of a longer name such as
-# mqtt_auth_token or auth_token_file) is refused, unless the whole line is exactly the key set to
-# an empty quoted string: `auth_token: ""` or `auth_token: ''`, indented, with
-# nothing after it. That is block style only: the flow form
-# `http: {auth_token: ""}` is refused too.
+# mqtt_auth_token or auth_token_file) is refused, unless the whole line is
+# exactly the key set to an empty quoted string: `auth_token: ""` or
+# `auth_token: ''`, indented, with nothing after it. That is block style only:
+# the flow form `http: {auth_token: ""}` is refused too.
 TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token(?![A-Za-z0-9_])", re.IGNORECASE)
 TOKEN_EMPTY_LINE = re.compile(r"[ \t]*auth_token:[ \t]*(\"\"|'')[ \t]*")
 
