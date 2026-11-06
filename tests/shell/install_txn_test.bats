@@ -563,7 +563,7 @@ SIG_IN_COMMIT_RENAME='mv() {
         _run_main_process ':' "SIG=${sig}"$'\n'"${SIG_IN_COMMIT_RENAME}"
         [ -e "${BATS_TEST_TMPDIR}/mark" ] || { echo "${sig}: rename not reached"; return 1; }
         [ "$status" -eq "${want}" ] || { echo "${sig}: status ${status}: ${output}"; return 1; }
-        [[ "${output}" == *"install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here"* ]] \
+        [[ "${output}" == *"install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here, before its remaining steps: ${PFX}/manifest.json still describes the previous install until the next install"* ]] \
             || { echo "${sig}: ${output}"; return 1; }
         [[ "${output}" != *"install: restored"* ]]
         _is_new_install
@@ -597,4 +597,74 @@ TERM_AFTER_COMMIT='phase_manifest() { echo phase_manifest >> "${LATER}"; kill -T
     _is_new_install
     grep -qx phase_manifest "${LATER}"
     ! grep -qx phase_systemd "${LATER}"
+}
+
+# The commit's `mv` renames, and then reports the status of one killed by a
+# signal, 130: the case where a group SIGINT lands after rename(2) and before
+# mv exits. It waits for that signal, sent from outside to the whole process
+# group, so the shell has it recorded too. The filesystem says the commit
+# happened, so it is a commit: no "cannot commit", no restore, no restore
+# command for directories that are live.
+MV_RENAMES_THEN_FAILS='mv() {
+    if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then
+        command mv "$@"; : > "${MARK}"
+        local i; for i in $(seq 1 600); do [[ -e "${MARK}.sent" ]] && break; sleep 0.05; done
+        return 130
+    fi
+    command mv "$@"
+}'
+
+@test "535: a commit rename that reports failure after renaming is a commit, not a rollback" {
+    _new_bundle 0
+    _start_main_process ':' "${MV_RENAMES_THEN_FAILS}"
+    _wait_for "${BATS_TEST_TMPDIR}/mark" || { kill -KILL -- -"${BGPID}"; cat "${BGOUT}"; return 1; }
+    kill -INT -- -"${BGPID}"
+    : > "${BATS_TEST_TMPDIR}/mark.sent"
+    status=0; wait "${BGPID}" || status=$?
+    [ "${status}" -eq 130 ] || { echo "status ${status}"; cat "${BGOUT}"; return 1; }
+    ! grep -q -e 'cannot commit' -e 'putting the prefix back' -e 'install: restored' -e 'could not restore' -e 'Put each one back' "${BGOUT}" \
+        || { cat "${BGOUT}"; return 1; }
+    grep -q "install: SIGINT arrived while the install committed; the new install is in place" "${BGOUT}"
+    _is_new_install
+    [ ! -e "${PFX}/.install-txn" ] && [ ! -e "${PFX}/.install-txn.done" ]
+}
+
+@test "535: a commit rename that reports failure after renaming, with no signal, says so and goes on" {
+    _new_bundle 0
+    mv() {
+        if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then command mv "$@"; return 1; fi
+        command mv "$@"
+    }
+    _main --no-start
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    [[ "${output}" == *"install: the rename of ${PFX}/.install-txn to ${PFX}/.install-txn.done reported failure but completed; the install is committed"* ]]
+    [[ "${output}" != *"cannot commit"* && "${output}" != *"install: restored"* ]]
+    _is_new_install
+    grep -qx phase_manifest "${LATER}"
+}
+
+# A group SIGINT that lands just before the commit's rename, while a child of
+# the `mv` runs: the rename runs where the signal is ignored, so the child is
+# not killed and the rename happens. The shell records the signal and stops
+# once the commit is done.
+MV_WAITS_THEN_RENAMES='mv() {
+    if [[ "${1:-}" == "${PFX}/.install-txn" && "${2:-}" == "${PFX}/.install-txn.done" ]]; then
+        : > "${MARK}"
+        sh -c '\''while [ ! -e "$1" ]; do sleep 0.05; done'\'' _ "${MARK}.sent" || return $?
+    fi
+    command mv "$@"
+}'
+
+@test "535: a group signal during the commit's rename does not kill it" {
+    _new_bundle 0
+    _start_main_process ':' "${MV_WAITS_THEN_RENAMES}"
+    _wait_for "${BATS_TEST_TMPDIR}/mark" || { kill -KILL -- -"${BGPID}"; cat "${BGOUT}"; return 1; }
+    kill -INT -- -"${BGPID}"
+    : > "${BATS_TEST_TMPDIR}/mark.sent"
+    status=0; wait "${BGPID}" || status=$?
+    [ "${status}" -eq 130 ] || { echo "status ${status}"; cat "${BGOUT}"; return 1; }
+    ! grep -q -e 'cannot commit' -e 'install: restored' -e 'could not restore' "${BGOUT}" || { cat "${BGOUT}"; return 1; }
+    grep -q "install: SIGINT arrived while the install committed" "${BGOUT}"
+    _is_new_install
+    [ ! -e "${PFX}/.install-txn" ] && [ ! -e "${PFX}/.install-txn.done" ]
 }

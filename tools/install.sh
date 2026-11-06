@@ -573,11 +573,15 @@ _install_txn_begin() {
 # restore before any of it is deleted: INSTALL_TXN is cleared, then the copy is
 # renamed. An INT, TERM or HUP in those two steps is recorded, not acted on;
 # once the copy is deleted the install says so and stops with that signal, the
-# new install in place. A signal during the delete restores nothing, and a
-# .done left behind (a kill, a power cut) is the copy of an install that
-# committed, which the next install removes. A rename that fails is a commit
-# that failed: the install stops, and the EXIT trap puts the prefix back, as
-# for any stop before the commit. The EXIT trap stays, for the temp dir.
+# new install in place. The rename itself runs in a subshell that ignores
+# them, so a signal to the whole process group (a ^C, a dropped ssh session)
+# cannot kill `mv` (a recorded trap, unlike an ignored one, is not inherited).
+# A signal during the delete restores nothing, and a .done left behind (a kill,
+# a power cut) is the copy of an install that committed, which the next install
+# removes. A rename that fails is a commit that failed: the install stops, and
+# the EXIT trap puts the prefix back, as for any stop before the commit. What
+# counts is the filesystem, not mv's status: a rename that reports failure but
+# has happened is a commit. The EXIT trap stays, for the temp dir.
 _install_txn_commit() {
     local txn="${INSTALL_TXN}" sig=""
     [[ -n "${txn}" ]] || return 0
@@ -585,10 +589,14 @@ _install_txn_commit() {
     trap 'sig=TERM' TERM
     trap 'sig=HUP' HUP
     INSTALL_TXN=""
-    if ! mv "${txn}" "${txn}.done"; then
-        INSTALL_TXN="${txn}"
-        trap - INT TERM HUP
-        die "install: cannot rename ${txn} to ${txn}.done, so the install cannot commit; putting the prefix back"
+    if ! ( trap '' INT TERM HUP; mv "${txn}" "${txn}.done" ); then
+        if [[ -d "${txn}.done" && ! -e "${txn}" ]]; then
+            [[ -n "${sig}" ]] || log_warn "install: the rename of ${txn} to ${txn}.done reported failure but completed; the install is committed"
+        else
+            INSTALL_TXN="${txn}"
+            trap - INT TERM HUP
+            die "install: cannot rename ${txn} to ${txn}.done, so the install cannot commit; putting the prefix back"
+        fi
     fi
     trap - INT TERM HUP
     if ! rm -rf "${txn}.done"; then
@@ -596,7 +604,7 @@ _install_txn_commit() {
         log_info "  Until it is removed, the next install tries to remove it, and stops if it cannot."
     fi
     if [[ -n "${sig}" ]]; then
-        log_warn "install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here, before its remaining steps"
+        log_warn "install: SIG${sig} arrived while the install committed; the new install is in place, and the install stops here, before its remaining steps: ${PREFIX}/manifest.json still describes the previous install until the next install"
         kill -s "${sig}" "${BASHPID}"
     fi
 }

@@ -418,7 +418,10 @@ Once the check passes, the install commits: it stops treating the copy as one
 to restore, renames it to `<prefix>/.install-txn.done/` (one rename), and only
 then deletes it. A SIGINT, SIGTERM or SIGHUP during the rename takes effect
 once the copy is deleted: the install says so and stops, with the new install
-in place. A signal while it deletes, or after, leaves the new install in place
+in place and `manifest.json` still describing the previous install until the
+next install. The `mv` that renames ignores those signals, so a ^C or a
+dropped ssh session cannot kill it part way, and a rename that reports failure
+but has happened counts as the commit. A signal while it deletes, or after, leaves the new install in place
 and puts nothing back. A
 `.install-txn.done/` left behind (SIGKILL or a power cut while it deletes, or a
 delete that failed) is the copy of an install that finished: nothing in it is
