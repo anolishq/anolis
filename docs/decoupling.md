@@ -75,13 +75,13 @@ failure surfaces as an actionable install error rather than a service that
 crash-loops while the install reports success. That mirroring is itself worth
 preserving: the two checks are meant to agree, and a change to one needs the
 other. The preflight reads `http` as the runtime does, without python: a block
-mapping with quoted or plain values, every boolean spelling the runtime accepts (`true`, `yes`, `on`, `y` and their
-negatives, lower case, upper case or capitalised), and it skips the bind check
-when `http.enabled` is false. An `http.enabled`, `http.auth_enabled` or
-`http.allow_insecure_bind` that is present but not one of those booleans,
-an empty value included, fails the preflight, as it fails the runtime. Only an
-absent `http.bind` is the loopback default: `bind: ""` is checked as the
-non-loopback address it is.
+mapping with quoted or plain values, every boolean spelling the runtime
+accepts (`true`, `yes`, `on`, `y` and their negatives, lower case, upper case
+or capitalised), and it skips the bind check when `http.enabled` is false. An
+`http.enabled`, `http.auth_enabled` or `http.allow_insecure_bind` that is
+present but not one of those booleans, an empty value included, fails the
+preflight, as it fails the runtime. Only an absent `http.bind` is the loopback
+default: `bind: ""` is checked as the non-loopback address it is.
 
 Its reader is not a YAML parser. It reads a strict subset of YAML, the one
 `install.sh` itself writes, and refuses everything else with `cannot verify
@@ -102,11 +102,13 @@ reader` rather than guess. The subset:
   decimal number;
 - everywhere: no tab in the indentation, and no quote or bracket left open at
   the end of a line (a tag or anchor in front of a quoted value counts), except
-  inside a block scalar (`|`, `>`), whose lines are passed over; no tag or
-  anchor written with a quote or a flow character (`"'[]{},`); no explicit key
-  (`?` followed by a space); no quoted key with its value right after the colon
-  (`"a":"b"`, `'a':'b'`); and no NEL, line separator or paragraph separator
-  character; comments on their own line or after a value.
+  inside a block scalar (`|`, `>`) under a plain-name key, whose lines are
+  passed over; a block scalar with no indentation indicator (`|4`) and no line
+  less indented than its first; no quoted mapping key (`"a": b`, `'a':'b'`);
+  no alias (`*name`); no tag or anchor written with a quote or a flow
+  character (`"'[]{},`); no explicit key (`?` followed by a space); and no
+  NEL, line separator or paragraph separator character; comments on their own
+  line or after a value.
 
 Quoted key names, `?` keys, merge keys and an indented first line are outside
 it. Simplify the config, or check it with `anolis-runtime --check-config <file>`.

@@ -2019,12 +2019,13 @@ _yaml_block_value() {
 #   - anywhere in the file: no quote or bracket left open at the end of a line
 #     (a tag or anchor before a value does not hide its quote, and one
 #     written with a quote or a flow character `"'[]{},` is refused), no `? `
-#     explicit key, no quoted key with a value right after its colon, no tab
+#     explicit key, no alias, no quoted mapping key, no block scalar with an
+#     indentation indicator or a line less indented than its first, no tab
 #     in the indentation, and no NEL, line or paragraph separator character; a
 #     `#` comment on its own line, or after a value outside quotes.
 #
-# Block scalars (`|`, `>`) are allowed outside http's watched keys, and their
-# lines are not checked.
+# Block scalars (`|`, `>`) are allowed outside http's watched keys; of their
+# lines only the indentation is checked.
 #
 #   _http_config_check <file> "<k1 k2 ...>"
 _http_config_check() {
@@ -2046,13 +2047,13 @@ _http_config_check() {
                 nx = substr(s, i + 1, 1)
                 if (q == "\"") {
                     if (c == "\\") i++
-                    else if (c == q) { q = ""; vs = 0; if (nx == ":" && substr(s, i + 2, 1) !~ /^([ \t]|)$/) shape = "a quoted key with no space after its colon" }
+                    else if (c == q) { q = ""; vs = 0; if (substr(s, i + 1) ~ /^[ \t]*:/) shape = "a quoted mapping key" }
                     prev = c; continue
                 }
                 if (q == "\047") {
                     if (c == q) {
                         if (nx == q) i++
-                        else { q = ""; vs = 0; if (nx == ":" && substr(s, i + 2, 1) !~ /^([ \t]|)$/) shape = "a quoted key with no space after its colon" }
+                        else { q = ""; vs = 0; if (substr(s, i + 1) ~ /^[ \t]*:/) shape = "a quoted mapping key" }
                     }
                     prev = c; continue
                 }
@@ -2066,6 +2067,7 @@ _http_config_check() {
                     prev = substr(s, i, 1); continue
                 }
                 if (c == "?" && vs && (nx == "" || nx ~ /[ \t]/)) { shape = "an explicit key (?)"; vs = 1; prev = c; continue }
+                if (c == "*" && vs) { shape = "an alias (*)"; vs = 0; prev = c; continue }
                 if ((c == "\"" || c == "\047") && vs) q = c
                 else if ((c == "[" || c == "{") && (vs || depth > 0)) { depth++; vs = 1 }
                 else if ((c == "]" || c == "}") && depth > 0) { depth--; vs = 0 }
@@ -2091,6 +2093,15 @@ _http_config_check() {
             return 0
         }
         function plain_of(t) { sub(/[ \t]+#.*$/, "", t); sub(/[ \t]+$/, "", t); return t }
+        # A block scalar starts here only after a plain-name key: a quoted key
+        # whose text holds ": |" is not a header.
+        function bs_header(l) { return l ~ /^(- )?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[|>]/ }
+        # Start passing over a block scalar whose header sits at indentation
+        # `at`. Its lines must all be indented at least as far as its first.
+        function start_bs(l, at) {
+            if (l ~ /:[ \t]*[|>][-+]?[0-9]/) bad("a block scalar with an indentation indicator")
+            in_bs = 1; bs_ind = at; bs_cind = -1
+        }
         # A watched key: what its value must be.
         function watched_value(k, t,   e) {
             if (t ~ /^[&!*]/) { bad("an anchor, alias or tag on http." k); return }
@@ -2113,7 +2124,15 @@ _http_config_check() {
         }
         NR == 1 && substr($0, 1, 3) == "\357\273\277" { bad("a byte-order mark"); $0 = substr($0, 4) }
         # The lines of a block scalar are its text.
-        in_bs { if ($0 ~ /^ *$/ || indent_of($0) > bs_ind) next; in_bs = 0 }
+        in_bs {
+            if ($0 ~ /^ *$/) next
+            if (indent_of($0) > bs_ind) {
+                if (bs_cind < 0) bs_cind = indent_of($0)
+                else if (indent_of($0) < bs_cind) bad("a block scalar line less indented than its first")
+                next
+            }
+            in_bs = 0
+        }
         /^[ \t]*(#|$)/ { next }
         /^ *\t/ { bad("a tab in the indentation"); next }
         /^---([ \t]|$)/ {
@@ -2130,7 +2149,10 @@ _http_config_check() {
             # (A flow http is refused below, by name, whatever its lines hold.)
             if (!(ind == 0 && line ~ /^http:[ \t]*[[{]/)) {
                 if (open_at_end(line, 1)) bad("a quoted value or a collection over several lines")
-                if (shape != "") bad(shape)
+                # An alias is refused at the end, so that one on http or on a
+                # key it reads is named for that key.
+                if (shape == "an alias (*)") alias = shape
+                else if (shape != "") bad(shape)
             }
             rest = line; sub(/^[^:]*:[ \t]*/, "", rest)
         }
@@ -2139,7 +2161,7 @@ _http_config_check() {
             if (state == 1) { if (!children) bad("an empty http"); state = 3 }
             if (line !~ /^[A-Za-z_][A-Za-z0-9_-]*:([ \t]|$)/) { bad("a top-level line not written name: value"); next }
             k = line; sub(/:.*$/, "", k)
-            if (rest ~ /^[|>]/) { in_bs = 1; bs_ind = 0 }
+            if (bs_header(line)) start_bs(line, 0)
             if (k != "http") next
             if (++headers > 1) { bad("a second top-level http"); next }
             if (rest ~ /^[[{]/) { bad("http in flow style (write http: in block style)"); state = 3; next }
@@ -2156,21 +2178,22 @@ _http_config_check() {
                 if (line !~ /^[A-Za-z_][A-Za-z0-9_]*:([ \t]|$)/) { bad("a line in http not written name: value"); last = ""; next }
                 k = line; sub(/:.*$/, "", k)
                 if (k in watched) watched_value(k, rest)
-                else if (rest ~ /^[|>]/) { in_bs = 1; bs_ind = ind }
+                else if (bs_header(line)) start_bs(line, ind)
                 last = k
             } else if (ind > cind) {
                 if (last in watched) bad("a value of http." last " on the next line")
-                if (rest ~ /^[|>]/ && line ~ /^[^ ]+:/) { in_bs = 1; bs_ind = ind }
+                if (bs_header(line)) start_bs(line, ind)
             } else {
                 bad("an indentation in http the reader does not follow")
             }
             next
         }
         # A line of another top-level block: only its block scalars matter here.
-        { if (line ~ /^(- )?[^ ]+:[ \t]*[|>]/) { in_bs = 1; bs_ind = ind } }
+        { if (bs_header(line)) start_bs(line, ind) }
         END {
             if (!started) bad("a file with no top-level key")
             if (state == 1 && !children) bad("an empty http")
+            if (alias != "") bad(alias)
             if (reason != "") print reason
         }
     ' "${cfg}"

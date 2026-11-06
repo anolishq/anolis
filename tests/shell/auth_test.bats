@@ -221,6 +221,9 @@ _cannot_verify() {
     _cannot_verify $'http:\n' "an empty http"
     printf '{"http": {"bind": "0.0.0.0"}}\n' > "${TMP}/runtime.yaml"
     run preflight_runtime_config "${TMP}/runtime.yaml"
+    [[ "${output}" == *"a quoted mapping key is not supported"* ]]
+    printf '{http: {bind: 0.0.0.0}}\n' > "${TMP}/runtime.yaml"
+    run preflight_runtime_config "${TMP}/runtime.yaml"
     [[ "${output}" == *"a top-level line not written name: value is not supported"* ]]
     printf '\357\273\277http:\n  bind: 0.0.0.0\n' > "${TMP}/runtime.yaml"
     run preflight_runtime_config "${TMP}/runtime.yaml"
@@ -249,10 +252,10 @@ _cannot_verify() {
 }
 
 @test "530: a quoted or escaped key name cannot be verified, at top level or in http" {
-    _cannot_verify $'http:\n  "bind": 0.0.0.0\n' "a line in http not written name: value"
-    _cannot_verify $'http:\n  \'bind\': 0.0.0.0\n' "a line in http not written name: value"
-    _cannot_verify $'http:\n  "bin\\x64": 0.0.0.0\n' "a line in http not written name: value"
-    _cannot_verify $'"htt\\x70":\n  bind: 0.0.0.0\n' "a top-level line not written name: value"
+    _cannot_verify $'http:\n  "bind": 0.0.0.0\n' "a quoted mapping key"
+    _cannot_verify $'http:\n  \'bind\': 0.0.0.0\n' "a quoted mapping key"
+    _cannot_verify $'http:\n  "bin\\x64": 0.0.0.0\n' "a quoted mapping key"
+    _cannot_verify $'"htt\\x70":\n  bind: 0.0.0.0\n' "a quoted mapping key"
 }
 
 # Constructs that would hide http from the reader, or hide lines inside a
@@ -316,10 +319,32 @@ _cannot_verify_file() {
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xc2\x85b\n' "a NEL, line separator or paragraph separator character"
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xe2\x80\xa8b\n' "a NEL, line separator or paragraph separator character"
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: a\xe2\x80\xa9b\n' "a NEL, line separator or paragraph separator character"
-    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    "a":"b\n' "a quoted key with no space after its colon"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    "a":"b\n' "a quoted mapping key"
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: ? x\n' "an explicit key (?)"
-    # A plain value may hold ! and & past its start, and a quoted key its space.
-    run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: a!b&c\n  "q": "v"\nhttp:\n  bind: 127.0.0.1\n')"
+    # A plain value may hold ! and & past its start.
+    run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: a!b&c\nhttp:\n  bind: 127.0.0.1\n')"
+    [ "$status" -eq 0 ]
+}
+
+@test "530: an alias, or a block scalar yaml-cpp cannot end, cannot be verified" {
+    # Each is a file yaml-cpp refuses to load at all.
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: *a "abc\n  auth_enabled: true\n  q: w"\n' "an alias (*)"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  list:\n    - *a\n' "an alias (*)"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: |\n      deep\n    "less\n  auth_enabled: true\n' \
+        "a block scalar line less indented than its first"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    note: |\n        deep\n      less\n' \
+        "a block scalar line less indented than its first"
+    _cannot_verify $'runtime:\n  note: >\n      deep\n    less\nhttp:\n  bind: 127.0.0.1\n' \
+        "a block scalar line less indented than its first"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  note: |4\n      ok\n    "x\n  auth_enabled: true\n' \
+        "a block scalar with an indentation indicator"
+    _cannot_verify $'runtime:\n  note: >-2\n    x\nhttp:\n  bind: 127.0.0.1\n' \
+        "a block scalar with an indentation indicator"
+    # An asterisk past the start of a plain value, a block scalar whose lines
+    # hold or deepen their indentation, and a chomping indicator all stage.
+    run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: a*b\nhttp:\n  bind: 127.0.0.1\n')"
+    [ "$status" -eq 0 ]
+    run preflight_runtime_config "$(_http_cfg $'runtime:\n  note: |-\n    a\n      b\n    c\nhttp:\n  bind: 127.0.0.1\n')"
     [ "$status" -eq 0 ]
 }
 
@@ -336,8 +361,24 @@ _cannot_verify_file() {
     _cannot_verify $'http:\n  bind: 127.0.0.1\n  note: &a,b v\n' "${t}"
 }
 
-@test "530: a single-quoted key with its value right after the colon cannot be verified" {
-    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    \'a\':\'b\'\n' "a quoted key with no space after its colon"
+@test "530: a quoted mapping key anywhere in the file cannot be verified" {
+    local k="a quoted mapping key"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\n  tls:\n    \'a\':\'b\'\n' "${k}"
+    _cannot_verify $'runtime:\n  "q": "v"\nhttp:\n  bind: 127.0.0.1\n' "${k}"
+    _cannot_verify $'http:\n  bind: 127.0.0.1\nproviders:\n  - "id" : p1\n' "${k}"
+}
+
+# A quoted key whose text holds ": |" or ": >" is no block-scalar header: the
+# quote opened under it must still be checked (corpus5).
+@test "530: a quoted key that looks like a block-scalar header does not hide the quote under it" {
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    "a: |b":\n      "zzz\n  auth_enabled: true\n  q: w"\n' "a quoted mapping key"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    \'a: |b\':\n      "zzz\n  auth_enabled: true\n  q: w"\n' "a quoted mapping key"
+    _cannot_verify $'http:\n  bind: 0.0.0.0\n  tls:\n    "a: >b":\n      "zzz\n  allow_insecure_bind: true\n  q: w"\n' "a quoted mapping key"
+    # Only a plain name (letters, digits, _ and -) starts a block scalar the
+    # reader passes over; under any other key its lines are checked like any.
+    _cannot_verify $'runtime:\n  a.b: |\n    "x\nhttp:\n  bind: 127.0.0.1\n' "a quoted value or a collection over several lines"
+    run preflight_runtime_config "$(_http_cfg $'runtime:\n  a_b-c: |\n    "x\nhttp:\n  bind: 127.0.0.1\n')"
+    [ "$status" -eq 0 ]
 }
 
 @test "530: a watched value with anything after its closing quote cannot be verified" {
