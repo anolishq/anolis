@@ -58,7 +58,6 @@ commit messages only.
   removed by the next install. A symlinked `bin/`, `config/`, `projects/` or
   `.prev/` is refused before anything changes, since the copy would hold
   only the link.
-
 - **`install.sh`'s runtime-config preflight agrees with the runtime** (#530).
   It read the `http` block line by line and compared booleans to the literal
   `true`, so it passed a flow-style `http: {bind: 0.0.0.0}` the runtime
