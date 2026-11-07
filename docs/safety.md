@@ -102,8 +102,8 @@ can hurt someone or destroy a batch.
   back able to be started, not started. Today the runtime does this per device
   (anolishq/anolis#285, #299). A device that went unreachable stays
   latched, and the behaviour tree may not actuate it until an operator re-enters
-  AUTO. When it answers again, the active safe-state rung is re-run for it (under
-  rung `none` that does nothing), and
+  AUTO. When it answers again, the software safe state's calls for it are re-run
+  (under `none` that does nothing), and
   `GET /v0/runtime/status` lists it under `device_loss_latched`. The latch does
   not hold manual calls or mode-transition hooks, and the runtime tells a stop
   from a fault only for a stop it observes (see the stop chain below).
@@ -217,7 +217,9 @@ for `leave` and for no declared safe state. Each failed action carries a
 `cause` (#616). `config` means the call could not be planned from the config on
 these devices: the zero rung could not build its arguments, or the call was
 refused before it reached its provider because its device or function does not
-exist or an argument is invalid. It fails the same way on every run, and on
+exist or an argument is invalid, or an actuating function has no setpoint or
+zero that can be sent and is reported not driven, with nothing sent (#640).
+It fails the same way on every run, and on
 every `POST /v0/estop`, until `safety.safe_state` is fixed. `run` is anything
 else, such as a provider that failed the call or a board that came up tripped. Set `leave` only on a machine
 where a restart must not interrupt a running process, such as a culture that
@@ -313,15 +315,17 @@ header; see [install-sh.md](deploy/install-sh.md#after-installing).
 > **Satisfying this gate does not give you a software stop.** The gate asks
 > only for the autonomous path; `POST /v0/estop` runs `safety.safe_state`, which
 > is a separate declaration the gate never checks. Declaring only the hook
-> leaves the software stop's ladder driving nothing. With no rung to run, the
+> leaves the software stop's ladder driving nothing. With nothing to drive, the
 > stop's own entry into FAULT runs the `-> FAULT` hooks that match the mode it
 > was pressed in — in IDLE only the `after_transition` ones, because the IDLE
 > gate refuses `before_transition` calls — and reports
 > `safe_state_achieved: false`: the runtime cannot
-> tell whether those hooks make the machine safe. When the ladder does run a
-> rung (hooks, setpoints or zero), the latch refuses those hooks and the ladder
-> alone drives the outputs. The refusal message says so when the ladder would
-> drive nothing.
+> tell whether those hooks make the machine safe. The same holds when
+> `safety.safe_state` is declared but none of it can drive an actuating output
+> (#640). When the stop runs declared hooks, or drives at least one output
+> with a setpoint or a zero, the latch refuses those hooks and the stop alone
+> drives the outputs. The refusal message says so when the stop would drive
+> nothing.
 
 ### AUTO to MANUAL
 

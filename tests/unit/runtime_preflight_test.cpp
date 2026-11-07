@@ -88,6 +88,86 @@ TEST(RuntimePreflightTest, FlagsAHookValueOutsideTheProvidersAllowedValues) {
     EXPECT_NE(startup.failed_actions[0].error.find(refusal), std::string::npos) << startup.failed_actions[0].error;
 }
 
+namespace {
+
+// heater0/set_pwm is ACTUATE, pwm in 0..100. One setpoint with pwm -5.
+std::string heater_yaml(bool zero_is_safe) {
+    return std::string(R"(
+runtime: {}
+http:
+  enabled: false
+providers:
+  - id: bread0
+    command: ")") +
+           kHelperPath + R"("
+    args: ["--heater"]
+    timeout_ms: 2000
+    hello_timeout_ms: 2000
+    ready_timeout_ms: 5000
+polling:
+  interval_ms: 200
+telemetry:
+  enabled: false
+safety:
+  safe_state:
+    zero_is_safe: )" +
+           (zero_is_safe ? "true" : "false") + R"(
+    setpoints:
+      - device_handle: bread0/heater0
+        function_name: set_pwm
+        args:
+          pwm: -5
+)";
+}
+
+}  // namespace
+
+// #640 (B2 of its review): a setpoint that cannot dispatch is an ERROR and is
+// counted, whether or not a zero covers its output, and the preflight never
+// says no safe state is declared when one is.
+TEST(RuntimePreflightTest, AnUndispatchableSetpointIsAnErrorAndTheStartupRunFailsOnIt) {
+    anolis::runtime::Runtime runtime(load("anolis-640-no-zero.yaml", heater_yaml(false)));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("[ERROR] [Runtime] safety.safe_state.setpoints cannot be dispatched: bread0/heater0/set_pwm - "
+                       "Argument 'pwm': Value -5 below minimum 0"),
+              std::string::npos)
+        << log;
+    EXPECT_NE(log.find("1 of 1 declared call(s) could not be dispatched"), std::string::npos) << log;
+    EXPECT_NE(log.find("leaves 1 of 1 actuating function(s) undriven"), std::string::npos) << log;
+    EXPECT_EQ(log.find("no software safe-state is declared"), std::string::npos) << log;
+    EXPECT_EQ(log.find("declared but unused"), std::string::npos) << log;
+
+    // What install.sh reads (#634): a config failure in the startup run.
+    const auto startup = runtime.get_safe_state().startup_report();
+    EXPECT_TRUE(startup.ran);
+    EXPECT_FALSE(startup.safe_state_achieved);
+    ASSERT_EQ(startup.failed_actions.size(), 1u);
+    EXPECT_EQ(startup.failed_actions[0].device_handle, "bread0/heater0");
+    EXPECT_EQ(startup.failed_actions[0].cause, anolis::control::FailureCause::Config);
+}
+
+// The issue's case: zero_is_safe covers the output, so the startup run
+// drives it to 0 and is achieved. The broken setpoint is still an ERROR.
+TEST(RuntimePreflightTest, ZeroCoversAnOutputWhoseSetpointCannotDispatch) {
+    anolis::runtime::Runtime runtime(load("anolis-640-zero.yaml", heater_yaml(true)));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("[ERROR] [Runtime] safety.safe_state.setpoints cannot be dispatched"), std::string::npos) << log;
+    EXPECT_NE(log.find("preflight: e-stop plan 'zero'"), std::string::npos) << log;
+    EXPECT_EQ(log.find("undriven"), std::string::npos) << log;
+
+    const auto startup = runtime.get_safe_state().startup_report();
+    EXPECT_TRUE(startup.ran);
+    EXPECT_EQ(startup.kind, anolis::control::SafeStateKind::Zero);
+    EXPECT_TRUE(startup.safe_state_achieved);
+    EXPECT_TRUE(startup.failed_actions.empty());
+}
+
 TEST(RuntimePreflightTest, PassesAHookValueInsideTheProvidersAllowedValues) {
     anolis::runtime::Runtime runtime(load("anolis-467-inside.yaml", config_yaml("closed_speed")));
     std::string error;

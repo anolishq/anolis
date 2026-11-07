@@ -135,16 +135,29 @@ Notes:
 
 Notes:
 
-1. `/v0/estop` runs the declared safe-state ladder (hooks -> per-actuator
-   setpoints, only when they cover every actuating output -> zero, only when
-   `safety.safe_state.zero_is_safe` is set -> otherwise an honest
-   `software_safe_state: "none"`) and works whether or not automation is
-   enabled. On an automation machine it also drives `FAULT`. The response
-   carries `safe_state_achieved`: `true` only when the rung issued at least
-   one call and every call succeeded, `false` when any call failed, when the
-   rung issued no call, or when no rung applies. It covers only the calls
-   the rung issued: under `hooks` it can be `true` while actuating functions
-   no hook drives remain (`uncovered_actuating_functions` in
+1. `/v0/estop` runs the declared safe state and works whether or not
+   automation is enabled. Declared hooks are run alone. Otherwise each
+   actuating function gets its setpoint if one passes validation, else its
+   zero if `safety.safe_state.zero_is_safe` is set and the zero passes
+   validation, else it is reported in `actions` as not driven, with
+   `cause: "config"` and the reason, and nothing is sent for it. A setpoint
+   that fails validation is never sent; it is also reported not driven when
+   another setpoint for the same function (another index) is sent, but not
+   when the function's zero drives it instead
+   ([configuration-schema.md](configuration-schema.md#safety)).
+   `software_safe_state` says how the outputs are driven: `hooks`,
+   `setpoints`, `zero`, `mixed` (some outputs get their setpoint, others
+   their zero), or `none` when nothing is declared
+   ([configuration-schema.md](configuration-schema.md#safety) has the exact
+   rule). An entry in `actions` with `cause: "config"` may be an output for
+   which no call was sent. On an automation machine
+   it also drives `FAULT`. The response
+   carries `safe_state_achieved`: `true` only when there is at least one
+   action and every action succeeded, `false` when any call failed, when an
+   output is reported not driven, when nothing was issued, or under `none`.
+   Under `hooks` it covers only the calls the hooks make, so it can be `true`
+   while actuating functions no hook drives remain
+   (`uncovered_actuating_functions` in
    `GET /v0/runtime/status`, and `uncovered_functions` names them). A call succeeds when its provider reports it
    OK; that confirms the command was accepted, not that the device was seen
    in the commanded state. The same verdict is logged when a returning

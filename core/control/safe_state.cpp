@@ -152,6 +152,8 @@ const char *safe_state_kind_to_string(SafeStateKind kind) {
             return "setpoints";
         case SafeStateKind::Zero:
             return "zero";
+        case SafeStateKind::Mixed:
+            return "mixed";
         case SafeStateKind::None:
         default:
             return "none";
@@ -171,39 +173,162 @@ bool SafeStateController::admits_fault_entry_hooks() const {
     return fault_entry_hook_thread_.load(std::memory_order_acquire) == std::this_thread::get_id();
 }
 
-std::vector<std::pair<std::string, registry::FunctionSpec>> SafeStateController::actuating_functions() const {
-    return actuating_functions_for(registry_);
+namespace {
+
+// One entry of a worked-out plan, in the order the stop runs them.
+struct PlanStep {
+    enum class Kind {
+        Call,       // a declared hook or setpoint, sent as declared
+        Zero,       // rung-3 zero for `spec`, which dispatches
+        NotDriven,  // `spec` has no call that dispatches; reported, not sent
+    };
+    Kind kind = Kind::Call;
+    const runtime::ModeTransitionCallConfig *call = nullptr;  // Call
+    std::string handle;                                       // Zero, NotDriven
+    registry::FunctionSpec spec;                              // Zero, NotDriven
+    std::string why;                                          // NotDriven
+};
+
+struct WorkedPlan {
+    SafeStatePlan summary;
+    std::vector<PlanStep> steps;
+};
+
+// Whether rung 3's zero call for `spec` would dispatch; why not, when not.
+bool zero_dispatches(const CallRouter &call_router, const std::string &handle, const registry::FunctionSpec &spec,
+                     std::string &why) {
+    CallRequest request;
+    request.device_handle = handle;
+    request.function_id = spec.function_id;
+    request.function_name = spec.function_name;
+    request.safe_state = true;
+    why = build_zero_args(spec, request.args);
+    if (!why.empty()) {
+        return false;
+    }
+    return call_router.validate_call(request, why);
 }
 
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety) {
-    size_t uncovered = 0;
-    for (const auto &[handle, spec] : actuating_functions_for(registry)) {
-        bool covered = false;
-        for (const auto &setpoint : safety.safe_state.setpoints) {
-            if (setpoint_matches(setpoint, handle, spec)) {
-                covered = true;
-                break;
+// The plan, as plan_safe_state() documents it. Every caller that needs the
+// plan, the stop itself included, goes through here, so the status surface,
+// the gate, the preflight and the stop cannot answer differently.
+WorkedPlan work_out_plan(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                         const runtime::SafetyConfig &safety) {
+    WorkedPlan plan;
+    const auto &declared = safety.safe_state;
+    const auto actuating = actuating_functions_for(registry);
+    plan.summary.actuating_functions = actuating.size();
+
+    if (!declared.hooks.empty()) {
+        plan.summary.kind = SafeStateKind::Hooks;
+        for (const auto &call : declared.hooks) {
+            plan.steps.push_back({PlanStep::Kind::Call, &call, {}, {}, {}});
+        }
+        plan.summary.uncovered = uncovered_actuating_functions(registry, call_router, declared.hooks);
+        return plan;
+    }
+    if (declared.setpoints.empty() && !declared.zero_is_safe) {
+        for (const auto &[handle, spec] : actuating) {
+            plan.summary.uncovered.push_back(handle + "/" + spec.function_name);
+        }
+        return plan;  // None: nothing declared
+    }
+
+    const auto &setpoints = declared.setpoints;
+    std::vector<char> dispatches(setpoints.size(), 0);
+    std::vector<char> targets_actuator(setpoints.size(), 0);
+    std::vector<std::string> refusal(setpoints.size());
+    for (size_t i = 0; i < setpoints.size(); ++i) {
+        dispatches[i] = call_router.validate_call(to_call_request(setpoints[i]), refusal[i]) ? 1 : 0;
+    }
+
+    // Per output: its setpoint, else its zero, else reported not driven.
+    std::vector<PlanStep> per_output;
+    bool zeroed = false;
+    bool by_setpoint = false;
+    for (const auto &[handle, spec] : actuating) {
+        bool driven = false;
+        std::string why;
+        std::vector<size_t> refused;  // this function's setpoints that do not dispatch
+        for (size_t i = 0; i < setpoints.size(); ++i) {
+            if (!setpoint_matches(setpoints[i], handle, spec)) {
+                continue;
+            }
+            targets_actuator[i] = 1;
+            if (dispatches[i] != 0) {
+                driven = true;
+            } else {
+                refused.push_back(i);
+                if (why.empty()) {
+                    why = std::format("setpoint: {}", refusal[i]);
+                }
             }
         }
-        if (!covered) {
-            ++uncovered;
+        if (driven) {
+            by_setpoint = true;
+            // One function can drive several outputs, one setpoint per index
+            // (motor_index 1 and 2). A sibling that dispatches does not drive
+            // the output a refused setpoint was declared for, so each refused
+            // one is reported not driven, and nothing is sent for it.
+            for (const size_t i : refused) {
+                per_output.push_back(
+                    {PlanStep::Kind::NotDriven, nullptr, handle, spec, std::format("setpoint: {}", refusal[i])});
+            }
+            continue;
+        }
+        if (declared.zero_is_safe) {
+            std::string zero_why;
+            if (zero_dispatches(call_router, handle, spec, zero_why)) {
+                per_output.push_back({PlanStep::Kind::Zero, nullptr, handle, spec, {}});
+                zeroed = true;
+                continue;
+            }
+            why = why.empty() ? zero_why : std::format("{}; zero: {}", why, zero_why);
+        } else if (why.empty()) {
+            why = "no setpoint drives it and zero_is_safe is not set";
+        }
+        per_output.push_back({PlanStep::Kind::NotDriven, nullptr, handle, spec, why});
+        plan.summary.uncovered.push_back(handle + "/" + spec.function_name);
+    }
+
+    // Setpoints go out in declared order: each that dispatches, and each that
+    // targets no registered ACTUATE function, as before. One for an ACTUATE
+    // function that does not dispatch is not sent: it is reported not driven
+    // above, unless no setpoint for that function dispatches and its zero
+    // drives the function instead (#640, owner decision).
+    for (size_t i = 0; i < setpoints.size(); ++i) {
+        if (dispatches[i] != 0 || targets_actuator[i] == 0) {
+            plan.steps.push_back({PlanStep::Kind::Call, &setpoints[i], {}, {}, {}});
         }
     }
+    plan.steps.insert(plan.steps.end(), per_output.begin(), per_output.end());
 
-    if (!safety.safe_state.hooks.empty()) {
-        return SafeStateKind::Hooks;
+    // The kind says how the actuating outputs are driven. A setpoint sent to
+    // anything else (another category, a device not present) does not change it.
+    if (by_setpoint && zeroed) {
+        plan.summary.kind = SafeStateKind::Mixed;
+    } else if (by_setpoint) {
+        plan.summary.kind = SafeStateKind::Setpoints;
+    } else if (zeroed) {
+        plan.summary.kind = SafeStateKind::Zero;
+    } else {
+        // No output is driven: name what was declared.
+        plan.summary.kind = setpoints.empty() ? SafeStateKind::Zero : SafeStateKind::Setpoints;
     }
-    // Setpoints apply only if they cover every actuating output (fail closed).
-    if (!safety.safe_state.setpoints.empty() && uncovered == 0) {
-        return SafeStateKind::Setpoints;
-    }
-    if (safety.safe_state.zero_is_safe) {
-        return SafeStateKind::Zero;
-    }
-    return SafeStateKind::None;
+    return plan;
 }
 
-SafeStateKind SafeStateController::planned_kind() const { return planned_safe_state_kind(registry_, safety_); }
+}  // namespace
+
+SafeStatePlan plan_safe_state(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                              const runtime::SafetyConfig &safety) {
+    return work_out_plan(registry, call_router, safety).summary;
+}
+
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                                      const runtime::SafetyConfig &safety) {
+    return plan_safe_state(registry, call_router, safety).kind;
+}
 
 const char *failure_cause_to_string(FailureCause cause) {
     switch (cause) {
@@ -260,6 +385,7 @@ CallOutcome SafeStateController::run_zero_call(const std::string &device_handle,
         outcome.success = false;
         outcome.error = std::move(why);
         outcome.cause = FailureCause::Config;
+        outcome.sent = false;
         return outcome;
     }
 
@@ -278,57 +404,43 @@ EstopResult SafeStateController::run_ladder(const std::string *only_device, cons
     };
 
     EstopResult result;
-    // A declared call to a device in `absent` is recorded, not issued: one its
-    // provider reports missing (anolishq/anolis#461), or one behind a stop
-    // chain in force at startup (#483). The zero rung checks too: a device
-    // behind the stop is registered, only unpowered.
-    const auto run_or_skip = [&](const runtime::ModeTransitionCallConfig &call) {
+    const WorkedPlan plan = work_out_plan(registry_, call_router_, safety_);
+    result.kind = plan.summary.kind;
+    result.drives_no_output = plan.summary.drives_no_output();
+    for (const auto &step : plan.steps) {
+        const std::string &handle = step.kind == PlanStep::Kind::Call ? step.call->device_handle : step.handle;
+        if (!wanted(handle)) {
+            continue;
+        }
+        const std::string function =
+            step.kind == PlanStep::Kind::Call
+                ? (step.call->function_name.empty() ? std::to_string(step.call->function_id) : step.call->function_name)
+                : step.spec.function_name;
+        // An entry for a device in `absent` is recorded, not run: one its
+        // provider reports missing (anolishq/anolis#461), or one behind a stop
+        // chain in force at startup (#483). Zero and not-driven entries check
+        // too: a device behind the stop is registered, only unpowered.
         if (absent != nullptr) {
-            if (const auto it = absent->find(call.device_handle); it != absent->end()) {
-                result.skipped.push_back(
-                    {call.device_handle,
-                     call.function_name.empty() ? std::to_string(call.function_id) : call.function_name, it->second});
-                return;
+            if (const auto it = absent->find(handle); it != absent->end()) {
+                result.skipped.push_back({handle, function, it->second});
+                continue;
             }
         }
-        result.actions.push_back(run_call(call));
-    };
-    result.kind = planned_kind();
-    switch (result.kind) {
-        case SafeStateKind::Hooks:
-            for (const auto &call : safety_.safe_state.hooks) {
-                if (wanted(call.device_handle)) {
-                    run_or_skip(call);
-                }
-            }
-            break;
-        case SafeStateKind::Setpoints:
-            for (const auto &call : safety_.safe_state.setpoints) {
-                if (wanted(call.device_handle)) {
-                    run_or_skip(call);
-                }
-            }
-            break;
-        case SafeStateKind::Zero:
-            for (const auto &[handle, spec] : actuating_functions()) {
-                if (!wanted(handle)) {
-                    continue;
-                }
-                if (absent != nullptr) {
-                    if (const auto it = absent->find(handle); it != absent->end()) {
-                        result.skipped.push_back({handle, spec.function_name, it->second});
-                        continue;
-                    }
-                }
-                result.actions.push_back(run_zero_call(handle, spec));
-            }
-            break;
-        case SafeStateKind::None:
-            break;
+        switch (step.kind) {
+            case PlanStep::Kind::Call:
+                result.actions.push_back(run_call(*step.call));
+                break;
+            case PlanStep::Kind::Zero:
+                result.actions.push_back(run_zero_call(handle, step.spec));
+                break;
+            case PlanStep::Kind::NotDriven:
+                result.actions.push_back({handle, function, false, step.why, FailureCause::Config, false});
+                break;
+        }
     }
-    // No fall-through to another rung: a call that failed at run time mostly
-    // failed on transport, and a second rung would go to the same device. The
-    // verdict says so instead.
+    // No fall-through at run time: a call that failed then mostly failed on
+    // transport, and another call would go to the same device. The verdict
+    // says so instead.
     result.safe_state_achieved =
         result.kind != SafeStateKind::None && !result.actions.empty() &&
         std::all_of(result.actions.begin(), result.actions.end(), [](const CallOutcome &a) { return a.success; });
@@ -396,18 +508,19 @@ EstopResult SafeStateController::trigger(const std::string &reason) {
 
     // On an automation machine, also drive FAULT: any->FAULT is always valid and
     // cannot be vetoed, so it stops the behavior tree and routes the operator to
-    // the FAULT->MANUAL recovery path. Under a rung, actuating FAULT-entry hooks
-    // are refused by the latch: the ladder above is the single safe-state
-    // authority. Under rung none nothing else drives those actuators, so this
-    // FAULT entry's hooks are let through -- on this thread, for this set_mode
-    // only (#251). safe_state_achieved stays false: the ladder ran nothing.
+    // the FAULT->MANUAL recovery path. While the plan drives an output, actuating
+    // FAULT-entry hooks are refused by the latch: the plan above is the single
+    // safe-state authority. When it drives none (nothing declared, or nothing
+    // declared dispatches), nothing else drives those actuators, so this FAULT
+    // entry's hooks are let through -- on this thread, for this set_mode only
+    // (#251). safe_state_achieved stays false: the plan drove nothing.
     if (mode_manager_ != nullptr) {
         result.fault_requested = true;
         std::string err;
-        const bool admit_hooks = result.kind == SafeStateKind::None;
+        const bool admit_hooks = result.drives_no_output;
         if (admit_hooks) {
             LOG_WARN(
-                "[SafeState] E-stop ladder planned no safe state; running the -> FAULT mode-transition hooks "
+                "[SafeState] E-stop plan drives no actuating output; running the -> FAULT mode-transition hooks "
                 "this FAULT entry fires");
         }
         // Withdrawn however set_mode returns, so the admission never outlives it.
@@ -518,45 +631,13 @@ void SafeStateController::attach_latch_store(std::unique_ptr<LatchStore> store) 
                                       "safe");
 }
 
-std::vector<std::string> SafeStateController::uncovered_functions(SafeStateKind kind) const {
-    // Coverage of the rung that would actually run, judged the way it would
-    // run: a call covers a function only if it can dispatch (#253).
-    switch (kind) {
-        case SafeStateKind::Hooks:
-            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.hooks);
-        case SafeStateKind::Setpoints:
-            return uncovered_actuating_functions(registry_, call_router_, safety_.safe_state.setpoints);
-        case SafeStateKind::Zero: {
-            std::vector<std::string> uncovered;
-            // Covered only if rung 3 can build the call AND the call would
-            // pass validation: a zero below an argument's min fails at e-stop.
-            for (const auto &[handle, spec] : actuating_functions()) {
-                CallRequest request;
-                request.device_handle = handle;
-                request.function_id = spec.function_id;
-                request.function_name = spec.function_name;
-                std::string err;
-                if (!build_zero_args(spec, request.args).empty() || !call_router_.validate_call(request, err)) {
-                    uncovered.push_back(handle + "/" + spec.function_name);
-                }
-            }
-            return uncovered;
-        }
-        case SafeStateKind::None:
-        default: {
-            std::vector<std::string> all;
-            for (const auto &[handle, spec] : actuating_functions()) {
-                all.push_back(handle + "/" + spec.function_name);
-            }
-            return all;
-        }
-    }
-}
-
 EstopCapability SafeStateController::capability() const {
     EstopCapability cap;
-    cap.software_safe_state = planned_kind();
-    cap.uncovered_functions = uncovered_functions(cap.software_safe_state);
+    // Kind and uncovered list from one evaluation of the plan, so the pair
+    // cannot disagree (#640).
+    auto plan = plan_safe_state(registry_, call_router_, safety_);
+    cap.software_safe_state = plan.kind;
+    cap.uncovered_functions = std::move(plan.uncovered);
     cap.uncovered_actuating_functions = cap.uncovered_functions.size();
     {
         // Read latch flag and timestamp together so the pair is consistent

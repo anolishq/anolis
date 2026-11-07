@@ -40,25 +40,74 @@ namespace control {
 
 class CallRouter;
 
-/** @brief Which rung of the safe-state ladder applies (or None). */
-enum class SafeStateKind { None, Hooks, Setpoints, Zero };
+/**
+ * @brief What a software stop would drive, by where its calls come from.
+ *
+ * `Hooks`: the declared hooks, and nothing else. Otherwise the plan is per
+ * output, and the kind says how the ACTUATE outputs are driven: `Setpoints`
+ * or `Zero` when every driven output gets that, `Mixed` when some get their
+ * setpoint and others their zero. A setpoint sent to anything else does not
+ * count. When no output is driven, it names what is declared: `Setpoints` if
+ * any are, else `Zero`. `None` when no software safe state is declared at all.
+ */
+enum class SafeStateKind { None, Hooks, Setpoints, Zero, Mixed };
+
+/** @brief What a software stop would do, as `plan_safe_state` works it out. */
+struct SafeStatePlan {
+    SafeStateKind kind = SafeStateKind::None;
+    // ACTUATE functions the plan does not drive with any dispatchable call, as
+    // "provider/device/function". Every ACTUATE function under `None`. A
+    // function one setpoint drives while another of its setpoints is refused
+    // is not listed; the stop reports the refused one as not driven.
+    std::vector<std::string> uncovered;
+    // ACTUATE functions in the inventory.
+    size_t actuating_functions = 0;
+
+    /**
+     * True when the stop would leave every actuating output as it was: no
+     * safe state is declared, or a per-output plan drives none of them. Never
+     * true under `Hooks`, whose calls the stop runs whatever they cover.
+     */
+    bool drives_no_output() const {
+        return kind == SafeStateKind::None ||
+               (kind != SafeStateKind::Hooks && actuating_functions > 0 && uncovered.size() == actuating_functions);
+    }
+};
 
 /**
- * @brief What the e-stop ladder would drive for this config against this
- *        inventory, without needing a controller.
+ * @brief What the e-stop would drive for this config against this inventory,
+ *        without needing a controller.
  *
  * The single answer to "does this machine have a working software safe state".
- * Callers outside the controller (the refuse-hookless gate, diagnostics) must
- * use this rather than inspecting `safety.safe_state` themselves: the setpoints
- * rung counts only when it covers EVERY actuating output, so a config with
- * setpoints that cover nothing still plans `None` and drives nothing. A second,
- * weaker answer to this question is precisely how a machine gets reported as
- * safe while its e-stop does nothing (#251, #258).
+ * Callers outside the controller (the refuse-hookless gate, the startup
+ * preflight) must use this rather than inspecting `safety.safe_state`
+ * themselves: a second, weaker answer to this question is precisely how a
+ * machine gets reported as safe while its e-stop does nothing (#251, #258).
  *
- * How many functions the active rung cannot drive is a separate question,
- * answered by `EstopCapability::uncovered_actuating_functions`.
+ * Declared hooks are the whole plan when present. Otherwise each ACTUATE
+ * function is planned on its own (#640):
+ *  1. its declared setpoint, if one dispatches (passes
+ *     `CallRouter::validate_call`);
+ *  2. else its zero, if `zero_is_safe` is set and the zero call dispatches;
+ *  3. else it is not driven: the stop reports it as a config failure without
+ *     a call.
+ * A setpoint that does not dispatch is never sent. When another setpoint
+ * drives the same function (one per index, say), the refused one is reported
+ * as a not-driven config failure of its own, since one function can drive
+ * several outputs; that function stays out of `uncovered`. When none does and
+ * the zero drives the function, the refused setpoint is dropped and only the
+ * startup preflight reports it, at ERROR.
+ * A setpoint that targets no registered ACTUATE function (another category, a
+ * device not present) is sent as declared. Validation reads the live
+ * registry, so the plan can change when a provider restart republishes its
+ * inventory.
  */
-SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const runtime::SafetyConfig &safety);
+SafeStatePlan plan_safe_state(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                              const runtime::SafetyConfig &safety);
+
+/** @brief `plan_safe_state(...).kind`. */
+SafeStateKind planned_safe_state_kind(const registry::DeviceRegistry &registry, const CallRouter &call_router,
+                                      const runtime::SafetyConfig &safety);
 
 const char *safe_state_kind_to_string(SafeStateKind kind);
 
@@ -100,6 +149,9 @@ struct CallOutcome {
     bool success = false;
     std::string error;
     FailureCause cause = FailureCause::Run;  // meaningful only when !success
+    // False for an entry no call was made for: an output the plan cannot
+    // drive, or a zero it could not build. Such an entry is never a success.
+    bool sent = true;
 };
 
 /**
@@ -126,9 +178,12 @@ struct EstopResult {
     // with an AbsentDevices map fills this. Not in `actions`, so they count
     // for neither side of the verdict.
     std::vector<SkippedAction> skipped;
-    // True only when a rung ran, issued at least one call, and every call
-    // succeeded. One failed call makes the whole rung not achieved (#256).
+    // True only when a plan ran, it has at least one action, and every action
+    // succeeded. One failed call makes the whole run not achieved (#256), and
+    // so does an output the plan reports not driven (#640).
     bool safe_state_achieved = false;
+    // The plan drives no actuating output (SafeStatePlan::drives_no_output).
+    bool drives_no_output = false;
     bool fault_requested = false;  // automation machine: FAULT drive attempted
     bool fault_ok = false;
 };
@@ -138,7 +193,7 @@ struct EstopCapability {
     bool latched = false;
     SafeStateKind software_safe_state = SafeStateKind::None;  // what a trigger WOULD do now
     std::optional<int64_t> latched_at_epoch_ms;
-    size_t uncovered_actuating_functions = 0;      // ACTUATE functions the active rung cannot drive
+    size_t uncovered_actuating_functions = 0;      // ACTUATE functions the plan cannot drive
     std::vector<std::string> uncovered_functions;  // the same, as "provider/device/function" (#698)
     // Set while the latch is one this runtime started with, read from disk (#482): why.
     std::optional<std::string> restored_reason;
@@ -185,10 +240,11 @@ public:
     /**
      * @brief Engage the latch, run the safe-state ladder, and (if automation) drive FAULT.
      *
-     * When the ladder planned no rung, the `-> FAULT` mode-transition hooks
-     * fired by that FAULT entry are let through the latch: nothing else drives
-     * those actuators (#251). Under any other rung they are refused, as is
-     * every hook on any later entry into FAULT.
+     * When the plan drives no actuating output (`EstopResult::drives_no_output`:
+     * nothing is declared, or a declared per-output plan drives none of them),
+     * the `-> FAULT` mode-transition hooks fired by that FAULT entry are let
+     * through the latch: nothing else drives those actuators (#251). Otherwise
+     * they are refused, as is every hook on any later entry into FAULT.
      */
     EstopResult trigger(const std::string &reason);
 
@@ -222,8 +278,8 @@ public:
     /**
      * @brief Re-assert the planned safe state for ONE device, in place.
      *
-     * Runs the same rung `trigger()` would -- hooks, else setpoints, else zero
-     * -- restricted to calls targeting `device_handle`. Does not engage the
+     * Runs the same plan `trigger()` would (`plan_safe_state`), restricted to
+     * the entries for `device_handle`. Does not engage the
      * latch, does not drive FAULT, does not take `mutex_`: this runs on the
      * poll thread when a lost device answers again (#285), and an e-stop
      * arriving over HTTP must never wait behind it. Per-provider serialization
@@ -256,16 +312,9 @@ public:
     StartupSafeStateReport startup_report() const;
 
 private:
-    // Actuating (handle, spec) pairs across all discovered devices, fail-closed.
-    std::vector<std::pair<std::string, registry::FunctionSpec>> actuating_functions() const;
-    // Which rung would run now.
-    SafeStateKind planned_kind() const;
-    // ACTUATE functions the rung `kind` cannot drive (all of them for None),
-    // as "provider/device/function".
-    std::vector<std::string> uncovered_functions(SafeStateKind kind) const;
-    // Runs the planned rung. With `only_device` set, only calls whose target is
-    // that handle are issued. With `absent` set, calls whose target is in it
-    // are skipped instead of issued.
+    // Works out the plan now and runs it. With `only_device` set, only entries
+    // whose target is that handle are run. With `absent` set, entries whose
+    // target is in it are skipped instead.
     EstopResult run_ladder(const std::string *only_device = nullptr, const AbsentDevices *absent = nullptr);
     CallOutcome run_call(const runtime::ModeTransitionCallConfig &call);
     CallOutcome run_zero_call(const std::string &device_handle, const registry::FunctionSpec &spec);
@@ -277,7 +326,8 @@ private:
     automation::ModeManager *mode_manager_ = nullptr;  // optional
 
     std::atomic<bool> latched_{false};
-    // The thread running trigger()'s FAULT entry under rung none; empty otherwise.
+    // The thread running trigger()'s FAULT entry under a plan that drives no
+    // output; empty otherwise.
     std::atomic<std::thread::id> fault_entry_hook_thread_{};
     mutable std::mutex mutex_;                                 // serialize trigger()/clear(); guard metadata
     std::optional<int64_t> latched_at_ms_;                     // guarded by mutex_
