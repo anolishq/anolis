@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "errors.hpp"
 #include "events/event_emitter.hpp"
@@ -45,6 +48,43 @@ const std::string *allowed_origin_entry(const std::vector<std::string> &allowed_
                    origin.compare(origin.size() - suffix.size(), suffix.size(), suffix) == 0;
         });
     return matched == allowed_origins.end() ? nullptr : &*matched;
+}
+
+// The Access-Control-Allow-Origin value for a request from @p origin: the
+// origin itself, "*" for a "*" entry, or nothing when no entry admits it.
+// "*" is never sent with credentials: CORS forbids the pair and config
+// validation refuses it, so a config built with it anyway allows no origin.
+std::optional<std::string> cors_allow_origin(const std::vector<std::string> &allowed_origins, bool allow_credentials,
+                                             const std::string &origin) {
+    const std::string *entry = allowed_origin_entry(allowed_origins, origin);
+    if (entry == nullptr) {
+        return std::nullopt;
+    }
+    if (*entry == "*") {
+        return allow_credentials ? std::nullopt : std::optional<std::string>("*");
+    }
+    return origin;
+}
+
+// A CORS preflight from an allowed origin: the OPTIONS a browser sends to
+// /v0/, without credentials, before a cross-origin request that will carry
+// them (#460). Access-Control-Request-Method is what makes it a preflight.
+bool is_allowed_preflight(const httplib::Request &req, const std::vector<std::string> &allowed_origins,
+                          bool allow_credentials) {
+    return req.method == "OPTIONS" && req.path.rfind("/v0/", 0) == 0 &&
+           req.has_header("Access-Control-Request-Method") && req.has_header("Origin") &&
+           cors_allow_origin(allowed_origins, allow_credentials, req.get_header_value("Origin")).has_value();
+}
+
+// Add Origin to the response's Vary, in the one Vary line cpp-httplib may
+// already have set (Accept-Encoding, for a compressed body).
+void vary_on_origin(httplib::Response &res) {
+    const auto vary = res.headers.find("Vary");
+    if (vary == res.headers.end()) {
+        res.set_header("Vary", "Origin");
+    } else {
+        vary->second += ", Origin";
+    }
 }
 
 // The host part of a Host header: "[::1]:8080" -> "::1", "Localhost:8080" ->
@@ -150,25 +190,28 @@ bool HttpServer::start(std::string &error) {
     int pool_size = config_.thread_pool_size;
     server_->new_task_queue = [pool_size] { return new httplib::ThreadPool(pool_size); };
 
-    // Add CORS headers to all responses (allowlist with wildcard support)
+    // CORS headers, for an allowed origin, on every response: routed, refused
+    // before routing (403, 415, 401) or answered as a preflight. This is the
+    // only place that sets them, so each is sent once.
     const bool allow_credentials = config_.cors_allow_credentials;
     server_->set_post_routing_handler([allow_credentials, origins = config_.cors_allowed_origins](
                                           const httplib::Request &req, httplib::Response &res) {
-        const auto origin_it = req.headers.find("Origin");
-        if (origin_it == req.headers.end()) {
+        if (origins.empty()) {
             return;
         }
-
-        const std::string origin = origin_it->second;
-        const std::string *allowed = allowed_origin_entry(origins, origin);
-        if (allowed == nullptr) {
+        // Whether the headers below are sent depends on Origin, so a cache
+        // must not reuse this response for another one.
+        vary_on_origin(res);
+        if (!req.has_header("Origin")) {
             return;
         }
-        const std::string response_origin = *allowed == "*" ? "*" : origin;
-
-        res.set_header("Access-Control-Allow-Origin", response_origin.c_str());
+        const auto allow_origin = cors_allow_origin(origins, allow_credentials, req.get_header_value("Origin"));
+        if (!allow_origin) {
+            return;
+        }
+        res.set_header("Access-Control-Allow-Origin", *allow_origin);
         res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        res.set_header("Access-Control-Allow-Headers", "Authorization, Content-Type");
         if (allow_credentials) {
             res.set_header("Access-Control-Allow-Credentials", "true");
         }
@@ -185,10 +228,13 @@ bool HttpServer::start(std::string &error) {
     //   workbench's proxy send none);
     // - a POST with a body must say application/json.
     // Authentication covers every endpoint including the SSE stream. Loopback
-    // is exempt only when http.auth_exempt_loopback is set; see config.
+    // is exempt only when http.auth_exempt_loopback is set; see config. A
+    // CORS preflight from an allowed origin carries no credentials, so it is
+    // answered here, 204 with no body, before the token check and without
+    // reaching a handler (#460). Any other OPTIONS needs the token.
     const bool check_host = !config_.auth_enabled && !config_.allow_insecure_bind;
     server_->set_pre_routing_handler([check_host, bind = config_.bind, origins = config_.cors_allowed_origins,
-                                      auth_enabled = config_.auth_enabled,
+                                      allow_credentials, auth_enabled = config_.auth_enabled,
                                       exempt_loopback = config_.auth_exempt_loopback,
                                       token = config_.auth_token](const httplib::Request &req, httplib::Response &res) {
         auto refuse = [&res](int status, const char *message) {
@@ -209,6 +255,10 @@ bool HttpServer::start(std::string &error) {
             if (has_body && media_type(req.get_header_value("Content-Type")) != "application/json") {
                 return refuse(kStatusUnsupportedMediaType, "a request body must be application/json");
             }
+        }
+        if (is_allowed_preflight(req, origins, allow_credentials)) {
+            res.status = kStatusNoContent;
+            return httplib::Server::HandlerResponse::Handled;
         }
         if (authorize(auth_enabled, exempt_loopback, token, req.remote_addr, req.get_header_value("Authorization"))) {
             return httplib::Server::HandlerResponse::Unhandled;
@@ -337,19 +387,13 @@ void HttpServer::setup_routes() {
     server_->Post("/v0/call",
                   [this](const httplib::Request &req, httplib::Response &res) { handle_post_call(req, res); });
 
-    // OPTIONS /v0/call - CORS preflight for POST
-    server_->Options("/v0/call", [](const httplib::Request &, httplib::Response &res) {
-        res.status = kStatusNoContent;
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-    });
-
-    // OPTIONS catch-all for CORS preflight on all routes
-    server_->Options(R"(/v0/.*)", [](const httplib::Request &, httplib::Response &res) {
-        res.status = kStatusNoContent;
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-    });
+    // OPTIONS /v0/call and catch-all. A preflight from an allowed origin is
+    // answered before routing; these answer any other OPTIONS that got past
+    // the gate. The post-routing handler adds the CORS headers.
+    server_->Options("/v0/call",
+                     [](const httplib::Request &, httplib::Response &res) { res.status = kStatusNoContent; });
+    server_->Options(R"(/v0/.*)",
+                     [](const httplib::Request &, httplib::Response &res) { res.status = kStatusNoContent; });
 
     // GET /v0/runtime/status - Get runtime status
     server_->Get("/v0/runtime/status",

@@ -82,6 +82,26 @@ Upgrade notes:
 
 ### Fixed
 
+- **A browser on an allowed origin can call an authenticated runtime**
+  (#460). With `http.auth_enabled: true`, the CORS preflight a browser sends
+  before a request carrying `Authorization` was refused with `401`, since it
+  carries no token, and `Access-Control-Allow-Headers` named only
+  `Content-Type`, so the browser would not send `Authorization` cross-origin
+  even past the gate. Origins listed in `http.cors_allowed_origins` were
+  usable only with auth off. Now a preflight from a listed origin (an
+  `OPTIONS` to `/v0/` carrying `Origin` and `Access-Control-Request-Method`)
+  is answered `204` with no body before the token check, and reaches no
+  handler. Any other `OPTIONS`, and a preflight from an origin not listed,
+  still needs the token; nothing else about authentication changes.
+  `Access-Control-Allow-Headers` is `Authorization, Content-Type`. Each CORS
+  header is sent once: the `OPTIONS` routes and the CORS hook both set
+  `Access-Control-Allow-Headers` and `-Methods`, so a preflight carried each
+  twice. An `OPTIONS` from an origin not listed, or without `Origin`, no
+  longer gets `Access-Control-Allow-Headers` or `-Methods` (it never got
+  `Access-Control-Allow-Origin`). With origins listed, every reply carries
+  `Vary: Origin`, merged into the `Vary: Accept-Encoding` line of a
+  compressed reply. With no origins listed (the default) no CORS header is
+  sent, as before.
 - **The software stop plans each output on its own** (#640). It chose one
   rung for the whole machine: setpoints when they named every actuating
   function, without checking that they could be sent, else the zero rung for

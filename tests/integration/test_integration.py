@@ -292,6 +292,7 @@ def test_provider_config_suite(runtime_exe: Path, provider_exe: Path, unique_por
     [
         http_auth_suite.test_loopback_requires_token_by_default,
         http_auth_suite.test_explicit_exemption_still_exempts_and_warns,
+        http_auth_suite.test_cross_origin_browser_client_with_auth,
     ],
 )
 def test_http_auth_suite(runtime_exe: Path, provider_exe: Path, unique_port: int, check) -> None:
