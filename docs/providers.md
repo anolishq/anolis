@@ -95,8 +95,11 @@ Behavior:
    replacement is stopped and reaped before the attempt ends, and the attempt
    counts as a failure.
    Unset, `timeout_ms` is `hello_timeout_ms + ready_timeout_ms`, the longest
-   `Hello` and `WaitReady` can take at boot, so a provider that boots within
-   its own timeouts can also be restarted. An explicit value smaller than that
+   `Hello` and `WaitReady` can take at boot. Starting the process and
+   discovery spend the same budget, so a provider whose `Hello` and
+   `WaitReady` together use nearly all of both timeouts can still be refused
+   after discovery, though boot would accept it; give such a provider a
+   `timeout_ms` with room for discovery. An explicit value smaller than that
    sum is accepted, with a warning at load: a restart then fails whenever
    `Hello` and `WaitReady` together take longer than `timeout_ms`, even though
    each finishes within its own timeout and boot would accept it.

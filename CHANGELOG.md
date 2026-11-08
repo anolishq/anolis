@@ -59,14 +59,17 @@ Upgrade notes:
   the two share it: each waits for the smaller of its own timeout and what is
   left, so an attempt that cannot be ready in time is refused while it
   starts. Unset, it was 30000 ms; it is now
-  `hello_timeout_ms + ready_timeout_ms` (65000 ms with their defaults), so a
-  provider ready within those timeouts can be restarted. With an explicit
-  value, an attempt the old check refused is still refused, and sooner: the
-  replacement is stopped part way instead of being brought fully up first.
-  A value below
+  `hello_timeout_ms + ready_timeout_ms` (65000 ms with their defaults).
+  Starting the process and rediscovering its devices spend the same budget,
+  and discovery is checked only once it is done, so a provider whose `Hello`
+  and `WaitReady` together use nearly all of both timeouts can still come up
+  and be refused after discovery; give such a provider a `timeout_ms` with
+  room for discovery. With an explicit value, an attempt the old check
+  refused is still refused, and sooner: the replacement is stopped part way
+  instead of being brought fully up first. A value below
   `hello_timeout_ms + ready_timeout_ms` now loads with a warning that names
-  both numbers; remove it to use the sum. The runtime-config schema no longer
-  requires `timeout_ms` in an enabled `restart_policy`.
+  both numbers. The runtime-config schema no longer requires `timeout_ms` in
+  an enabled `restart_policy`.
 
 ### Security
 
@@ -114,7 +117,8 @@ Upgrade notes:
 
 ### Fixed
 
-- **A provider slow to become ready can be restarted** (#556). With the
+- **A provider slow to become ready can be restarted** (#556), when its
+  `Hello` and `WaitReady` leave room in the budget for discovery. With the
   defaults, `restart_policy.timeout_ms` (30000 ms) was shorter than
   `ready_timeout_ms` (60000 ms), and it was checked only after `WaitReady`
   had answered, so every restart of a provider that took more than 30 s to

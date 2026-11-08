@@ -58,9 +58,9 @@ struct ProviderConfig {
  * @brief The budget for one restart attempt of this provider (#556).
  *
  * `restart_policy.timeout_ms` when set. Otherwise `hello_timeout_ms +
- * ready_timeout_ms`, the longest `Hello` and `WaitReady` can take at boot, so
- * a provider that boots within its own timeouts can also be restarted.
- * Saturates at INT_MAX.
+ * ready_timeout_ms`, the longest `Hello` and `WaitReady` can take at boot.
+ * Spawning and discovery spend the same budget, so a provider that needs nearly
+ * all of both timeouts needs an explicit, larger value. Saturates at INT_MAX.
  */
 inline int restart_timeout_ms(const ProviderConfig &config) {
     if (config.restart_policy.timeout_ms) {
