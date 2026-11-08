@@ -15,6 +15,12 @@ commit messages only.
 
 Upgrade notes:
 
+- **A `bytes` value on the event stream is base64** (#594). A `state_update`
+  for a `bytes` signal now carries `{"type":"bytes","base64":"..."}`, as the
+  REST API does. Earlier releases sent `{"type":"string","string":...}` with
+  the raw bytes (and aborted when they were not valid UTF-8), so a client
+  reading such a signal from `GET /v0/events` must now decode `base64`. No
+  shipped provider declares a `bytes` signal.
 - **Capability args carry `position`** (#731). A client that validates
   `GET /v0/devices/{provider_id}/{device_id}/capabilities` responses against a
   copy of `schemas/http/runtime-http.openapi.v0.yaml` from before this release
@@ -205,23 +211,27 @@ Upgrade notes:
 - **The runtime HTTP fixtures match provider-sim v0.2.8** (#582): `motorctl0`'s
   function is `1` / `set_motor_duty`, with its label and argument bounds, in
   the capabilities, call and e-stop examples.
-- **A byte that is not valid UTF-8 no longer aborts the runtime** (#594).
-  The `GET /v0/events` stream and the HTTP error responses serialized JSON
-  with a `dump()` that throws on such a byte, and cpp-httplib calls the event
-  stream's content provider and the error handler outside its own
-  try/catch, so the throw reached `std::terminate`. Any `bytes` signal value
-  with a byte of 0x80 or above did it while a client was watching the event
-  stream, and so did an `automation_fault` whose message carried such a byte,
-  or any request for an unrouted path such as `/%FF` (with auth off, or with
-  a valid token). Every HTTP-layer serialization now replaces each invalid
-  byte with U+FFFD, as `send_json` already did, and an exception inside the
-  event stream now ends that client's stream with an ERROR log line instead
-  of the process. A `bytes` value on the event stream is now
-  `{"type":"bytes","base64":"..."}`, as the REST API and the OpenAPI `Value`
-  encode it; it was labelled `string` and carried the raw bytes. No shipped
-  provider declares a `bytes` signal. The InfluxDB sink still writes a
-  `bytes` value as the same lossy `value_string` as before; changing it is
-  #500.
+- **Text that is not valid UTF-8 no longer aborts the runtime** (#594).
+  The `GET /v0/events` stream, the HTTP error responses and the run journal
+  serialized JSON with a `dump()` that throws on such text, in places where
+  nothing caught the exception, so it reached `std::terminate`. Any of these
+  aborted the runtime:
+  - a `bytes` signal value with a byte of 0x80 or above, or a string signal
+    that is not valid UTF-8, while a client watched the event stream;
+  - an `automation_fault` whose message is not valid UTF-8, on the event
+    stream or, while a run is open, in the run journal;
+  - a request path holding a byte that is not valid UTF-8.
+
+  All of them now replace invalid UTF-8 sequences with U+FFFD, as
+  `send_json` already did, and a run record written for a tree file whose
+  name is not valid UTF-8 no longer fails `POST /v0/runs`. An exception
+  inside the event stream now ends that client's stream with an ERROR log
+  line instead of the process, and one in the run journal's writer drops
+  that event with an ERROR log line and keeps writing. A `bytes` value on
+  the event stream is now `{"type":"bytes","base64":"..."}`, as the REST API
+  and the OpenAPI `Value` encode it (see Upgrade notes). The InfluxDB sink
+  still writes a `bytes` value as the same lossy `value_string` as before;
+  changing it is #500.
 - **`GET /v0/automation/tree` serves the tree that is running** (#584). It
   read the behavior tree file again on every request, so after the file was
   edited it returned XML that was not running and did not hash to

@@ -26,7 +26,8 @@ inline bool parse_path_params(const httplib::Request &req, std::string &provider
  * Bodies and event frames carry provider-, engine- and client-supplied text
  * (device ids, labels, health and fault messages, a request path). By default
  * dump() throws type_error.316 on a byte sequence that is not valid UTF-8; this
- * writes U+FFFD for each such byte instead. Every HTTP-layer serialization goes
+ * replaces invalid sequences with U+FFFD instead (an incomplete multibyte
+ * sequence becomes a single U+FFFD). Every HTTP-layer serialization goes
  * through here: inside a route handler a throw would turn the whole response
  * into a 500, and in the error handler or an SSE content provider, which
  * cpp-httplib calls outside its routing try/catch, it would abort the runtime

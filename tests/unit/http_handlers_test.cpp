@@ -2125,35 +2125,36 @@ protected:
         server.reset();
     }
 
-    // A device with one bytes signal, "blob", whose first read is `bytes`.
-    void RegisterBlobDevice(const std::string& bytes) {
+    // A device "sigdev" with one signal, `signal_id`, of `value`'s type, whose
+    // first read is `value`.
+    void RegisterOneSignalDevice(const std::string& signal_id, const anolis::deviceprovider::v1::Value& value) {
         EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
             Device dev;
-            dev.set_device_id("blobdev");
+            dev.set_device_id("sigdev");
             devices.push_back(dev);
             return true;
         }));
-        EXPECT_CALL(*mock_provider, describe_device("blobdev", _))
-            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
-                response.mutable_device()->set_device_id("blobdev");
+        EXPECT_CALL(*mock_provider, describe_device("sigdev", _))
+            .WillOnce(Invoke([signal_id, value](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("sigdev");
                 auto* signal = response.mutable_capabilities()->add_signals();
-                signal->set_signal_id("blob");
-                signal->set_name("blob");
-                signal->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
+                signal->set_signal_id(signal_id);
+                signal->set_name(signal_id);
+                signal->set_value_type(value.type());
                 signal->set_poll_hint_hz(1.0);  // polled by default
                 return true;
             }));
         registry->discover_provider("test_provider", *mock_provider);
-        EXPECT_CALL(*mock_provider, read_signals("blobdev", _, _, _))
-            .WillOnce(Invoke([bytes](const std::string&, const std::vector<std::string>&, ReadSignalsResponse& response,
-                                     anolis::deviceprovider::v1::Status_Code&) {
-                auto* value = response.add_values();
-                value->set_signal_id("blob");
-                value->mutable_value()->set_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
-                value->mutable_value()->set_bytes_value(bytes);
-                value->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
-                return true;
-            }));
+        EXPECT_CALL(*mock_provider, read_signals("sigdev", _, _, _))
+            .WillOnce(
+                Invoke([signal_id, value](const std::string&, const std::vector<std::string>&,
+                                          ReadSignalsResponse& response, anolis::deviceprovider::v1::Status_Code&) {
+                    auto* read = response.add_values();
+                    read->set_signal_id(signal_id);
+                    *read->mutable_value() = value;
+                    read->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                    return true;
+                }));
     }
 
     struct Frame {
@@ -2230,7 +2231,10 @@ protected:
 };
 
 TEST_F(HttpEventStreamTest, BytesValueIsSentAsBase64AndTheStreamContinues) {
-    RegisterBlobDevice(std::string("\xFF\x00\x10", 3));
+    anolis::deviceprovider::v1::Value blob;
+    blob.set_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
+    blob.set_bytes_value(std::string("\xFF\x00\x10", 3));
+    RegisterOneSignalDevice("blob", blob);
     ASSERT_TRUE(state_cache->initialize());
     Listen(2);
 
@@ -2248,6 +2252,29 @@ TEST_F(HttpEventStreamTest, BytesValueIsSentAsBase64AndTheStreamContinues) {
     ExpectServerStillServing();
 }
 
+// A provider's string signal is text it supplied and may not be valid UTF-8.
+// Its state_update frame carries the value with invalid sequences replaced.
+TEST_F(HttpEventStreamTest, NonUtf8StringSignalIsReplacedAndTheStreamContinues) {
+    anolis::deviceprovider::v1::Value text;
+    text.set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    text.set_string_value(std::string("ok \xFF end"));
+    RegisterOneSignalDevice("status", text);
+    ASSERT_TRUE(state_cache->initialize());
+    Listen(2);
+
+    state_cache->poll_once(*provider_registry);
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "state_update");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["value"], (nlohmann::json{{"type", "string"}, {"string", "ok \xEF\xBF\xBD end"}})) << got[0].data;
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the string value must still arrive";
+    ExpectServerStillServing();
+}
+
 TEST_F(HttpEventStreamTest, NonUtf8FaultMessageIsReplacedAndTheStreamContinues) {
     Listen(2);
 
@@ -2260,7 +2287,8 @@ TEST_F(HttpEventStreamTest, NonUtf8FaultMessageIsReplacedAndTheStreamContinues) 
     ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
     const auto data = nlohmann::json::parse(got[0].data);
     EXPECT_EQ(data["locus"], "tick");
-    // Each invalid byte becomes U+FFFD; the valid text around it is kept.
+    // 0xFF and 0xFE are each an invalid sequence of one byte, so each becomes
+    // U+FFFD; the valid text around them is kept.
     EXPECT_EQ(data["error"], "tick threw: \xEF\xBF\xBD\xEF\xBF\xBD end");
     EXPECT_EQ(got[1].event, "mode_change") << "an event after the fault must still arrive";
     ExpectServerStillServing();

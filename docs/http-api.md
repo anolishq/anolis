@@ -298,9 +298,10 @@ it.
 
 `state_update`'s `value` uses the [typed value encoding](#typed-value-encoding)
 of the REST API, so a `bytes` value is `{"type":"bytes","base64":"..."}`.
-Strings in a frame (a fault message, say) that are not valid UTF-8 are sent
-with each invalid byte replaced by U+FFFD. If the runtime cannot send an
-event, it ends that client's stream and logs the reason at ERROR; other
+Earlier releases sent it as `{"type":"string","string":...}` with the raw
+bytes. In strings in a frame (a string signal value or a fault message, say),
+invalid UTF-8 sequences are replaced with U+FFFD. If the runtime cannot send
+an event, it ends that client's stream and logs the reason at ERROR; other
 clients and later connections are unaffected.
 
 Provider health is not streamed. Read `GET /v0/providers/health` for it.
