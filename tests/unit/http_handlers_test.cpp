@@ -2426,6 +2426,31 @@ TEST_F(HttpCorsTest, AWildcardIsNeverSentWithCredentials) {
     }
 }
 
+// The 404 for a path holding a byte that is not valid UTF-8 (#594) is still a
+// JSON 404 an allowed origin can read: the error handler writes the body, the
+// post-routing hook adds the CORS headers once (#460).
+TEST_F(HttpCorsTest, ANonUtf8UnroutedPathIsANotFoundWithTheCorsHeadersOnce) {
+    for (const bool auth : {false, true}) {
+        SCOPED_TRACE(auth ? "auth on" : "auth off");
+        start(auth ? auth_on() : auth_off());
+        httplib::Headers headers{{"Origin", kAllowedOrigin}};
+        if (auth) {
+            headers.emplace("Authorization", std::string("Bearer ") + kToken);
+        }
+        auto res = client->Get("/%FF", headers);
+        ASSERT_TRUE(res) << "no response: the server died";
+        EXPECT_EQ(404, res->status);
+        ASSERT_TRUE(nlohmann::json::accept(res->body)) << res->body;
+        EXPECT_EQ("NOT_FOUND", nlohmann::json::parse(res->body)["status"]["code"]);
+        EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Origin"));
+        EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+        auto again = client->Get("/v0/devices", headers);
+        ASSERT_TRUE(again) << "server stopped answering";
+        EXPECT_EQ(200, again->status);
+        TearDown();
+    }
+}
+
 //=============================================================================
 // GET /v0/events: non-UTF-8 bytes and bytes values (#594)
 //
