@@ -3,12 +3,15 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <variant>
@@ -725,7 +728,9 @@ logging:
     EXPECT_FALSE(rp.enabled);  // Default disabled
     EXPECT_EQ(rp.max_attempts, 3);
     ASSERT_EQ(rp.backoff_ms.size(), 3);
-    EXPECT_EQ(rp.timeout_ms, 30000);
+    EXPECT_FALSE(rp.timeout_ms.has_value());
+    // hello_timeout_ms + ready_timeout_ms with their defaults (#556)
+    EXPECT_EQ(anolis::provider::restart_timeout_ms(config.providers[0]), 5000 + 60000);
     EXPECT_EQ(rp.success_reset_ms, 1000);
 }
 
@@ -1480,6 +1485,95 @@ logging:
     EXPECT_FALSE(load_config(config_path, config, error));
     EXPECT_FALSE(error.empty());
     EXPECT_NE(error.find("timeout_ms must be >= 1000ms"), std::string::npos);
+}
+
+// ===== Restart budget (#556) =====
+
+namespace {
+
+// load_config with the log captured, for its warnings.
+bool load_capturing_log(const std::string& path, RuntimeConfig& config, std::string& error, std::string& log) {
+    std::ostringstream captured;
+    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    const bool ok = load_config(path, config, error);
+    std::cerr.rdbuf(old);
+    log = captured.str();
+    return ok;
+}
+
+std::string restart_budget_config(const std::string& timeouts, const std::string& restart_timeout) {
+    return R"(
+http:
+  enabled: false
+
+providers:
+  - id: slow_ready
+    command: /path/to/provider
+)" + timeouts +
+           R"(    restart_policy:
+      enabled: true
+      max_attempts: 1
+      backoff_ms: [100]
+)" + restart_timeout +
+           R"(
+logging:
+  level: info
+)";
+}
+
+}  // namespace
+
+TEST_F(ConfigTest, RestartTimeoutUnsetIsHelloPlusReadyTimeout) {
+    const auto path =
+        create_config_file("restart_timeout_unset.yaml",
+                           restart_budget_config("    hello_timeout_ms: 2000\n    ready_timeout_ms: 45000\n", ""));
+    RuntimeConfig config;
+    std::string error;
+    std::string log;
+
+    ASSERT_TRUE(load_capturing_log(path, config, error, log)) << error;
+    EXPECT_FALSE(config.providers[0].restart_policy.timeout_ms.has_value());
+    EXPECT_EQ(anolis::provider::restart_timeout_ms(config.providers[0]), 47000);
+    EXPECT_EQ(log.find("restart_policy.timeout_ms"), std::string::npos) << log;
+}
+
+// Existing configs, such as the integration suite's timeout_ms: 1000, keep
+// loading; the warning names the value and the sum it falls short of.
+TEST_F(ConfigTest, RestartTimeoutBelowHelloPlusReadyWarnsAndLoads) {
+    const auto path =
+        create_config_file("restart_timeout_short.yaml", restart_budget_config("", "      timeout_ms: 1000\n"));
+    RuntimeConfig config;
+    std::string error;
+    std::string log;
+
+    ASSERT_TRUE(load_capturing_log(path, config, error, log)) << error;
+    EXPECT_EQ(config.providers[0].restart_policy.timeout_ms, 1000);
+    EXPECT_EQ(anolis::provider::restart_timeout_ms(config.providers[0]), 1000);
+    EXPECT_NE(log.find("[WARN]"), std::string::npos) << log;
+    EXPECT_NE(log.find("Provider 'slow_ready' restart_policy.timeout_ms (1000 ms) is less than "
+                       "hello_timeout_ms + ready_timeout_ms (5000 + 60000 = 65000 ms)"),
+              std::string::npos)
+        << log;
+}
+
+TEST_F(ConfigTest, RestartTimeoutCoveringHelloPlusReadyDoesNotWarn) {
+    const auto path = create_config_file(
+        "restart_timeout_covering.yaml",
+        restart_budget_config("    hello_timeout_ms: 1000\n    ready_timeout_ms: 4000\n", "      timeout_ms: 5000\n"));
+    RuntimeConfig config;
+    std::string error;
+    std::string log;
+
+    ASSERT_TRUE(load_capturing_log(path, config, error, log)) << error;
+    EXPECT_EQ(anolis::provider::restart_timeout_ms(config.providers[0]), 5000);
+    EXPECT_EQ(log.find("restart_policy.timeout_ms"), std::string::npos) << log;
+}
+
+TEST_F(ConfigTest, RestartTimeoutDefaultSaturates) {
+    anolis::provider::ProviderConfig provider;
+    provider.hello_timeout_ms = 2'000'000'000;
+    provider.ready_timeout_ms = 2'000'000'000;
+    EXPECT_EQ(anolis::provider::restart_timeout_ms(provider), INT_MAX);
 }
 
 TEST_F(ConfigTest, RestartPolicyNegativeSuccessResetWindow) {

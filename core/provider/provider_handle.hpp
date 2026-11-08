@@ -53,6 +53,16 @@ public:
      */
     bool start() override;
 
+    /**
+     * @brief start() with `budget` for the whole of it (#556).
+     *
+     * The spawn, `Hello` and `WaitReady` share the budget: each RPC waits for
+     * the smaller of its own timeout and what is left, and `WaitReady`'s hint
+     * carries that wait. Fails, with the session unhealthy, when the budget runs
+     * out first; the process is left for stop() to reap.
+     */
+    bool start_within(std::chrono::milliseconds budget);
+
     /** @brief Report whether the process is alive and the ADPP session is healthy. */
     bool is_available() const override {
         return session_healthy_.load(std::memory_order_acquire) && process_.is_running();
@@ -156,15 +166,35 @@ private:
      * returns false with DEADLINE_EXCEEDED, sends nothing, and leaves
      * error_ and last_status_code_ alone, since they belong to the exchange
      * that holds the lock.
+     *
+     * With `timeout_ms`, the exchange waits that long instead of the timeout
+     * its request type selects.
      */
     bool send_request(const anolis::deviceprovider::v1::Request &request,
                       anolis::deviceprovider::v1::Response &response, uint64_t request_id,
                       anolis::deviceprovider::v1::Status_Code &status,
-                      std::optional<std::chrono::milliseconds> lock_wait = std::nullopt);
+                      std::optional<std::chrono::milliseconds> lock_wait = std::nullopt,
+                      std::optional<int> timeout_ms = std::nullopt);
 
     /** @brief GetHealth, with an optional bound on the wait for the session. */
     bool get_health_impl(anolis::deviceprovider::v1::GetHealthResponse &response,
                          std::optional<std::chrono::milliseconds> lock_wait);
+
+    /** @brief start(), with `Hello` and `WaitReady` cut short at `deadline` when given. */
+    bool start_impl(std::optional<std::chrono::steady_clock::time_point> deadline);
+
+    /**
+     * @brief The wait for one startup RPC: `own_timeout_ms`, cut to what is left before `deadline`.
+     *
+     * Returns false, with error_ set, when nothing is left.
+     */
+    bool startup_wait(int own_timeout_ms, std::optional<std::chrono::steady_clock::time_point> deadline,
+                      const char *rpc, int &wait_ms);
+
+    /** @brief `Hello`, waiting at most `timeout_ms`. */
+    bool hello_within(anolis::deviceprovider::v1::HelloResponse &response, int timeout_ms);
+    /** @brief `WaitReady`, waiting at most `timeout_ms`, which is also its `max_wait_ms_hint`. */
+    bool wait_ready_within(anolis::deviceprovider::v1::WaitReadyResponse &response, int timeout_ms);
 
     /** @brief Wait for one correlated response frame within the given timeout. */
     bool wait_for_response(anolis::deviceprovider::v1::Response &response, uint64_t expected_request_id, int timeout_ms,

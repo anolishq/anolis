@@ -300,7 +300,8 @@
           }
         },
         "timeout_ms": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Budget (ms) for one whole restart attempt: starting the new process, Hello, WaitReady and device discovery. Hello and WaitReady share it, each waiting for the smaller of its own timeout and what is left. Absent => the provider's hello_timeout_ms + ready_timeout_ms. A value below that sum is accepted with a warning. Not applied at boot."
         },
         "success_reset_ms": {
           "type": "integer"
@@ -322,8 +323,7 @@
           "then": {
             "required": [
               "max_attempts",
-              "backoff_ms",
-              "timeout_ms"
+              "backoff_ms"
             ],
             "properties": {
               "max_attempts": {

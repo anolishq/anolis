@@ -1,0 +1,16 @@
+# An explicit restart_policy.timeout_ms below hello_timeout_ms +
+# ready_timeout_ms (5000 + 60000 ms by default) loads, with a warning (#556).
+providers:
+  - id: test0
+    command: ./provider-test
+    restart_policy:
+      enabled: true
+      max_attempts: 1
+      backoff_ms: [100]
+      timeout_ms: 1000
+
+http:
+  enabled: false
+
+logging:
+  level: info

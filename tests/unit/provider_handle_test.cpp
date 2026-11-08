@@ -12,6 +12,7 @@ namespace {
 
 const char *kHelloMismatchProviderPath = PROVIDER_HELLO_MISMATCH_HELPER_PATH;
 const char *kStalledReadProviderPath = PROVIDER_STALLED_READ_HELPER_PATH;
+const char *kEmptyInventoryProviderPath = PROVIDER_EMPTY_INVENTORY_HELPER_PATH;
 
 using namespace std::chrono_literals;
 namespace adpp = anolis::deviceprovider::v1;
@@ -93,4 +94,55 @@ TEST(ProviderHandleTest, GetHealthWaitsForABusySession) {
 
     EXPECT_FALSE(stuck.get());
     handle.stop();
+}
+
+// #556: a startup budget is shared by Hello and WaitReady. Each answers in
+// 700 ms, inside its own 1000 ms timeout, so start() accepts the provider; but
+// together they take 1400 ms, so a 1000 ms budget refuses it at the budget.
+namespace {
+
+anolis::provider::ProviderHandle slow_startup_handle() {
+    return anolis::provider::ProviderHandle("slow-startup", kEmptyInventoryProviderPath,
+                                            {"--hello-delay-ms", "700", "--ready-delay-ms", "700"}, 1000, 1000, 1000,
+                                            500);
+}
+
+}  // namespace
+
+TEST(ProviderHandleTest, StartGivesHelloAndWaitReadyEachTheirOwnTimeout) {
+    auto handle = slow_startup_handle();
+    EXPECT_TRUE(handle.start()) << handle.last_error();
+    EXPECT_TRUE(handle.is_available());
+    EXPECT_TRUE(handle.stop());
+}
+
+TEST(ProviderHandleTest, StartWithinRefusesWhenHelloAndWaitReadyTogetherOutlastTheBudget) {
+    auto handle = slow_startup_handle();
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(handle.start_within(1000ms));
+    const auto waited = elapsed_since(start);
+    EXPECT_GE(waited, 1000ms);
+    EXPECT_LT(waited, 1400ms) << "WaitReady waited its own timeout, not what Hello left of the budget";
+    EXPECT_NE(handle.last_error().find("Timeout waiting for response"), std::string::npos) << handle.last_error();
+    EXPECT_FALSE(handle.is_available());
+    EXPECT_TRUE(handle.stop()) << "the refused provider was not reaped";
+}
+
+TEST(ProviderHandleTest, StartWithinAcceptsWhenHelloAndWaitReadyFitTheBudget) {
+    auto handle = slow_startup_handle();
+    EXPECT_TRUE(handle.start_within(3000ms)) << handle.last_error();
+    EXPECT_TRUE(handle.is_available());
+    EXPECT_TRUE(handle.stop());
+}
+
+TEST(ProviderHandleTest, StartWithinCutsHelloToTheBudget) {
+    anolis::provider::ProviderHandle handle("slow-hello", kEmptyInventoryProviderPath, {"--hello-delay-ms", "1500"},
+                                            1000, 3000, 1000, 500);
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(handle.start_within(1000ms));
+    const auto waited = elapsed_since(start);
+    EXPECT_GE(waited, 1000ms);
+    EXPECT_LT(waited, 1500ms) << "Hello waited its own timeout, not the budget";
+    EXPECT_FALSE(handle.is_available());
+    EXPECT_TRUE(handle.stop()) << "the refused provider was not reaped";
 }

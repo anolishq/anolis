@@ -81,7 +81,13 @@ Restart policy fields:
 1. `enabled` (bool)
 2. `max_attempts` (int)
 3. `backoff_ms` (int array)
-4. `timeout_ms` (int)
+4. `timeout_ms` (int, optional, >= 1000): the budget for one whole restart
+   attempt, from starting the new process through `Hello`, `WaitReady` and
+   device discovery. `Hello` and `WaitReady` share it: each waits for the
+   smaller of its own timeout and what is left. Unset, it is
+   `hello_timeout_ms + ready_timeout_ms`. An explicit value below that sum is
+   accepted with a warning. It does not apply at boot. See
+   [Provider Supervision](providers.md#provider-supervision).
 5. `success_reset_ms` (int)
 
 Key invariants:

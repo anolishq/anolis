@@ -1,0 +1,17 @@
+# restart_policy.timeout_ms unset: one restart attempt gets
+# hello_timeout_ms + ready_timeout_ms, here 2000 + 45000 ms (#556).
+providers:
+  - id: test0
+    command: ./provider-test
+    hello_timeout_ms: 2000
+    ready_timeout_ms: 45000
+    restart_policy:
+      enabled: true
+      max_attempts: 2
+      backoff_ms: [100, 1000]
+
+http:
+  enabled: false
+
+logging:
+  level: info
