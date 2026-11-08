@@ -175,6 +175,7 @@ inline std::string escape_field_string(const std::string &s) {
  * - uint64: value_uint=1200u
  * - bool: value_bool=true
  * - string: value_string="hello"
+ * - bytes: value_string="<raw bytes, escaped>" (lossy; see #500)
  */
 inline std::string format_line_protocol(const events::StateUpdateEvent &event,
                                         const std::string &runtime_name = "default") {
@@ -214,6 +215,13 @@ inline std::string format_line_protocol(const events::StateUpdateEvent &event,
                 line << "value_bool=" << (arg ? "true" : "false");
             } else if constexpr (std::is_same_v<T, std::string>) {
                 line << "value_string=\"" << escape_field_string(arg) << "\"";
+            } else if constexpr (std::is_same_v<T, events::BytesValue>) {
+                // Unchanged from when bytes arrived here as a plain string: the
+                // raw bytes, escaped as text. Lossy, and not necessarily valid
+                // UTF-8; how bytes should be stored is #500's decision.
+                line << "value_string=\"" << escape_field_string(arg.bytes) << "\"";
+            } else {
+                static_assert(sizeof(T) == 0, "every TypedValue alternative needs a line-protocol field");
             }
         },
         event.value);

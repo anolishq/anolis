@@ -641,7 +641,7 @@ void StateCache::emit_state_update(const std::string &provider_id, const std::st
             typed_val = value.string_value();
             break;
         case VT::VALUE_TYPE_BYTES:
-            typed_val = value.bytes_value();
+            typed_val = events::BytesValue{value.bytes_value()};
             break;
         default:
             typed_val = std::string("<unknown>");

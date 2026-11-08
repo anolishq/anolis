@@ -20,10 +20,16 @@
 #include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -33,6 +39,7 @@
 #include "control/device_loss_latch.hpp"
 #include "control/safe_state.hpp"
 #include "control/stop_chain.hpp"
+#include "events/event_emitter.hpp"
 #include "http/json.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
@@ -41,6 +48,13 @@
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
 #include "state/state_cache.hpp"
+
+#if ANOLIS_ENABLE_AUTOMATION
+#include <openssl/evp.h>
+
+#include "automation/bt_runtime.hpp"
+#include "automation/mode_manager.hpp"
+#endif
 
 // HttpHandlersTest disabled under ThreadSanitizer due to cpp-httplib incompatibility.
 // The library's internal threading triggers TSAN segfaults during server initialization.
@@ -1053,6 +1067,23 @@ TEST_F(HttpHandlersTest, ErrorResponseFormat) {
 
     EXPECT_EQ("NOT_FOUND", json["status"]["code"]);
     EXPECT_FALSE(json["status"]["message"].get<std::string>().empty());
+}
+
+// The 404 message quotes the request path, which a client chooses and which
+// `%FF` decodes to a byte that is not valid UTF-8. Rendering it must not throw:
+// the error handler runs outside cpp-httplib's routing try/catch, so a throw
+// there aborts the runtime.
+TEST_F(HttpHandlersTest, NonUtf8UnroutedPathIsNotFoundAndTheServerKeepsServing) {
+    auto res = client->Get("/%FF");
+
+    ASSERT_TRUE(res) << "no response: the server died";
+    EXPECT_EQ(404, res->status);
+    ASSERT_TRUE(nlohmann::json::accept(res->body)) << res->body;
+    EXPECT_EQ("NOT_FOUND", nlohmann::json::parse(res->body)["status"]["code"]);
+
+    auto again = client->Get("/v0/devices");
+    ASSERT_TRUE(again) << "server stopped answering";
+    EXPECT_EQ(200, again->status);
 }
 
 //=============================================================================
@@ -2394,6 +2425,483 @@ TEST_F(HttpCorsTest, AWildcardIsNeverSentWithCredentials) {
         EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
     }
 }
+
+// The 404 for a path holding a byte that is not valid UTF-8 (#594) is still a
+// JSON 404 an allowed origin can read: the error handler writes the body, the
+// post-routing hook adds the CORS headers once (#460).
+TEST_F(HttpCorsTest, ANonUtf8UnroutedPathIsANotFoundWithTheCorsHeadersOnce) {
+    for (const bool auth : {false, true}) {
+        SCOPED_TRACE(auth ? "auth on" : "auth off");
+        start(auth ? auth_on() : auth_off());
+        httplib::Headers headers{{"Origin", kAllowedOrigin}};
+        if (auth) {
+            headers.emplace("Authorization", std::string("Bearer ") + kToken);
+        }
+        auto res = client->Get("/%FF", headers);
+        ASSERT_TRUE(res) << "no response: the server died";
+        EXPECT_EQ(404, res->status);
+        ASSERT_TRUE(nlohmann::json::accept(res->body)) << res->body;
+        EXPECT_EQ("NOT_FOUND", nlohmann::json::parse(res->body)["status"]["code"]);
+        EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Origin"));
+        EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+        auto again = client->Get("/v0/devices", headers);
+        ASSERT_TRUE(again) << "server stopped answering";
+        EXPECT_EQ(200, again->status);
+        TearDown();
+    }
+}
+
+//=============================================================================
+// GET /v0/events: non-UTF-8 bytes and bytes values (#594)
+//
+// A frame carries provider- and engine-supplied strings. A byte that is not
+// valid UTF-8 must not abort the runtime or end the stream, and a bytes signal
+// value goes out as base64, as the REST API sends it.
+//=============================================================================
+
+class HttpEventStreamTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        emitter = std::make_shared<events::EventEmitter>(100, 8);
+        state_cache->set_event_emitter(emitter);
+
+        mock_provider = std::make_shared<StrictMock<MockProviderHandle>>();
+        mock_provider->_id = "test_provider";
+        EXPECT_CALL(*mock_provider, provider_id()).WillRepeatedly(ReturnRef(mock_provider->_id));
+        EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Return(true));
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        provider_registry->add_provider("test_provider", mock_provider);
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;  // OS-assigned port
+
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.event_emitter = emitter;
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    void TearDown() override {
+        if (reader.joinable()) {
+            reader.join();
+        }
+        server->stop();
+        server.reset();
+    }
+
+    // A device "sigdev" with one signal, `signal_id`, of `value`'s type, whose
+    // first read is `value`.
+    void RegisterOneSignalDevice(const std::string& signal_id, const anolis::deviceprovider::v1::Value& value) {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("sigdev");
+            devices.push_back(dev);
+            return true;
+        }));
+        EXPECT_CALL(*mock_provider, describe_device("sigdev", _))
+            .WillOnce(Invoke([signal_id, value](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("sigdev");
+                auto* signal = response.mutable_capabilities()->add_signals();
+                signal->set_signal_id(signal_id);
+                signal->set_name(signal_id);
+                signal->set_value_type(value.type());
+                signal->set_poll_hint_hz(1.0);  // polled by default
+                return true;
+            }));
+        registry->discover_provider("test_provider", *mock_provider);
+        EXPECT_CALL(*mock_provider, read_signals("sigdev", _, _, _))
+            .WillOnce(
+                Invoke([signal_id, value](const std::string&, const std::vector<std::string>&,
+                                          ReadSignalsResponse& response, anolis::deviceprovider::v1::Status_Code&) {
+                    auto* read = response.add_values();
+                    read->set_signal_id(signal_id);
+                    *read->mutable_value() = value;
+                    read->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                    return true;
+                }));
+    }
+
+    struct Frame {
+        std::string event;
+        std::string data;
+    };
+
+    // Opens /v0/events on its own connection and collects frames until `count`
+    // have arrived or the stream ends; returns once the subscription exists, so
+    // nothing emitted afterwards can be missed.
+    void Listen(size_t count) {
+        const size_t before = emitter->subscriber_count();
+        reader = std::thread([this, count] {
+            httplib::Client sse("127.0.0.1", server->get_port());
+            sse.set_read_timeout(10, 0);
+            std::string buffer;
+            sse.Get("/v0/events", [&](const char* data, size_t length) {
+                buffer.append(data, length);
+                for (auto end = buffer.find("\n\n"); end != std::string::npos; end = buffer.find("\n\n")) {
+                    const std::string block = buffer.substr(0, end);
+                    buffer.erase(0, end + 2);
+                    if (block.starts_with(":")) {
+                        continue;  // keep-alive comment
+                    }
+                    Frame frame;
+                    std::istringstream lines(block);
+                    for (std::string line; std::getline(lines, line);) {
+                        if (line.starts_with("event: ")) frame.event = line.substr(7);
+                        if (line.starts_with("data: ")) frame.data = line.substr(6);
+                    }
+                    std::lock_guard<std::mutex> lock(frames_mutex);
+                    frames.push_back(frame);
+                }
+                std::lock_guard<std::mutex> lock(frames_mutex);
+                return frames.size() < count;
+            });
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (emitter->subscriber_count() == before && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ASSERT_GT(emitter->subscriber_count(), before) << "the SSE client never subscribed";
+    }
+
+    std::vector<Frame> Collected() {
+        if (reader.joinable()) {
+            reader.join();
+        }
+        std::lock_guard<std::mutex> lock(frames_mutex);
+        return frames;
+    }
+
+    void EmitModeChange() { emitter->emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0}); }
+
+    // The server still answers a fresh request.
+    void ExpectServerStillServing() {
+        httplib::Client client("127.0.0.1", server->get_port());
+        client.set_connection_timeout(1, 0);
+        auto res = client.Get("/v0/devices");
+        ASSERT_TRUE(res) << "server stopped answering";
+        EXPECT_EQ(200, res->status);
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::shared_ptr<events::EventEmitter> emitter;
+    std::shared_ptr<MockProviderHandle> mock_provider;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<HttpServer> server;
+    std::thread reader;
+    std::mutex frames_mutex;
+    std::vector<Frame> frames;
+};
+
+TEST_F(HttpEventStreamTest, BytesValueIsSentAsBase64AndTheStreamContinues) {
+    anolis::deviceprovider::v1::Value blob;
+    blob.set_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
+    blob.set_bytes_value(std::string("\xFF\x00\x10", 3));
+    RegisterOneSignalDevice("blob", blob);
+    ASSERT_TRUE(state_cache->initialize());
+    Listen(2);
+
+    state_cache->poll_once(*provider_registry);
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "state_update");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["signal_id"], "blob");
+    EXPECT_EQ(data["value"], (nlohmann::json{{"type", "bytes"}, {"base64", "/wAQ"}})) << got[0].data;
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the bytes value must still arrive";
+    ExpectServerStillServing();
+}
+
+// A provider cannot send this today: the protobuf parser rejects a string
+// field that is not valid UTF-8. The mock puts one straight into the cache to
+// pin that a state_update frame with such a string is still serialized, with
+// invalid sequences replaced, rather than throwing.
+TEST_F(HttpEventStreamTest, NonUtf8StringSignalIsReplacedAndTheStreamContinues) {
+    anolis::deviceprovider::v1::Value text;
+    text.set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+    text.set_string_value(std::string("ok \xFF end"));
+    RegisterOneSignalDevice("status", text);
+    ASSERT_TRUE(state_cache->initialize());
+    Listen(2);
+
+    state_cache->poll_once(*provider_registry);
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "state_update");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["value"], (nlohmann::json{{"type", "string"}, {"string", "ok \xEF\xBF\xBD end"}})) << got[0].data;
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the string value must still arrive";
+    ExpectServerStillServing();
+}
+
+TEST_F(HttpEventStreamTest, NonUtf8FaultMessageIsReplacedAndTheStreamContinues) {
+    Listen(2);
+
+    emitter->emit(events::AutomationFaultEvent{0, "tick", std::string("tick threw: \xFF\xFE end"), 0});
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "automation_fault");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["locus"], "tick");
+    // 0xFF and 0xFE are each an invalid sequence of one byte, so each becomes
+    // U+FFFD; the valid text around them is kept.
+    EXPECT_EQ(data["error"], "tick threw: \xEF\xBF\xBD\xEF\xBF\xBD end");
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the fault must still arrive";
+    ExpectServerStillServing();
+}
+
+// Captures std::cerr, where the logger writes, for one scope, and puts it back
+// however the scope ends: an exception escaping the code under test must not
+// leave std::cerr pointing at a destroyed buffer.
+class CerrCapture {
+public:
+    CerrCapture() : old_(std::cerr.rdbuf(captured_.rdbuf())) {}
+    ~CerrCapture() { std::cerr.rdbuf(old_); }
+    CerrCapture(const CerrCapture&) = delete;
+    CerrCapture& operator=(const CerrCapture&) = delete;
+    CerrCapture(CerrCapture&&) = delete;
+    CerrCapture& operator=(CerrCapture&&) = delete;
+
+    std::string str() const { return captured_.str(); }
+
+private:
+    std::ostringstream captured_;
+    std::streambuf* old_;
+};
+
+// cpp-httplib calls the content provider outside its routing try/catch, so an
+// exception escaping a stream step would reach std::terminate (#594). A step
+// that throws ends that one stream, says why in the log, and returns.
+TEST(SseStreamStep, AnExceptionEndsTheStreamAndIsLogged) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    bool wrote = false;
+    sink.write = [&wrote](const char*, size_t) {
+        wrote = true;
+        return true;
+    };
+    int idle_polls = 0;
+    const auto throwing = [](const events::Event&) -> std::string { throw std::runtime_error("formatter blew up"); };
+
+    bool keep_streaming = true;
+    std::string log;
+    {
+        CerrCapture capture;
+        keep_streaming = sse_stream_step(*subscription, sink, idle_polls, throwing, "sse-test");
+        log = capture.str();
+    }
+
+    EXPECT_FALSE(keep_streaming);
+    EXPECT_FALSE(wrote);
+    EXPECT_NE(log.find("sse-test"), std::string::npos) << log;
+    EXPECT_NE(log.find("formatter blew up"), std::string::npos) << log;
+}
+
+TEST(SseStreamStep, ANonStandardExceptionAlsoEndsTheStream) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    sink.write = [](const char*, size_t) { return true; };
+    int idle_polls = 0;
+    const auto throwing = [](const events::Event&) -> std::string { throw 42; };
+
+    bool keep_streaming = true;
+    std::string log;
+    {
+        CerrCapture capture;
+        keep_streaming = sse_stream_step(*subscription, sink, idle_polls, throwing, "sse-test");
+        log = capture.str();
+    }
+
+    EXPECT_FALSE(keep_streaming);
+    EXPECT_NE(log.find("sse-test"), std::string::npos) << log;
+}
+
+TEST(SseStreamStep, AFormattedEventIsWrittenAndTheStreamContinues) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    std::string written;
+    sink.write = [&written](const char* data, size_t length) {
+        written.append(data, length);
+        return true;
+    };
+    int idle_polls = 3;
+    const auto format = [](const events::Event&) -> std::string { return "frame\n\n"; };
+
+    EXPECT_TRUE(sse_stream_step(*subscription, sink, idle_polls, format, "sse-test"));
+    EXPECT_EQ(written, "frame\n\n");
+    EXPECT_EQ(idle_polls, 0);
+}
+
+#if ANOLIS_ENABLE_AUTOMATION
+//=============================================================================
+// GET /v0/automation/tree serves the loaded definition (#584)
+//
+// The endpoint reports what is running: the bytes the engine loaded and
+// digested, never a fresh read of the source file, which may since have been
+// edited or removed.
+//=============================================================================
+
+namespace {
+
+std::string sha256_hex(const std::string& data) {
+    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
+    unsigned int md_len = 0;
+    if (EVP_Digest(data.data(), data.size(), md.data(), &md_len, EVP_sha256(), nullptr) != 1) {
+        return "";
+    }
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    for (unsigned int i = 0; i < md_len; ++i) {
+        out.push_back(kHex[md[i] >> 4]);
+        out.push_back(kHex[md[i] & 0x0F]);
+    }
+    return out;
+}
+
+void write_file(const std::filesystem::path& path, const std::string& content) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << content;
+}
+
+constexpr char kLoadedTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+    <BehaviorTree ID="TestNoop">
+        <AlwaysSuccess />
+    </BehaviorTree>
+</root>
+)";
+
+constexpr char kEditedTreeXml[] =
+    R"(<root BTCPP_format="4"><BehaviorTree ID="EditedAfterStartup"><AlwaysFailure/></BehaviorTree></root>)";
+
+}  // namespace
+
+class HttpAutomationTreeTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        mode_manager = std::make_unique<automation::ModeManager>(automation::RuntimeMode::MANUAL);
+        bt_runtime = std::make_unique<automation::BTRuntime>(*state_cache, *call_router, *provider_registry,
+                                                             *mode_manager, nullptr);
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;  // OS-assigned port
+
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.mode_manager = mode_manager.get();
+        dependencies.bt_runtime = bt_runtime.get();
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+        client->set_connection_timeout(1, 0);
+
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        tree_path = std::filesystem::temp_directory_path() / ("anolis-http-tree-" + std::to_string(nonce) + ".xml");
+    }
+
+    void TearDown() override {
+        client.reset();
+        server->stop();
+        server.reset();
+        std::error_code ec;
+        std::filesystem::remove(tree_path, ec);
+    }
+
+    std::string status_digest() {
+        auto res = client->Get("/v0/automation/status");
+        EXPECT_TRUE(res);
+        if (!res) return "";
+        EXPECT_EQ(200, res->status) << res->body;
+        return nlohmann::json::parse(res->body)["automation_version"]["digest"].get<std::string>();
+    }
+
+    // GET /v0/automation/tree must answer 200 {status, tree} with exactly the
+    // loaded bytes, and those bytes must hash to the status digest.
+    void ExpectServesLoadedTree(const std::string& when) {
+        auto res = client->Get("/v0/automation/tree");
+        ASSERT_TRUE(res) << when;
+        ASSERT_EQ(200, res->status) << when << ": " << res->body;
+        const auto body = nlohmann::json::parse(res->body);
+        EXPECT_EQ(body.size(), 2U) << when << ": the response shape is {status, tree}";
+        EXPECT_EQ(body["status"]["code"], "OK") << when;
+        const auto tree = body["tree"].get<std::string>();
+        EXPECT_EQ(tree, std::string(kLoadedTreeXml)) << when;
+        EXPECT_EQ(sha256_hex(tree), status_digest()) << when;
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<automation::ModeManager> mode_manager;
+    std::unique_ptr<automation::BTRuntime> bt_runtime;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+    std::filesystem::path tree_path;
+};
+
+TEST_F(HttpAutomationTreeTest, ServesTheLoadedDefinitionAfterTheFileIsEditedOrRemoved) {
+    write_file(tree_path, kLoadedTreeXml);
+    const auto outcome = bt_runtime->load(automation::AutomationDefinitionRef{tree_path.string()});
+    ASSERT_TRUE(outcome.ok) << outcome.error;
+    ASSERT_EQ(outcome.version.digest, sha256_hex(kLoadedTreeXml));
+
+    ExpectServesLoadedTree("at load");
+
+    write_file(tree_path, kEditedTreeXml);
+    ExpectServesLoadedTree("after the file was overwritten");
+
+    std::filesystem::remove(tree_path);
+    ASSERT_FALSE(std::filesystem::exists(tree_path));
+    ExpectServesLoadedTree("after the file was removed");
+}
+
+TEST_F(HttpAutomationTreeTest, NoLoadedDefinitionIsNotFound) {
+    auto res = client->Get("/v0/automation/tree");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(404, res->status) << res->body;
+    const auto body = nlohmann::json::parse(res->body);
+    EXPECT_EQ(body["status"]["code"], "NOT_FOUND");
+    EXPECT_EQ(body["status"]["message"], "No behavior tree loaded");
+}
+#endif  // ANOLIS_ENABLE_AUTOMATION
 
 #else  // ANOLIS_SKIP_HTTP_TESTS
 TEST(HttpHandlersTest, DISABLED_SkippedUnderThreadSanitizer) {

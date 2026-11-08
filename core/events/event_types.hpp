@@ -57,16 +57,31 @@ inline const char *quality_to_string(Quality q) {
 }
 
 /**
+ * @brief The raw bytes of a `bytes` signal value.
+ *
+ * A distinct type, not a std::string alternative of TypedValue, so a bytes
+ * value is never mistaken for text. The bytes are arbitrary and need not be
+ * valid UTF-8; each consumer encodes them for its own wire (the SSE stream
+ * sends base64, as the REST API does).
+ */
+struct BytesValue {
+    std::string bytes;
+
+    bool operator==(const BytesValue &) const = default;
+};
+
+/**
  * @brief Typed value union
  *
  * Uses std::variant for type-safe value storage.
  * Matches the JSON format: {"type": "double", "double": 23.5}
  */
-using TypedValue = std::variant<double,      // "double"
-                                int64_t,     // "int64"
-                                uint64_t,    // "uint64"
-                                bool,        // "bool"
-                                std::string  // "string" or "bytes" (base64 encoded)
+using TypedValue = std::variant<double,       // "double"
+                                int64_t,      // "int64"
+                                uint64_t,     // "uint64"
+                                bool,         // "bool"
+                                std::string,  // "string"
+                                BytesValue    // "bytes" (raw; base64 on the JSON wire)
                                 >;
 
 /**
@@ -86,6 +101,8 @@ inline const char *value_type_name(const TypedValue &v) {
                 return "bool";
             else if constexpr (std::is_same_v<T, std::string>)
                 return "string";
+            else if constexpr (std::is_same_v<T, BytesValue>)
+                return "bytes";
             else
                 return "unknown";
         },

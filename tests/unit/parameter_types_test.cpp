@@ -74,6 +74,18 @@ TEST(ParameterTypesTest, BridgeRejectsUint64Overflow) {
     EXPECT_NE(std::string::npos, error.find("exceeds int64 range"));
 }
 
+// A bytes value is its own TypedValue alternative (#594), so it names itself
+// "bytes" and does not pass for a string parameter.
+TEST(ParameterTypesTest, BytesTypedValueIsNotAStringParameter) {
+    const events::TypedValue bytes = events::BytesValue{std::string("\xFF\x00", 2)};
+    EXPECT_STREQ("bytes", events::value_type_name(bytes));
+    EXPECT_FALSE(events::values_equal(bytes, events::TypedValue{std::string("\xFF\x00", 2)}));
+
+    std::string error;
+    EXPECT_FALSE(parameter_value_from_typed_value(bytes, &error).has_value());
+    EXPECT_NE(std::string::npos, error.find("Unsupported"));
+}
+
 }  // namespace
 }  // namespace automation
 }  // namespace anolis

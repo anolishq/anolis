@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <exception>
 #include <fstream>
 #include <random>
 
@@ -122,6 +123,14 @@ std::vector<std::string> to_str_vec(const nlohmann::json& arr) {
         }
     }
     return out;
+}
+
+// One journal line. Run records and events carry strings from clients and from
+// automation faults (an exception's what(), which can hold any bytes). A strict
+// dump() throws on a byte sequence that is not valid UTF-8, and on the writer
+// thread nothing would catch it (#594); invalid sequences become U+FFFD.
+std::string json_line(const nlohmann::json& value) {
+    return value.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 }  // namespace
@@ -406,7 +415,7 @@ bool RunJournal::append_record(const Run& run, std::string& error) {
     if (torn) {
         out << "\n";
     }
-    out << to_json(run).dump() << "\n";
+    out << json_line(to_json(run)) << "\n";
     out.close();
     if (out.fail()) {
         error = "failed to write run record to " + index_path_.string();
@@ -475,7 +484,7 @@ RunJournal::AppendEventResult RunJournal::append_event_locked(const std::string&
     if (torn) {
         out << "\n";
     }
-    out << to_json(event).dump() << "\n";
+    out << json_line(to_json(event)) << "\n";
     out.close();
     if (out.fail()) {
         result.error = "failed to write run event to " + events_path(run_id).string();
@@ -566,10 +575,20 @@ void RunJournal::writer_loop() {
             }
             continue;
         }
-        auto res =
-            append_event_locked(*open_run_id_, item.category, item.type, item.payload, item.occurred_at_epoch_ms);
-        if (!res.ok) {
-            LOG_WARN("[RunJournal] Failed to persist " << to_string(item.category) << ": " << res.error);
+        // Nothing above this thread would catch an exception, so one event that
+        // cannot be written must not end it: log it, count it, keep draining.
+        try {
+            auto res =
+                append_event_locked(*open_run_id_, item.category, item.type, item.payload, item.occurred_at_epoch_ms);
+            if (!res.ok) {
+                LOG_WARN("[RunJournal] Failed to persist " << to_string(item.category) << ": " << res.error);
+            }
+        } catch (const std::exception& e) {
+            events_dropped_.fetch_add(1);
+            LOG_ERROR("[RunJournal] Dropped " << to_string(item.category) << " after an exception: " << e.what());
+        } catch (...) {
+            events_dropped_.fetch_add(1);
+            LOG_ERROR("[RunJournal] Dropped " << to_string(item.category) << " after an unknown exception");
         }
     }
 }
