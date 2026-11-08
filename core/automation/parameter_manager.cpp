@@ -26,13 +26,18 @@ bool ParameterDef::validate(const ParameterValue &new_value, std::string &error)
             numeric_value = static_cast<double>(std::get<int64_t>(new_value));
         }
 
+        // As written: an int64 as an integer, a double in its shortest
+        // round-trip form, so 1e-9 and 1e-8 do not both print as 0.000000.
+        const std::string shown = std::holds_alternative<int64_t>(new_value)
+                                      ? std::format("{}", std::get<int64_t>(new_value))
+                                      : std::format("{}", numeric_value);
         if (min.has_value() && numeric_value < min.value()) {
-            error = "Value " + std::to_string(numeric_value) + " is below minimum " + std::to_string(min.value());
+            error = std::format("Value {} is below minimum {}", shown, min.value());
             return false;
         }
 
         if (max.has_value() && numeric_value > max.value()) {
-            error = "Value " + std::to_string(numeric_value) + " exceeds maximum " + std::to_string(max.value());
+            error = std::format("Value {} exceeds maximum {}", shown, max.value());
             return false;
         }
     }
@@ -102,7 +107,7 @@ bool ParameterManager::define(const std::string &name, ParameterType type, const
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (parameters_.find(name) != parameters_.end()) {
-        LOG_WARN("[ParameterManager] Parameter '" << name << "' already defined, ignoring redefinition");
+        LOG_ERROR("[ParameterManager] Parameter '" << name << "' is already defined");
         return false;
     }
 

@@ -1087,14 +1087,22 @@ automation:
 TEST_F(ConfigTest, AutomationParameterDefaultMustSatisfyItsConstraints) {
     const std::vector<std::pair<std::string, std::string>> cases = {
         {"    - { name: setpoint, type: double, default: 150.0, min: 0.0, max: 100.0 }\n",
-         "Parameter 'setpoint' default value invalid: Value 150.000000 exceeds maximum 100.000000"},
+         "Parameter 'setpoint' default value invalid: Value 150 exceeds maximum 100"},
         {"    - { name: floor, type: int64, default: -1, min: 0 }\n",
-         "Parameter 'floor' default value invalid: Value -1.000000 is below minimum 0.000000"},
+         "Parameter 'floor' default value invalid: Value -1 is below minimum 0"},
+        // Values print as written: shortest round-trip, so close values stay apart.
+        {"    - { name: tiny, type: double, default: 1.0e-9, min: 1.0e-8 }\n",
+         "Parameter 'tiny' default value invalid: Value 1e-09 is below minimum 1e-08"},
+        // 2^53 + 1 has no double; an int64 prints as the integer it is.
+        {"    - { name: big, type: int64, default: 9007199254740993, max: 0 }\n",
+         "Parameter 'big' default value invalid: Value 9007199254740993 exceeds maximum 0"},
+        {"    - { name: inverted, type: double, default: 5.0, min: 10.0, max: 0.0 }\n",
+         "Parameter 'inverted' has invalid constraints: min > max"},
         {"    - { name: mode_sel, type: string, default: turbo, allowed_values: [eco, normal] }\n",
          "Parameter 'mode_sel' default value invalid: Value 'turbo' not in allowed values: [eco, normal]"},
         // An omitted default is the type's zero, and is held to the same rules.
         {"    - { name: period_s, type: int64, min: 1, max: 60 }\n",
-         "Parameter 'period_s' default value invalid: Value 0.000000 is below minimum 1.000000 "
+         "Parameter 'period_s' default value invalid: Value 0 is below minimum 1 "
          "(no default given, so the default is the type's zero)"},
         {"    - { name: mode_sel, type: string, allowed_values: [eco, normal] }\n",
          "Parameter 'mode_sel' default value invalid: Value '' not in allowed values: [eco, normal] "
@@ -1182,8 +1190,8 @@ TEST(ParameterDefinitionRules, ConfigValidationAndDefineAgree) {
         EXPECT_EQ(validate_config(config, error), c.valid) << error;
 
         anolis::automation::ParameterManager manager;
-        const auto allowed = c.param.allowed_values.empty() ? std::nullopt : std::make_optional(c.param.allowed_values);
-        EXPECT_EQ(manager.define(c.param.name, c.param.type, c.param.default_value, c.param.min, c.param.max, allowed),
+        EXPECT_EQ(manager.define(c.param.name, c.param.type, c.param.default_value, c.param.min, c.param.max,
+                                 c.param.allowed_values_constraint()),
                   c.valid);
     }
 }
