@@ -1371,16 +1371,9 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
         provider_id, provider_config.command, provider_config.args, provider_config.timeout_ms,
         provider_config.hello_timeout_ms, provider_config.ready_timeout_ms, config_.runtime.shutdown_timeout_ms);
 
-    // A replacement this attempt refuses is stopped and reaped before the
-    // attempt ends, so nothing of it is left running when the next attempt
-    // starts another (#556).
-    const auto refuse = [&provider, &provider_id] {
-        if (!provider->stop()) {
-            LOG_ERROR("[Runtime] The refused replacement for provider '"
-                      << provider_id << "', or a process it started, is still running after the stop");
-        }
-        return false;
-    };
+    // Nothing else holds this handle until it is published, so a replacement
+    // the attempt refuses is stopped and reaped by its destructor when this
+    // returns, before supervision can start another.
 
     // timeout_ms bounds the whole attempt: Hello and WaitReady share it, each
     // waiting at most what is left, so a replacement that cannot be ready in
@@ -1394,7 +1387,7 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
         } else {
             LOG_ERROR("[Runtime] Failed to start provider '" << provider_id << "': " << provider->last_error());
         }
-        return refuse();
+        return false;
     }
 
     LOG_INFO("[Runtime] Provider " << provider_id << " process started");
@@ -1402,7 +1395,7 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     std::vector<registry::RegisteredDevice> replacement_devices;
     if (!registry_->inspect_provider_devices(provider_id, *provider, replacement_devices)) {
         LOG_ERROR("[Runtime] Discovery failed for provider '" << provider_id << "': " << registry_->last_error());
-        return refuse();
+        return false;
     }
 
     // Discovery's RPCs wait their own timeout_ms, not what is left of the
@@ -1410,14 +1403,14 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     if (const auto elapsed = elapsed_ms(); elapsed >= timeout_ms) {
         LOG_ERROR("[Runtime] Restart timeout exceeded for provider '" << provider_id << "' after discovery (" << elapsed
                                                                       << "ms >= " << timeout_ms << "ms)");
-        return refuse();
+        return false;
     }
 
     std::string ownership_error;
     if (!validate_ownership_claims_after_provider_replacement(registry_->get_all_devices(), provider_id,
                                                               replacement_devices, ownership_error)) {
         LOG_ERROR("[Runtime] " << ownership_error);
-        return refuse();
+        return false;
     }
 
     registry_->commit_provider_devices(provider_id, std::move(replacement_devices), true);
