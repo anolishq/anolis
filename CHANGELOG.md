@@ -211,13 +211,14 @@ Upgrade notes:
 - **The runtime HTTP fixtures match provider-sim v0.2.8** (#582): `motorctl0`'s
   function is `1` / `set_motor_duty`, with its label and argument bounds, in
   the capabilities, call and e-stop examples.
-- **Text that is not valid UTF-8 no longer aborts the runtime** (#594).
-  The `GET /v0/events` stream, the HTTP error responses and the run journal
-  serialized JSON with a `dump()` that throws on such text, in places where
-  nothing caught the exception, so it reached `std::terminate`. Any of these
-  aborted the runtime:
-  - a `bytes` signal value with a byte of 0x80 or above, or a string signal
-    that is not valid UTF-8, while a client watched the event stream;
+- **Invalid UTF-8 in events, request paths and run records no longer
+  aborts the runtime** (#594). The `GET /v0/events` stream, the HTTP error
+  responses and the run journal serialized JSON with a `dump()` that throws
+  on text that is not valid UTF-8, in places where nothing caught the
+  exception, so it reached `std::terminate`. Any of these aborted the
+  runtime:
+  - a `bytes` signal value with a byte of 0x80 or above, while a client
+    watched the event stream;
   - an `automation_fault` whose message is not valid UTF-8, on the event
     stream or, while a run is open, in the run journal;
   - a request path holding a byte that is not valid UTF-8.

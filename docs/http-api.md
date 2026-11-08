@@ -301,10 +301,10 @@ it.
 `state_update`'s `value` uses the [typed value encoding](#typed-value-encoding)
 of the REST API, so a `bytes` value is `{"type":"bytes","base64":"..."}`.
 Earlier releases sent it as `{"type":"string","string":...}` with the raw
-bytes. In strings in a frame (a string signal value or a fault message, say),
-invalid UTF-8 sequences are replaced with U+FFFD. If the runtime cannot send
-an event, it ends that client's stream and logs the reason at ERROR; other
-clients and later connections are unaffected.
+bytes. In strings in a frame (a fault message, say), invalid UTF-8 sequences
+are replaced with U+FFFD. If the runtime cannot send an event, it ends that
+client's stream and logs why: a failed write at WARN, any other error at
+ERROR. Other clients and later connections are unaffected.
 
 Provider health is not streamed. Read `GET /v0/providers/health` for it.
 

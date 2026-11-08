@@ -493,7 +493,7 @@ void HttpServer::handle_get_automation_tree(const httplib::Request &, httplib::R
         return;
     }
 
-    // The definition the engine loaded: the exact bytes it parsed and digested
+    // The definition the engine loaded: the exact bytes it loaded and digested
     // into automation_version.digest. Never the file on disk, which may have
     // been edited or removed since (#584).
     const auto definition = bt_runtime_->definition();

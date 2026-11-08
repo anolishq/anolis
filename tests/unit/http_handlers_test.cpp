@@ -2252,8 +2252,10 @@ TEST_F(HttpEventStreamTest, BytesValueIsSentAsBase64AndTheStreamContinues) {
     ExpectServerStillServing();
 }
 
-// A provider's string signal is text it supplied and may not be valid UTF-8.
-// Its state_update frame carries the value with invalid sequences replaced.
+// A provider cannot send this today: the protobuf parser rejects a string
+// field that is not valid UTF-8. The mock puts one straight into the cache to
+// pin that a state_update frame with such a string is still serialized, with
+// invalid sequences replaced, rather than throwing.
 TEST_F(HttpEventStreamTest, NonUtf8StringSignalIsReplacedAndTheStreamContinues) {
     anolis::deviceprovider::v1::Value text;
     text.set_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
