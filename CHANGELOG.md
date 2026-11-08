@@ -41,6 +41,18 @@ Upgrade notes:
   an output the stop could not drive, with `cause: config` and nothing sent,
   and that fails an install (see Fixed). A new failure for an existing
   client or install makes this release MINOR (`docs/dependencies.md`).
+- **A config with an automation parameter the runtime cannot define no
+  longer starts** (#567). Such a config used to pass `--check-config` and
+  start, without that parameter. With `automation.enabled: true`,
+  `--check-config` now exits 1, and startup fails, when a parameter's
+  `default` breaks its own `min`, `max` or `allowed_values`, or two
+  parameters share a `name`. An omitted `default` is the type's zero and is
+  checked too, so a numeric parameter whose range excludes zero, or a string
+  one whose non-empty `allowed_values` leaves out `""`, needs a default. Run
+  `anolis-runtime --check-config` on each config before upgrading; the error
+  names the parameter and the constraint. Every config shipped in this
+  repository and in anolishq/anolis-projects passes. A new failure for an
+  existing install makes this release MINOR (`docs/dependencies.md`).
 
 ### Security
 
@@ -113,6 +125,25 @@ Upgrade notes:
   carries `Vary: Origin`, merged into the `Vary: Accept-Encoding` line of a
   compressed reply. Replies other than `OPTIONS` are unchanged when no
   origins are listed.
+- **Config validation refuses an automation parameter that startup cannot
+  define** (#567). `--check-config` checked a parameter's default for its
+  type only, and did not look for duplicate names. At startup
+  `ParameterManager` refused a default outside its own `min`/`max` or
+  `allowed_values`, and the second of two parameters with one name. The
+  runtime logged a WARN and ran without the parameter: `GET /v0/parameters`
+  did not list it, `POST /v0/parameters` answered 404, and a tree node that
+  reads it failed on every tick in AUTO. Config validation and
+  `ParameterManager::define` now call one function for a definition's rules,
+  so the two cannot disagree. Validation also refuses a duplicate name,
+  naming both entries. A failed define at startup fails initialization
+  (see the upgrade note). Invalid-config contract fixtures cover the
+  out-of-range default, the default outside `allowed_values` and the
+  duplicate name; unit tests cover the omitted-default cases, which the
+  schema already refuses for lacking `default`. A parameter's range error,
+  in `--check-config` and in a refused `POST /v0/parameters`, now prints an
+  int64 as an integer and a double in its shortest round-trip form
+  (`Value 150 exceeds maximum 100`, not `150.000000`), so `1e-09` and
+  `1e-08` no longer both read `0.000000`.
 - **The software stop plans each output on its own** (#640). It chose one
   rung for the whole machine: setpoints when they named every actuating
   function, without checking that they could be sent, else the zero rung for

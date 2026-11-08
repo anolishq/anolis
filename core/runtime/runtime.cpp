@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <future>
 #include <optional>
 #include <sstream>
@@ -510,20 +511,21 @@ bool Runtime::init_automation(std::string &error) {
         LOG_INFO("[Runtime] Creating parameter manager");
         parameter_manager_ = std::make_unique<automation::ParameterManager>();
 
-        // Load parameters from config
+        // Load parameters from config. A parameter that cannot be defined fails
+        // startup: running without it leaves every tree node that reads it
+        // failing in AUTO (#567). validate_config applies the same checks, so
+        // a config from load_config never gets here.
         for (const auto &param_config : config_.automation.parameters) {
-            std::optional<std::vector<std::string>> allowed =
-                param_config.allowed_values.empty() ? std::nullopt : std::make_optional(param_config.allowed_values);
-
             if (!parameter_manager_->define(param_config.name, param_config.type, param_config.default_value,
-                                            param_config.min, param_config.max, allowed)) {
-                LOG_WARN("[Runtime] Failed to define parameter: " << param_config.name);
-            } else {
-                // Operator changes are not persisted (#273), so a value set before
-                // a restart is back at its default here. Say so where it shows.
-                LOG_INFO("[Runtime] Parameter '" << param_config.name << "' at config default "
-                                                 << automation::parameter_value_to_string(param_config.default_value));
+                                            param_config.min, param_config.max,
+                                            param_config.allowed_values_constraint())) {
+                error = std::format("Failed to define automation parameter '{}'", param_config.name);
+                return false;
             }
+            // Operator changes are not persisted (#273), so a value set before
+            // a restart is back at its default here. Say so where it shows.
+            LOG_INFO("[Runtime] Parameter '" << param_config.name << "' at config default "
+                                             << automation::parameter_value_to_string(param_config.default_value));
         }
 
         LOG_INFO("[Runtime] Parameter manager initialized with " << parameter_manager_->parameter_count()

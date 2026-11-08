@@ -1,0 +1,15 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ./behaviors/demo.xml
+  parameters:
+    - name: mode_sel
+      type: string
+      default: turbo
+      allowed_values: [eco, normal]
+
+logging:
+  level: info

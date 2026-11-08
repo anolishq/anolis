@@ -1,0 +1,16 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ./behaviors/demo.xml
+  parameters:
+    - name: setpoint
+      type: double
+      default: 150.0
+      min: 0.0
+      max: 100.0
+
+logging:
+  level: info

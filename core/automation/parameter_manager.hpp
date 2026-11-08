@@ -39,6 +39,27 @@ struct ParameterDef {
 };
 
 /**
+ * @brief Check one parameter definition: its name, its constraints, and its
+ * default against them
+ *
+ * The one copy of the rules for a definition. Config validation and
+ * ParameterManager::define() both call it, so a config that validates defines
+ * every parameter at startup (#567). Uniqueness of the name is not checked
+ * here: that needs the other definitions.
+ *
+ * @param allowed_values nullopt for no enum constraint; an empty list admits
+ *        no value
+ * @param error Set to the reason, naming the parameter, if the check fails
+ * @param default_omitted The config gave no default, so default_value is the
+ *        type's zero; a default that breaks a constraint says so
+ * @return true if the definition is valid
+ */
+bool validate_parameter_definition(const std::string &name, ParameterType type, const ParameterValue &default_value,
+                                   const std::optional<double> &min, const std::optional<double> &max,
+                                   const std::optional<std::vector<std::string>> &allowed_values, std::string &error,
+                                   bool default_omitted = false);
+
+/**
  * @brief Parameter change callback
  *
  * Invoked when a parameter value changes.
@@ -97,7 +118,8 @@ public:
      * @param min Minimum value (for numeric types, nullopt = no constraint)
      * @param max Maximum value (for numeric types, nullopt = no constraint)
      * @param allowed_values Enum values (for string types, nullopt = no constraint)
-     * @return true if defined, false if name already exists
+     * @return true if defined; false if the name already exists or
+     *         validate_parameter_definition() refuses the definition
      */
     bool define(const std::string &name, ParameterType type, const ParameterValue &default_value,
                 std::optional<double> min = std::nullopt, std::optional<double> max = std::nullopt,

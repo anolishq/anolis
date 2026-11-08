@@ -90,6 +90,12 @@ Software-stop and startup safe-state calls are exempt from `allowed_modes` and
 
 Parameters are declared in runtime YAML and mutable via HTTP.
 
+With `automation.enabled: true`, each default must satisfy its own `min`,
+`max` and `allowed_values`, and each name must be unique. A config that
+breaks either fails `--check-config`, and the runtime refuses to start on it
+rather than run without the parameter
+([configuration-schema.md](configuration-schema.md#automation)).
+
 Values set over HTTP are not persisted. Every start begins at the config
 defaults, and the startup log lists each parameter with its default value.
 `GET /v0/parameters` reports `source: default` until a `POST` changes a value,
