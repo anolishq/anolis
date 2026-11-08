@@ -68,7 +68,7 @@ providers:
       enabled: true
       max_attempts: 3
       backoff_ms: [200, 500, 1000]
-      timeout_ms: 30000
+      # timeout_ms: unset, so hello_timeout_ms + ready_timeout_ms
 ```
 
 Behavior:
@@ -85,10 +85,31 @@ Behavior:
    child the provider spawned, can still be running beside it. The restart
    policy's `timeout_ms` starts once the stop returns, so none of the stop time
    counts against it.
-3. Device inventory is rediscovered after restart.
-4. Circuit opens after `max_attempts` consecutive failures.
-5. While the circuit is open, the runtime makes one restart attempt (a
-   half-open probe) every 60 seconds. The interval is fixed, not configurable.
+3. `restart_policy.timeout_ms` bounds the rest of the attempt: starting the new
+   process, `Hello`, `WaitReady` and rediscovering its devices (#556). `Hello`
+   and `WaitReady` share it. Each waits for the smaller of its own timeout
+   (`hello_timeout_ms`, `ready_timeout_ms`) and what is left of `timeout_ms`,
+   so a replacement that cannot be ready in time is refused while it starts,
+   not after it is up. Discovery is not cut short: an attempt that has run past
+   `timeout_ms` once its devices are listed is refused then. A refused
+   replacement is stopped and reaped before the attempt ends, and the attempt
+   counts as a failure.
+   Unset, `timeout_ms` is `hello_timeout_ms + ready_timeout_ms`, the longest
+   `Hello` and `WaitReady` can take at boot. Starting the process and
+   discovery spend the same budget, so a provider whose `Hello` and
+   `WaitReady` together use nearly all of both timeouts can still be refused
+   after discovery, though boot would accept it; give such a provider a
+   `timeout_ms` with room for discovery. An explicit value smaller than that
+   sum is accepted, with a warning at load: a restart then fails whenever
+   `Hello` and `WaitReady` together take longer than `timeout_ms`, even though
+   each finishes within its own timeout and boot would accept it.
+   Boot has no `restart_policy` budget: each RPC waits for its own timeout, and
+   `runtime.startup_timeout_ms` is checked once all providers have started.
+4. Device inventory is rediscovered after restart.
+5. Circuit opens after `max_attempts` consecutive failures.
+6. While the circuit is open, the runtime makes one restart attempt (a
+   half-open probe) every 60 seconds, with the same `timeout_ms` budget as any
+   other attempt. The interval is fixed, not configurable.
    `supervision.circuit_open` stays `true` until a probe restarts the provider;
    a crash soon after that re-opens it.
 

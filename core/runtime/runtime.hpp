@@ -141,7 +141,9 @@ private:
      *
      * The existing registry entry is only replaced after the new provider
      * process starts, discovery succeeds, ownership validation passes, and the
-     * state cache poll plan is rebuilt.
+     * state cache poll plan is rebuilt. All of that up to publication runs within
+     * `restart_timeout_ms(provider_config)`, which `Hello` and `WaitReady` share
+     * (#556).
      */
     bool restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config);
 

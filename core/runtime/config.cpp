@@ -12,6 +12,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -458,9 +459,26 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
                 }
             }
 
-            if (provider.restart_policy.timeout_ms < 1000) {
-                error = "Provider '" + provider.id + "' restart policy timeout_ms must be >= 1000ms";
-                return false;
+            // Unset, timeout_ms is hello_timeout_ms + ready_timeout_ms. An
+            // explicit value below that sum loads, but a restart then fails
+            // whenever Hello and WaitReady together outlast it, even when each
+            // finishes within its own timeout (#556).
+            if (const auto timeout_ms = provider.restart_policy.timeout_ms) {
+                if (*timeout_ms < 1000) {
+                    error = "Provider '" + provider.id + "' restart policy timeout_ms must be >= 1000ms";
+                    return false;
+                }
+                const std::int64_t startup_ms = std::int64_t{provider.hello_timeout_ms} + provider.ready_timeout_ms;
+                if (*timeout_ms < startup_ms) {
+                    LOG_WARN("[Config] Provider '"
+                             << provider.id << "' restart_policy.timeout_ms (" << *timeout_ms
+                             << " ms) is less than hello_timeout_ms + ready_timeout_ms (" << provider.hello_timeout_ms
+                             << " + " << provider.ready_timeout_ms << " = " << startup_ms
+                             << " ms). It bounds the whole restart attempt, so a restart fails when Hello and "
+                                "WaitReady together take longer than "
+                             << *timeout_ms
+                             << " ms, even within their own timeouts. Leave timeout_ms unset to use the sum.");
+                }
             }
             if (provider.restart_policy.success_reset_ms < 0) {
                 error = "Provider '" + provider.id + "' restart policy success_reset_ms must be >= 0";

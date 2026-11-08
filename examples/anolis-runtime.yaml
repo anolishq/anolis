@@ -42,7 +42,8 @@ providers:
     #   enabled: true
     #   max_attempts: 3
     #   backoff_ms: [200, 500, 1000]
-    #   timeout_ms: 30000
+    #   # timeout_ms: budget for one restart attempt; Hello and WaitReady share it.
+    #   # Unset: hello_timeout_ms + ready_timeout_ms (65000ms with their defaults).
 
 polling:
   interval_ms: 500 # Default polling interval (min 100ms)

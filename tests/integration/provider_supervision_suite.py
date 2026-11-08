@@ -584,12 +584,18 @@ class SupervisionTester:
                 self.stop_runtime()
 
     def test_restart_timeout_enforced(self) -> None:
-        """Test restart timeout policy by forcing a delayed restart attempt."""
+        """restart_policy.timeout_ms bounds the whole attempt, Hello included (#556).
+
+        The second launch takes 2.5 s to answer Hello against a 1000 ms budget.
+        Hello gets only what is left of the budget, so the attempt is refused
+        while it is starting, and the launch it refused is stopped and reaped.
+        """
         print("\n[TEST] Restart Timeout Enforcement")
 
         with tempfile.TemporaryDirectory(prefix="anolis-supervision-") as tmp:
             temp_dir = Path(tmp)
             counter_path = temp_dir / "attempt_counter.txt"
+            delayed_pid_path = temp_dir / "attempt_2.pid"
             wrapper_path = self._write_wrapper_script(
                 temp_dir,
                 "timeout_provider_wrapper.py",
@@ -617,6 +623,7 @@ class SupervisionTester:
                     # Delay first crash until runtime startup has completed.
                     args += ["--crash-after", "2.0"]
                 elif attempt == 2:
+                    pathlib.Path(sys.argv[4]).write_text(str(os.getpid()), encoding="utf-8")
                     print("WRAPPER_DELAY_ATTEMPT_2", file=sys.stderr, flush=True)
                     time.sleep(2.5)
 
@@ -637,6 +644,7 @@ class SupervisionTester:
                             str(counter_path).replace("\\", "/"),
                             str(self.provider_sim_path).replace("\\", "/"),
                             self._default_provider_fixture_config(),
+                            str(delayed_pid_path).replace("\\", "/"),
                         ],
                         "timeout_ms": 1500,
                         "restart_policy": {
@@ -670,16 +678,36 @@ class SupervisionTester:
                         "Did not observe delayed restart wrapper attempt",
                     )
 
-                timeout_seen = False
+                refusal = None
                 if self.capture:
-                    timeout_seen = self.capture.wait_for_marker(
-                        "Restart timeout exceeded for provider 'provider-sim' after start()",
+                    refusal = self.capture.wait_for_pattern(
+                        r"Restart timeout exceeded for provider 'provider-sim' during start\(\) \((\d+)ms >= 1000ms\)",
                         timeout=15.0,
                     )
-                if not timeout_seen:
+                if refusal is None:
                     self._fail_with_output(
                         "restart_timeout_enforced",
-                        "Runtime did not report restart timeout for delayed restart attempt",
+                        "Runtime did not refuse the delayed restart attempt while it was starting",
+                    )
+                # Refused at the budget, not once Hello was answered after the
+                # 2.5 s delay: Hello itself waited only what was left.
+                if int(refusal.group(1)) >= 2000:
+                    self._fail_with_output(
+                        "restart_timeout_enforced",
+                        f"The attempt was refused after {refusal.group(1)} ms; Hello waited past the 1000 ms budget",
+                    )
+
+                # The refused launch is stopped: stdin EOF, then a kill after
+                # runtime.shutdown_timeout_ms (2000 ms by default). A launch
+                # left running would start provider-sim once its delay ends.
+                delayed_pid = int(delayed_pid_path.read_text(encoding="utf-8").strip())
+                reap_deadline = time.time() + 5.0
+                while time.time() < reap_deadline and self._pid_alive(delayed_pid):
+                    time.sleep(0.05)
+                if self._pid_alive(delayed_pid):
+                    self._fail_with_output(
+                        "restart_timeout_enforced",
+                        f"The refused launch (pid {delayed_pid}) was still running 5 s after the refusal",
                     )
 
                 recovered, rec_snaps = self._wait_for_snapshot_predicate(
@@ -931,6 +959,15 @@ class SupervisionTester:
         finally:
             stop.set()
             self.stop_runtime()
+
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        """Running or not yet reaped: a zombie counts, since the runtime has not waited for it."""
+        try:
+            psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return False
+        return True
 
     def _live_provider_children(self) -> List[psutil.Process]:
         """Provider processes the runtime has spawned and not yet reaped (zombies excluded)."""

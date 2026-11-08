@@ -53,6 +53,23 @@ Upgrade notes:
   names the parameter and the constraint. Every config shipped in this
   repository and in anolishq/anolis-projects passes. A new failure for an
   existing install makes this release MINOR (`docs/dependencies.md`).
+- **`restart_policy.timeout_ms` bounds the whole restart attempt** (#556).
+  It used to be compared with the elapsed time only once the replacement had
+  answered `Hello` and `WaitReady`, each of which waited its own timeout. Now
+  the two share it: each waits for the smaller of its own timeout and what is
+  left, so an attempt that cannot be ready in time is refused while it
+  starts. Unset, it was 30000 ms; it is now
+  `hello_timeout_ms + ready_timeout_ms` (65000 ms with their defaults).
+  Starting the process and rediscovering its devices spend the same budget,
+  and discovery is checked only once it is done, so a provider whose `Hello`
+  and `WaitReady` together use nearly all of both timeouts can still come up
+  and be refused after discovery; give such a provider a `timeout_ms` with
+  room for discovery. With an explicit value, an attempt the old check
+  refused is still refused, and sooner: the replacement is stopped part way
+  instead of being brought fully up first. A value below
+  `hello_timeout_ms + ready_timeout_ms` now loads with a warning that names
+  both numbers. The runtime-config schema no longer requires `timeout_ms` in
+  an enabled `restart_policy`.
 
 ### Security
 
@@ -99,6 +116,17 @@ Upgrade notes:
   smoke now fails a runtime whose args lack an integer `position`.
 
 ### Fixed
+
+- **A provider slow to become ready can be restarted** (#556), when its
+  `Hello` and `WaitReady` leave room in the budget for discovery. With the
+  defaults, `restart_policy.timeout_ms` (30000 ms) was shorter than
+  `ready_timeout_ms` (60000 ms), and it was checked only after `WaitReady`
+  had answered, so every restart of a provider that took more than 30 s to
+  be ready brought it fully up and then threw it away. Each such attempt
+  counted as a failure, the circuit opened, and the half-open probe failed
+  the same way, leaving the provider down until the runtime was restarted.
+  Now the budget caps `Hello` and `WaitReady` as they run and defaults to
+  their sum (see Upgrade notes).
 
 - **A browser on an allowed origin can call an authenticated runtime**
   (#460). With `http.auth_enabled: true`, the CORS preflight a browser sends

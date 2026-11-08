@@ -1332,7 +1332,7 @@ void Runtime::apply_startup_outputs() {
 }
 
 bool Runtime::restart_provider(const std::string &provider_id, const provider::ProviderConfig &provider_config) {
-    int timeout_ms = provider_config.restart_policy.timeout_ms;
+    const int timeout_ms = provider::restart_timeout_ms(provider_config);
 
     LOG_INFO("[Runtime] Restarting provider: " << provider_id);
     LOG_DEBUG("[Runtime]   Command: " << provider_config.command);
@@ -1355,7 +1355,12 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     // Start the timeout clock only now: timeout_ms bounds the new process coming
     // up, not the old one going down, which can take shutdown_timeout_ms (#379).
-    auto restart_start_time = std::chrono::steady_clock::now();
+    const auto restart_start_time = std::chrono::steady_clock::now();
+    const auto elapsed_ms = [&restart_start_time] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                     restart_start_time)
+            .count();
+    };
 
     // Replacement is a two-phase operation: bring up and inspect the new
     // provider off to the side first, then publish the new device inventory and
@@ -1366,18 +1371,22 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
         provider_id, provider_config.command, provider_config.args, provider_config.timeout_ms,
         provider_config.hello_timeout_ms, provider_config.ready_timeout_ms, config_.runtime.shutdown_timeout_ms);
 
-    if (!provider->start()) {
-        LOG_ERROR("[Runtime] Failed to start provider '" << provider_id << "': " << provider->last_error());
-        return false;
-    }
+    // Nothing else holds this handle until it is published, so a replacement
+    // the attempt refuses is stopped and reaped by its destructor when this
+    // returns, before supervision can start another.
 
-    // Check timeout after start()
-    auto elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - restart_start_time)
-            .count();
-    if (elapsed_ms >= timeout_ms) {
-        LOG_ERROR("[Runtime] Restart timeout exceeded for provider '" << provider_id << "' after start() ("
-                                                                      << elapsed_ms << "ms >= " << timeout_ms << "ms)");
+    // timeout_ms bounds the whole attempt: Hello and WaitReady share it, each
+    // waiting at most what is left, so a replacement that cannot be ready in
+    // time is refused while it starts rather than after it is up (#556).
+    if (!provider->start_within(std::chrono::milliseconds(timeout_ms))) {
+        const auto elapsed = elapsed_ms();
+        if (elapsed >= timeout_ms) {
+            LOG_ERROR("[Runtime] Restart timeout exceeded for provider '" << provider_id << "' during start() ("
+                                                                          << elapsed << "ms >= " << timeout_ms
+                                                                          << "ms): " << provider->last_error());
+        } else {
+            LOG_ERROR("[Runtime] Failed to start provider '" << provider_id << "': " << provider->last_error());
+        }
         return false;
     }
 
@@ -1389,13 +1398,11 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
         return false;
     }
 
-    // Check timeout after device inspection.
-    elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - restart_start_time)
-            .count();
-    if (elapsed_ms >= timeout_ms) {
-        LOG_ERROR("[Runtime] Restart timeout exceeded for provider '" << provider_id << "' after discovery ("
-                                                                      << elapsed_ms << "ms >= " << timeout_ms << "ms)");
+    // Discovery's RPCs wait their own timeout_ms, not what is left of the
+    // budget, so the attempt is checked once they are done.
+    if (const auto elapsed = elapsed_ms(); elapsed >= timeout_ms) {
+        LOG_ERROR("[Runtime] Restart timeout exceeded for provider '" << provider_id << "' after discovery (" << elapsed
+                                                                      << "ms >= " << timeout_ms << "ms)");
         return false;
     }
 

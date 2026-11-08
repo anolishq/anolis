@@ -10,6 +10,7 @@
 #include "provider_handle.hpp"
 
 #include <chrono>
+#include <format>
 #include <iostream>
 #include <thread>
 
@@ -35,7 +36,32 @@ bool ProviderHandle::stop() {
     return process_.shutdown();
 }
 
-bool ProviderHandle::start() {
+bool ProviderHandle::start() { return start_impl(std::nullopt); }
+
+bool ProviderHandle::start_within(std::chrono::milliseconds budget) {
+    return start_impl(std::chrono::steady_clock::now() + budget);
+}
+
+bool ProviderHandle::startup_wait(int own_timeout_ms, std::optional<std::chrono::steady_clock::time_point> deadline,
+                                  const char *rpc, int &wait_ms) {
+    wait_ms = own_timeout_ms;
+    if (!deadline) {
+        return true;
+    }
+    // Rounded up, so a wait cut to the deadline does not end just short of it.
+    const auto left =
+        std::chrono::ceil<std::chrono::milliseconds>(*deadline - std::chrono::steady_clock::now()).count();
+    if (left <= 0) {
+        set_error(std::format("Startup budget used up before {}", rpc));
+        return false;
+    }
+    if (left < wait_ms) {
+        wait_ms = static_cast<int>(left);
+    }
+    return true;
+}
+
+bool ProviderHandle::start_impl(std::optional<std::chrono::steady_clock::time_point> deadline) {
     LOG_INFO("[" << process_.provider_id() << "] Starting provider");
     session_healthy_.store(false, std::memory_order_release);
 
@@ -49,7 +75,9 @@ bool ProviderHandle::start() {
     // `Hello` is both the protocol negotiation step and the first proof that
     // framing and protobuf round-trips are working against the spawned child.
     anolis::deviceprovider::v1::HelloResponse hello_response;
-    if (!hello(hello_response)) {
+    int hello_wait_ms = 0;
+    if (!startup_wait(hello_timeout_ms_, deadline, "Hello", hello_wait_ms) ||
+        !hello_within(hello_response, hello_wait_ms)) {
         session_healthy_.store(false, std::memory_order_release);
         LOG_ERROR("[" << process_.provider_id() << "] Hello handshake failed: " << last_error());
         return false;
@@ -66,7 +94,9 @@ bool ProviderHandle::start() {
     if (supports_ready) {
         LOG_INFO("[" << process_.provider_id() << "] Provider supports WaitReady, waiting for initialization...");
         anolis::deviceprovider::v1::WaitReadyResponse ready_response;
-        if (!wait_ready(ready_response)) {
+        int ready_wait_ms = 0;
+        if (!startup_wait(ready_timeout_ms_, deadline, "WaitReady", ready_wait_ms) ||
+            !wait_ready_within(ready_response, ready_wait_ms)) {
             session_healthy_.store(false, std::memory_order_release);
             LOG_ERROR("[" << process_.provider_id() << "] WaitReady failed: " << last_error());
             return false;
@@ -94,6 +124,10 @@ bool ProviderHandle::start() {
 }
 
 bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) {
+    return hello_within(response, hello_timeout_ms_);
+}
+
+bool ProviderHandle::hello_within(anolis::deviceprovider::v1::HelloResponse &response, int timeout_ms) {
     anolis::deviceprovider::v1::Request request;
     uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
     request.set_request_id(request_id);
@@ -104,7 +138,7 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
 
     anolis::deviceprovider::v1::Response resp;
     anolis::deviceprovider::v1::Status_Code status;
-    if (!send_request(request, resp, request_id, status)) {
+    if (!send_request(request, resp, request_id, status, std::nullopt, timeout_ms)) {
         return false;
     }
 
@@ -123,16 +157,20 @@ bool ProviderHandle::hello(anolis::deviceprovider::v1::HelloResponse &response) 
 }
 
 bool ProviderHandle::wait_ready(anolis::deviceprovider::v1::WaitReadyResponse &response) {
+    return wait_ready_within(response, ready_timeout_ms_);
+}
+
+bool ProviderHandle::wait_ready_within(anolis::deviceprovider::v1::WaitReadyResponse &response, int timeout_ms) {
     anolis::deviceprovider::v1::Request request;
     uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
     request.set_request_id(request_id);
     auto *ready_req = request.mutable_wait_ready();
-    ready_req->set_max_wait_ms_hint(ready_timeout_ms_);
+    ready_req->set_max_wait_ms_hint(timeout_ms);
 
     anolis::deviceprovider::v1::Response resp;
     anolis::deviceprovider::v1::Status_Code status;
-    // Use ready_timeout_ms_ for this RPC (hardware initialization can be slow)
-    if (!send_request(request, resp, request_id, status)) {
+    // ready_timeout_ms_ unless a startup budget cuts it (hardware initialization can be slow)
+    if (!send_request(request, resp, request_id, status, std::nullopt, timeout_ms)) {
         return false;
     }
 
@@ -281,7 +319,7 @@ bool ProviderHandle::get_health_impl(anolis::deviceprovider::v1::GetHealthRespon
 bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &request,
                                   anolis::deviceprovider::v1::Response &response, uint64_t request_id,
                                   anolis::deviceprovider::v1::Status_Code &status,
-                                  std::optional<std::chrono::milliseconds> lock_wait) {
+                                  std::optional<std::chrono::milliseconds> lock_wait, std::optional<int> timeout_ms) {
     using anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
     using anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
     using anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE;
@@ -328,7 +366,9 @@ bool ProviderHandle::send_request(const anolis::deviceprovider::v1::Request &req
     // Handshake and ready RPCs intentionally use dedicated timeout budgets that
     // differ from normal control/read operations.
     int timeout_to_use = timeout_ms_;  // Default for normal operations
-    if (request.has_hello()) {
+    if (timeout_ms) {
+        timeout_to_use = *timeout_ms;  // the caller's, e.g. what a startup budget left (#556)
+    } else if (request.has_hello()) {
         timeout_to_use = hello_timeout_ms_;
     } else if (request.has_wait_ready()) {
         timeout_to_use = ready_timeout_ms_;

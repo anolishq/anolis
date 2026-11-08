@@ -1,0 +1,15 @@
+# restart_policy.timeout_ms is optional, but an explicit value is still >= 1000.
+providers:
+  - id: test0
+    command: ./provider-test
+    restart_policy:
+      enabled: true
+      max_attempts: 1
+      backoff_ms: [100]
+      timeout_ms: 500
+
+http:
+  enabled: false
+
+logging:
+  level: info
