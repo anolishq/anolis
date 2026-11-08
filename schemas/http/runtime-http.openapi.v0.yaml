@@ -12,7 +12,11 @@ info:
     environment variable (the env var supplies the token only — it does not
     enable auth). Loopback clients need the token too unless
     `http.auth_exempt_loopback` is set to true. When enabled, unauthorized requests
-    receive `401` with `WWW-Authenticate: Bearer`. TLS is available via
+    receive `401` with `WWW-Authenticate: Bearer`. The one exception is a
+    CORS preflight from an origin in `http.cors_allowed_origins` (an OPTIONS
+    to /v0/ with `Origin` and `Access-Control-Request-Method`): it is
+    answered `204` with no body before the token check and reaches no
+    handler. TLS is available via
     `http.tls_cert_path` + `http.tls_key_path` (the server then speaks
     https); the runtime refuses non-loopback binds without auth unless
     `http.allow_insecure_bind` is set. Operator guidance: docs/security.md.

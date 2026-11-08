@@ -36,6 +36,16 @@ The runtime now refuses these before routing:
 UI that calls the runtime directly, or `*` to allow any. The workbench reaches
 the runtime through its own server, so it needs no entry.
 
+With auth on, a listed origin's page calls the runtime with the token in
+`Authorization` (#460). Before such a request the browser sends a CORS
+preflight, an `OPTIONS` without the token, so the runtime answers a preflight
+from a listed origin with `204` and no body before the token check. It reaches
+no handler and returns no runtime data. Every other request from that page,
+and any `OPTIONS` that is not a preflight from a listed origin, still needs
+the token. Listing an origin does not let its pages skip authentication; with
+auth off, it lets them call the API and read the replies. The headers sent are
+in [the HTTP API guide](http-api.md#transport).
+
 With auth on and `http.auth_exempt_loopback: true`, a rebound page's requests
 come from loopback and skip the token. The origin and content-type checks still
 refuse its `POST`s, but it can read `GET` responses. Leave
