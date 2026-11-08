@@ -188,11 +188,19 @@ Fields:
 
 Parameter entry fields:
 
-1. `name`
+1. `name` (unique among the parameters)
 2. `type` (`double|int64|bool|string`)
-3. `default`
+3. `default` (required by the schema; the runtime reads an omitted default
+   as the type's zero: `0.0`, `0`, `false` or `""`)
 4. `min` / `max` (numeric types only)
 5. `allowed_values` (string type only)
+
+The default, given or zero, must satisfy the entry's own `min`, `max` and
+`allowed_values`. `--check-config` and startup refuse a config with a default
+that breaks them, or with two parameters of one name, and name the parameter
+and the constraint. A string parameter with `allowed_values` and no default
+is refused unless `""` is allowed, and so is a numeric one whose range
+excludes zero.
 
 `mode_transition_hooks` fields:
 

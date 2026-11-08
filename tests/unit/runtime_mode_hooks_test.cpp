@@ -258,3 +258,27 @@ TEST(RuntimeModeHooksTest, CallFailureLimitFromConfigFaultsAndRunsTheSafeState) 
     EXPECT_NE(log.find("bread0/gpio0 set_pwm failed once"), std::string::npos) << log;
     EXPECT_EQ(calls_made(rig), "motor0/1\n") << log;
 }
+
+// anolis#567: a parameter ParameterManager refuses to define fails startup
+// rather than leaving the tree to run without it. load_config refuses both of
+// these, so each is put into the config after it loads.
+TEST(RuntimeModeHooksTest, AParameterThatCannotBeDefinedFailsInitialization) {
+    const auto rig = fresh_rig("anolis-567-define");
+    const auto loaded = config_for(rig, kFaultHook,
+                                   "  parameters:\n"
+                                   "    - { name: setpoint, type: double, default: 50.0, min: 0.0, max: 100.0 }\n");
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+
+    auto duplicate = loaded;
+    duplicate.automation.parameters.push_back(duplicate.automation.parameters.front());
+    auto out_of_range = loaded;
+    out_of_range.automation.parameters.front().default_value = 150.0;
+
+    for (const auto *config : {&duplicate, &out_of_range}) {
+        anolis::runtime::Runtime runtime(*config);
+        std::string error;
+        EXPECT_FALSE(runtime.initialize(error));
+        EXPECT_EQ(error, "Failed to define automation parameter 'setpoint'");
+        runtime.shutdown();
+    }
+}

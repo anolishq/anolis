@@ -1,0 +1,17 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ./behaviors/demo.xml
+  parameters:
+    - name: dup
+      type: int64
+      default: 1
+    - name: dup
+      type: int64
+      default: 2
+
+logging:
+  level: info

@@ -46,6 +46,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/15-automation-max-call-failures.yaml
     expect: valid
     note: automation.max_consecutive_call_failures sets the limit before FAULT (#678)
+  - file: tests/contracts/runtime-config/valid/16-automation-parameter-defaults-at-bounds.yaml
+    expect: valid
+    note: parameter defaults equal to min, to max, and in allowed_values are accepted (#567)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -105,3 +108,12 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/07-safety-stop-chain-duplicate-device.yaml
     expect: invalid/runtime
     note: safety.stop_chain.devices lists one handle twice, with different expects
+  - file: tests/contracts/runtime-config/invalid/runtime/08-parameter-default-above-max.yaml
+    expect: invalid/runtime
+    note: an automation parameter default above its own max (#567)
+  - file: tests/contracts/runtime-config/invalid/runtime/09-parameter-default-not-in-allowed-values.yaml
+    expect: invalid/runtime
+    note: an automation parameter default not in its own allowed_values (#567)
+  - file: tests/contracts/runtime-config/invalid/runtime/10-parameter-duplicate-name.yaml
+    expect: invalid/runtime
+    note: two automation parameters share a name (#567)

@@ -133,11 +133,22 @@ struct ParameterConfig {
     std::string name;
     automation::ParameterType type = automation::ParameterType::DOUBLE;
     automation::ParameterValue default_value = 0.0;
+    // The YAML entry had no `default`, so default_value is the type's zero.
+    // Only the error message for a default that breaks a constraint reads it.
+    bool default_omitted = false;
 
     // Constraints
     std::optional<double> min;
     std::optional<double> max;
     std::vector<std::string> allowed_values;  // For string enums
+
+    /// allowed_values as ParameterManager takes it: an empty list is no constraint.
+    std::optional<std::vector<std::string>> allowed_values_constraint() const {
+        if (allowed_values.empty()) {
+            return std::nullopt;
+        }
+        return allowed_values;
+    }
 };
 
 /**

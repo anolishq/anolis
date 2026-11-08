@@ -1,6 +1,7 @@
 #include "parameter_manager.hpp"
 
 #include <algorithm>
+#include <format>
 #include <iostream>
 
 #include "logging/logger.hpp"
@@ -57,6 +58,44 @@ bool ParameterDef::validate(const ParameterValue &new_value, std::string &error)
     return true;
 }
 
+bool validate_parameter_definition(const std::string &name, ParameterType type, const ParameterValue &default_value,
+                                   const std::optional<double> &min, const std::optional<double> &max,
+                                   const std::optional<std::vector<std::string>> &allowed_values, std::string &error,
+                                   bool default_omitted) {
+    if (name.empty()) {
+        error = "Parameter missing name";
+        return false;
+    }
+    if (!parameter_value_matches_type(type, default_value)) {
+        error = std::format("Parameter '{}' default value type mismatch: expected {}, got {}", name,
+                            parameter_type_to_string(type), parameter_value_type_name(default_value));
+        return false;
+    }
+    const bool numeric_type = (type == ParameterType::DOUBLE || type == ParameterType::INT64);
+    if (!numeric_type && (min.has_value() || max.has_value())) {
+        error = std::format("Parameter '{}' min/max constraints require numeric type", name);
+        return false;
+    }
+    if (min.has_value() && max.has_value() && min.value() > max.value()) {
+        error = std::format("Parameter '{}' has invalid constraints: min > max", name);
+        return false;
+    }
+    if (type != ParameterType::STRING && allowed_values.has_value()) {
+        error = std::format("Parameter '{}' allowed_values is only valid for string parameters", name);
+        return false;
+    }
+
+    // The default is held to the same check as every later set().
+    const ParameterDef def{name, type, default_value, min, max, allowed_values};
+    std::string reason;
+    if (!def.validate(default_value, reason)) {
+        error = std::format("Parameter '{}' default value invalid: {}{}", name, reason,
+                            default_omitted ? " (no default given, so the default is the type's zero)" : "");
+        return false;
+    }
+    return true;
+}
+
 bool ParameterManager::define(const std::string &name, ParameterType type, const ParameterValue &default_value,
                               std::optional<double> min, std::optional<double> max,
                               std::optional<std::vector<std::string>> allowed_values) {
@@ -67,14 +106,13 @@ bool ParameterManager::define(const std::string &name, ParameterType type, const
         return false;
     }
 
-    // Validate default value against constraints
-    ParameterDef def{name, type, default_value, min, max, std::move(allowed_values)};
     std::string error;
-    if (!def.validate(default_value, error)) {
-        LOG_ERROR("[ParameterManager] Parameter '" << name << "' default value invalid: " << error);
+    if (!validate_parameter_definition(name, type, default_value, min, max, allowed_values, error)) {
+        LOG_ERROR("[ParameterManager] " << error);
         return false;
     }
 
+    ParameterDef def{name, type, default_value, min, max, std::move(allowed_values)};
     parameters_[name] = def;
     // Debug logging omitted for brevity
     return true;

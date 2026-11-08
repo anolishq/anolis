@@ -3,14 +3,18 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include "automation/parameter_manager.hpp"
 
 namespace fs = std::filesystem;
 using namespace anolis::runtime;
@@ -1056,6 +1060,132 @@ automation:
 
     EXPECT_FALSE(load_config(config_path, config, error));
     EXPECT_EQ(error, "'automation.parameters[0].allowed_values' must be a sequence");
+}
+
+namespace {
+
+std::string automation_parameters_config(const std::string& parameters) {
+    return R"(
+http:
+  enabled: false
+
+providers:
+  - id: test_provider
+    command: /path/to/provider
+
+automation:
+  enabled: true
+  behavior_tree: /path/to/tree.xml
+  parameters:
+)" + parameters;
+}
+
+}  // namespace
+
+// #567: a parameter the runtime would refuse to define at startup is refused
+// here, so --check-config cannot pass a config that does not start as written.
+TEST_F(ConfigTest, AutomationParameterDefaultMustSatisfyItsConstraints) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"    - { name: setpoint, type: double, default: 150.0, min: 0.0, max: 100.0 }\n",
+         "Parameter 'setpoint' default value invalid: Value 150.000000 exceeds maximum 100.000000"},
+        {"    - { name: floor, type: int64, default: -1, min: 0 }\n",
+         "Parameter 'floor' default value invalid: Value -1.000000 is below minimum 0.000000"},
+        {"    - { name: mode_sel, type: string, default: turbo, allowed_values: [eco, normal] }\n",
+         "Parameter 'mode_sel' default value invalid: Value 'turbo' not in allowed values: [eco, normal]"},
+        // An omitted default is the type's zero, and is held to the same rules.
+        {"    - { name: period_s, type: int64, min: 1, max: 60 }\n",
+         "Parameter 'period_s' default value invalid: Value 0.000000 is below minimum 1.000000 "
+         "(no default given, so the default is the type's zero)"},
+        {"    - { name: mode_sel, type: string, allowed_values: [eco, normal] }\n",
+         "Parameter 'mode_sel' default value invalid: Value '' not in allowed values: [eco, normal] "
+         "(no default given, so the default is the type's zero)"},
+        // A fault in the constraints themselves says nothing about the default.
+        {"    - { name: flag, type: bool, min: 0 }\n", "Parameter 'flag' min/max constraints require numeric type"},
+        {"    - { name: dup, type: int64, default: 1 }\n    - { name: other, type: bool, default: true }\n"
+         "    - { name: dup, type: int64, default: 2 }\n",
+         "automation.parameters[2] names 'dup', already defined at automation.parameters[0]"},
+    };
+    for (size_t i = 0; i < cases.size(); ++i) {
+        SCOPED_TRACE(cases[i].first);
+        const auto path = create_config_file("parameter_bad_" + std::to_string(i) + ".yaml",
+                                             automation_parameters_config(cases[i].first));
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_FALSE(load_config(path, config, error));
+        EXPECT_EQ(error, cases[i].second);
+    }
+}
+
+TEST_F(ConfigTest, AutomationParameterDefaultsOnTheirBoundsAreAccepted) {
+    const auto path = create_config_file("parameter_bounds.yaml", automation_parameters_config(R"(
+    - { name: at_max, type: double, default: 100.0, min: 0.0, max: 100.0 }
+    - { name: at_min, type: int64, default: 1, min: 1, max: 5 }
+    - { name: zero_in_range, type: int64, min: 0, max: 5 }
+    - { name: allowed, type: string, default: eco, allowed_values: [eco, normal] }
+    - { name: empty_allowed, type: string, allowed_values: ["", eco] }
+    - { name: flag, type: bool }
+)"));
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_EQ(config.automation.parameters.size(), 6u);
+}
+
+// #567: config validation and ParameterManager::define apply one set of
+// rules, so every definition gets the same verdict from both.
+TEST(ParameterDefinitionRules, ConfigValidationAndDefineAgree) {
+    using anolis::automation::ParameterType;
+    using anolis::automation::ParameterValue;
+    const auto param = [](ParameterType type, ParameterValue default_value, std::optional<double> min,
+                          std::optional<double> max, std::vector<std::string> allowed, std::string name = "p") {
+        ParameterConfig p;
+        p.name = std::move(name);
+        p.type = type;
+        p.default_value = std::move(default_value);
+        p.min = min;
+        p.max = max;
+        p.allowed_values = std::move(allowed);
+        return p;
+    };
+    struct Case {
+        const char* what;
+        ParameterConfig param;
+        bool valid;
+    };
+    const std::vector<Case> cases = {
+        {"double inside its range", param(ParameterType::DOUBLE, 5.0, 0.0, 10.0, {}), true},
+        {"double on its max", param(ParameterType::DOUBLE, 10.0, 0.0, 10.0, {}), true},
+        {"double above its max", param(ParameterType::DOUBLE, 10.5, 0.0, 10.0, {}), false},
+        {"int64 below its min", param(ParameterType::INT64, int64_t{0}, 1.0, std::nullopt, {}), false},
+        {"string in allowed_values", param(ParameterType::STRING, std::string("a"), std::nullopt, std::nullopt, {"a"}),
+         true},
+        {"string not in allowed_values",
+         param(ParameterType::STRING, std::string("c"), std::nullopt, std::nullopt, {"a", "b"}), false},
+        {"bool", param(ParameterType::BOOL, true, std::nullopt, std::nullopt, {}), true},
+        {"min/max on a bool", param(ParameterType::BOOL, true, 0.0, 1.0, {}), false},
+        {"allowed_values on a double", param(ParameterType::DOUBLE, 1.0, std::nullopt, std::nullopt, {"1"}), false},
+        {"min above max", param(ParameterType::DOUBLE, 5.0, 10.0, 0.0, {}), false},
+        {"default of another type", param(ParameterType::DOUBLE, int64_t{5}, std::nullopt, std::nullopt, {}), false},
+        {"empty name", param(ParameterType::DOUBLE, 1.0, std::nullopt, std::nullopt, {}, ""), false},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.what);
+        RuntimeConfig config;
+        anolis::provider::ProviderConfig provider;
+        provider.id = "test0";
+        provider.command = "./provider-test";
+        config.providers.push_back(provider);
+        config.automation.enabled = true;
+        config.automation.behavior_tree = "./tree.xml";
+        config.automation.parameters = {c.param};
+        std::string error;
+        EXPECT_EQ(validate_config(config, error), c.valid) << error;
+
+        anolis::automation::ParameterManager manager;
+        const auto allowed = c.param.allowed_values.empty() ? std::nullopt : std::make_optional(c.param.allowed_values);
+        EXPECT_EQ(manager.define(c.param.name, c.param.type, c.param.default_value, c.param.min, c.param.max, allowed),
+                  c.valid);
+    }
 }
 // Sprint 2.1.3: Negative configuration tests for idempotency and strict validation
 

@@ -21,8 +21,10 @@
 #include <iterator>
 #include <optional>
 #include <regex>
+#include <unordered_map>
 #include <unordered_set>
 
+#include "../automation/parameter_manager.hpp"
 #include "../logging/logger.hpp"
 
 namespace anolis {
@@ -508,30 +510,21 @@ bool validate_config(const RuntimeConfig &config, std::string &error) {
             return false;
         }
 
-        for (const auto &param : config.automation.parameters) {
-            if (param.name.empty()) {
-                error = "Parameter missing name";
+        // The checks ParameterManager::define applies at startup, so a config
+        // that validates defines every parameter it declares (#567).
+        std::unordered_map<std::string, size_t> parameter_index;
+        for (size_t i = 0; i < config.automation.parameters.size(); ++i) {
+            const auto &param = config.automation.parameters[i];
+            if (!automation::validate_parameter_definition(param.name, param.type, param.default_value, param.min,
+                                                           param.max, param.allowed_values_constraint(), error,
+                                                           param.default_omitted)) {
                 return false;
             }
-            if (!automation::parameter_value_matches_type(param.type, param.default_value)) {
-                error = "Parameter '" + param.name + "' default value type mismatch: expected " +
-                        std::string(automation::parameter_type_to_string(param.type)) + ", got " +
-                        std::string(automation::parameter_value_type_name(param.default_value));
-                return false;
-            }
-
-            const bool numeric_type =
-                (param.type == automation::ParameterType::DOUBLE || param.type == automation::ParameterType::INT64);
-            if (!numeric_type && (param.min.has_value() || param.max.has_value())) {
-                error = "Parameter '" + param.name + "' min/max constraints require numeric type";
-                return false;
-            }
-            if (param.min.has_value() && param.max.has_value() && param.min.value() > param.max.value()) {
-                error = "Parameter '" + param.name + "' has invalid constraints: min > max";
-                return false;
-            }
-            if (param.type != automation::ParameterType::STRING && !param.allowed_values.empty()) {
-                error = "Parameter '" + param.name + "' allowed_values is only valid for string parameters";
+            const auto [first, inserted] = parameter_index.emplace(param.name, i);
+            if (!inserted) {
+                error =
+                    std::format("automation.parameters[{}] names '{}', already defined at automation.parameters[{}]", i,
+                                param.name, first->second);
                 return false;
             }
         }
@@ -1193,6 +1186,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
                     // Start from a typed zero/default so omitted defaults still
                     // produce a value consistent with the declared type.
+                    // validate_config holds it to the constraints like any default.
+                    param.default_omitted = !param_node["default"];
                     switch (param.type) {
                         case automation::ParameterType::DOUBLE:
                             param.default_value = 0.0;
