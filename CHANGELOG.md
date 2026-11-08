@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-08
+
+0.11.0 is a minor release because several changes make an existing install
+behave differently (`docs/dependencies.md`: before 1.0, such a change bumps
+MINOR). A config with an invalid automation parameter now refuses to start,
+`restart_policy.timeout_ms` now bounds the whole restart attempt, the
+software stop plans each output on its own, and a `bytes` value on the event
+stream is base64. Read the upgrade notes before upgrading.
+
 Upgrade notes:
 
 - **A `bytes` value on the event stream is base64** (#594). A `state_update`
@@ -35,8 +44,8 @@ Upgrade notes:
   value it does not know to `none` and tells the operator that no software
   safe state is declared, that the stop drives nothing, and to use the
   hardware emergency stop. That is false for a `mixed` stop, which drives
-  outputs. Update the workbench to a release that knows `mixed` before or
-  with this one (anolishq/anolis-workbench, follow-up to #640). A config
+  outputs. Update anolis-workbench to 0.33.2 or later, which knows
+  `mixed`, before or with this one. A config
   that declares a safe state no longer plans `none`. `actions` can now hold
   an output the stop could not drive, with `cause: config` and nothing sent,
   and that fails an install (see Fixed). A new failure for an existing
