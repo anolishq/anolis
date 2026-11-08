@@ -82,6 +82,31 @@ Upgrade notes:
 
 ### Fixed
 
+- **A browser on an allowed origin can call an authenticated runtime**
+  (#460). With `http.auth_enabled: true`, the CORS preflight a browser sends
+  before a request carrying `Authorization` was refused with `401`, since it
+  carries no token, and `Access-Control-Allow-Headers` named only
+  `Content-Type`, so the browser would not send `Authorization` cross-origin
+  even past the gate. Origins listed in `http.cors_allowed_origins` were
+  usable only with auth off. Now a preflight from a listed origin (an
+  `OPTIONS` to `/v0/` carrying `Origin` and `Access-Control-Request-Method`)
+  is answered `204` with no body before the token check, and reaches no
+  handler. Any other `OPTIONS`, and a preflight from an origin not listed,
+  still needs the token; nothing else about authentication changes.
+  `Access-Control-Allow-Headers` is `Authorization, Content-Type`. Each CORS
+  header is sent once: the `OPTIONS` routes and the CORS hook both set
+  `Access-Control-Allow-Headers` and `-Methods`, so a preflight carried each
+  twice. The routes set those two on every `OPTIONS` reply, whatever the
+  `Origin` and whether or not any origins were listed. Now an `OPTIONS` from
+  an origin not listed, or without `Origin`, gets neither. That includes the
+  default config: with no origins listed, an `OPTIONS` used to get
+  `Access-Control-Allow-Headers: Content-Type` and
+  `Access-Control-Allow-Methods: GET, POST, OPTIONS`, and now gets no CORS
+  header at all. Those replies never carried `Access-Control-Allow-Origin`,
+  so a browser could not act on them. With origins listed, every reply
+  carries `Vary: Origin`, merged into the `Vary: Accept-Encoding` line of a
+  compressed reply. Replies other than `OPTIONS` are unchanged when no
+  origins are listed.
 - **The software stop plans each output on its own** (#640). It chose one
   rung for the whole machine: setpoints when they named every actuating
   function, without checking that they could be sent, else the zero rung for

@@ -15,14 +15,19 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
@@ -2046,6 +2051,348 @@ TEST_F(HttpBrowserGuardTest, AConfiguredOriginWithAJsonBodyStillWorks) {
     EXPECT_EQ(200, res->status) << res->body;
     EXPECT_EQ("http://localhost:3000", res->get_header_value("Access-Control-Allow-Origin"));
     EXPECT_FALSE(safe_state->is_engaged());
+}
+
+// --- #460: a browser on an allowed origin calling an authenticated runtime ---
+//
+// A browser sends a preflight OPTIONS with no Authorization header before a
+// cross-origin request that carries one, and sends the request only if the
+// preflight's reply allows the origin, the method and the Authorization
+// header. These requests carry what a browser would send.
+class HttpCorsTest : public Test {
+protected:
+    static constexpr const char* kAllowedOrigin = "http://ui.example.test";
+    static constexpr const char* kOtherOrigin = "https://evil.example";
+    static constexpr const char* kToken = "fake-test-token-not-a-secret";
+
+    static runtime::HttpConfig auth_on() {
+        runtime::HttpConfig config;
+        config.auth_enabled = true;
+        config.auth_token = kToken;
+        config.cors_allowed_origins = {kAllowedOrigin};
+        return config;
+    }
+
+    static runtime::HttpConfig auth_off() {
+        runtime::HttpConfig config;
+        config.cors_allowed_origins = {kAllowedOrigin};
+        return config;
+    }
+
+    void start(runtime::HttpConfig http_config) {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+
+        http_config.enabled = true;
+        http_config.port = 0;
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+        client->set_connection_timeout(1, 0);
+    }
+
+    void TearDown() override {
+        client.reset();
+        if (server) {
+            server->stop();
+        }
+        server.reset();
+    }
+
+    // What a browser sends before POST /v0/call with a bearer token.
+    static httplib::Headers preflight(const std::string& origin, const std::string& method = "POST") {
+        return {{"Origin", origin},
+                {"Access-Control-Request-Method", method},
+                {"Access-Control-Request-Headers", "authorization, content-type"}};
+    }
+
+    httplib::Result options(const std::string& path, const httplib::Headers& headers) {
+        return client->Options(path, headers);
+    }
+
+    // True if the comma-separated header value lists @p name (any case).
+    static bool lists(const std::string& value, const std::string& name) {
+        auto lower = [](std::string s) {
+            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+            return s;
+        };
+        std::size_t start = 0;
+        while (start <= value.size()) {
+            const std::size_t comma = std::min(value.find(',', start), value.size());
+            std::string item = value.substr(start, comma - start);
+            item.erase(0, item.find_first_not_of(" \t"));
+            item.erase(item.find_last_not_of(" \t") + 1);
+            if (lower(item) == lower(name)) {
+                return true;
+            }
+            start = comma + 1;
+        }
+        return false;
+    }
+
+    // Every CORS response header a page could act on.
+    static constexpr std::array<const char*, 4> kCorsHeaders = {
+        "Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Credentials"};
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+};
+
+TEST_F(HttpCorsTest, WithAuthOnAPreflightFromAnAllowedOriginIsAnsweredWithoutAToken) {
+    start(auth_on());
+    for (const auto& [path, method] : {std::pair<std::string, std::string>{"/v0/call", "POST"},
+                                       std::pair<std::string, std::string>{"/v0/runtime/status", "GET"}}) {
+        SCOPED_TRACE(path);
+        auto res = options(path, preflight(kAllowedOrigin, method));
+        ASSERT_TRUE(res);
+        EXPECT_EQ(204, res->status) << res->body;
+        // httplib's client reads no body on a 204; Content-Length is what was sent.
+        EXPECT_EQ("0", res->get_header_value("Content-Length")) << res->body;
+        EXPECT_FALSE(res->has_header("WWW-Authenticate"));
+        EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+        EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Methods"), method));
+        EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Headers"), "Authorization"));
+        EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Headers"), "Content-Type"));
+        for (const char* name : kCorsHeaders) {
+            EXPECT_LE(res->get_header_value_count(name), 1U) << name;
+        }
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOnAPreflightFromAnotherOriginIsRefusedWithNoAllowHeaders) {
+    start(auth_on());
+    auto res = options("/v0/call", preflight(kOtherOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status);
+    EXPECT_EQ(R"({"error":"unauthorized"})", res->body);
+    for (const char* name : kCorsHeaders) {
+        EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOffAPreflightFromAnotherOriginGetsNoAllowHeaders) {
+    start(auth_off());
+    auto res = options("/v0/call", preflight(kOtherOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(204, res->status);
+    EXPECT_EQ("0", res->get_header_value("Content-Length")) << res->body;
+    for (const char* name : kCorsHeaders) {
+        EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOffAPreflightNamingAForeignHostIsRefused) {
+    // The DNS-rebinding Host check runs before the preflight is answered.
+    start(auth_off());
+    httplib::Headers headers = preflight(kAllowedOrigin);
+    headers.emplace("Host", "attacker.rebind.example:" + std::to_string(server->get_port()));
+    auto res = options("/v0/call", headers);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+    EXPECT_EQ(R"({"error":"host not allowed"})", res->body);
+}
+
+TEST_F(HttpCorsTest, WithAuthOnAnOptionsWithoutAccessControlRequestMethodStillNeedsAToken) {
+    // Only a CORS preflight skips the token: OPTIONS with an
+    // Access-Control-Request-Method, from an allowed Origin, under /v0/.
+    start(auth_on());
+    const httplib::Headers no_request_method = {{"Origin", kAllowedOrigin},
+                                                {"Access-Control-Request-Headers", "authorization"}};
+    auto res = options("/v0/call", no_request_method);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status) << res->body;
+
+    const httplib::Headers no_origin = {{"Access-Control-Request-Method", "POST"}};
+    res = options("/v0/call", no_origin);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status) << res->body;
+
+    res = options("/not-the-api", preflight(kAllowedOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status) << res->body;
+}
+
+TEST_F(HttpCorsTest, WithAuthOnAPreflightDoesNotAuthorizeTheRequestItAnnounces) {
+    // A GET carrying Access-Control-Request-Method is not a preflight.
+    start(auth_on());
+    auto res = client->Get("/v0/devices", preflight(kAllowedOrigin, "GET"));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status) << res->body;
+}
+
+TEST_F(HttpCorsTest, WithAuthOnAnAuthenticatedCrossOriginGetWorks) {
+    start(auth_on());
+    const httplib::Headers headers = {{"Origin", kAllowedOrigin}, {"Authorization", std::string("Bearer ") + kToken}};
+    auto res = client->Get("/v0/devices", headers);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status) << res->body;
+    EXPECT_TRUE(nlohmann::json::parse(res->body).contains("devices")) << res->body;
+    EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+    for (const char* name : kCorsHeaders) {
+        EXPECT_LE(res->get_header_value_count(name), 1U) << name;
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOnARefusalToAnAllowedOriginCarriesTheCorsHeadersOnce) {
+    // So the page can read the 401 instead of seeing a network error.
+    start(auth_on());
+    const httplib::Headers headers = {{"Origin", kAllowedOrigin}};
+    auto res = client->Get("/v0/devices", headers);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(401, res->status);
+    EXPECT_EQ("Bearer", res->get_header_value("WWW-Authenticate"));
+    EXPECT_EQ(R"({"error":"unauthorized"})", res->body);
+    EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+    for (const char* name : kCorsHeaders) {
+        EXPECT_LE(res->get_header_value_count(name), 1U) << name;
+    }
+}
+
+// A preflight is answered before routing; a plain OPTIONS reaches the OPTIONS
+// routes. Both get each header from the CORS hook, once.
+TEST_F(HttpCorsTest, WithAuthOffAPreflightSendsAccessControlAllowHeadersOnce) {
+    start(auth_off());
+    for (const auto& [name, headers] :
+         {std::pair<std::string, httplib::Headers>{"preflight", preflight(kAllowedOrigin)},
+          std::pair<std::string, httplib::Headers>{"plain OPTIONS", httplib::Headers{{"Origin", kAllowedOrigin}}}}) {
+        SCOPED_TRACE(name);
+        for (const std::string path : {"/v0/call", "/v0/state"}) {
+            SCOPED_TRACE(path);
+            auto res = options(path, headers);
+            ASSERT_TRUE(res);
+            EXPECT_EQ(204, res->status);
+            EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Headers"));
+            EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Headers"), "Authorization"));
+            EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Headers"), "Content-Type"));
+        }
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOffAPreflightSendsAccessControlAllowMethodsOnce) {
+    start(auth_off());
+    for (const auto& [name, headers] :
+         {std::pair<std::string, httplib::Headers>{"preflight", preflight(kAllowedOrigin)},
+          std::pair<std::string, httplib::Headers>{"plain OPTIONS", httplib::Headers{{"Origin", kAllowedOrigin}}}}) {
+        SCOPED_TRACE(name);
+        for (const std::string path : {"/v0/call", "/v0/state"}) {
+            SCOPED_TRACE(path);
+            auto res = options(path, headers);
+            ASSERT_TRUE(res);
+            EXPECT_EQ(204, res->status);
+            EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Methods"));
+            EXPECT_EQ("GET, POST, OPTIONS", res->get_header_value("Access-Control-Allow-Methods"));
+        }
+    }
+}
+
+TEST_F(HttpCorsTest, WithAuthOffAPreflightSendsAccessControlAllowOriginOnce) {
+    start(auth_off());
+    auto res = options("/v0/call", preflight(kAllowedOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Origin"));
+    EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+}
+
+TEST_F(HttpCorsTest, AnotherOriginGetsNoAllowOrigin) {
+    for (const bool auth : {false, true}) {
+        SCOPED_TRACE(auth ? "auth on" : "auth off");
+        start(auth ? auth_on() : auth_off());
+        httplib::Headers headers = {{"Origin", kOtherOrigin}};
+        if (auth) {
+            headers.emplace("Authorization", std::string("Bearer ") + kToken);
+        }
+        auto res = client->Get("/v0/devices", headers);
+        ASSERT_TRUE(res);
+        EXPECT_EQ(200, res->status) << res->body;
+        for (const char* name : kCorsHeaders) {
+            EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
+        }
+        TearDown();
+    }
+}
+
+TEST_F(HttpCorsTest, AnEchoedOriginIsMarkedVaryOriginOnce) {
+    // The reply depends on Origin, so a cache must not serve it to another
+    // origin: Vary: Origin on every reply once an allowlist is configured.
+    start(auth_on());
+    const std::string bearer = std::string("Bearer ") + kToken;
+    const std::vector<std::pair<std::string, httplib::Headers>> requests = {
+        {"allowed", {{"Origin", kAllowedOrigin}, {"Authorization", bearer}}},
+        {"other", {{"Origin", kOtherOrigin}, {"Authorization", bearer}}},
+        {"no origin", {{"Authorization", bearer}}},
+        {"refused", {{"Origin", kAllowedOrigin}}},
+    };
+    for (const auto& [name, headers] : requests) {
+        SCOPED_TRACE(name);
+        auto res = client->Get("/v0/devices", headers);
+        ASSERT_TRUE(res);
+        EXPECT_EQ(1U, res->get_header_value_count("Vary"));
+        EXPECT_TRUE(lists(res->get_header_value("Vary"), "Origin")) << res->get_header_value("Vary");
+    }
+    auto res = options("/v0/call", preflight(kAllowedOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(1U, res->get_header_value_count("Vary"));
+    EXPECT_TRUE(lists(res->get_header_value("Vary"), "Origin")) << res->get_header_value("Vary");
+}
+
+TEST_F(HttpCorsTest, WithNoAllowlistNothingCorsIsSent) {
+    // The default: no origin is allowed and no CORS header is sent, on any
+    // reply. Before #460 the OPTIONS routes sent Allow-Headers and
+    // Allow-Methods even here.
+    runtime::HttpConfig config;
+    start(config);
+    std::vector<std::pair<std::string, httplib::Result>> replies;
+    replies.emplace_back("GET", client->Get("/v0/devices", httplib::Headers{{"Origin", kAllowedOrigin}}));
+    replies.emplace_back("OPTIONS", options("/v0/call", httplib::Headers{{"Origin", kAllowedOrigin}}));
+    replies.emplace_back("OPTIONS without Origin", options("/v0/call", httplib::Headers{}));
+    replies.emplace_back("preflight", options("/v0/call", preflight(kAllowedOrigin)));
+    for (const auto& [name, res] : replies) {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(res);
+        EXPECT_EQ(name == "GET" ? 200 : 204, res->status);
+        // cpp-httplib sends its own Vary: Accept-Encoding with a compressed body.
+        EXPECT_FALSE(lists(res->get_header_value("Vary"), "Origin")) << res->get_header_value("Vary");
+        for (const char* header : kCorsHeaders) {
+            EXPECT_FALSE(res->has_header(header)) << header << ": " << res->get_header_value(header);
+        }
+    }
+}
+
+TEST_F(HttpCorsTest, CredentialsAreAllowedOnceForAnAllowedOrigin) {
+    runtime::HttpConfig config = auth_on();
+    config.cors_allow_credentials = true;
+    start(config);
+    auto res = options("/v0/call", preflight(kAllowedOrigin));
+    ASSERT_TRUE(res);
+    EXPECT_EQ(204, res->status);
+    EXPECT_EQ(1U, res->get_header_value_count("Access-Control-Allow-Credentials"));
+    EXPECT_EQ("true", res->get_header_value("Access-Control-Allow-Credentials"));
+    EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
+}
+
+TEST_F(HttpCorsTest, AWildcardIsNeverSentWithCredentials) {
+    // Config validation refuses "*" with cors_allow_credentials; a server
+    // built from such a config anyway allows no origin rather than "*".
+    runtime::HttpConfig config = auth_off();
+    config.cors_allowed_origins = {"*"};
+    config.cors_allow_credentials = true;
+    start(config);
+    auto res = client->Get("/v0/devices", httplib::Headers{{"Origin", kAllowedOrigin}});
+    ASSERT_TRUE(res);
+    EXPECT_EQ(200, res->status);
+    for (const char* name : kCorsHeaders) {
+        EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
+    }
 }
 
 #else  // ANOLIS_SKIP_HTTP_TESTS
