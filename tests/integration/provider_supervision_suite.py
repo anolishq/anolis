@@ -678,16 +678,23 @@ class SupervisionTester:
                         "Did not observe delayed restart wrapper attempt",
                     )
 
-                timeout_seen = False
+                refusal = None
                 if self.capture:
-                    timeout_seen = self.capture.wait_for_marker(
-                        "Restart timeout exceeded for provider 'provider-sim' during start()",
+                    refusal = self.capture.wait_for_pattern(
+                        r"Restart timeout exceeded for provider 'provider-sim' during start\(\) \((\d+)ms >= 1000ms\)",
                         timeout=15.0,
                     )
-                if not timeout_seen:
+                if refusal is None:
                     self._fail_with_output(
                         "restart_timeout_enforced",
                         "Runtime did not refuse the delayed restart attempt while it was starting",
+                    )
+                # Refused at the budget, not once Hello was answered after the
+                # 2.5 s delay: Hello itself waited only what was left.
+                if int(refusal.group(1)) >= 2000:
+                    self._fail_with_output(
+                        "restart_timeout_enforced",
+                        f"The attempt was refused after {refusal.group(1)} ms; Hello waited past the 1000 ms budget",
                     )
 
                 # The refused launch is stopped: stdin EOF, then a kill after
