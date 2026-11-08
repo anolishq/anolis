@@ -239,6 +239,9 @@ Upgrade notes:
   returned `500` while the tree kept running. It now returns the bytes the
   engine loaded and digested, without touching the file, and `404` "No
   behavior tree loaded" when there is none. The response shape is unchanged.
+  JSON carries only UTF-8, so for a tree file that is not valid UTF-8 the
+  served text has U+FFFD in place of the invalid sequences and no longer
+  hashes to the digest, as before.
 
 ## [0.10.2] - 2026-11-01
 

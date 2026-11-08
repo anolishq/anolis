@@ -231,10 +231,12 @@ Notes:
 2. `POST /v0/mode`
 3. `GET /v0/parameters`
 4. `POST /v0/parameters`
-5. `GET /v0/automation/tree` - the definition the runtime loaded, as the
-   exact bytes `automation_version.digest` hashes, not a fresh read of the
-   file. Editing or removing the file changes nothing here until the tree is
-   loaded again; `404` when no tree is loaded.
+5. `GET /v0/automation/tree` - the definition the runtime loaded, not a
+   fresh read of the file. Editing or removing the file changes nothing here
+   until the tree is loaded again; `404` when no tree is loaded. For a tree
+   file that is valid UTF-8 this is the exact text `automation_version.digest`
+   hashes. JSON carries only UTF-8, so other files are served with U+FFFD in
+   place of the invalid sequences and do not hash to the digest.
 6. `GET /v0/automation/status`
 
 ### Runs
