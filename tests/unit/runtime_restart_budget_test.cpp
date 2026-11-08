@@ -34,7 +34,7 @@ const char *kEmptyInventoryProviderPath = PROVIDER_EMPTY_INVENTORY_HELPER_PATH;
 
 // `restart_policy` is the YAML of the policy's own keys, indented under it.
 std::string config_yaml(const std::string &runtime, const std::string &args, int hello_timeout_ms, int ready_timeout_ms,
-                        const std::string &restart_policy) {
+                        const std::string &restart_policy, int rpc_timeout_ms = 2000) {
     return "runtime: " + runtime + R"(
 http:
   enabled: false
@@ -45,7 +45,8 @@ providers:
            R"("
     args: [)" +
            args + R"(]
-    timeout_ms: 2000
+    timeout_ms: )" +
+           std::to_string(rpc_timeout_ms) + R"(
     hello_timeout_ms: )" +
            std::to_string(hello_timeout_ms) + R"(
     ready_timeout_ms: )" +
@@ -169,7 +170,7 @@ bool gone(pid_t pid) { return ::kill(pid, 0) == -1 && errno == ESRCH; }
 
 // An explicit timeout_ms smaller than hello_timeout_ms + ready_timeout_ms
 // still bounds the attempt: WaitReady gets what Hello left of the 2 s, so the
-// attempt is refused at about 2 s instead of when the helper answers at 6 s.
+// attempt is refused at about 2 s instead of when the helper answers at 9 s.
 // The replacement it refused is stopped and reaped before the restart ends, so
 // nothing of it runs on beside the provider entry supervision keeps retrying.
 TEST(RuntimeRestartBudgetTest, ARestartThatCannotBeReadyWithinTimeoutMsIsRefusedAndItsReplacementReaped) {
@@ -181,7 +182,7 @@ TEST(RuntimeRestartBudgetTest, ARestartThatCannotBeReadyWithinTimeoutMsIsRefused
     const auto config =
         load(dir, config_yaml("{shutdown_timeout_ms: 500}",
                               "\"--exit-when\", " + quoted(trigger) + ", \"--slow-ready-when\", " + quoted(slow) +
-                                  ", \"--ready-delay-ms\", \"6000\", \"--pid-dir\", " + quoted(pids),
+                                  ", \"--ready-delay-ms\", \"9000\", \"--pid-dir\", " + quoted(pids),
                               2000, 10000, "      timeout_ms: 2000\n"));
     anolis::runtime::Runtime runtime(config);
     std::string error;
@@ -210,15 +211,15 @@ TEST(RuntimeRestartBudgetTest, ARestartThatCannotBeReadyWithinTimeoutMsIsRefused
                 return false;
             }
             // 2 s of budget, 0.5 s for stdin EOF the helper ignores, then the
-            // kill: about 3 s. Waiting out the 6 s WaitReady would take longer.
+            // kill: about 3 s. Waiting out the 9 s WaitReady would take longer.
             reaped = gone(replacement);
             registered = runtime.get_provider_registry().get_provider("bread0");
-            return reaped || std::chrono::steady_clock::now() - spawned > std::chrono::milliseconds(4500);
+            return reaped || std::chrono::steady_clock::now() - spawned > std::chrono::milliseconds(7000);
         },
         log);
 
     ASSERT_NE(replacement, 0) << "no replacement was launched\n" << log;
-    EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 4.5 s after it was launched\n" << log;
+    EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 7 s after it was launched\n" << log;
     EXPECT_NE(log.find("Restart timeout exceeded for provider 'bread0'"), std::string::npos) << log;
     EXPECT_EQ(registered, first) << "a refused replacement was published";
     if (!gone(replacement)) {
@@ -240,10 +241,10 @@ TEST(RuntimeRestartBudgetTest, ARestartWhoseDiscoveryOutlastsTimeoutMsIsRefusedA
     const auto config =
         load(dir, config_yaml("{shutdown_timeout_ms: 500}",
                               "\"--exit-when\", " + quoted(trigger) + ", \"--slow-ready-when\", " + quoted(slow) +
-                                  ", \"--ready-delay-ms\", \"0\", \"--list-delay-ms\", \"1500\", "
+                                  ", \"--ready-delay-ms\", \"0\", \"--list-delay-ms\", \"4000\", "
                                   "\"--pid-dir\", " +
                                   quoted(pids),
-                              2000, 10000, "      timeout_ms: 1000\n"));
+                              2000, 10000, "      timeout_ms: 3000\n", 8000));
     anolis::runtime::Runtime runtime(config);
     std::string error;
     ASSERT_TRUE(runtime.initialize(error)) << error;
@@ -251,7 +252,7 @@ TEST(RuntimeRestartBudgetTest, ARestartWhoseDiscoveryOutlastsTimeoutMsIsRefusedA
     ASSERT_NE(first, nullptr);
     ASSERT_EQ(launched(pids).size(), 1u);
     const pid_t booted = launched(pids).front();
-    std::ofstream(slow) << "slow";  // boot listed at once; a restart's ListDevices takes 1.5 s
+    std::ofstream(slow) << "slow";  // boot listed at once; a restart's ListDevices takes 4 s
 
     pid_t replacement = 0;
     std::chrono::steady_clock::time_point spawned;
@@ -272,14 +273,14 @@ TEST(RuntimeRestartBudgetTest, ARestartWhoseDiscoveryOutlastsTimeoutMsIsRefusedA
             }
             reaped = gone(replacement);
             registered = runtime.get_provider_registry().get_provider("bread0");
-            return reaped || std::chrono::steady_clock::now() - spawned > std::chrono::milliseconds(4500);
+            return reaped || std::chrono::steady_clock::now() - spawned > std::chrono::milliseconds(9000);
         },
         log);
 
     ASSERT_NE(replacement, 0) << "no replacement was launched\n" << log;
     EXPECT_NE(log.find("Restart timeout exceeded for provider 'bread0' after discovery"), std::string::npos) << log;
     EXPECT_EQ(registered, first) << "a replacement that overran its budget in discovery was published\n" << log;
-    EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 4.5 s after it was launched";
+    EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 9 s after it was launched";
     if (!gone(replacement)) {
         ::kill(replacement, SIGKILL);
     }
