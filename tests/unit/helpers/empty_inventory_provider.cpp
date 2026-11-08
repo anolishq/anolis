@@ -22,8 +22,11 @@
 // With `--slow-ready-when <path>`, while that file exists it waits 6 s before
 // answering WaitReady, so a test can hold a restart in flight (#557);
 // `--ready-delay-ms <n>` makes that wait n ms instead, and without
-// `--slow-ready-when` every WaitReady waits n ms. `--hello-delay-ms <n>` waits
-// n ms before answering Hello (#556). With `--pid-dir <dir>` it creates an
+// `--slow-ready-when` every WaitReady waits n ms. `--list-delay-ms <n>` waits
+// n ms before answering ListDevices, under the same `--slow-ready-when` gate.
+// `--hello-delay-ms <n>` waits n ms before answering Hello, and
+// `--hint-to <path>` writes each WaitReady's max_wait_ms_hint there (#556).
+// With `--pid-dir <dir>` it creates an
 // empty file named for its process ID in <dir> when it starts, so a test can
 // tell its launches apart and watch each one.
 // On POSIX, with `--close-stdin-after-hello`, or `--close-stdin-when <path>` once
@@ -176,6 +179,8 @@ int main(int argc, char **argv) {
     int ready_delay_ms = 6000;
     bool ready_delay_given = false;
     int hello_delay_ms = 0;
+    int list_delay_ms = 0;
+    std::string hint_to;
     std::string pid_dir;
     bool mixed = false;
     bool allowed_values = false;
@@ -197,6 +202,10 @@ int main(int argc, char **argv) {
             ready_delay_given = true;
         } else if (std::string(argv[i]) == "--hello-delay-ms" && i + 1 < argc) {
             hello_delay_ms = std::stoi(argv[i + 1]);
+        } else if (std::string(argv[i]) == "--list-delay-ms" && i + 1 < argc) {
+            list_delay_ms = std::stoi(argv[i + 1]);
+        } else if (std::string(argv[i]) == "--hint-to" && i + 1 < argc) {
+            hint_to = argv[i + 1];
         } else if (std::string(argv[i]) == "--pid-dir" && i + 1 < argc) {
             pid_dir = argv[i + 1];
         } else if (std::string(argv[i]) == "--mixed") {
@@ -277,12 +286,19 @@ int main(int argc, char **argv) {
             hello->set_provider_version("0.0.1");
             (*hello->mutable_metadata())["supports_wait_ready"] = "true";
         } else if (request.has_wait_ready()) {
+            if (!hint_to.empty()) {
+                std::ofstream(hint_to) << request.wait_ready().max_wait_ms_hint();
+            }
             std::error_code ec;
             if (slow_ready_when.empty() ? ready_delay_given : std::filesystem::exists(slow_ready_when, ec)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(ready_delay_ms));
             }
             (*response.mutable_wait_ready()->mutable_diagnostics())["device_count"] = "0";
         } else if (request.has_list_devices()) {
+            std::error_code ec;
+            if (slow_ready_when.empty() || std::filesystem::exists(slow_ready_when, ec)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(list_delay_ms));
+            }
             auto *list = response.mutable_list_devices();
             if (mixed) {
                 list->add_devices()->set_device_id("rlht1");

@@ -1,8 +1,8 @@
 // anolishq/anolis#556: restart_policy.timeout_ms bounds the whole restart
 // attempt. Hello and WaitReady share it, so a replacement that cannot be ready
 // within it is refused while it starts, not after it is up; unset, it is
-// hello_timeout_ms + ready_timeout_ms, so a provider that boots within its own
-// timeouts can also be restarted.
+// hello_timeout_ms + ready_timeout_ms, so a provider slower to be ready than
+// the old 30 s default can be restarted when that leaves room for discovery.
 
 #include <gtest/gtest.h>
 
@@ -221,6 +221,65 @@ TEST(RuntimeRestartBudgetTest, ARestartThatCannotBeReadyWithinTimeoutMsIsRefused
     EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 4.5 s after it was launched\n" << log;
     EXPECT_NE(log.find("Restart timeout exceeded for provider 'bread0'"), std::string::npos) << log;
     EXPECT_EQ(registered, first) << "a refused replacement was published";
+    if (!gone(replacement)) {
+        ::kill(replacement, SIGKILL);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+// Discovery's RPCs wait their own timeout_ms, not what is left of the budget,
+// so an attempt whose ListDevices outlasts the budget is checked once discovery
+// is done: it is refused there, its inventory is not published, and the
+// replacement is stopped.
+TEST(RuntimeRestartBudgetTest, ARestartWhoseDiscoveryOutlastsTimeoutMsIsRefusedAfterDiscovery) {
+    const auto dir = scratch_dir("anolis-556-discovery");
+    const auto pids = dir / "pids";
+    std::filesystem::create_directories(pids);
+    const auto trigger = dir / "exit-now";
+    const auto slow = dir / "slow";
+    const auto config =
+        load(dir, config_yaml("{shutdown_timeout_ms: 500}",
+                              "\"--exit-when\", " + quoted(trigger) + ", \"--slow-ready-when\", " + quoted(slow) +
+                                  ", \"--ready-delay-ms\", \"0\", \"--list-delay-ms\", \"1500\", "
+                                  "\"--pid-dir\", " +
+                                  quoted(pids),
+                              2000, 10000, "      timeout_ms: 1000\n"));
+    anolis::runtime::Runtime runtime(config);
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+    const auto first = runtime.get_provider_registry().get_provider("bread0");
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(launched(pids).size(), 1u);
+    const pid_t booted = launched(pids).front();
+    std::ofstream(slow) << "slow";  // boot listed at once; a restart's ListDevices takes 1.5 s
+
+    pid_t replacement = 0;
+    std::chrono::steady_clock::time_point spawned;
+    bool reaped = false;
+    std::shared_ptr<anolis::provider::IProviderHandle> registered;
+    std::string log;
+    run_until(
+        runtime, trigger, std::chrono::seconds(15),
+        [&] {
+            if (replacement == 0) {
+                for (const pid_t pid : launched(pids)) {
+                    if (pid != booted) {
+                        replacement = pid;
+                        spawned = std::chrono::steady_clock::now();
+                    }
+                }
+                return false;
+            }
+            reaped = gone(replacement);
+            registered = runtime.get_provider_registry().get_provider("bread0");
+            return reaped || std::chrono::steady_clock::now() - spawned > std::chrono::milliseconds(4500);
+        },
+        log);
+
+    ASSERT_NE(replacement, 0) << "no replacement was launched\n" << log;
+    EXPECT_NE(log.find("Restart timeout exceeded for provider 'bread0' after discovery"), std::string::npos) << log;
+    EXPECT_EQ(registered, first) << "a replacement that overran its budget in discovery was published\n" << log;
+    EXPECT_TRUE(reaped) << "replacement " << replacement << " was still running 4.5 s after it was launched";
     if (!gone(replacement)) {
         ::kill(replacement, SIGKILL);
     }

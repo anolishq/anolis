@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <string>
 #include <thread>
@@ -145,4 +146,34 @@ TEST(ProviderHandleTest, StartWithinCutsHelloToTheBudget) {
     EXPECT_LT(waited, 1500ms) << "Hello waited its own timeout, not the budget";
     EXPECT_FALSE(handle.is_available());
     EXPECT_TRUE(handle.stop()) << "the refused provider was not reaped";
+}
+
+// The provider is told how long it has: WaitReady's max_wait_ms_hint is the
+// wait the runtime will give it, its own ready timeout at boot and what is left
+// of the budget on a restart.
+namespace {
+
+int wait_ready_hint(bool budgeted) {
+    const auto hint_file = std::filesystem::path(::testing::TempDir()) /
+                           (std::string("anolis-556-hint-") + (budgeted ? "budgeted" : "boot"));
+    std::filesystem::remove(hint_file);
+    anolis::provider::ProviderHandle handle("hint", kEmptyInventoryProviderPath,
+                                            {"--hello-delay-ms", "300", "--hint-to", hint_file.string()}, 1000, 1000,
+                                            5000, 500);
+    EXPECT_TRUE(budgeted ? handle.start_within(2000ms) : handle.start()) << handle.last_error();
+    handle.stop();
+    int hint = -1;
+    std::ifstream(hint_file) >> hint;
+    std::filesystem::remove(hint_file);
+    return hint;
+}
+
+}  // namespace
+
+TEST(ProviderHandleTest, WaitReadyHintIsTheReadyTimeoutWithoutABudget) { EXPECT_EQ(wait_ready_hint(false), 5000); }
+
+TEST(ProviderHandleTest, WaitReadyHintIsWhatHelloLeftOfTheBudget) {
+    const int hint = wait_ready_hint(true);
+    EXPECT_GT(hint, 0);
+    EXPECT_LE(hint, 1700) << "Hello took 300 ms of the 2000 ms budget";
 }
