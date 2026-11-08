@@ -222,6 +222,13 @@ Upgrade notes:
   provider declares a `bytes` signal. The InfluxDB sink still writes a
   `bytes` value as the same lossy `value_string` as before; changing it is
   #500.
+- **`GET /v0/automation/tree` serves the tree that is running** (#584). It
+  read the behavior tree file again on every request, so after the file was
+  edited it returned XML that was not running and did not hash to
+  `automation_version.digest`, and after the file was moved or deleted it
+  returned `500` while the tree kept running. It now returns the bytes the
+  engine loaded and digested, without touching the file, and `404` "No
+  behavior tree loaded" when there is none. The response shape is unchanged.
 
 ## [0.10.2] - 2026-11-01
 

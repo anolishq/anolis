@@ -1,5 +1,4 @@
 #include <chrono>
-#include <fstream>
 #include <map>
 
 #include "anolis_build_config.hpp"
@@ -494,28 +493,17 @@ void HttpServer::handle_get_automation_tree(const httplib::Request &, httplib::R
         return;
     }
 
-    // Get the tree path
-    const std::string &tree_path = bt_runtime_->get_tree_path();
-    if (tree_path.empty()) {
+    // The definition the engine loaded: the exact bytes it parsed and digested
+    // into automation_version.digest. Never the file on disk, which may have
+    // been edited or removed since (#584).
+    const auto definition = bt_runtime_->definition();
+    if (!definition.has_value()) {
         nlohmann::json response = make_error_response(StatusCode::NOT_FOUND, "No behavior tree loaded");
         send_json(res, StatusCode::NOT_FOUND, response);
         return;
     }
 
-    // Read the file
-    std::ifstream file(tree_path);
-    if (!file.is_open()) {
-        std::string error = "Failed to read behavior tree file: " + tree_path;
-        nlohmann::json response = make_error_response(StatusCode::INTERNAL, error);
-        send_json(res, StatusCode::INTERNAL, response);
-        return;
-    }
-
-    std::string xml_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
-
-    // Return XML content
-    nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"tree", xml_content}};
+    nlohmann::json response = {{"status", make_status(StatusCode::OK)}, {"tree", definition->bytes}};
 
     send_json(res, StatusCode::OK, response);
 #else

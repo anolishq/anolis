@@ -15,8 +15,11 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -41,6 +44,13 @@
 #include "registry/device_registry.hpp"
 #include "runtime/config.hpp"
 #include "state/state_cache.hpp"
+
+#if ANOLIS_ENABLE_AUTOMATION
+#include <openssl/evp.h>
+
+#include "automation/bt_runtime.hpp"
+#include "automation/mode_manager.hpp"
+#endif
 
 // HttpHandlersTest disabled under ThreadSanitizer due to cpp-httplib incompatibility.
 // The library's internal threading triggers TSAN segfaults during server initialization.
@@ -2349,6 +2359,148 @@ TEST(SseStreamStep, AFormattedEventIsWrittenAndTheStreamContinues) {
     EXPECT_EQ(written, "frame\n\n");
     EXPECT_EQ(idle_polls, 0);
 }
+
+#if ANOLIS_ENABLE_AUTOMATION
+//=============================================================================
+// GET /v0/automation/tree serves the loaded definition (#584)
+//
+// The endpoint reports what is running: the bytes the engine loaded and
+// digested, never a fresh read of the source file, which may since have been
+// edited or removed.
+//=============================================================================
+
+namespace {
+
+std::string sha256_hex(const std::string& data) {
+    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
+    unsigned int md_len = 0;
+    if (EVP_Digest(data.data(), data.size(), md.data(), &md_len, EVP_sha256(), nullptr) != 1) {
+        return "";
+    }
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    for (unsigned int i = 0; i < md_len; ++i) {
+        out.push_back(kHex[md[i] >> 4]);
+        out.push_back(kHex[md[i] & 0x0F]);
+    }
+    return out;
+}
+
+void write_file(const std::filesystem::path& path, const std::string& content) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << content;
+}
+
+constexpr char kLoadedTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+    <BehaviorTree ID="TestNoop">
+        <AlwaysSuccess />
+    </BehaviorTree>
+</root>
+)";
+
+constexpr char kEditedTreeXml[] =
+    R"(<root BTCPP_format="4"><BehaviorTree ID="EditedAfterStartup"><AlwaysFailure/></BehaviorTree></root>)";
+
+}  // namespace
+
+class HttpAutomationTreeTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        mode_manager = std::make_unique<automation::ModeManager>(automation::RuntimeMode::MANUAL);
+        bt_runtime = std::make_unique<automation::BTRuntime>(*state_cache, *call_router, *provider_registry,
+                                                             *mode_manager, nullptr);
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;  // OS-assigned port
+
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.mode_manager = mode_manager.get();
+        dependencies.bt_runtime = bt_runtime.get();
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+        client->set_connection_timeout(1, 0);
+
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        tree_path = std::filesystem::temp_directory_path() / ("anolis-http-tree-" + std::to_string(nonce) + ".xml");
+    }
+
+    void TearDown() override {
+        client.reset();
+        server->stop();
+        server.reset();
+        std::error_code ec;
+        std::filesystem::remove(tree_path, ec);
+    }
+
+    std::string status_digest() {
+        auto res = client->Get("/v0/automation/status");
+        EXPECT_TRUE(res);
+        if (!res) return "";
+        EXPECT_EQ(200, res->status) << res->body;
+        return nlohmann::json::parse(res->body)["automation_version"]["digest"].get<std::string>();
+    }
+
+    // GET /v0/automation/tree must answer 200 {status, tree} with exactly the
+    // loaded bytes, and those bytes must hash to the status digest.
+    void ExpectServesLoadedTree(const std::string& when) {
+        auto res = client->Get("/v0/automation/tree");
+        ASSERT_TRUE(res) << when;
+        ASSERT_EQ(200, res->status) << when << ": " << res->body;
+        const auto body = nlohmann::json::parse(res->body);
+        EXPECT_EQ(body.size(), 2U) << when << ": the response shape is {status, tree}";
+        EXPECT_EQ(body["status"]["code"], "OK") << when;
+        const auto tree = body["tree"].get<std::string>();
+        EXPECT_EQ(tree, std::string(kLoadedTreeXml)) << when;
+        EXPECT_EQ(sha256_hex(tree), status_digest()) << when;
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<automation::ModeManager> mode_manager;
+    std::unique_ptr<automation::BTRuntime> bt_runtime;
+    std::unique_ptr<HttpServer> server;
+    std::unique_ptr<httplib::Client> client;
+    std::filesystem::path tree_path;
+};
+
+TEST_F(HttpAutomationTreeTest, ServesTheLoadedDefinitionAfterTheFileIsEditedOrRemoved) {
+    write_file(tree_path, kLoadedTreeXml);
+    const auto outcome = bt_runtime->load(automation::AutomationDefinitionRef{tree_path.string()});
+    ASSERT_TRUE(outcome.ok) << outcome.error;
+    ASSERT_EQ(outcome.version.digest, sha256_hex(kLoadedTreeXml));
+
+    ExpectServesLoadedTree("at load");
+
+    write_file(tree_path, kEditedTreeXml);
+    ExpectServesLoadedTree("after the file was overwritten");
+
+    std::filesystem::remove(tree_path);
+    ASSERT_FALSE(std::filesystem::exists(tree_path));
+    ExpectServesLoadedTree("after the file was removed");
+}
+
+TEST_F(HttpAutomationTreeTest, NoLoadedDefinitionIsNotFound) {
+    auto res = client->Get("/v0/automation/tree");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(404, res->status) << res->body;
+    const auto body = nlohmann::json::parse(res->body);
+    EXPECT_EQ(body["status"]["code"], "NOT_FOUND");
+    EXPECT_EQ(body["status"]["message"], "No behavior tree loaded");
+}
+#endif  // ANOLIS_ENABLE_AUTOMATION
 
 #else  // ANOLIS_SKIP_HTTP_TESTS
 TEST(HttpHandlersTest, DISABLED_SkippedUnderThreadSanitizer) {
