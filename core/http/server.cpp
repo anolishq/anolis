@@ -6,6 +6,7 @@
 
 #include "errors.hpp"
 #include "events/event_emitter.hpp"
+#include "handlers/utils.hpp"
 #include "http/auth.hpp"
 #include "logging/logger.hpp"
 #include "provider/provider_supervisor.hpp"
@@ -249,7 +250,7 @@ bool HttpServer::start(std::string &error) {
         }
 
         nlohmann::json response = make_error_response(code, message);
-        res.set_content(response.dump(), "application/json");
+        res.set_content(dump_json(response), "application/json");
     });
 
     // Set exception handler
@@ -267,7 +268,7 @@ bool HttpServer::start(std::string &error) {
 
         nlohmann::json response = make_error_response(StatusCode::INTERNAL, msg);
         res.status = kStatusInternal;
-        res.set_content(response.dump(), "application/json");
+        res.set_content(dump_json(response), "application/json");
     });
 
     // Record server start time for uptime reporting

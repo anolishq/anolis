@@ -42,7 +42,8 @@ class SafeStateController;
 }  // namespace control
 namespace events {
 class EventEmitter;
-}
+class Subscription;
+}  // namespace events
 namespace automation {
 class ModeManager;
 class ParameterManager;
@@ -94,6 +95,25 @@ struct HttpServerDependencies {
     automation::BTRuntime *bt_runtime = nullptr;
 #endif
 };
+
+/**
+ * @brief One step of a `GET /v0/events` stream.
+ *
+ * Waits up to a second for the subscription's next event and writes it as
+ * formatted by `format`; after 15 consecutive empty waits it writes a
+ * keep-alive comment instead. `idle_polls` counts those waits for this client
+ * and is reset by every event sent.
+ *
+ * cpp-httplib calls a chunked content provider outside its routing try/catch,
+ * so an exception escaping one reaches std::terminate and aborts the whole
+ * runtime, not just one client's stream (#594). This step catches every
+ * exception, logs it with `client_name` and ends this stream only.
+ *
+ * @return true to keep streaming; false to end the stream, after a failed
+ *         write or an exception.
+ */
+bool sse_stream_step(events::Subscription &subscription, httplib::DataSink &sink, int &idle_polls,
+                     const std::function<std::string(const events::Event &)> &format, const std::string &client_name);
 
 /**
  * @brief HTTP server wrapper for Anolis runtime

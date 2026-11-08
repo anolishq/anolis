@@ -205,6 +205,23 @@ Upgrade notes:
 - **The runtime HTTP fixtures match provider-sim v0.2.8** (#582): `motorctl0`'s
   function is `1` / `set_motor_duty`, with its label and argument bounds, in
   the capabilities, call and e-stop examples.
+- **A byte that is not valid UTF-8 no longer aborts the runtime** (#594).
+  The `GET /v0/events` stream and the HTTP error responses serialized JSON
+  with a `dump()` that throws on such a byte, and cpp-httplib calls the event
+  stream's content provider and the error handler outside its own
+  try/catch, so the throw reached `std::terminate`. Any `bytes` signal value
+  with a byte of 0x80 or above did it while a client was watching the event
+  stream, and so did an `automation_fault` whose message carried such a byte,
+  or any request for an unrouted path such as `/%FF` (with auth off, or with
+  a valid token). Every HTTP-layer serialization now replaces each invalid
+  byte with U+FFFD, as `send_json` already did, and an exception inside the
+  event stream now ends that client's stream with an ERROR log line instead
+  of the process. A `bytes` value on the event stream is now
+  `{"type":"bytes","base64":"..."}`, as the REST API and the OpenAPI `Value`
+  encode it; it was labelled `string` and carried the raw bytes. No shipped
+  provider declares a `bytes` signal. The InfluxDB sink still writes a
+  `bytes` value as the same lossy `value_string` as before; changing it is
+  #500.
 
 ## [0.10.2] - 2026-11-01
 

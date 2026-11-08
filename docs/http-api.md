@@ -293,6 +293,13 @@ Current event names:
 `quality_change` is defined in the wire format, but the runtime does not emit
 it.
 
+`state_update`'s `value` uses the [typed value encoding](#typed-value-encoding)
+of the REST API, so a `bytes` value is `{"type":"bytes","base64":"..."}`.
+Strings in a frame (a fault message, say) that are not valid UTF-8 are sent
+with each invalid byte replaced by U+FFFD. If the runtime cannot send an
+event, it ends that client's stream and logs the reason at ERROR; other
+clients and later connections are unaffected.
+
 Provider health is not streamed. Read `GET /v0/providers/health` for it.
 
 `device_availability` carries `provider_id`, `device_id`, `available` and

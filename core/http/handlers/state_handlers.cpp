@@ -1,4 +1,6 @@
 #include <chrono>
+#include <exception>
+#include <functional>
 #include <iomanip>
 
 #include "../../events/event_emitter.hpp"
@@ -132,7 +134,7 @@ void HttpServer::handle_get_events(const httplib::Request &req, httplib::Respons
         LOG_WARN("[SSE] Client rejected: max clients (" << MAX_SSE_CLIENTS << ") reached");
         nlohmann::json error_response = make_error_response(StatusCode::UNAVAILABLE, "Too many SSE clients");
         res.status = 503;  // Service Unavailable
-        res.set_content(error_response.dump(), "application/json");
+        res.set_content(dump_json(error_response), "application/json");
         return;
     }
 
@@ -156,7 +158,7 @@ void HttpServer::handle_get_events(const httplib::Request &req, httplib::Respons
         LOG_ERROR("[SSE] Failed to create subscription");
         nlohmann::json error_response = make_error_response(StatusCode::UNAVAILABLE, "Failed to subscribe to events");
         res.status = 503;
-        res.set_content(error_response.dump(), "application/json");
+        res.set_content(dump_json(error_response), "application/json");
         return;
     }
 
@@ -179,36 +181,45 @@ void HttpServer::handle_get_events(const httplib::Request &req, httplib::Respons
             if (!running_.load()) {
                 return false;  // Stop streaming
             }
-
-            // Try to get event with timeout (allows periodic keep-alive)
-            auto event_opt = subscription->pop(1000);  // 1 second timeout
-
-            if (event_opt) {
-                // Format and send event
-                std::string sse_data = format_sse_event(*event_opt);
-                if (!sink.write(sse_data.c_str(), sse_data.size())) {
-                    LOG_WARN("[SSE] Write failed for " << client_name);
-                    return false;  // Stop streaming on write error
-                }
-                *keepalive_counter = 0;  // Reset on successful event
-            } else {
-                // No event - send keep-alive comment every ~15 seconds
-                if (++(*keepalive_counter) >= 15) {
-                    std::string keepalive = ": keepalive\n\n";
-                    if (!sink.write(keepalive.c_str(), keepalive.size())) {
-                        LOG_WARN("[SSE] Keep-alive failed for " << client_name);
-                        return false;  // Stop streaming on write error
-                    }
-                    *keepalive_counter = 0;
-                }
-            }
-
-            return true;  // Continue streaming
+            return sse_stream_step(
+                *subscription, sink, *keepalive_counter,
+                [this](const events::Event &event) { return format_sse_event(event); }, client_name);
         },
         [this](bool) {
             // Cleanup callback when stream ends
             sse_client_count_--;
         });
+}
+
+bool sse_stream_step(events::Subscription &subscription, httplib::DataSink &sink, int &idle_polls,
+                     const std::function<std::string(const events::Event &)> &format, const std::string &client_name) {
+    try {
+        // Wait with a timeout so an idle stream still gets periodic keep-alives.
+        auto event_opt = subscription.pop(1000);  // 1 second timeout
+
+        if (event_opt) {
+            const std::string sse_data = format(*event_opt);
+            if (!sink.write(sse_data.c_str(), sse_data.size())) {
+                LOG_WARN("[SSE] Write failed for " << client_name);
+                return false;  // Stop streaming on write error
+            }
+            idle_polls = 0;  // Reset on successful event
+        } else if (++idle_polls >= 15) {
+            // No event - send keep-alive comment every ~15 seconds
+            const std::string keepalive = ": keepalive\n\n";
+            if (!sink.write(keepalive.c_str(), keepalive.size())) {
+                LOG_WARN("[SSE] Keep-alive failed for " << client_name);
+                return false;  // Stop streaming on write error
+            }
+            idle_polls = 0;
+        }
+        return true;  // Continue streaming
+    } catch (const std::exception &e) {
+        LOG_ERROR("[SSE] Ending stream for " << client_name << " after an exception: " << e.what());
+    } catch (...) {
+        LOG_ERROR("[SSE] Ending stream for " << client_name << " after an unknown exception");
+    }
+    return false;
 }
 
 // Helper: Format event as SSE message
@@ -248,6 +259,11 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                             data["value"] = {{"type", "bool"}, {"bool", val}};
                         } else if constexpr (std::is_same_v<V, std::string>) {
                             data["value"] = {{"type", "string"}, {"string", val}};
+                        } else if constexpr (std::is_same_v<V, events::BytesValue>) {
+                            // As the REST API encodes it (`Value` in the OpenAPI contract).
+                            data["value"] = {{"type", "bytes"}, {"base64", base64_encode(val.bytes)}};
+                        } else {
+                            static_assert(sizeof(V) == 0, "every TypedValue alternative needs an SSE encoding");
                         }
                     },
                     e.value);
@@ -336,13 +352,13 @@ std::string HttpServer::format_sse_event(const events::Event &event) {
                 fault["timestamp_ms"] = e.timestamp_ms;
                 result = "event: automation_fault\n";
                 result += "id: " + std::to_string(e.event_id) + "\n";
-                result += "data: " + fault.dump() + "\n\n";
+                result += "data: " + dump_json(fault) + "\n\n";
 
                 data_written_inline = true;
             }
 
             if (!data_written_inline) {
-                result += "data: " + data.dump() + "\n\n";
+                result += "data: " + dump_json(data) + "\n\n";
             }
         },
         event);

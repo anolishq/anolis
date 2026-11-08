@@ -17,10 +17,14 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -28,6 +32,7 @@
 #include "control/device_loss_latch.hpp"
 #include "control/safe_state.hpp"
 #include "control/stop_chain.hpp"
+#include "events/event_emitter.hpp"
 #include "http/json.hpp"
 #include "http/server.hpp"
 #include "mocks/mock_provider_handle.hpp"
@@ -1050,6 +1055,23 @@ TEST_F(HttpHandlersTest, ErrorResponseFormat) {
     EXPECT_FALSE(json["status"]["message"].get<std::string>().empty());
 }
 
+// The 404 message quotes the request path, which a client chooses and which
+// `%FF` decodes to a byte that is not valid UTF-8. Rendering it must not throw:
+// the error handler runs outside cpp-httplib's routing try/catch, so a throw
+// there aborts the runtime.
+TEST_F(HttpHandlersTest, NonUtf8UnroutedPathIsNotFoundAndTheServerKeepsServing) {
+    auto res = client->Get("/%FF");
+
+    ASSERT_TRUE(res) << "no response: the server died";
+    EXPECT_EQ(404, res->status);
+    ASSERT_TRUE(nlohmann::json::accept(res->body)) << res->body;
+    EXPECT_EQ("NOT_FOUND", nlohmann::json::parse(res->body)["status"]["code"]);
+
+    auto again = client->Get("/v0/devices");
+    ASSERT_TRUE(again) << "server stopped answering";
+    EXPECT_EQ(200, again->status);
+}
+
 //=============================================================================
 // Providers Health Handler Tests — with real ProviderSupervisor
 //
@@ -2046,6 +2068,286 @@ TEST_F(HttpBrowserGuardTest, AConfiguredOriginWithAJsonBodyStillWorks) {
     EXPECT_EQ(200, res->status) << res->body;
     EXPECT_EQ("http://localhost:3000", res->get_header_value("Access-Control-Allow-Origin"));
     EXPECT_FALSE(safe_state->is_engaged());
+}
+
+//=============================================================================
+// GET /v0/events: non-UTF-8 bytes and bytes values (#594)
+//
+// A frame carries provider- and engine-supplied strings. A byte that is not
+// valid UTF-8 must not abort the runtime or end the stream, and a bytes signal
+// value goes out as base64, as the REST API sends it.
+//=============================================================================
+
+class HttpEventStreamTest : public Test {
+protected:
+    void SetUp() override {
+        registry = std::make_unique<registry::DeviceRegistry>();
+        state_cache = std::make_unique<state::StateCache>(*registry, 100);
+        call_router = std::make_unique<control::CallRouter>(*registry, *state_cache);
+        emitter = std::make_shared<events::EventEmitter>(100, 8);
+        state_cache->set_event_emitter(emitter);
+
+        mock_provider = std::make_shared<StrictMock<MockProviderHandle>>();
+        mock_provider->_id = "test_provider";
+        EXPECT_CALL(*mock_provider, provider_id()).WillRepeatedly(ReturnRef(mock_provider->_id));
+        EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Return(true));
+        provider_registry = std::make_unique<provider::ProviderRegistry>();
+        provider_registry->add_provider("test_provider", mock_provider);
+
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;  // OS-assigned port
+
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        dependencies.event_emitter = emitter;
+        server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(server->start(error)) << "Failed to start HTTP server: " << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    void TearDown() override {
+        if (reader.joinable()) {
+            reader.join();
+        }
+        server->stop();
+        server.reset();
+    }
+
+    // A device with one bytes signal, "blob", whose first read is `bytes`.
+    void RegisterBlobDevice(const std::string& bytes) {
+        EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
+            Device dev;
+            dev.set_device_id("blobdev");
+            devices.push_back(dev);
+            return true;
+        }));
+        EXPECT_CALL(*mock_provider, describe_device("blobdev", _))
+            .WillOnce(Invoke([](const std::string&, DescribeDeviceResponse& response) {
+                response.mutable_device()->set_device_id("blobdev");
+                auto* signal = response.mutable_capabilities()->add_signals();
+                signal->set_signal_id("blob");
+                signal->set_name("blob");
+                signal->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
+                signal->set_poll_hint_hz(1.0);  // polled by default
+                return true;
+            }));
+        registry->discover_provider("test_provider", *mock_provider);
+        EXPECT_CALL(*mock_provider, read_signals("blobdev", _, _, _))
+            .WillOnce(Invoke([bytes](const std::string&, const std::vector<std::string>&, ReadSignalsResponse& response,
+                                     anolis::deviceprovider::v1::Status_Code&) {
+                auto* value = response.add_values();
+                value->set_signal_id("blob");
+                value->mutable_value()->set_type(anolis::deviceprovider::v1::VALUE_TYPE_BYTES);
+                value->mutable_value()->set_bytes_value(bytes);
+                value->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                return true;
+            }));
+    }
+
+    struct Frame {
+        std::string event;
+        std::string data;
+    };
+
+    // Opens /v0/events on its own connection and collects frames until `count`
+    // have arrived or the stream ends; returns once the subscription exists, so
+    // nothing emitted afterwards can be missed.
+    void Listen(size_t count) {
+        const size_t before = emitter->subscriber_count();
+        reader = std::thread([this, count] {
+            httplib::Client sse("127.0.0.1", server->get_port());
+            sse.set_read_timeout(10, 0);
+            std::string buffer;
+            sse.Get("/v0/events", [&](const char* data, size_t length) {
+                buffer.append(data, length);
+                for (auto end = buffer.find("\n\n"); end != std::string::npos; end = buffer.find("\n\n")) {
+                    const std::string block = buffer.substr(0, end);
+                    buffer.erase(0, end + 2);
+                    if (block.starts_with(":")) {
+                        continue;  // keep-alive comment
+                    }
+                    Frame frame;
+                    std::istringstream lines(block);
+                    for (std::string line; std::getline(lines, line);) {
+                        if (line.starts_with("event: ")) frame.event = line.substr(7);
+                        if (line.starts_with("data: ")) frame.data = line.substr(6);
+                    }
+                    std::lock_guard<std::mutex> lock(frames_mutex);
+                    frames.push_back(frame);
+                }
+                std::lock_guard<std::mutex> lock(frames_mutex);
+                return frames.size() < count;
+            });
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (emitter->subscriber_count() == before && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ASSERT_GT(emitter->subscriber_count(), before) << "the SSE client never subscribed";
+    }
+
+    std::vector<Frame> Collected() {
+        if (reader.joinable()) {
+            reader.join();
+        }
+        std::lock_guard<std::mutex> lock(frames_mutex);
+        return frames;
+    }
+
+    void EmitModeChange() { emitter->emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0}); }
+
+    // The server still answers a fresh request.
+    void ExpectServerStillServing() {
+        httplib::Client client("127.0.0.1", server->get_port());
+        client.set_connection_timeout(1, 0);
+        auto res = client.Get("/v0/devices");
+        ASSERT_TRUE(res) << "server stopped answering";
+        EXPECT_EQ(200, res->status);
+    }
+
+    std::unique_ptr<registry::DeviceRegistry> registry;
+    std::unique_ptr<state::StateCache> state_cache;
+    std::unique_ptr<control::CallRouter> call_router;
+    std::shared_ptr<events::EventEmitter> emitter;
+    std::shared_ptr<MockProviderHandle> mock_provider;
+    std::unique_ptr<provider::ProviderRegistry> provider_registry;
+    std::unique_ptr<HttpServer> server;
+    std::thread reader;
+    std::mutex frames_mutex;
+    std::vector<Frame> frames;
+};
+
+TEST_F(HttpEventStreamTest, BytesValueIsSentAsBase64AndTheStreamContinues) {
+    RegisterBlobDevice(std::string("\xFF\x00\x10", 3));
+    ASSERT_TRUE(state_cache->initialize());
+    Listen(2);
+
+    state_cache->poll_once(*provider_registry);
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "state_update");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["signal_id"], "blob");
+    EXPECT_EQ(data["value"], (nlohmann::json{{"type", "bytes"}, {"base64", "/wAQ"}})) << got[0].data;
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the bytes value must still arrive";
+    ExpectServerStillServing();
+}
+
+TEST_F(HttpEventStreamTest, NonUtf8FaultMessageIsReplacedAndTheStreamContinues) {
+    Listen(2);
+
+    emitter->emit(events::AutomationFaultEvent{0, "tick", std::string("tick threw: \xFF\xFE end"), 0});
+    EmitModeChange();
+
+    const auto got = Collected();
+    ASSERT_EQ(got.size(), 2U);
+    EXPECT_EQ(got[0].event, "automation_fault");
+    ASSERT_TRUE(nlohmann::json::accept(got[0].data)) << got[0].data;
+    const auto data = nlohmann::json::parse(got[0].data);
+    EXPECT_EQ(data["locus"], "tick");
+    // Each invalid byte becomes U+FFFD; the valid text around it is kept.
+    EXPECT_EQ(data["error"], "tick threw: \xEF\xBF\xBD\xEF\xBF\xBD end");
+    EXPECT_EQ(got[1].event, "mode_change") << "an event after the fault must still arrive";
+    ExpectServerStillServing();
+}
+
+// Captures std::cerr, where the logger writes, for one scope, and puts it back
+// however the scope ends: an exception escaping the code under test must not
+// leave std::cerr pointing at a destroyed buffer.
+class CerrCapture {
+public:
+    CerrCapture() : old_(std::cerr.rdbuf(captured_.rdbuf())) {}
+    ~CerrCapture() { std::cerr.rdbuf(old_); }
+    CerrCapture(const CerrCapture&) = delete;
+    CerrCapture& operator=(const CerrCapture&) = delete;
+    CerrCapture(CerrCapture&&) = delete;
+    CerrCapture& operator=(CerrCapture&&) = delete;
+
+    std::string str() const { return captured_.str(); }
+
+private:
+    std::ostringstream captured_;
+    std::streambuf* old_;
+};
+
+// cpp-httplib calls the content provider outside its routing try/catch, so an
+// exception escaping a stream step would reach std::terminate (#594). A step
+// that throws ends that one stream, says why in the log, and returns.
+TEST(SseStreamStep, AnExceptionEndsTheStreamAndIsLogged) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    bool wrote = false;
+    sink.write = [&wrote](const char*, size_t) {
+        wrote = true;
+        return true;
+    };
+    int idle_polls = 0;
+    const auto throwing = [](const events::Event&) -> std::string { throw std::runtime_error("formatter blew up"); };
+
+    bool keep_streaming = true;
+    std::string log;
+    {
+        CerrCapture capture;
+        keep_streaming = sse_stream_step(*subscription, sink, idle_polls, throwing, "sse-test");
+        log = capture.str();
+    }
+
+    EXPECT_FALSE(keep_streaming);
+    EXPECT_FALSE(wrote);
+    EXPECT_NE(log.find("sse-test"), std::string::npos) << log;
+    EXPECT_NE(log.find("formatter blew up"), std::string::npos) << log;
+}
+
+TEST(SseStreamStep, ANonStandardExceptionAlsoEndsTheStream) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    sink.write = [](const char*, size_t) { return true; };
+    int idle_polls = 0;
+    const auto throwing = [](const events::Event&) -> std::string { throw 42; };
+
+    bool keep_streaming = true;
+    std::string log;
+    {
+        CerrCapture capture;
+        keep_streaming = sse_stream_step(*subscription, sink, idle_polls, throwing, "sse-test");
+        log = capture.str();
+    }
+
+    EXPECT_FALSE(keep_streaming);
+    EXPECT_NE(log.find("sse-test"), std::string::npos) << log;
+}
+
+TEST(SseStreamStep, AFormattedEventIsWrittenAndTheStreamContinues) {
+    events::EventEmitter emitter(10, 1);
+    auto subscription = emitter.subscribe();
+    ASSERT_TRUE(subscription);
+    emitter.emit(events::ModeChangeEvent{0, "MANUAL", "AUTO", 0});
+
+    httplib::DataSink sink;
+    std::string written;
+    sink.write = [&written](const char* data, size_t length) {
+        written.append(data, length);
+        return true;
+    };
+    int idle_polls = 3;
+    const auto format = [](const events::Event&) -> std::string { return "frame\n\n"; };
+
+    EXPECT_TRUE(sse_stream_step(*subscription, sink, idle_polls, format, "sse-test"));
+    EXPECT_EQ(written, "frame\n\n");
+    EXPECT_EQ(idle_polls, 0);
 }
 
 #else  // ANOLIS_SKIP_HTTP_TESTS
