@@ -96,12 +96,17 @@ Upgrade notes:
   `Access-Control-Allow-Headers` is `Authorization, Content-Type`. Each CORS
   header is sent once: the `OPTIONS` routes and the CORS hook both set
   `Access-Control-Allow-Headers` and `-Methods`, so a preflight carried each
-  twice. An `OPTIONS` from an origin not listed, or without `Origin`, no
-  longer gets `Access-Control-Allow-Headers` or `-Methods` (it never got
-  `Access-Control-Allow-Origin`). With origins listed, every reply carries
-  `Vary: Origin`, merged into the `Vary: Accept-Encoding` line of a
-  compressed reply. With no origins listed (the default) no CORS header is
-  sent, as before.
+  twice. The routes set those two on every `OPTIONS` reply, whatever the
+  `Origin` and whether or not any origins were listed. Now an `OPTIONS` from
+  an origin not listed, or without `Origin`, gets neither. That includes the
+  default config: with no origins listed, an `OPTIONS` used to get
+  `Access-Control-Allow-Headers: Content-Type` and
+  `Access-Control-Allow-Methods: GET, POST, OPTIONS`, and now gets no CORS
+  header at all. Those replies never carried `Access-Control-Allow-Origin`,
+  so a browser could not act on them. With origins listed, every reply
+  carries `Vary: Origin`, merged into the `Vary: Accept-Encoding` line of a
+  compressed reply. Replies other than `OPTIONS` are unchanged when no
+  origins are listed.
 - **The software stop plans each output on its own** (#640). It chose one
   rung for the whole machine: setpoints when they named every actuating
   function, without checking that they could be sent, else the zero rung for

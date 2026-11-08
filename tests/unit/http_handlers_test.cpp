@@ -2346,16 +2346,25 @@ TEST_F(HttpCorsTest, AnEchoedOriginIsMarkedVaryOriginOnce) {
 }
 
 TEST_F(HttpCorsTest, WithNoAllowlistNothingCorsIsSent) {
-    // The default: no origin is allowed, and replies are as before.
+    // The default: no origin is allowed and no CORS header is sent, on any
+    // reply. Before #460 the OPTIONS routes sent Allow-Headers and
+    // Allow-Methods even here.
     runtime::HttpConfig config;
     start(config);
-    auto res = client->Get("/v0/devices", httplib::Headers{{"Origin", kAllowedOrigin}});
-    ASSERT_TRUE(res);
-    EXPECT_EQ(200, res->status);
-    // cpp-httplib sends its own Vary: Accept-Encoding with a compressed body.
-    EXPECT_FALSE(lists(res->get_header_value("Vary"), "Origin")) << res->get_header_value("Vary");
-    for (const char* name : kCorsHeaders) {
-        EXPECT_FALSE(res->has_header(name)) << name;
+    std::vector<std::pair<std::string, httplib::Result>> replies;
+    replies.emplace_back("GET", client->Get("/v0/devices", httplib::Headers{{"Origin", kAllowedOrigin}}));
+    replies.emplace_back("OPTIONS", options("/v0/call", httplib::Headers{{"Origin", kAllowedOrigin}}));
+    replies.emplace_back("OPTIONS without Origin", options("/v0/call", httplib::Headers{}));
+    replies.emplace_back("preflight", options("/v0/call", preflight(kAllowedOrigin)));
+    for (const auto& [name, res] : replies) {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(res);
+        EXPECT_EQ(name == "GET" ? 200 : 204, res->status);
+        // cpp-httplib sends its own Vary: Accept-Encoding with a compressed body.
+        EXPECT_FALSE(lists(res->get_header_value("Vary"), "Origin")) << res->get_header_value("Vary");
+        for (const char* header : kCorsHeaders) {
+            EXPECT_FALSE(res->has_header(header)) << header << ": " << res->get_header_value(header);
+        }
     }
 }
 

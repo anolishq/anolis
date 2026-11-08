@@ -51,8 +51,9 @@ Use this file for operational semantics and practical examples.
      `Access-Control-Allow-Credentials: true` when
      `http.cors_allow_credentials` is set. Each is sent once, on every reply
      to that origin, the `401`, `403` and `415` refusals included, so a page
-     can read why it was refused. A request from any other origin gets none
-     of them;
+     can read why it was refused. (A request cpp-httplib rejects as malformed
+     before routing, which a browser does not send, gets none.) A request
+     from any other origin gets none of them;
    - a CORS preflight from a listed origin, an `OPTIONS` to `/v0/` with
      `Origin` and `Access-Control-Request-Method`, is answered `204` with no
      body before authentication: a browser sends it without the token. It
