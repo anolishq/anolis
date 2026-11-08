@@ -15,6 +15,12 @@ commit messages only.
 
 Upgrade notes:
 
+- **A `bytes` value on the event stream is base64** (#594). A `state_update`
+  for a `bytes` signal now carries `{"type":"bytes","base64":"..."}`, as the
+  REST API does. Earlier releases sent `{"type":"string","string":...}` with
+  the raw bytes (and aborted when they were not valid UTF-8), so a client
+  reading such a signal from `GET /v0/events` must now decode `base64`. No
+  shipped provider declares a `bytes` signal.
 - **Capability args carry `position`** (#731). A client that validates
   `GET /v0/devices/{provider_id}/{device_id}/capabilities` responses against a
   copy of `schemas/http/runtime-http.openapi.v0.yaml` from before this release
@@ -285,6 +291,38 @@ Upgrade notes:
 - **The runtime HTTP fixtures match provider-sim v0.2.8** (#582): `motorctl0`'s
   function is `1` / `set_motor_duty`, with its label and argument bounds, in
   the capabilities, call and e-stop examples.
+- **Invalid UTF-8 in events, request paths and run records no longer
+  aborts the runtime** (#594). The `GET /v0/events` stream, the HTTP error
+  responses and the run journal serialized JSON with a `dump()` that throws
+  on text that is not valid UTF-8, in places where nothing caught the
+  exception, so it reached `std::terminate`. Any of these aborted the
+  runtime:
+  - a `bytes` signal value with a byte of 0x80 or above, while a client
+    watched the event stream;
+  - an `automation_fault` whose message is not valid UTF-8, on the event
+    stream or, while a run is open, in the run journal;
+  - a request path holding a byte that is not valid UTF-8.
+
+  All of them now replace invalid UTF-8 sequences with U+FFFD, as
+  `send_json` already did, and a run record written for a tree file whose
+  name is not valid UTF-8 no longer fails `POST /v0/runs`. An exception
+  inside the event stream now ends that client's stream with an ERROR log
+  line instead of the process, and one in the run journal's writer drops
+  that event with an ERROR log line and keeps writing. A `bytes` value on
+  the event stream is now `{"type":"bytes","base64":"..."}`, as the REST API
+  and the OpenAPI `Value` encode it (see Upgrade notes). The InfluxDB sink
+  still writes a `bytes` value as the same lossy `value_string` as before;
+  changing it is #500.
+- **`GET /v0/automation/tree` serves the tree that is running** (#584). It
+  read the behavior tree file again on every request, so after the file was
+  edited it returned XML that was not running and did not hash to
+  `automation_version.digest`, and after the file was moved or deleted it
+  returned `500` while the tree kept running. It now returns the bytes the
+  engine loaded and digested, without touching the file, and `404` "No
+  behavior tree loaded" when there is none. The response shape is unchanged.
+  JSON carries only UTF-8, so for a tree file that is not valid UTF-8 the
+  served text has U+FFFD in place of the invalid sequences and no longer
+  hashes to the digest, as before.
 
 ## [0.10.2] - 2026-11-01
 

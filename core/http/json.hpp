@@ -30,6 +30,9 @@ nlohmann::json encode_capabilities(const registry::DeviceCapabilitySet& caps);
 nlohmann::json encode_signal_spec(const registry::SignalSpec& spec);
 nlohmann::json encode_function_spec(const registry::FunctionSpec& spec);
 
+// Standard base64 with padding, as a `bytes` value carries it in JSON
+std::string base64_encode(const std::string& bytes);
+
 // Decode functions for incoming requests
 bool decode_value(const nlohmann::json& json, anolis::deviceprovider::v1::Value& value, std::string& error);
 bool decode_call_request(const nlohmann::json& json, std::string& provider_id, std::string& device_id,

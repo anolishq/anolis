@@ -256,7 +256,12 @@ Notes:
 2. `POST /v0/mode`
 3. `GET /v0/parameters`
 4. `POST /v0/parameters`
-5. `GET /v0/automation/tree`
+5. `GET /v0/automation/tree` - the definition the runtime loaded, not a
+   fresh read of the file. Editing or removing the file changes nothing here
+   until the tree is loaded again; `404` when no tree is loaded. For a tree
+   file that is valid UTF-8 this is the exact text `automation_version.digest`
+   hashes. JSON carries only UTF-8, so other files are served with U+FFFD in
+   place of the invalid sequences and do not hash to the digest.
 6. `GET /v0/automation/status`
 
 ### Runs
@@ -317,6 +322,14 @@ Current event names:
 
 `quality_change` is defined in the wire format, but the runtime does not emit
 it.
+
+`state_update`'s `value` uses the [typed value encoding](#typed-value-encoding)
+of the REST API, so a `bytes` value is `{"type":"bytes","base64":"..."}`.
+Earlier releases sent it as `{"type":"string","string":...}` with the raw
+bytes. In strings in a frame (a fault message, say), invalid UTF-8 sequences
+are replaced with U+FFFD. If the runtime cannot send an event, it ends that
+client's stream and logs why: a failed write at WARN, any other error at
+ERROR. Other clients and later connections are unaffected.
 
 Provider health is not streamed. Read `GET /v0/providers/health` for it.
 

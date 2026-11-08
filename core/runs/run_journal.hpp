@@ -121,7 +121,8 @@ public:
     std::vector<RunEvent> list_events(const std::string& run_id, size_t limit, size_t offset) const;
 
     /// Count of queued events dropped because the async queue was full, plus
-    /// faults that drained with no run open.
+    /// faults that drained with no run open, plus queued events whose write
+    /// threw (logged at ERROR; the writer thread keeps going).
     uint64_t events_dropped() const { return events_dropped_.load(); }
 
 private:

@@ -342,6 +342,27 @@ TEST(InfluxLineProtocolTest, FormatStringValue) {
     EXPECT_TRUE(line.find("value_string=\"hello_world\"") != std::string::npos);
 }
 
+// A bytes value reaches the sink as BytesValue, no longer as a std::string
+// (#594), but what it writes is unchanged: the raw bytes escaped as a string
+// field, exactly as the same bytes were written before. Changing that is #500.
+TEST(InfluxLineProtocolTest, BytesValueIsWrittenAsTheSameStringFieldAsBefore) {
+    const std::string raw("\x00\x01\x02\x41\x0a\xff\x1f", 7);
+    StateUpdateEvent event;
+    event.provider_id = "provider";
+    event.device_id = "device";
+    event.signal_id = "blob";
+    event.quality = Quality::OK;
+    event.timestamp_ms = 1000000;
+
+    event.value = BytesValue{raw};
+    const std::string bytes_line = format_line_protocol(event);
+    event.value = raw;
+    const std::string string_line = format_line_protocol(event);
+
+    EXPECT_EQ(bytes_line, string_line);
+    EXPECT_NE(bytes_line.find("value_string=\"A\\n\xff\""), std::string::npos) << bytes_line;
+}
+
 TEST(InfluxLineProtocolTest, FormatStringWithQuotes) {
     StateUpdateEvent event;
     event.provider_id = "provider";

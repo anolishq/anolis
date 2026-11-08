@@ -14,7 +14,7 @@ static const std::string base64_chars =
     "abcdefghijklmnopqrstuvwxyz"
     "0123456789+/";
 
-static std::string base64_encode(const std::string &bytes) {
+std::string base64_encode(const std::string &bytes) {
     std::string encoded;
     unsigned int val = 0;
     int bits = -6;

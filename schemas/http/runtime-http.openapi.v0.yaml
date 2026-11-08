@@ -629,6 +629,10 @@ paths:
         `locus`, never a BT node) carries the engine fault; the former `bt_error`
         compatibility alias was removed in v0.1.26. An ordinary unsuccessful
         execution is NOT a fault (it surfaces via `execution_status=failed`).
+        `state_update`'s `value` is a `TypedValue`: a bytes value is
+        `{"type": "bytes", "base64": ...}`. In strings, invalid UTF-8
+        sequences are replaced with U+FFFD. A client whose event cannot be sent
+        has its stream ended; the runtime keeps serving.
       parameters:
         - name: provider_id
           in: query
