@@ -21,7 +21,8 @@ Use this file for operational semantics and practical examples.
 3. API prefix: `/v0`
 4. Authentication: bearer token, off by default (`http.auth_enabled`). With it
    on, every request needs `Authorization: Bearer <token>`, including one from
-   this host unless `http.auth_exempt_loopback` is set. The check runs before
+   this host unless `http.auth_exempt_loopback` is set. The one exception is a
+   CORS preflight from an allowed origin (item 6). The check runs before
    routing, so it covers every endpoint and the `/v0/events` stream. Without a
    valid token the reply is `401` with
    `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, not the
@@ -39,7 +40,31 @@ Use this file for operational semantics and practical examples.
    - a `POST` with a body must send `Content-Type: application/json`, or the
      reply is `415`. A bodyless `POST`, such as `/v0/estop`, needs none.
 
-CORS response headers come from runtime config (`http.cors_*`).
+6. CORS, from `http.cors_allowed_origins` and `http.cors_allow_credentials`
+   (#460). With no origins listed (the default) the runtime sends no CORS
+   headers. With origins listed:
+   - every reply carries `Vary: Origin`;
+   - a request whose `Origin` is listed gets `Access-Control-Allow-Origin`
+     (that origin, or `*` for a `*` entry),
+     `Access-Control-Allow-Methods: GET, POST, OPTIONS`,
+     `Access-Control-Allow-Headers: Authorization, Content-Type`, and
+     `Access-Control-Allow-Credentials: true` when
+     `http.cors_allow_credentials` is set. Each is sent once, on every reply
+     to that origin, the `401`, `403` and `415` refusals included, so a page
+     can read why it was refused. (A request cpp-httplib rejects as malformed
+     before routing, which a browser does not send, gets none.) A request
+     from any other origin gets none of them;
+   - a CORS preflight from a listed origin, an `OPTIONS` to `/v0/` with
+     `Origin` and `Access-Control-Request-Method`, is answered `204` with no
+     body before authentication: a browser sends it without the token. It
+     reaches no handler. Any other `OPTIONS`, and a preflight from an origin
+     not listed, needs the token like any other request.
+
+   A browser on another origin can therefore call an authenticated runtime
+   with `fetch` or `XMLHttpRequest`: the page sends
+   `Authorization: Bearer <token>` on its requests, and the browser's
+   preflight is allowed. `EventSource` cannot send that header, so with auth
+   on it gets `401` from `/v0/events`; read the stream with `fetch` instead.
 
 ## Common Response Envelope
 
