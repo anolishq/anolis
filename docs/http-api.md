@@ -59,9 +59,11 @@ Use this file for operational semantics and practical examples.
      reaches no handler. Any other `OPTIONS`, and a preflight from an origin
      not listed, needs the token like any other request.
 
-   A browser on another origin can therefore call an authenticated runtime:
-   the page sends `Authorization: Bearer <token>` on its requests, and the
-   browser's preflight is allowed.
+   A browser on another origin can therefore call an authenticated runtime
+   with `fetch` or `XMLHttpRequest`: the page sends
+   `Authorization: Bearer <token>` on its requests, and the browser's
+   preflight is allowed. `EventSource` cannot send that header, so with auth
+   on it gets `401` from `/v0/events`; read the stream with `fetch` instead.
 
 ## Common Response Envelope
 

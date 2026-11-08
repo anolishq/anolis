@@ -145,7 +145,8 @@ def test_cross_origin_browser_client_with_auth(runtime_path: Path, provider_path
             timeout=5.0,
         )
         assert preflight.status_code == 204, f"preflight: {preflight.status_code} {preflight.text}"
-        assert preflight.content == b"", preflight.text
+        # requests reads no body on a 204; Content-Length is what was sent.
+        assert preflight.headers.get("Content-Length") == "0", preflight.headers
         assert _header_lines(preflight, "Access-Control-Allow-Origin") == [UI_ORIGIN]
         assert len(_header_lines(preflight, "Access-Control-Allow-Methods")) == 1
         allow_headers = _header_lines(preflight, "Access-Control-Allow-Headers")

@@ -2156,7 +2156,8 @@ TEST_F(HttpCorsTest, WithAuthOnAPreflightFromAnAllowedOriginIsAnsweredWithoutATo
         auto res = options(path, preflight(kAllowedOrigin, method));
         ASSERT_TRUE(res);
         EXPECT_EQ(204, res->status) << res->body;
-        EXPECT_TRUE(res->body.empty()) << res->body;
+        // httplib's client reads no body on a 204; Content-Length is what was sent.
+        EXPECT_EQ("0", res->get_header_value("Content-Length")) << res->body;
         EXPECT_FALSE(res->has_header("WWW-Authenticate"));
         EXPECT_EQ(kAllowedOrigin, res->get_header_value("Access-Control-Allow-Origin"));
         EXPECT_TRUE(lists(res->get_header_value("Access-Control-Allow-Methods"), method));
@@ -2184,10 +2185,21 @@ TEST_F(HttpCorsTest, WithAuthOffAPreflightFromAnotherOriginGetsNoAllowHeaders) {
     auto res = options("/v0/call", preflight(kOtherOrigin));
     ASSERT_TRUE(res);
     EXPECT_EQ(204, res->status);
-    EXPECT_TRUE(res->body.empty()) << res->body;
+    EXPECT_EQ("0", res->get_header_value("Content-Length")) << res->body;
     for (const char* name : kCorsHeaders) {
         EXPECT_FALSE(res->has_header(name)) << name << ": " << res->get_header_value(name);
     }
+}
+
+TEST_F(HttpCorsTest, WithAuthOffAPreflightNamingAForeignHostIsRefused) {
+    // The DNS-rebinding Host check runs before the preflight is answered.
+    start(auth_off());
+    httplib::Headers headers = preflight(kAllowedOrigin);
+    headers.emplace("Host", "attacker.rebind.example:" + std::to_string(server->get_port()));
+    auto res = options("/v0/call", headers);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(403, res->status) << res->body;
+    EXPECT_EQ(R"({"error":"host not allowed"})", res->body);
 }
 
 TEST_F(HttpCorsTest, WithAuthOnAnOptionsWithoutAccessControlRequestMethodStillNeedsAToken) {
