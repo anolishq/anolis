@@ -41,12 +41,12 @@ Upgrade notes:
   `--check-config` now exits 1, and startup fails, when a parameter's
   `default` breaks its own `min`, `max` or `allowed_values`, or two
   parameters share a `name`. An omitted `default` is the type's zero and is
-  checked too, so a string parameter with `allowed_values` and no default,
-  or a numeric one whose range excludes zero, is refused. Run `anolis-runtime --check-config` on
-  each config before upgrading; the error names the parameter and the
-  constraint. Every config shipped in this repository and in
-  anolishq/anolis-projects passes. A new failure for an existing install
-  makes this release MINOR (`docs/dependencies.md`).
+  checked too, so a numeric parameter whose range excludes zero, or a string
+  one whose non-empty `allowed_values` leaves out `""`, needs a default. Run
+  `anolis-runtime --check-config` on each config before upgrading; the error
+  names the parameter and the constraint. Every config shipped in this
+  repository and in anolishq/anolis-projects passes. A new failure for an
+  existing install makes this release MINOR (`docs/dependencies.md`).
 
 ### Security
 
@@ -109,9 +109,9 @@ Upgrade notes:
   out-of-range default, the default outside `allowed_values` and the
   duplicate name; unit tests cover the omitted-default cases, which the
   schema already refuses for lacking `default`. A parameter's range error,
-  in `--check-config` and in a refused `POST /v0/parameters`, now prints
-  values as written: an int64 as an integer and a double in its shortest
-  form (`Value 150 exceeds maximum 100`, not `150.000000`), so `1e-09` and
+  in `--check-config` and in a refused `POST /v0/parameters`, now prints an
+  int64 as an integer and a double in its shortest round-trip form
+  (`Value 150 exceeds maximum 100`, not `150.000000`), so `1e-09` and
   `1e-08` no longer both read `0.000000`.
 - **The software stop plans each output on its own** (#640). It chose one
   rung for the whole machine: setpoints when they named every actuating

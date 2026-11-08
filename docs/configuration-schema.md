@@ -195,12 +195,13 @@ Parameter entry fields:
 4. `min` / `max` (numeric types only)
 5. `allowed_values` (string type only)
 
-The default, given or zero, must satisfy the entry's own `min`, `max` and
-`allowed_values`. `--check-config` and startup refuse a config with a default
-that breaks them, or with two parameters of one name, and name the parameter
-and the constraint. A string parameter with `allowed_values` and no default
-is refused unless `""` is allowed, and so is a numeric one whose range
-excludes zero.
+With `automation.enabled: true`, the default, given or zero, must satisfy
+the entry's own `min`, `max` and `allowed_values`. `--check-config` and
+startup refuse a config with a default that breaks them, or with two
+parameters of one name, and name the parameter and the constraint. So a
+numeric parameter whose range excludes zero needs a default, and so does a
+string one whose `allowed_values` is non-empty and leaves out `""`. An empty
+`allowed_values: []` is no constraint.
 
 `mode_transition_hooks` fields:
 
