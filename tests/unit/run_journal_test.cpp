@@ -2,10 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <mutex>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -370,6 +374,109 @@ TEST(RunJournalTest, EnqueueFaultIsPersistedAsyncToOpenRun) {
         if (!found) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     EXPECT_TRUE(found) << "async fault was not persisted within the timeout";
+
+    std::filesystem::remove_all(dir);
+}
+
+// A fault message is an exception's what() and can hold any bytes. Writing it
+// to the open run must not throw on the writer thread, where nothing catches
+// (#594): invalid UTF-8 is stored as U+FFFD and the event is persisted.
+TEST(RunJournalTest, NonUtf8FaultMessageIsPersistedToTheOpenRun) {
+    auto dir = unique_dir();
+    RunJournal journal(dir, "rt1", 1000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok);
+    const std::string id = opened.run.run_id;
+
+    journal.enqueue_fault("tick", std::string("tick threw: \xFF\xFE end"), 0);
+
+    bool found = false;
+    for (int i = 0; i < 200 && !found; ++i) {
+        for (const auto& ev : journal.list_events(id, 100, 0)) {
+            if (ev.category == RunEventCategory::AutomationFault) {
+                EXPECT_EQ(ev.payload.value("message", ""), "tick threw: \xEF\xBF\xBD\xEF\xBF\xBD end");
+                found = true;
+            }
+        }
+        if (!found) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(found) << "the fault was not persisted within the timeout";
+    EXPECT_EQ(journal.events_dropped(), 0U);
+
+    std::filesystem::remove_all(dir);
+}
+
+// A run record carries the automation version id, the tree file's name, which
+// a filesystem need not keep in UTF-8. Opening the run must still write it.
+TEST(RunJournalTest, NonUtf8AutomationVersionIdStillOpensTheRun) {
+    auto dir = unique_dir();
+    RunJournal journal(dir, "rt1", 1000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    anolis::runs::AutomationVersionRecord version{"behavior_tree", std::string("tree-\xFF"), "abc", "top_level_file"};
+
+    auto opened = journal.open(RunOpenSpec{}, version);
+
+    ASSERT_TRUE(opened.ok) << opened.error;
+    // The record on disk is valid JSON, with the invalid byte as U+FFFD. Read it
+    // in its own scope: Windows cannot remove the directory while the file is
+    // still open.
+    std::string line;
+    bool read = false;
+    {
+        std::ifstream index(dir / "runs" / "index.jsonl");
+        read = static_cast<bool>(std::getline(index, line));
+    }
+    ASSERT_TRUE(read);
+    ASSERT_TRUE(nlohmann::json::accept(line)) << line;
+    const auto record = run_from_json(nlohmann::json::parse(line));
+    ASSERT_TRUE(record.has_value());
+    ASSERT_TRUE(record->automation_version.has_value());
+    EXPECT_EQ(record->automation_version->id, "tree-\xEF\xBF\xBD");
+
+    std::filesystem::remove_all(dir);
+}
+
+// One queued event whose write throws must not end the writer thread: it is
+// logged and counted as dropped, and the next event is still persisted. The
+// throw is injected through the sync hook, the journal's one I/O seam.
+TEST(RunJournalTest, WriterThreadSurvivesAnEventWhoseWriteThrows) {
+    auto dir = unique_dir();
+    std::atomic<bool> throw_next{false};
+    RunJournal journal(dir, "rt1", 1000, [&throw_next](const std::filesystem::path&, bool) {
+        if (throw_next.exchange(false)) {
+            throw std::runtime_error("injected write failure");
+        }
+        return true;
+    });
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok);
+    const std::string id = opened.run.run_id;
+
+    std::ostringstream captured;
+    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    throw_next = true;
+    journal.enqueue_fault("tick", "first", 0);
+    for (int i = 0; i < 200 && journal.events_dropped() == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    journal.enqueue_fault("tick", "second", 0);
+    bool second = false;
+    for (int i = 0; i < 200 && !second; ++i) {
+        for (const auto& ev : journal.list_events(id, 100, 0)) {
+            if (ev.payload.value("message", "") == "second") second = true;
+        }
+        if (!second) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::cerr.rdbuf(old);
+
+    EXPECT_EQ(journal.events_dropped(), 1U);
+    EXPECT_TRUE(second) << "the writer thread stopped persisting after the throw";
+    EXPECT_NE(captured.str().find("injected write failure"), std::string::npos) << captured.str();
 
     std::filesystem::remove_all(dir);
 }
