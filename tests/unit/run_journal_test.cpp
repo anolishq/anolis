@@ -420,10 +420,16 @@ TEST(RunJournalTest, NonUtf8AutomationVersionIdStillOpensTheRun) {
     auto opened = journal.open(RunOpenSpec{}, version);
 
     ASSERT_TRUE(opened.ok) << opened.error;
-    // The record on disk is valid JSON, with the invalid byte as U+FFFD.
-    std::ifstream index(dir / "runs" / "index.jsonl");
+    // The record on disk is valid JSON, with the invalid byte as U+FFFD. Read it
+    // in its own scope: Windows cannot remove the directory while the file is
+    // still open.
     std::string line;
-    ASSERT_TRUE(static_cast<bool>(std::getline(index, line)));
+    bool read = false;
+    {
+        std::ifstream index(dir / "runs" / "index.jsonl");
+        read = static_cast<bool>(std::getline(index, line));
+    }
+    ASSERT_TRUE(read);
     ASSERT_TRUE(nlohmann::json::accept(line)) << line;
     const auto record = run_from_json(nlohmann::json::parse(line));
     ASSERT_TRUE(record.has_value());
