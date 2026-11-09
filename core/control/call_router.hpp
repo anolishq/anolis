@@ -198,6 +198,7 @@ private:
 
     // The mode checks execute_call makes before the provider lock and again
     // after it (#762). Each fills `result` and returns true to refuse the call.
+    bool automation_stopped_refuses(const CallRequest &request, CallResult &result) const;
     bool mode_gates_refuse(const CallRequest &request, CallResult &result) const;
     bool allowed_modes_refuse(const CallRequest &request, const registry::FunctionSpec &spec,
                               const std::string &resolved_function_name, CallResult &result) const;

@@ -1492,6 +1492,8 @@ TEST_F(CallRouterTest, DeviceLossLatchBlocksBehaviorTreeActuation) {
     StubDeviceLossLatch loss;
     loss.handles.insert("sim0/dev1");
     router->set_device_loss_latch(&loss);
+    std::string mode_error;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, mode_error)) << mode_error;
 
     // StrictMock: no call() expectation, so dispatching would fail the test.
     control::CallRequest req;
