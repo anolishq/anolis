@@ -12,7 +12,7 @@ namespace {
 void log_engaged(const std::string &device_handle) {
     LOG_WARN("[DeviceLossLatch] " << device_handle
                                   << " went unreachable; autonomous actuation to it is blocked until "
-                                     "it answers and MANUAL -> AUTO re-arms it");
+                                     "a read succeeds and MANUAL -> AUTO re-arms it");
 }
 
 }  // namespace

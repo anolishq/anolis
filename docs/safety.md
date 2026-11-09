@@ -101,9 +101,9 @@ can hurt someone or destroy a batch.
   restarting". The second half is the actionable part — the runtime must come
   back able to be started, not started. Today the runtime does this per device
   (anolishq/anolis#285, #299). A device that went unreachable stays
-  latched, and the behaviour tree may not actuate it until it has answered again
+  latched, and the behaviour tree may not actuate it until a read has succeeded
   and an operator then re-enters AUTO. Re-entering AUTO while it is still
-  unreachable leaves it latched, and one that never answers again, including one
+  unreachable leaves it latched, and one that never reads successfully again, including one
   removed from the inventory, stays latched until the runtime restarts. When it
   answers again, the software safe state's
   calls for it are re-run (under `none` that does nothing), and

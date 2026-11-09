@@ -242,9 +242,9 @@ Notes:
    with `FAILED_PRECONDITION`. Manual `POST /v0/call`, mode-transition hooks and
    safe-state calls are unaffected — an operator commanding a device they can
    see is the deliberate action that "permit restarting" means.
-2. Latches clear on a `MANUAL -> AUTO` transition, for devices that have
-   answered since their loss, and on nothing else while the runtime runs. A
-   device that never answers again, including one removed from the inventory,
+2. Latches clear on a `MANUAL -> AUTO` transition, for devices with a
+   successful read since their loss, and on nothing else while the runtime runs.
+   A device that never reads successfully again, including one removed from the inventory,
    stays latched until the runtime restarts. They are held in memory, so a restarted runtime starts
    with none, in `IDLE`, and automation still needs a deliberate
    `MANUAL -> AUTO`. Releasing

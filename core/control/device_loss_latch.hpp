@@ -13,7 +13,7 @@
  * restarted by itself ~1.4 s after power returned.
  *
  * This blocks the command rather than stopping the machine. A latched device
- * cannot be commanded by automation until it has answered and an operator then
+ * cannot be commanded by automation until a read has succeeded and an operator then
  * deliberately re-enters AUTO, which is the "permit restarting" the standard asks for. Manual calls,
  * mode-transition hooks and safe-state calls are all unaffected -- see
  * CallRouter for why the hook exemption is load-bearing rather than a

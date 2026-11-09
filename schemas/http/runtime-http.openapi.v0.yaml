@@ -844,7 +844,7 @@ components:
           description: >-
             Device handles blocked from autonomous actuation after going
             unreachable at the transport level. Cleared only by a MANUAL -> AUTO
-            transition, and only for a device that has answered since its loss:
+            transition, and only for a device with a successful read since its loss:
             releasing an emergency stop may permit a restart but
             must not cause one (ISO 13850 4.1.4). Empty when nothing is latched.
           items:
