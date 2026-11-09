@@ -13,6 +13,19 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-09
+
+0.12.0 is a minor release because a config that used to start can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR).
+
+Upgrade notes:
+
+- **A null token value no longer counts as a token.** With
+  `http.auth_enabled` true, a config whose `http.auth_token` is null (no
+  value, `~`, `null`) now uses `ANOLIS_API_TOKEN`. If that is not set either,
+  the runtime refuses the config. Set a token in one of the two places. A
+  client that was using a token from such a config needs the real token.
+
 ### Fixed
 
 - **A null token value is treated as unset.** `http.auth_token`,
