@@ -583,16 +583,28 @@ _installed_cfg() {
     [[ "${output}" != *"baked-token-xyz"* ]]
 }
 
-@test "529: a null auth_token is warned about: the runtime reads it as the token \"null\"" {
+@test "a null auth_token sets no token: no warning, and the summary does not name the config" {
     local v
-    for v in 'auth_token:' 'auth_token: ~' 'auth_token: null' 'auth_token:   # none'; do
+    for v in 'auth_token:' 'auth_token: ~' 'auth_token: null' 'auth_token: Null' 'auth_token: NULL' \
+        'auth_token:   # none' 'auth_token: null  # none' 'auth_token: !!null null'; do
+        _installed_cfg "auth_enabled: true" "${v}"
+        mkdir -p "${PREFIX}/bin"
+        printf '#!/bin/sh\necho "anolis-runtime 0.11.1"\n' > "${PREFIX}/bin/anolis-runtime"
+        chmod +x "${PREFIX}/bin/anolis-runtime"
+        run _warn_config_api_token
+        [ "${output}" == "" ] || { echo "warned: ${v}"; return 1; }
+        run phase_summary
+        [[ "${output}" != *"API token: the http.auth_token"* ]] || { echo "summary: ${v}"; return 1; }
+    done
+}
+
+@test "a quoted \"null\" auth_token is a token: it is warned about" {
+    local v
+    for v in 'auth_token: "null"' "auth_token: 'null'" 'auth_token: "~"'; do
         _installed_cfg "auth_enabled: true" "${v}"
         run _warn_config_api_token
         [[ "${output}" == *"sets http.auth_token"* ]] || { echo "no warning: ${v}"; return 1; }
     done
-    _installed_cfg "auth_enabled: true" "auth_token:"
-    run phase_summary
-    [[ "${output}" == *"API token: the http.auth_token in ${PREFIX}/config/runtime.yaml"* ]]
 }
 
 @test "529: no warning when the installed config sets no token, or a quoted empty one" {

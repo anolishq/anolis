@@ -2557,34 +2557,80 @@ _runtime_probe_host() {
     esac
 }
 
-# http.auth_token as the installed runtime.yaml sets it, quotes removed (the
-# reader removes them: what is left is the token). Prints nothing when the
-# config sets none.
-_config_api_token() {
-    _http_value "${PREFIX}/config/runtime.yaml" auth_token
+# Whether the runtime in ${PREFIX}/bin reads a null http.auth_token as unset.
+# Releases up to 0.11.0 read it as the string "null", and this script can act
+# on one (an older pin or bundle, --rollback, --allow-downgrade). A version
+# that cannot be read counts as older.
+_runtime_reads_null_token_as_unset() {
+    local v
+    v=$(_runtime_binary_version "${PREFIX}/bin/anolis-runtime")
+    [[ -n "${v}" && "${v}" != "0.11.0" ]] \
+        && [[ "$(printf '%s\n0.11.0\n' "${v}" | sort -V | head -n1)" == "0.11.0" ]]
 }
 
-# True when the installed runtime.yaml's http block has an auth_token key whose
-# value is anything but a quoted empty string. yaml-cpp reads a key with no
-# value, `~` or `null` as the token "null", so those count (#529). Reads the
-# block style install.sh renders; a flow-style http block is not seen here
-# (the bundle step checks every form before a config is shipped).
-_config_sets_api_token() {
+# What the installed runtime.yaml's http.auth_token holds: "token", "null" (no
+# value, `~`, `null`, `Null`, `NULL`, `!!null`), or nothing for a quoted empty
+# string or no key. A key with no value on its line takes a more indented next
+# line as its value. Reads the block style install.sh renders; a flow-style
+# http block is not seen here (the bundle step checks every form before a
+# config is shipped).
+_config_api_token_kind() {
     local cfg="${PREFIX}/config/runtime.yaml"
-    [[ -f "${cfg}" ]] || return 1
+    [[ -f "${cfg}" ]] || return 0
     awk '
+        # "blank", "none" (a quoted empty string), "null" or "token".
+        function kind_of(v) {
+            sub(/^[[:space:]]+/, "", v)
+            sub(/(^|[[:space:]]+)#.*$/, "", v)
+            sub(/[[:space:]]+$/, "", v)
+            if (v == "") return "blank"
+            if (v ~ /^(""|\047\047)$/) return "none"
+            if (v ~ /^(~|null|Null|NULL)$/ || v ~ /^!!null([[:space:]]|$)/) return "null"
+            return "token"
+        }
         { sub(/\r$/, "") }
+        pending {
+            if ($0 ~ /^[[:space:]]*(#|$)/) next
+            match($0, /^ */)
+            if (RLENGTH > key_indent) kind = kind_of($0)
+            exit
+        }
         /^[^[:space:]#]/ { in_blk = ($1 == "http:") }
         in_blk && $1 == "auth_token:" {
             v = $0
-            sub(/^[^:]*:[[:space:]]*/, "", v)
-            sub(/[[:space:]]+#.*$/, "", v)
-            sub(/[[:space:]]+$/, "", v)
-            found = (v != "\"\"" && v != "\047\047")
+            sub(/^[^:]*:/, "", v)
+            kind = kind_of(v)
+            if (kind == "blank") {
+                kind = "null"
+                match($0, /^ */)
+                key_indent = RLENGTH
+                pending = 1
+                next
+            }
             exit
         }
-        END { exit !found }
+        END { if (kind == "token" || kind == "null") print kind }
     ' "${cfg}"
+}
+
+# True when the runtime in ${PREFIX}/bin takes its token from runtime.yaml.
+_config_sets_api_token() {
+    case "$(_config_api_token_kind)" in
+        token) return 0 ;;
+        null) ! _runtime_reads_null_token_as_unset ;;
+        *) return 1 ;;
+    esac
+}
+
+# The http.auth_token the runtime in ${PREFIX}/bin uses from runtime.yaml, quotes
+# removed (the reader removes them: what is left is the token). Prints nothing
+# when it uses none.
+_config_api_token() {
+    if [[ "$(_config_api_token_kind)" == null ]]; then
+        _runtime_reads_null_token_as_unset || printf 'null'
+        return 0
+    fi
+    _http_value "${PREFIX}/config/runtime.yaml" auth_token
 }
 
 # The runtime's API token, resolved as the runtime resolves it: http.auth_token
@@ -3246,6 +3292,7 @@ do_rollback() {
     chmod +x "${PREFIX}"/bin/* 2>/dev/null || true
     chown "${ANOLIS_USER}:${ANOLIS_USER}" "${PREFIX}"/bin/* 2>/dev/null || true
     log_ok "restored binaries from .prev/"
+    _warn_config_api_token
 
     # manifest.json is the operator's record of what is installed, and the next
     # backup copies it into .prev/meta, so it must follow the binaries (#345).
@@ -3535,11 +3582,10 @@ def read(f):
 # does. So it walks the node graph, not the loaded data: every top-level `http`
 # key and every `auth_token` key in each, duplicates included (PyYAML keeps the
 # last of a duplicate key, yaml-cpp the first), and the mappings a `<<` merge
-# key brings in. The only value that is no token is a quoted empty string;
-# yaml-cpp reads a null (`auth_token:`, `~`, `null`) as the string "null", and
-# keeps the text of a scalar whatever its tag (`!!null x` is "x"). A file that
-# does not parse cannot be shown to be free of a token, so it is refused too;
-# the parser's message is not printed, because it quotes the offending line.
+# key brings in. The only value a bundle may hold is a quoted empty string; a
+# null (`auth_token:`, `~`, `null`) is refused like any other. A file that does
+# not parse cannot be shown to be free of a token, so it is refused too; the
+# parser's message is not printed, because it quotes the offending line.
 class SelfMerge(Exception):
     pass
 
@@ -3610,7 +3656,7 @@ def check_token_nodes(root, name):
             sys.exit(
                 f"{name}: sets http.auth_token. A bundle must not carry an API token: every device "
                 f"installed from it would accept that token, in place of its own. Remove the key "
-                f"(a null value is a token too: the runtime reads it as \"null\"); the install "
+                f"(a null value is refused too: only \"\" may stand for no token); the install "
                 f"generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
             )
 
