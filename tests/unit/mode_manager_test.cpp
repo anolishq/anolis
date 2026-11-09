@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -491,6 +492,70 @@ TEST(ModeManagerConcurrentCommitTest, FaultIsANoOpWhenAnotherFaultEntryCommitsFi
     EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
     const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::AUTO, RuntimeMode::FAULT}};
     EXPECT_EQ(committed, expected);  // entered once, not twice
+
+    // The second request never reached its own commit, and still cleared.
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+}
+
+// The order the commit-time check exists for: the ordinary request is already
+// in its before-callbacks when the FAULT starts, so the check at its start
+// passed.
+TEST(ModeManagerConcurrentCommitTest, AnOrdinaryRequestAlreadyInFlightIsRefusedWhenAFaultStarts) {
+    ModeManager mode(RuntimeMode::MANUAL);
+    std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
+    mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
+    std::promise<void> ordinary_in_before, fault_in_before, ordinary_finished;
+    mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::AUTO) {
+            ordinary_in_before.set_value();
+            fault_in_before.get_future().wait();
+        } else if (next == RuntimeMode::FAULT) {
+            fault_in_before.set_value();
+            ordinary_finished.get_future().wait();
+        }
+        return true;
+    });
+
+    bool ordinary_ok = true;
+    std::thread ordinary([&] {
+        std::string error;
+        ordinary_ok = mode.set_mode(RuntimeMode::AUTO, error);
+        ordinary_finished.set_value();
+    });
+    ordinary_in_before.get_future().wait();
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    ordinary.join();
+
+    EXPECT_FALSE(ordinary_ok);
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::MANUAL, RuntimeMode::FAULT}};
+    EXPECT_EQ(committed, expected);
+}
+
+// Refused at its start, so its before-callbacks do not run alongside the FAULT.
+TEST(ModeManagerConcurrentCommitTest, AnOrdinaryRequestMadeDuringAPendingFaultRunsNoBeforeCallbacks) {
+    ModeManager mode(RuntimeMode::MANUAL);
+    std::atomic<int> ordinary_callbacks{0};
+    bool raced = false;
+    bool ordinary_ok = true;
+    mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::AUTO) {
+            ++ordinary_callbacks;
+        } else if (next == RuntimeMode::FAULT && !raced) {
+            raced = true;
+            std::thread other([&] {
+                std::string error;
+                ordinary_ok = mode.set_mode(RuntimeMode::AUTO, error);
+            });
+            other.join();
+        }
+        return true;
+    });
+
+    std::string error;
+    EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_FALSE(ordinary_ok);
+    EXPECT_EQ(ordinary_callbacks.load(), 0);
 }
 
 TEST(ModeManagerConcurrentCommitTest, NonFaultRequestIsStillRefusedWhenAnotherTransitionCommitsFirst) {
