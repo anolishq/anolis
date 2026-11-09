@@ -116,10 +116,11 @@ public:
      * - FAULT -> AUTO: blocked (must go thru MANUAL)
      * - FAULT -> IDLE: blocked (must go thru MANUAL)
      *
-     * A request for FAULT always ends in FAULT. If another transition commits
-     * while its before-callbacks run, FAULT commits from that mode instead,
-     * and the after-callbacks receive it as the previous mode. Any other
-     * request is refused in that case.
+     * A request for FAULT always ends in FAULT. While its before-callbacks run,
+     * an ordinary transition cannot commit, so FAULT commits from the mode its
+     * before-callbacks were chosen for (#763). An ordinary request is refused
+     * if a FAULT is in progress, or if the mode changed while its own
+     * before-callbacks ran.
      *
      * @param new_mode Requested mode
      * @param error Output error message if transition fails
@@ -163,6 +164,8 @@ private:
 
     mutable std::mutex mutex_;
     RuntimeMode current_mode_;
+    // FAULT requests between validation and their commit (or return).
+    int fault_requests_pending_ = 0;
     std::vector<BeforeModeChangeCallback> before_callbacks_;
     std::vector<CommitGuard> commit_guards_;
     std::vector<ModeChangeCallback> callbacks_;

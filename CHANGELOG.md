@@ -15,6 +15,11 @@ commit messages only.
 
 ### Fixed
 
+- **An ordinary mode change can no longer commit during a pending FAULT.** A
+  transition that committed while FAULT's before-hooks ran moved FAULT to a mode
+  those hooks were not chosen for, so a before-only AUTO -> FAULT hook could be
+  skipped. The other request is now refused until the FAULT commits. FAULT
+  itself is never delayed or refused. (#763)
 - **A re-arm no longer releases a device that is still unreachable.** Re-entering
   AUTO used to clear every device-loss latch, so a device still dark lost its
   protection and came back with no safe-state re-assert. It now stays latched,
