@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A null token value is treated as unset.** `http.auth_token`,
+  `telemetry.influxdb.token` and `telemetry.influx_token` written with no
+  value, `~` or `null` now leave the token unset, so the `ANOLIS_API_TOKEN` or
+  `INFLUXDB_TOKEN` environment fallback applies. A quoted `"null"` is still a
+  string.
+
 ## [0.11.0] - 2026-11-08
 
 0.11.0 is a minor release because several changes make an existing install

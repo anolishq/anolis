@@ -43,9 +43,9 @@ is a complete example, and the workbench writes projects in the same layout.
   left as it is and not checked.
 - No config may set `http.auth_token` to anything but `""`. Each install
   generates the device's own token into `/etc/anolis/runtime.env`, and a token
-  in the config would replace it on every device. A null value counts: the
-  runtime reads `auth_token:`, `~` and `null` as the token `null`. The bundle
-  step checks every file it renders, before and after its rewrites, and
+  in the config would replace it on every device. A null value (`auth_token:`,
+  `~`, `null`) is refused too. The bundle step checks every file it renders,
+  before and after its rewrites, and
   `machine-profile.yaml`, reads them as the runtime's YAML parser does (the
   first of duplicate keys, a tag does not hide the value), stops and names the
   file, and never prints the token. The bundle carries no token's text either:

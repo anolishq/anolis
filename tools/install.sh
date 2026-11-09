@@ -2561,14 +2561,16 @@ _runtime_probe_host() {
 # reader removes them: what is left is the token). Prints nothing when the
 # config sets none.
 _config_api_token() {
+    _config_sets_api_token || return 0
     _http_value "${PREFIX}/config/runtime.yaml" auth_token
 }
 
-# True when the installed runtime.yaml's http block has an auth_token key whose
-# value is anything but a quoted empty string. yaml-cpp reads a key with no
-# value, `~` or `null` as the token "null", so those count (#529). Reads the
-# block style install.sh renders; a flow-style http block is not seen here
-# (the bundle step checks every form before a config is shipped).
+# True when the installed runtime.yaml's http block has an auth_token key with
+# a token in it: anything but a quoted empty string or a YAML null (no value,
+# `~`, `null`, `Null`, `NULL`, `!!null`), which the runtime treats as unset. A
+# quoted "null" is a token. Reads the block style install.sh renders; a
+# flow-style http block is not seen here (the bundle step checks every form
+# before a config is shipped).
 _config_sets_api_token() {
     local cfg="${PREFIX}/config/runtime.yaml"
     [[ -f "${cfg}" ]] || return 1
@@ -2578,9 +2580,9 @@ _config_sets_api_token() {
         in_blk && $1 == "auth_token:" {
             v = $0
             sub(/^[^:]*:[[:space:]]*/, "", v)
-            sub(/[[:space:]]+#.*$/, "", v)
+            sub(/(^|[[:space:]]+)#.*$/, "", v)
             sub(/[[:space:]]+$/, "", v)
-            found = (v != "\"\"" && v != "\047\047")
+            found = (v != "" && v !~ /^(""|\047\047|~|null|Null|NULL)$/ && v !~ /^!!null([[:space:]]|$)/)
             exit
         }
         END { exit !found }
@@ -3535,11 +3537,10 @@ def read(f):
 # does. So it walks the node graph, not the loaded data: every top-level `http`
 # key and every `auth_token` key in each, duplicates included (PyYAML keeps the
 # last of a duplicate key, yaml-cpp the first), and the mappings a `<<` merge
-# key brings in. The only value that is no token is a quoted empty string;
-# yaml-cpp reads a null (`auth_token:`, `~`, `null`) as the string "null", and
-# keeps the text of a scalar whatever its tag (`!!null x` is "x"). A file that
-# does not parse cannot be shown to be free of a token, so it is refused too;
-# the parser's message is not printed, because it quotes the offending line.
+# key brings in. The only value a bundle may hold is a quoted empty string; a
+# null (`auth_token:`, `~`, `null`) is refused like any other. A file that does
+# not parse cannot be shown to be free of a token, so it is refused too; the
+# parser's message is not printed, because it quotes the offending line.
 class SelfMerge(Exception):
     pass
 
@@ -3610,7 +3611,7 @@ def check_token_nodes(root, name):
             sys.exit(
                 f"{name}: sets http.auth_token. A bundle must not carry an API token: every device "
                 f"installed from it would accept that token, in place of its own. Remove the key "
-                f"(a null value is a token too: the runtime reads it as \"null\"); the install "
+                f"(a null value is refused too: only \"\" may stand for no token); the install "
                 f"generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
             )
 

@@ -55,6 +55,13 @@ std::string gating_policy_to_string(GatingPolicy policy) {
 
 namespace {
 
+// True when a token key holds a value. A YAML null (no value, `~`, `null`,
+// `Null`, `NULL` or an explicit `!!null`) leaves the token unset, so its
+// environment fallback applies; as<std::string>() would return its text.
+bool has_token_value(const YAML::Node &node) {
+    return node && !node.IsNull() && node.Tag() != "tag:yaml.org,2002:null";
+}
+
 bool ensure_mapping(const YAML::Node &node, const std::string &path, std::string &error) {
     if (!node || node.IsNull()) {
         return true;
@@ -738,7 +745,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (yaml["http"]["auth_enabled"]) {
                 config.http.auth_enabled = yaml["http"]["auth_enabled"].as<bool>();
             }
-            if (yaml["http"]["auth_token"]) {
+            if (has_token_value(yaml["http"]["auth_token"])) {
                 config.http.auth_token = yaml["http"]["auth_token"].as<std::string>();
             }
             if (yaml["http"]["auth_exempt_loopback"]) {
@@ -993,7 +1000,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (flat["influx_bucket"]) {
                 config.telemetry.influx_bucket = flat["influx_bucket"].as<std::string>();
             }
-            if (flat["influx_token"]) {
+            if (has_token_value(flat["influx_token"])) {
                 config.telemetry.influx_token = flat["influx_token"].as<std::string>();
             }
             if (flat["batch_size"]) {
@@ -1023,7 +1030,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 if (influx["bucket"]) {
                     config.telemetry.influx_bucket = influx["bucket"].as<std::string>();
                 }
-                if (influx["token"]) {
+                if (has_token_value(influx["token"])) {
                     config.telemetry.influx_token = influx["token"].as<std::string>();
                 }
                 if (influx["batch_size"]) {

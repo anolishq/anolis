@@ -101,6 +101,22 @@ _assert_every_call_carries_token() {
     ! grep -qF "${FAKE_TOKEN}" "${CALLS}" || return 1
 }
 
+@test "health: a null http.auth_token uses runtime.env, as in the runtime" {
+    local v
+    for v in '' '~' 'null' 'Null' 'NULL' '# none' '~  # none' '!!null null'; do
+        printf 'http:\n  port: 8080\n  auth_enabled: true\n  auth_token: %s\n' "${v}" > "${PREFIX}/config/runtime.yaml"
+        : > "${CALLS}"
+        run _run_registry_available "http://localhost:8080"
+        [ "$status" -eq 0 ]
+        grep -qxF "STDIN: Authorization: Bearer ${FAKE_TOKEN}" "${CALLS}" || { echo "value: [${v}]"; cat "${CALLS}"; return 1; }
+    done
+}
+
+@test "health: a quoted \"null\" http.auth_token is the token in use" {
+    printf 'http:\n  port: 8080\n  auth_enabled: true\n  auth_token: "null"\n' > "${PREFIX}/config/runtime.yaml"
+    [ "$(_runtime_api_token)" = "null" ]
+}
+
 @test "health: with no token anywhere, the probes run without a header" {
     rm -f "${RUNTIME_ENV_FILE}"
     run _run_registry_available "http://localhost:8080"

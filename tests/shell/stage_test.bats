@@ -355,9 +355,8 @@ _assert_token_refused() {
     done
 }
 
-# yaml-cpp, which the runtime parses with, reads a null value as the string
-# "null": the runtime would use "null" as the token, not ANOLIS_API_TOKEN.
-@test "#529 a null auth_token is a token: staging fails" {
+# A bundle may hold only the quoted empty string: a null value is refused too.
+@test "#529 a null auth_token is refused: staging fails" {
     local v
     for v in '' '~' 'null' 'Null' '!!null'; do
         PROJECT_DIR="$(_copy_fixture)"

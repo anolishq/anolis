@@ -244,6 +244,173 @@ telemetry:
     EXPECT_EQ(config.telemetry.influx_token, "flat-token");
 }
 
+namespace {
+
+// Holds an environment variable at `value` (unset if nullopt) for one scope,
+// and leaves it unset afterwards.
+class ScopedEnv {
+public:
+    ScopedEnv(std::string name, const std::optional<std::string>& value) : name_(std::move(name)) { apply(value); }
+    ~ScopedEnv() { apply(std::nullopt); }
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+private:
+    void apply(const std::optional<std::string>& value) const {
+#ifdef _WIN32
+        _putenv_s(name_.c_str(), value.value_or("").c_str());
+#else
+        if (value) {
+            setenv(name_.c_str(), value->c_str(), 1);
+        } else {
+            unsetenv(name_.c_str());
+        }
+#endif
+    }
+
+    std::string name_;
+};
+
+// Every way YAML writes a null scalar, with the empty value first.
+const std::vector<std::string> kNullValues = {"", "~", "null", "Null", "NULL", "!!null null", "!!null ~"};
+
+// Scalars that spell null but are strings, each with the token it configures.
+const std::vector<std::pair<std::string, std::string>> kNullLookingStrings = {
+    {"\"null\"", "null"}, {"'null'", "null"}, {"\"~\"", "~"}, {"!!str null", "null"}};
+
+// The two keys that hold the InfluxDB token, up to the value.
+const std::vector<std::string> kInfluxTokenKeys = {"  influx_token: ", "  influxdb:\n    token: "};
+
+// `value` is what follows `auth_token:`; nullopt leaves the key out.
+std::string http_auth_yaml(const std::optional<std::string>& value, bool auth_enabled = true) {
+    std::string yaml = "providers:\n  - id: test\n    command: /path/to/provider\n";
+    yaml += "http:\n  enabled: true\n  bind: 127.0.0.1\n";
+    yaml += std::string("  auth_enabled: ") + (auth_enabled ? "true" : "false") + "\n";
+    if (value) {
+        yaml += "  auth_token: " + *value + "\n";
+    }
+    return yaml;
+}
+
+std::string telemetry_yaml(const std::string& token_lines) {
+    return "providers:\n  - id: test\n    command: /path/to/provider\ntelemetry:\n  enabled: true\n" + token_lines;
+}
+
+}  // namespace
+
+TEST_F(ConfigTest, NullHttpAuthTokenUsesTheEnvironmentToken) {
+    const ScopedEnv env("ANOLIS_API_TOKEN", "env-token");
+    for (const auto& value : kNullValues) {
+        SCOPED_TRACE("auth_token: " + value);
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_TRUE(load_config(create_config_file("null_token.yaml", http_auth_yaml(value)), config, error)) << error;
+        EXPECT_EQ(config.http.auth_token, "env-token");
+    }
+}
+
+TEST_F(ConfigTest, NullHttpAuthTokenStaysEmptyWithAuthOff) {
+    const ScopedEnv env("ANOLIS_API_TOKEN", "env-token");
+    for (const auto& value : kNullValues) {
+        SCOPED_TRACE("auth_token: " + value);
+        RuntimeConfig config;
+        std::string error;
+        const auto path = create_config_file("null_token_auth_off.yaml", http_auth_yaml(value, false));
+        EXPECT_TRUE(load_config(path, config, error)) << error;
+        EXPECT_EQ(config.http.auth_token, "");
+    }
+}
+
+TEST_F(ConfigTest, AuthWithANullTokenAndNoEnvironmentTokenIsRefused) {
+    const ScopedEnv env("ANOLIS_API_TOKEN", std::nullopt);
+    for (const auto& value : kNullValues) {
+        SCOPED_TRACE("auth_token: " + value);
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_FALSE(load_config(create_config_file("null_token_no_env.yaml", http_auth_yaml(value)), config, error));
+        EXPECT_NE(error.find("requires http.auth_token"), std::string::npos) << error;
+    }
+}
+
+// The refusal above matches what an unset token gets.
+TEST_F(ConfigTest, AuthWithAnUnsetTokenAndNoEnvironmentTokenIsRefused) {
+    const ScopedEnv env("ANOLIS_API_TOKEN", std::nullopt);
+    for (const auto& value : std::vector<std::optional<std::string>>{std::nullopt, "\"\""}) {
+        SCOPED_TRACE(value.value_or("(no auth_token key)"));
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_FALSE(load_config(create_config_file("unset_token.yaml", http_auth_yaml(value)), config, error));
+        EXPECT_NE(error.find("requires http.auth_token"), std::string::npos) << error;
+    }
+}
+
+TEST_F(ConfigTest, QuotedNullHttpAuthTokenIsAConfiguredToken) {
+    const ScopedEnv env("ANOLIS_API_TOKEN", "env-token");
+    for (const auto& [value, expected] : kNullLookingStrings) {
+        SCOPED_TRACE("auth_token: " + value);
+        RuntimeConfig config;
+        std::string error;
+        EXPECT_TRUE(load_config(create_config_file("quoted_null.yaml", http_auth_yaml(value)), config, error)) << error;
+        EXPECT_EQ(config.http.auth_token, expected);
+    }
+}
+
+TEST_F(ConfigTest, NullInfluxTokensUseTheEnvironmentToken) {
+    const ScopedEnv env("INFLUXDB_TOKEN", "env-token");
+    for (const auto& value : kNullValues) {
+        for (const auto& key : kInfluxTokenKeys) {
+            SCOPED_TRACE(key + value);
+            RuntimeConfig config;
+            std::string error;
+            const auto path = create_config_file("null_influx.yaml", telemetry_yaml(key + value + "\n"));
+            EXPECT_TRUE(load_config(path, config, error)) << error;
+            EXPECT_EQ(config.telemetry.influx_token, "env-token");
+        }
+    }
+}
+
+TEST_F(ConfigTest, NullInfluxTokensStayEmptyWithNoEnvironmentToken) {
+    const ScopedEnv env("INFLUXDB_TOKEN", std::nullopt);
+    for (const auto& value : kNullValues) {
+        for (const auto& key : kInfluxTokenKeys) {
+            SCOPED_TRACE(key + value);
+            RuntimeConfig config;
+            std::string error;
+            const auto path = create_config_file("null_influx_no_env.yaml", telemetry_yaml(key + value + "\n"));
+            EXPECT_TRUE(load_config(path, config, error)) << error;
+            EXPECT_EQ(config.telemetry.influx_token, "");
+        }
+    }
+}
+
+TEST_F(ConfigTest, ANullNestedInfluxTokenLeavesTheFlatTokenInPlace) {
+    const ScopedEnv env("INFLUXDB_TOKEN", "env-token");
+    for (const auto& value : kNullValues) {
+        SCOPED_TRACE("token: " + value);
+        RuntimeConfig config;
+        std::string error;
+        const auto path =
+            create_config_file("null_nested_influx.yaml",
+                               telemetry_yaml("  influx_token: flat-token\n  influxdb:\n    token: " + value + "\n"));
+        EXPECT_TRUE(load_config(path, config, error)) << error;
+        EXPECT_EQ(config.telemetry.influx_token, "flat-token");
+    }
+}
+
+TEST_F(ConfigTest, QuotedNullInfluxTokensAreConfiguredTokens) {
+    const ScopedEnv env("INFLUXDB_TOKEN", "env-token");
+    for (const auto& [value, expected] : kNullLookingStrings) {
+        for (const auto& key : kInfluxTokenKeys) {
+            SCOPED_TRACE(key + value);
+            RuntimeConfig config;
+            std::string error;
+            const auto path = create_config_file("quoted_influx.yaml", telemetry_yaml(key + value + "\n"));
+            EXPECT_TRUE(load_config(path, config, error)) << error;
+            EXPECT_EQ(config.telemetry.influx_token, expected);
+        }
+    }
+}
+
 TEST_F(ConfigTest, UnknownKeysDoNotFailLoad) {
     // Unknown keys should generate warnings but not prevent loading
     std::string config_content = R"(
