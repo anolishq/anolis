@@ -544,9 +544,12 @@ bool Runtime::init_automation(std::string &error) {
             if (prev != automation::RuntimeMode::MANUAL || next != automation::RuntimeMode::AUTO) {
                 return;
             }
-            const auto released = device_loss_latch_->release_all();
+            const auto released = device_loss_latch_->release_reachable();
             for (const auto &handle : released) {
                 LOG_WARN("[Runtime] re-armed " << handle << " for automation (MANUAL -> AUTO)");
+            }
+            for (const auto &handle : device_loss_latch_->latched()) {
+                LOG_WARN("[Runtime] " << handle << " stays latched: still unreachable at MANUAL -> AUTO");
             }
             if (!released.empty()) {
                 LOG_INFO("[Runtime] " << released.size()
