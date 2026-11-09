@@ -381,6 +381,60 @@ TEST_F(StateCacheReachabilityTest, FiresOncePerEdgeNotOncePerFailedPoll) {
     EXPECT_GT(events[1].edge_seq, events[0].edge_seq);
 }
 
+// #764: the worst status of an outage decides the latch. A transient INTERNAL
+// alone does not latch, but UNAVAILABLE later in the same outage must, and the
+// device's return must then re-assert its safe state.
+TEST_F(StateCacheReachabilityTest, UnavailableAfterInternalInTheSameOutageLatches) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(good_read());
+
+    control::DeviceLossLatch latch;
+    std::size_t applied = 0;
+    const auto drain = [&] {
+        bool reissue = false;
+        for (; applied < events.size(); ++applied) {
+            const auto &edge = events[applied];
+            reissue = latch.apply_reachability_edge(edge.device_handle, edge.reachable, edge.status, edge.edge_seq) ||
+                      reissue;
+        }
+        return reissue;
+    };
+
+    state_cache->poll_once(*provider_registry);
+    drain();
+    ASSERT_EQ(events.size(), 1U) << "control: the INTERNAL read must have produced the first loss edge";
+    EXPECT_FALSE(latch.is_latched("sim0/dev1")) << "control: INTERNAL alone does not latch";
+
+    state_cache->poll_once(*provider_registry);
+    drain();
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "UNAVAILABLE during the outage did not latch";
+
+    state_cache->poll_once(*provider_registry);
+    EXPECT_TRUE(drain()) << "the return did not ask for a safe-state re-assert";
+}
+
+// The further edge is for a worsening only: a status that does not worsen the
+// outage stays silent, so the sink still sees one edge per outage otherwise.
+TEST_F(StateCacheReachabilityTest, AStatusThatDoesNotWorsenTheOutageFiresNoFurtherEdge) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    for (int i = 0; i < 5; ++i) {
+        state_cache->poll_once(*provider_registry);
+    }
+
+    ASSERT_EQ(events.size(), 2U) << "INTERNAL, then the first transport failure, and nothing after";
+    EXPECT_EQ(events[0].status, anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL);
+    EXPECT_EQ(events[1].status, anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED);
+    EXPECT_GT(events[1].edge_seq, events[0].edge_seq);
+}
+
 // A device that starts reachable and stays reachable produces no edge. In
 // particular the FIRST successful poll must not fire "became reachable": that
 // would re-issue safe state to every device at startup.

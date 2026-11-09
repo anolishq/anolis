@@ -132,7 +132,7 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
             // Check if device_handle starts with "provider_id/"
             if (it->first.find(provider_id + "/") == 0) {
                 carried[it->first] = {it->second.provider_available, it->second.loss_reported,
-                                      it->second.unavailable_emitted};
+                                      it->second.unavailable_emitted, it->second.loss_was_transport};
                 it = device_states_.erase(it);
             } else {
                 ++it;
@@ -188,6 +188,7 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
                 state.provider_available = prior.provider_available;
                 state.loss_reported = prior.loss_reported;
                 state.unavailable_emitted = prior.unavailable_emitted;
+                state.loss_was_transport = prior.loss_was_transport;
                 device_states_[state.device_handle] = state;
             }
         }
@@ -464,8 +465,14 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
                     it->second.unavailable_emitted = true;
                     emit_device_availability(provider_id, device_id, false);
                 }
-                if (!shutting_down && !provider_lost && !it->second.loss_reported && device_reachability_sink_) {
+                // One edge per outage, plus one more if the outage worsens to a
+                // transport failure: the latch ignores a non-transport loss, so
+                // an outage that began with one must still reach it (#764).
+                const bool transport = is_transport_failure(failure_status);
+                if (!shutting_down && !provider_lost && device_reachability_sink_ &&
+                    (!it->second.loss_reported || (transport && !it->second.loss_was_transport))) {
                     it->second.loss_reported = true;
+                    it->second.loss_was_transport = transport;
                     report_loss = true;
                     loss_seq = ++reachability_edge_seq_;
                 }
@@ -521,6 +528,7 @@ void StateCache::update_device_state(const std::string &device_handle, const std
         }
         if (state.loss_reported) {
             state.loss_reported = false;
+            state.loss_was_transport = false;
             report_return = true;
             return_seq = ++reachability_edge_seq_;
         }

@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An outage that starts with INTERNAL can now engage the device-loss latch.**
+  The first failed read used to decide the whole outage, so a decode error
+  followed by silence never latched and the device's return re-asserted nothing.
+  UNAVAILABLE or DEADLINE_EXCEEDED later in the same outage now latches. A
+  transient INTERNAL alone still does not. (#764)
+
 ## [0.12.0] - 2026-11-09
 
 0.12.0 is a minor release because a config that used to start can now be

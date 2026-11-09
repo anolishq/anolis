@@ -58,6 +58,17 @@ struct CachedSignalValue {
 };
 
 /**
+ * @brief True for a read failure that means the device could not answer.
+ *
+ * Only these engage the device-loss latch. Anything else, such as a decode error
+ * (INTERNAL), means the device answered.
+ */
+inline bool is_transport_failure(anolis::deviceprovider::v1::Status_Code status) {
+    return status == anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE ||
+           status == anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+}
+
+/**
  * @brief Snapshot of one device's cached state.
  *
  * `provider_available` reflects whether polling could currently reach the
@@ -75,6 +86,10 @@ struct DeviceState {
     // sink call): deriving the edges from that flag would swallow the loss
     // edge of a device that is dark across a provider restart (#285).
     bool loss_reported = false;
+    // True once a loss edge for the current outage carried a transport failure.
+    // An outage that starts with a non-transport status reports a further loss
+    // edge if it worsens to a transport failure (#764), and only that once.
+    bool loss_was_transport = false;
     // True from the `device_availability` event with `available: false` until
     // the one with `available: true` (#300). Follows `provider_available` on
     // both loss paths, except that no loss is emitted once shutdown is
@@ -244,6 +259,7 @@ private:
         bool provider_available = true;
         bool loss_reported = false;
         bool unavailable_emitted = false;
+        bool loss_was_transport = false;
     };
 
     // A device a rebuild dropped while a loss was on record for it, by handle.
