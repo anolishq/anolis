@@ -217,8 +217,10 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // protocol's authoritative enforcer. Safe-state calls are exempt so the
     // ladder can always drive outputs safe. Without automation there is no mode
     // manager and the runtime is under manual control, so the call is judged as
-    // MANUAL.
-    if (allowed_modes_refuse(request, *func_spec, resolved_function_name, result)) {
+    // MANUAL. AUTO may have ended since the first gate; that is not a refusal of
+    // this function (#762).
+    if (automation_stopped_refuses(request, result) ||
+        allowed_modes_refuse(request, *func_spec, resolved_function_name, result)) {
         return result;
     }
 
