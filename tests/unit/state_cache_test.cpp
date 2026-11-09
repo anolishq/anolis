@@ -1034,7 +1034,7 @@ TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileLatchedReturnsWithAReturnEdge)
 
     EXPECT_EQ(worker_reissues, 1) << "the first good read after the return re-asserts safe state, once";
     EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
-    EXPECT_EQ(latch.release_all(), std::vector<std::string>{"sim0/dev1"});
+    EXPECT_EQ(latch.release_reachable(), std::vector<std::string>{"sim0/dev1"});
 }
 
 // A device removed while reachable and registered again comes back as a new

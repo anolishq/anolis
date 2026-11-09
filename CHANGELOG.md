@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A re-arm no longer releases a device that is still unreachable.** Re-entering
+  AUTO used to clear every device-loss latch, so a device still dark lost its
+  protection and came back with no safe-state re-assert. It now stays latched,
+  is re-asserted when it answers again, and is released by a later re-entry into
+  AUTO. The runtime log names each device kept latched. (#765)
+
 ## [0.12.0] - 2026-11-09
 
 0.12.0 is a minor release because a config that used to start can now be

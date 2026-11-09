@@ -71,13 +71,17 @@ public:
     bool is_latched(const std::string &device_handle) const override;
 
     /**
-     * @brief Release every latch and return what was released.
+     * @brief Release the latch of every device not known to be unreachable, and
+     * return what was released.
      *
-     * Called on the deliberate MANUAL -> AUTO transition, post-commit. The
+     * Called on the deliberate MANUAL -> AUTO transition, post-commit. A device
+     * whose newest applied edge is a loss stays latched (#765): re-arming must
+     * not clear the protection of a device that has not come back, so its
+     * return still re-asserts safe state and a later re-arm releases it. The
      * returned handles are logged: an operator re-arming a machine should see
-     * which devices it covered.
+     * which devices it covered, and `latched()` names the ones it did not.
      */
-    std::vector<std::string> release_all();
+    std::vector<std::string> release_reachable();
 
     std::vector<std::string> latched() const override;
 

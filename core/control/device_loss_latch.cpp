@@ -73,12 +73,17 @@ void DeviceLossLatch::set_expected_loss(std::function<std::optional<std::string>
     expected_loss_ = std::move(expected_loss);
 }
 
-std::vector<std::string> DeviceLossLatch::release_all() {
+std::vector<std::string> DeviceLossLatch::release_reachable() {
     std::vector<std::string> released;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        released.assign(latched_.begin(), latched_.end());
-        latched_.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = latched_.begin(); it != latched_.end();) {
+        const auto edge = last_edge_.find(*it);
+        if (edge != last_edge_.end() && !edge->second.reachable) {
+            ++it;
+            continue;
+        }
+        released.push_back(*it);
+        it = latched_.erase(it);
     }
     return released;
 }

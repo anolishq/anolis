@@ -40,12 +40,14 @@ TEST(DeviceLossLatchTest, EngageIsIdempotent) {
     EXPECT_EQ(latch.latched().size(), 1U);
 }
 
-TEST(DeviceLossLatchTest, ReleaseAllReportsWhatItReleased) {
+TEST(DeviceLossLatchTest, ReleaseReachableReportsWhatItReleased) {
     DeviceLossLatch latch;
     latch.apply_reachability_edge("bread0/dcmt0", false, kUnavailable, 1);
     latch.apply_reachability_edge("bread0/dcmt1", false, kUnavailable, 2);
+    latch.apply_reachability_edge("bread0/dcmt0", true, kOk, 3);
+    latch.apply_reachability_edge("bread0/dcmt1", true, kOk, 4);
 
-    auto released = latch.release_all();
+    auto released = latch.release_reachable();
     EXPECT_EQ(released.size(), 2U);
     EXPECT_FALSE(latch.is_latched("bread0/dcmt0"));
     EXPECT_FALSE(latch.is_latched("bread0/dcmt1"));
@@ -55,7 +57,7 @@ TEST(DeviceLossLatchTest, ReleaseAllReportsWhatItReleased) {
     EXPECT_NE(std::find(released.begin(), released.end(), "bread0/dcmt0"), released.end());
     EXPECT_NE(std::find(released.begin(), released.end(), "bread0/dcmt1"), released.end());
 
-    EXPECT_TRUE(latch.release_all().empty());
+    EXPECT_TRUE(latch.release_reachable().empty());
 }
 
 // The poll thread writes; the automation thread reads through CallRouter.
@@ -97,6 +99,22 @@ TEST(DeviceLossLatchEdgeTest, LossThenReturnInOrderLatchesAndAsksForReissue) {
     EXPECT_TRUE(latch.is_latched("sim0/dev1"));
     EXPECT_TRUE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2));
     EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm";
+}
+
+// #765: a re-arm releases only devices that are reachable. A device still dark
+// stays latched, is re-asserted when it returns, and needs a later re-arm.
+TEST(DeviceLossLatchEdgeTest, RearmKeepsADeviceThatIsStillDarkLatched) {
+    DeviceLossLatch latch;
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/dark", false, kUnavailable, 1));
+    EXPECT_FALSE(latch.apply_reachability_edge("sim0/back", false, kUnavailable, 2));
+    EXPECT_TRUE(latch.apply_reachability_edge("sim0/back", true, kOk, 3));
+
+    latch.release_reachable();
+
+    EXPECT_FALSE(latch.is_latched("sim0/back")) << "control: a returned device is released";
+    EXPECT_TRUE(latch.is_latched("sim0/dark")) << "re-arm released a device that is still unreachable";
+    EXPECT_TRUE(latch.apply_reachability_edge("sim0/dark", true, kOk, 4))
+        << "the dark device's return must re-assert its safe state";
 }
 
 // Decided L1, R2; arriving R2, L1. The return found the device unlatched and
@@ -181,10 +199,10 @@ TEST(DeviceLossLatchEdgeTest, EdgeOrderIsTrackedPerDevice) {
 // A re-arm does not make an edge decided before it any newer. Decided L1, R2;
 // arriving R2, then a re-arm (MANUAL -> AUTO), then L1. The late loss is still
 // stale: it latches and asks for the re-issue its return did not make.
-TEST(DeviceLossLatchEdgeTest, ReleaseAllKeepsEdgeOrder) {
+TEST(DeviceLossLatchEdgeTest, ReleaseReachableKeepsEdgeOrder) {
     DeviceLossLatch latch;
     EXPECT_FALSE(latch.apply_reachability_edge("sim0/dev1", true, kOk, 2));
-    latch.release_all();
+    latch.release_reachable();
     EXPECT_TRUE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
     EXPECT_TRUE(latch.is_latched("sim0/dev1"));
 }
@@ -226,7 +244,7 @@ TEST(DeviceLossSinkTest, ForwardsTheEdgeNumberAndReissuesOnce) {
     EXPECT_EQ(reissued[0], "sim0/dev1");
 
     // A second outage after a re-arm latches and re-issues again.
-    latch.release_all();
+    latch.release_reachable();
     sink("sim0/dev1", false, kUnavailable, 3);
     EXPECT_TRUE(latch.is_latched("sim0/dev1"));
     sink("sim0/dev1", true, kOk, 4);
