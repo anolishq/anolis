@@ -165,6 +165,11 @@ Design work on this model is tracked in anolishq/anolis#283.
 | `AUTO`       | Running         | Manual calls policy-gated            | Automation calls continue normally                            |
 | `FAULT`      | Stopped         | Allowed                              | Recovery/diagnostic mode; transition restrictions still apply |
 
+`Stopped` takes effect from the moment a transition out of `AUTO` starts, before
+it commits: the runtime stops ticking the tree and refuses any tree call that has
+not reached its provider. A command already sent cannot be recalled. A hook call
+to the same provider waits for it, so that hook has the last word on that provider.
+
 Transition rules:
 
 1. `IDLE <-> MANUAL`

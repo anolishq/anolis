@@ -106,6 +106,19 @@ public:
     bool is_idle() const;
 
     /**
+     * Whether a transition out of AUTO has started and not yet committed or
+     * been abandoned (#762). The mode still reads AUTO during this window.
+     */
+    bool is_leaving_auto() const;
+
+    /**
+     * Whether automation may send a command now: the mode is AUTO and no
+     * transition out of it has started (#762). Thread-safe, and judged as one
+     * reading of both.
+     */
+    bool automation_may_dispatch() const;
+
+    /**
      * Request mode transition.
      *
      * Validates transition rules:
@@ -166,6 +179,8 @@ private:
     RuntimeMode current_mode_;
     // FAULT requests between validation and their commit (or return).
     int fault_requests_pending_ = 0;
+    // Transitions out of AUTO between validation and their commit (or return).
+    int leaving_auto_pending_ = 0;
     std::vector<BeforeModeChangeCallback> before_callbacks_;
     std::vector<CommitGuard> commit_guards_;
     std::vector<ModeChangeCallback> callbacks_;

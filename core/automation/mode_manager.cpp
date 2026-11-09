@@ -53,31 +53,44 @@ bool ModeManager::is_idle() const {
     return current_mode_ == RuntimeMode::IDLE;
 }
 
+bool ModeManager::is_leaving_auto() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return leaving_auto_pending_ > 0;
+}
+
+bool ModeManager::automation_may_dispatch() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return current_mode_ == RuntimeMode::AUTO && leaving_auto_pending_ == 0;
+}
+
 bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
     RuntimeMode previous_mode;
     std::vector<BeforeModeChangeCallback> before_callbacks_copy;
     std::vector<ModeChangeCallback> callbacks_copy;
 
-    // Marks a FAULT request as pending from validation until its commit, or
+    // Marks this request as in progress from validation until its commit, or
     // until set_mode returns if it never reaches one.
-    struct PendingFault {
+    struct PendingTransition {
         ModeManager &manager;
-        bool pending = false;
-        void begin_locked() {
-            pending = true;
-            ++manager.fault_requests_pending_;
+        bool fault = false;
+        bool leaving_auto = false;
+        void begin_locked(RuntimeMode from, RuntimeMode to) {
+            fault = to == RuntimeMode::FAULT;
+            leaving_auto = from == RuntimeMode::AUTO;
+            manager.fault_requests_pending_ += fault ? 1 : 0;
+            manager.leaving_auto_pending_ += leaving_auto ? 1 : 0;
         }
         void end_locked() {
-            if (pending) {
-                pending = false;
-                --manager.fault_requests_pending_;
-            }
+            manager.fault_requests_pending_ -= fault ? 1 : 0;
+            manager.leaving_auto_pending_ -= leaving_auto ? 1 : 0;
+            fault = false;
+            leaving_auto = false;
         }
-        ~PendingFault() {
+        ~PendingTransition() {
             std::lock_guard<std::mutex> lock(manager.mutex_);
             end_locked();
         }
-    } pending_fault{*this};
+    } pending{*this};
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -105,9 +118,7 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
 
         previous_mode = current_mode_;
-        if (new_mode == RuntimeMode::FAULT) {
-            pending_fault.begin_locked();
-        }
+        pending.begin_locked(previous_mode, new_mode);
 
         // Copy callbacks while holding lock
         before_callbacks_copy = before_callbacks_;
@@ -201,7 +212,7 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
 
         current_mode_ = new_mode;
-        pending_fault.end_locked();
+        pending.end_locked();
     }
 
     LOG_INFO("[ModeManager] Mode changed: " << mode_to_string(previous_mode) << " -> " << mode_to_string(new_mode));

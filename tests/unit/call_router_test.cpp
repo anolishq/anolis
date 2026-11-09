@@ -750,6 +750,8 @@ TEST_F(CallRouterTest, ABehaviorTreeCallIsLoggedOnlyWhenItChanges) {
     RegisterMockDeviceWithUnsignedArg();
     EXPECT_CALL(*mock_provider, call("dev1", 1, "set_duty", _, _)).Times(4).WillRepeatedly(Return(true));
 
+    std::string mode_error;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, mode_error)) << mode_error;
     auto tree_call = [&](uint64_t pct) {
         control::CallRequest req;
         req.device_handle = "sim0/dev1";
@@ -1490,6 +1492,8 @@ TEST_F(CallRouterTest, DeviceLossLatchBlocksBehaviorTreeActuation) {
     StubDeviceLossLatch loss;
     loss.handles.insert("sim0/dev1");
     router->set_device_loss_latch(&loss);
+    std::string mode_error;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, mode_error)) << mode_error;
 
     // StrictMock: no call() expectation, so dispatching would fail the test.
     control::CallRequest req;
@@ -1571,6 +1575,8 @@ TEST_F(CallRouterTest, DeviceLossLatchIsPerDevice) {
     StubDeviceLossLatch loss;
     loss.handles.insert("sim0/other");  // a different device
     router->set_device_loss_latch(&loss);
+    std::string mode_error;
+    ASSERT_TRUE(mode_manager->set_mode(automation::RuntimeMode::AUTO, mode_error)) << mode_error;
 
     EXPECT_CALL(*mock_provider, call("dev1", _, "reset", _, _)).WillOnce(Return(true));
 

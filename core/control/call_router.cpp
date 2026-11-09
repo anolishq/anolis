@@ -100,33 +100,73 @@ CallRouter::ProviderLock CallRouter::get_or_create_provider_lock(const std::stri
     return provider_locks_.try_emplace(provider_id, std::make_shared<std::mutex>()).first->second;
 }
 
+bool CallRouter::automation_stopped_refuses(const CallRequest& request, CallResult& result) const {
+    if (request.safe_state || !request.is_behavior_tree || mode_manager_ == nullptr ||
+        mode_manager_->automation_may_dispatch()) {
+        return false;
+    }
+    result.error_message = "Automation has stopped: the runtime is leaving or has left AUTO";
+    result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+    result.automation_stopped = true;
+    LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
+    return true;
+}
+
+bool CallRouter::mode_gates_refuse(const CallRequest& request, CallResult& result) const {
+    if (request.safe_state || mode_manager_ == nullptr) {
+        return false;
+    }
+    // Block control operations in IDLE mode. E-stop safe-state actions bypass
+    // gating so the ladder can still drive actuators to a safe state.
+    if (mode_manager_->is_idle()) {
+        result.error_message = "Control operations blocked in IDLE mode";
+    } else if (!request.is_automated && manual_gating_policy_ == "BLOCK" &&
+               mode_manager_->current_mode() == automation::RuntimeMode::AUTO) {
+        result.error_message = "Manual call blocked in AUTO mode (policy: BLOCK)";
+    } else {
+        return false;
+    }
+    result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+    LOG_WARN("[CallRouter] " << result.error_message);
+    return true;
+}
+
+bool CallRouter::allowed_modes_refuse(const CallRequest& request, const registry::FunctionSpec& spec,
+                                      const std::string& resolved_function_name, CallResult& result) const {
+    if (!request.safe_state && !spec.allowed_modes.empty()) {
+        const std::string mode = mode_manager_ != nullptr ? automation::mode_to_string(mode_manager_->current_mode())
+                                                          : std::string("MANUAL");
+        const bool allowed =
+            std::any_of(spec.allowed_modes.begin(), spec.allowed_modes.end(), [&mode](std::string declared) {
+                std::transform(declared.begin(), declared.end(), declared.begin(),
+                               [](unsigned char c) { return std::toupper(c); });
+                return declared == mode;
+            });
+        if (!allowed) {
+            std::string modes;
+            for (const auto& declared : spec.allowed_modes) {
+                modes += (modes.empty() ? "" : ", ") + declared;
+            }
+            result.error_message =
+                std::format("{} is allowed only in {}; the runtime is in {}", resolved_function_name, modes, mode);
+            result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+            LOG_WARN("[CallRouter] " << request.device_handle << ": " << result.error_message);
+            return true;
+        }
+    }
+    return false;
+}
+
 CallResult CallRouter::execute_call(const CallRequest& request, provider::ProviderRegistry& provider_registry) {
     CallResult result;
     result.success = false;
 
     // Dynamic gating lives here, not in validate_call(). That keeps the
     // validation-only path useful for static checks while reserving runtime
-    // mode/provider availability enforcement for real execution.
-    // Block control operations in IDLE mode. E-stop safe-state actions bypass
-    // gating so the ladder can still drive actuators to a safe state.
-    if (!request.safe_state && mode_manager_ != nullptr && mode_manager_->is_idle()) {
-        result.error_message = "Control operations blocked in IDLE mode";
-        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
-        LOG_WARN("[CallRouter] " << result.error_message);
+    // mode/provider availability enforcement for real execution. Asked first, so
+    // a tree call refused because AUTO ended is always classified as that (#762).
+    if (automation_stopped_refuses(request, result) || mode_gates_refuse(request, result)) {
         return result;
-    }
-
-    // Check manual/auto contention (only for manual calls)
-    if (!request.is_automated && !request.safe_state && mode_manager_ != nullptr &&
-        mode_manager_->current_mode() == automation::RuntimeMode::AUTO) {
-        if (manual_gating_policy_ == "BLOCK") {
-            result.error_message = "Manual call blocked in AUTO mode (policy: BLOCK)";
-            result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
-            LOG_WARN("[CallRouter] " << result.error_message);
-            return result;
-        } else if (manual_gating_policy_ == "OVERRIDE") {
-            // Allow call to proceed
-        }
     }
 
     // Parse device handle
@@ -177,27 +217,11 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // protocol's authoritative enforcer. Safe-state calls are exempt so the
     // ladder can always drive outputs safe. Without automation there is no mode
     // manager and the runtime is under manual control, so the call is judged as
-    // MANUAL.
-    if (!request.safe_state && !func_spec->allowed_modes.empty()) {
-        const std::string mode = mode_manager_ != nullptr ? automation::mode_to_string(mode_manager_->current_mode())
-                                                          : std::string("MANUAL");
-        const bool allowed = std::any_of(func_spec->allowed_modes.begin(), func_spec->allowed_modes.end(),
-                                         [&mode](std::string declared) {
-                                             std::transform(declared.begin(), declared.end(), declared.begin(),
-                                                            [](unsigned char c) { return std::toupper(c); });
-                                             return declared == mode;
-                                         });
-        if (!allowed) {
-            std::string modes;
-            for (const auto& declared : func_spec->allowed_modes) {
-                modes += (modes.empty() ? "" : ", ") + declared;
-            }
-            result.error_message =
-                std::format("{} is allowed only in {}; the runtime is in {}", resolved_function_name, modes, mode);
-            result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
-            LOG_WARN("[CallRouter] " << request.device_handle << ": " << result.error_message);
-            return result;
-        }
+    // MANUAL. AUTO may have ended since the first gate; that is not a refusal of
+    // this function (#762).
+    if (automation_stopped_refuses(request, result) ||
+        allowed_modes_refuse(request, *func_spec, resolved_function_name, result)) {
+        return result;
     }
 
     // Refuse actuating calls while the e-stop latch is engaged. Fail closed:
@@ -261,6 +285,16 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
         result.error_message = "Actuation latched by e-stop (POST /v0/estop/clear to release)";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message);
+        return result;
+    }
+
+    // Every mode gate above ran before this call waited for the lock, and the
+    // mode may have changed since (#762). Automation is refused from the moment
+    // a transition out of AUTO starts, while the mode still reads AUTO, so a
+    // tree command cannot land after a before-hook made the output safe.
+    // Safe-state calls are exempt so the ladder can always run.
+    if (automation_stopped_refuses(request, result) || mode_gates_refuse(request, result) ||
+        allowed_modes_refuse(request, *func_spec, resolved_function_name, result)) {
         return result;
     }
 
