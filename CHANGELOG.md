@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An ordinary mode change can no longer commit during a pending FAULT.** A
+  transition that committed while FAULT's before-hooks ran moved FAULT to a mode
+  those hooks were not chosen for, so a before-only AUTO -> FAULT hook could be
+  skipped. The other request is now refused until the FAULT commits. FAULT
+  itself is never delayed or refused. (#763)
+
 ## [0.12.0] - 2026-11-09
 
 0.12.0 is a minor release because a config that used to start can now be

@@ -428,7 +428,7 @@ void race_inside_before_callbacks(ModeManager &mode, RuntimeMode requested, Runt
 
 }  // namespace
 
-TEST(ModeManagerConcurrentCommitTest, FaultFromAutoEndsInFaultWhenAutoToManualCommitsFirst) {
+TEST(ModeManagerConcurrentCommitTest, AutoToManualCannotCommitDuringAPendingFault) {
     ModeManager mode(RuntimeMode::AUTO);
     std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
     mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
@@ -437,16 +437,15 @@ TEST(ModeManagerConcurrentCommitTest, FaultFromAutoEndsInFaultWhenAutoToManualCo
 
     std::string error;
     EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
-    EXPECT_TRUE(concurrent_ok);
+    EXPECT_FALSE(concurrent_ok);
     EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
-    // The after-callbacks, and with them the -> FAULT hooks, see the real
-    // previous mode.
-    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::AUTO, RuntimeMode::MANUAL},
-                                                                    {RuntimeMode::MANUAL, RuntimeMode::FAULT}};
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::AUTO, RuntimeMode::FAULT}};
     EXPECT_EQ(committed, expected);
 }
 
-TEST(ModeManagerConcurrentCommitTest, FaultFromManualEndsInFaultWhenManualToAutoCommitsFirst) {
+// #763: otherwise FAULT would commit from AUTO, and a before-only AUTO -> FAULT
+// hook, chosen against MANUAL, would never have run.
+TEST(ModeManagerConcurrentCommitTest, ManualToAutoCannotCommitDuringAPendingFault) {
     ModeManager mode(RuntimeMode::MANUAL);
     std::vector<std::pair<RuntimeMode, RuntimeMode>> committed;
     mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) { committed.emplace_back(prev, next); });
@@ -455,11 +454,28 @@ TEST(ModeManagerConcurrentCommitTest, FaultFromManualEndsInFaultWhenManualToAuto
 
     std::string error;
     EXPECT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
-    EXPECT_TRUE(concurrent_ok);
+    EXPECT_FALSE(concurrent_ok);
     EXPECT_EQ(mode.current_mode(), RuntimeMode::FAULT);
-    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::MANUAL, RuntimeMode::AUTO},
-                                                                    {RuntimeMode::AUTO, RuntimeMode::FAULT}};
+    const std::vector<std::pair<RuntimeMode, RuntimeMode>> expected{{RuntimeMode::MANUAL, RuntimeMode::FAULT}};
     EXPECT_EQ(committed, expected);
+}
+
+// The window closes at the commit, not when set_mode returns: a recovery made
+// from a FAULT after-callback is not refused.
+TEST(ModeManagerConcurrentCommitTest, AnOrdinaryTransitionCommitsOnceTheFaultHasCommitted) {
+    ModeManager mode(RuntimeMode::AUTO);
+    std::string recovery_error;
+    bool recovered = false;
+    mode.on_mode_change([&](RuntimeMode, RuntimeMode next) {
+        if (next == RuntimeMode::FAULT) {
+            recovered = mode.set_mode(RuntimeMode::MANUAL, recovery_error);
+        }
+    });
+
+    std::string error;
+    ASSERT_TRUE(mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_TRUE(recovered) << recovery_error;
+    EXPECT_EQ(mode.current_mode(), RuntimeMode::MANUAL);
 }
 
 TEST(ModeManagerConcurrentCommitTest, FaultIsANoOpWhenAnotherFaultEntryCommitsFirst) {

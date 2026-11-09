@@ -58,6 +58,27 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
     std::vector<BeforeModeChangeCallback> before_callbacks_copy;
     std::vector<ModeChangeCallback> callbacks_copy;
 
+    // Marks a FAULT request as pending from validation until its commit, or
+    // until set_mode returns if it never reaches one.
+    struct PendingFault {
+        ModeManager &manager;
+        bool pending = false;
+        void begin_locked() {
+            pending = true;
+            ++manager.fault_requests_pending_;
+        }
+        void end_locked() {
+            if (pending) {
+                pending = false;
+                --manager.fault_requests_pending_;
+            }
+        }
+        ~PendingFault() {
+            std::lock_guard<std::mutex> lock(manager.mutex_);
+            end_locked();
+        }
+    } pending_fault{*this};
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -75,6 +96,9 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
 
         previous_mode = current_mode_;
+        if (new_mode == RuntimeMode::FAULT) {
+            pending_fault.begin_locked();
+        }
 
         // Copy callbacks while holding lock
         before_callbacks_copy = before_callbacks_;
@@ -110,6 +134,15 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+
+        // A FAULT in progress chose its before-callbacks for the current mode.
+        // Committing under it would move FAULT to a mode those callbacks never
+        // covered (#763).
+        if (new_mode != RuntimeMode::FAULT && fault_requests_pending_ > 0) {
+            error = "Refused: a transition to FAULT is in progress";
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
 
         // Transition may have changed while callbacks were running.
         if (current_mode_ != previous_mode) {
@@ -157,6 +190,7 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
 
         current_mode_ = new_mode;
+        pending_fault.end_locked();
     }
 
     LOG_INFO("[ModeManager] Mode changed: " << mode_to_string(previous_mode) << " -> " << mode_to_string(new_mode));
