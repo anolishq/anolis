@@ -1762,7 +1762,8 @@ TEST_F(HttpRuntimeStatusLatchTest, ClearsAfterRelease) {
     latch->apply_reachability_edge("bread0/dcmt0", false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, 1);
     ASSERT_EQ(1u, get_status()["device_loss_latched"].size());
 
-    latch->release_all();
+    latch->apply_reachability_edge("bread0/dcmt0", true, anolis::deviceprovider::v1::Status_Code_CODE_OK, 2);
+    latch->release_reachable();
 
     EXPECT_TRUE(get_status()["device_loss_latched"].empty());
 }
