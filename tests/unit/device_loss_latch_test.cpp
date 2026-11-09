@@ -117,6 +117,25 @@ TEST(DeviceLossLatchEdgeTest, RearmKeepsADeviceThatIsStillDarkLatched) {
         << "the dark device's return must re-assert its safe state";
 }
 
+// INTERNAL means the device answered, so a re-arm is not held back by it.
+TEST(DeviceLossLatchEdgeTest, RearmReleasesADeviceWhoseNewestLossIsNotATransportFailure) {
+    DeviceLossLatch latch;
+    latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1);
+    latch.apply_reachability_edge("sim0/dev1", true, kOk, 2);
+    latch.apply_reachability_edge("sim0/dev1", false, kInternal, 3);
+
+    EXPECT_EQ(latch.release_reachable(), std::vector<std::string>{"sim0/dev1"});
+}
+
+// A stale transport loss latches, but the device's newest edge is its return.
+TEST(DeviceLossLatchEdgeTest, RearmReleasesADeviceLatchedByAStaleTransportLoss) {
+    DeviceLossLatch latch;
+    latch.apply_reachability_edge("sim0/dev1", true, kOk, 2);
+    ASSERT_TRUE(latch.apply_reachability_edge("sim0/dev1", false, kUnavailable, 1));
+
+    EXPECT_EQ(latch.release_reachable(), std::vector<std::string>{"sim0/dev1"});
+}
+
 // Decided L1, R2; arriving R2, L1. The return found the device unlatched and
 // re-asserted nothing, so the late loss still latches (fail closed) and asks
 // for the re-issue the in-order return would have made.

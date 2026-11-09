@@ -12,7 +12,7 @@ namespace {
 void log_engaged(const std::string &device_handle) {
     LOG_WARN("[DeviceLossLatch] " << device_handle
                                   << " went unreachable; autonomous actuation to it is blocked until "
-                                     "MANUAL -> AUTO re-arms it");
+                                     "it answers and MANUAL -> AUTO re-arms it");
 }
 
 }  // namespace
@@ -46,7 +46,7 @@ bool DeviceLossLatch::apply_reachability_edge(const std::string &device_handle, 
             engaged = latched_.insert(device_handle).second;
             reissue = engaged && last.reachable;
         } else {
-            last = {edge_seq, reachable};
+            last = {edge_seq, reachable, !reachable && transport_failure};
             if (reachable) {
                 return latched_.count(device_handle) != 0;
             }
@@ -78,7 +78,7 @@ std::vector<std::string> DeviceLossLatch::release_reachable() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = latched_.begin(); it != latched_.end();) {
         const auto edge = last_edge_.find(*it);
-        if (edge != last_edge_.end() && !edge->second.reachable) {
+        if (edge != last_edge_.end() && edge->second.transport_loss) {
             ++it;
             continue;
         }

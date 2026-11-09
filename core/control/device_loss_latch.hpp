@@ -13,8 +13,8 @@
  * restarted by itself ~1.4 s after power returned.
  *
  * This blocks the command rather than stopping the machine. A latched device
- * cannot be commanded by automation until an operator deliberately re-enters
- * AUTO, which is the "permit restarting" the standard asks for. Manual calls,
+ * cannot be commanded by automation until it has answered and an operator then
+ * deliberately re-enters AUTO, which is the "permit restarting" the standard asks for. Manual calls,
  * mode-transition hooks and safe-state calls are all unaffected -- see
  * CallRouter for why the hook exemption is load-bearing rather than a
  * convenience.
@@ -75,7 +75,7 @@ public:
      * return what was released.
      *
      * Called on the deliberate MANUAL -> AUTO transition, post-commit. A device
-     * whose newest applied edge is a loss stays latched (#765): re-arming must
+     * whose newest applied edge is a transport loss stays latched (#765): re-arming must
      * not clear the protection of a device that has not come back, so its
      * return still re-asserts safe state and a later re-arm releases it. The
      * returned handles are logged: an operator re-arming a machine should see
@@ -99,12 +99,13 @@ private:
     struct AppliedEdge {
         std::uint64_t seq = 0;
         bool reachable = false;
+        bool transport_loss = false;  // a loss the device could not answer
     };
 
     std::function<std::optional<std::string>(const std::string &)> expected_loss_;  // set before polling
     mutable std::mutex mutex_;
     std::set<std::string> latched_;
-    // Newest edge applied per device. Kept across release_all(): a re-arm does
+    // Newest edge applied per device. Kept across release_reachable(): a re-arm does
     // not make an edge decided before it any newer.
     std::unordered_map<std::string, AppliedEdge> last_edge_;
 };
