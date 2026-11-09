@@ -119,7 +119,8 @@ public:
      * A request for FAULT always ends in FAULT. While its before-callbacks run,
      * an ordinary transition cannot commit, so FAULT commits from the mode its
      * before-callbacks were chosen for (#763). An ordinary request is refused
-     * if the mode changed while its own before-callbacks ran.
+     * if a FAULT is in progress, or if the mode changed while its own
+     * before-callbacks ran.
      *
      * @param new_mode Requested mode
      * @param error Output error message if transition fails
