@@ -87,6 +87,14 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return true;
         }
 
+        // Before-callbacks of an ordinary request must not run alongside a FAULT
+        // that has started: they can actuate after its safe-state hooks (#763).
+        if (new_mode != RuntimeMode::FAULT && fault_requests_pending_ > 0) {
+            error = "Refused: a transition to FAULT is in progress";
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
+
         // Validate transition
         if (!is_valid_transition(current_mode_, new_mode)) {
             error = std::string("Invalid mode transition: ") + mode_to_string(current_mode_) + " -> " +
@@ -135,9 +143,10 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // A FAULT in progress chose its before-callbacks for the current mode.
-        // Committing under it would move FAULT to a mode those callbacks never
-        // covered (#763).
+        // Also checked here: this request may have started before the FAULT did.
+        // A FAULT in progress chose its before-callbacks for the current mode,
+        // and committing under it would move FAULT to a mode those callbacks
+        // never covered (#763).
         if (new_mode != RuntimeMode::FAULT && fault_requests_pending_ > 0) {
             error = "Refused: a transition to FAULT is in progress";
             LOG_ERROR("[ModeManager] " << error);
@@ -146,8 +155,9 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
 
         // Transition may have changed while callbacks were running.
         if (current_mode_ != previous_mode) {
-            // FAULT is fail-safe: it commits from whatever mode is current now,
-            // and the after-callbacks see that mode as the previous one (#528).
+            // While a FAULT is pending only another FAULT can commit (#763), so
+            // the reassignment below is defensive: if that ever stops being true,
+            // FAULT still commits (#528).
             if (new_mode == RuntimeMode::FAULT) {
                 if (current_mode_ == RuntimeMode::FAULT) {
                     return true;  // a concurrent FAULT entry already committed

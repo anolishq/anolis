@@ -188,8 +188,8 @@ bool enforce_hookless_gate_in_auto(const registry::DeviceRegistry &registry, con
     LOG_ERROR("[Runtime] " << context << " changed the device inventory while in AUTO: " << gate.message);
     std::string err;
     if (!mode_manager.set_mode(automation::RuntimeMode::FAULT, err)) {
-        // Unreachable: a FAULT request always ends in FAULT, including when
-        // another transition commits during its before-callbacks (#528).
+        // Unreachable: a FAULT request always ends in FAULT, and no ordinary
+        // transition can commit during its before-callbacks (#528, #763).
         LOG_ERROR("[Runtime] Failed to force FAULT after in-AUTO gate refusal: " << err);
     } else {
         LOG_ERROR(
