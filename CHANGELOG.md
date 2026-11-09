@@ -15,6 +15,13 @@ commit messages only.
 
 ### Fixed
 
+- **A tree command can no longer land after the machine has left AUTO.** Mode
+  gates ran only before a call waited for its provider, and the tick checked the
+  mode once, so a command could reach the provider after a FAULT or an AUTO ->
+  MANUAL hook had made the output safe. Tree calls are now refused from the moment
+  a transition out of AUTO starts, the tick pauses during it, and every mode gate
+  is re-checked after the provider lock. A call refused this way does not count
+  toward `max_consecutive_call_failures`. (#762)
 - **An ordinary mode change can no longer commit during a pending FAULT.** A
   transition that committed while FAULT's before-hooks ran moved FAULT to a mode
   those hooks were not chosen for, so a before-only AUTO -> FAULT hook could be

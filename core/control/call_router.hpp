@@ -70,6 +70,10 @@ struct CallResult {
     // True once the call was sent to its provider; false for a call refused
     // before that, by resolution, argument validation or gating (#616).
     bool dispatched = false;
+    // True for a behaviour-tree call refused because AUTO has ended or is
+    // ending (#762). It says nothing about the device, so automation does not
+    // count it as a failed call.
+    bool automation_stopped = false;
 };
 
 /**
@@ -191,6 +195,12 @@ private:
 
     // The e-stop latch check execute_call makes, on a resolved function.
     bool latch_holds(const CallRequest &request, const registry::FunctionSpec &spec) const;
+
+    // The mode checks execute_call makes before the provider lock and again
+    // after it (#762). Each fills `result` and returns true to refuse the call.
+    bool mode_gates_refuse(const CallRequest &request, CallResult &result) const;
+    bool allowed_modes_refuse(const CallRequest &request, const registry::FunctionSpec &spec,
+                              const std::string &resolved_function_name, CallResult &result) const;
 
     // Validation helpers
     bool validate_device_exists(const std::string &device_handle, std::string &error) const;

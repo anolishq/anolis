@@ -307,6 +307,15 @@ void BTRuntime::tick_loop() {
             continue;
         }
 
+        // A transition out of AUTO has begun and the router will refuse this
+        // run's calls (#762). Wait it out without touching was_auto: if it is
+        // vetoed, this is the same run continuing.
+        if (mode_manager_.is_leaving_auto()) {
+            std::this_thread::sleep_until(next_tick);
+            next_tick += tick_period;
+            continue;
+        }
+
         if (!was_auto) {
             // Entering AUTO starts a new run, so a failure of the previous run
             // no longer describes this one.
