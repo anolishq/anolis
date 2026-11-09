@@ -24,7 +24,7 @@ TLC_INVARIANT_VIOLATED = 12
 
 # Exact state counts. A narrowed guard or a shrunken model shows up as a changed
 # number in the diff, which a reviewer has to explain.
-PASSING = {"before-hook.cfg": 983625, "after-hook.cfg": 1069497}
+PASSING = {"before-hook.cfg": ("before", 983625), "after-hook.cfg": ("after", 1069497)}
 
 # Each must fail on exactly this invariant. A failure for any other reason, a
 # parse error included, is not a pass.
@@ -43,15 +43,14 @@ MUST_FAIL = {
     "witnesses/stop-holds.cfg": "NeverStopHolds",
 }
 
-# Every passing configuration checks exactly these, so dropping one is a failure.
-INVARIANTS = {
+INVARIANTS = (
     "TypeOK",
     "SafeWhenSettledOutsideAuto",
     "FaultAlwaysCommits",
     "NoAutoWhenHookless",
     "NoAutoEntryWhileLatched",
     "SafeWhileStopHolds",
-}
+)
 
 WEAKENING = re.compile(r"\b(ACTION_CONSTRAINTS?|CONSTRAINTS?|CHECK_DEADLOCK)\b")
 OVERCLAIM = re.compile(r"formally verified|provably|proven safe|mathematically", re.IGNORECASE)
@@ -105,10 +104,21 @@ def check_no_weakening() -> None:
         raise CheckError(f"configurations not matching the manifest: {sorted(actual ^ known)}")
 
 
-def check_passing(tmp: Path, config: str, states: int) -> None:
-    checked = set(re.findall(r"^INVARIANTS?\s+(\w+)", (HERE / config).read_text(), re.MULTILINE))
-    if checked != INVARIANTS:
-        raise CheckError(f"{config}: invariants differ from the manifest: {sorted(checked ^ INVARIANTS)}")
+def expected_lines(hook: str) -> list[str]:
+    fixed = ["INIT Init", "NEXT Next", "CONSTANT Ops = {o1, o2}", f'CONSTANT HookAt = "{hook}"']
+    return fixed + [f"INVARIANT {name}" for name in INVARIANTS]
+
+
+def check_config_is_exact(config: str, hook: str) -> None:
+    # Compared as text, not parsed: a substitution or a block comment could make
+    # TLC check something other than what a parser saw.
+    lines = [line for line in (HERE / config).read_text().splitlines() if not line.startswith("\\*")]
+    if lines != expected_lines(hook):
+        raise CheckError(f"{config} differs from the configuration check.py expects")
+
+
+def check_passing(tmp: Path, config: str, hook: str, states: int) -> None:
+    check_config_is_exact(config, hook)
     result = tlc(tmp, config, "-coverage", "1")
     if result.returncode != TLC_OK:
         raise CheckError(f"{config}: expected exit 0, got {result.returncode}\n{result.stdout[-3000:]}")
@@ -169,8 +179,8 @@ def main() -> int:
         ensure_jar()
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
-            for config, states in PASSING.items():
-                check_passing(tmp, config, states)
+            for config, (hook, states) in PASSING.items():
+                check_passing(tmp, config, hook, states)
             for config, invariant in MUST_FAIL.items():
                 check_must_fail(tmp, config, invariant)
     except CheckError as error:

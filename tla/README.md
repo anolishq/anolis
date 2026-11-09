@@ -62,8 +62,9 @@ mismatch.
   changes. Add a new one instead, and say why in the PR.
 - A new invariant needs a regression that makes it fail. The invariant set is pinned
   in `check.py`.
-- Invariant and guard text is not frozen. CI can only pin the configurations and
-  counts around it, so a reviewer has to read any change to `ModeDispatch.tla`.
+- `check.py` requires the exact content of the two passing configurations. Invariant
+  and guard text in `ModeDispatch.tla` is not frozen, so a reviewer has to read any
+  change to that file.
 - State counts are pinned in `check.py`. If one changes, say why in the PR.
 - Every action must be taken at least once. An action that never fires is a dead
   part of the model.

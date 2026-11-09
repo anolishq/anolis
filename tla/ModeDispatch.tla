@@ -93,7 +93,9 @@ Begin(c, t) ==
     /\ UNCHANGED <<mode, output, latched, laddered, hookless, prev, tree, faultLost, autoWhileLatched>>
 
 \* Refused at the request while a FAULT is pending; one already in flight when
-\* the FAULT starts is refused at its commit instead.
+\* the FAULT starts is refused at its commit instead. This mirrors the code and
+\* no invariant depends on it: hooks on entering AUTO do not actuate here, and
+\* the hazard it guards against is theirs.
 RequestOrdinary(c) ==
     /\ ~FaultPending
     /\ \E t \in Modes : <<mode, t>> \in Ordinary /\ Begin(c, t)
@@ -210,7 +212,7 @@ Settled == tree = "idle" /\ \A c \in Callers : pc[c] = "idle"
 \* word: no tree command landed after it (#762, #763).
 SafeWhenSettledOutsideAuto == (Settled /\ mode # "AUTO") => output = "safe"
 
-\* A FAULT request always ends in FAULT (#528).
+\* A FAULT request that reaches its commit is never refused (#528).
 FaultAlwaysCommits == ~faultLost
 
 \* AUTO is never entered without a hook covering it (#239).
