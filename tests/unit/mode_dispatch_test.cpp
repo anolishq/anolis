@@ -332,7 +332,7 @@ TEST(ModeDispatchTest, ATreeCallAfterAutoHasEndedIsMarkedStoppedAtTheFirstGate) 
 }
 
 // A tick cut short by a transition that is then vetoed must not end the run
-// under on_terminal: stop: the machine is still in AUTO and the tree must resume.
+// under on_terminal: stop: the machine is still in AUTO, so the tree runs again.
 TEST(ModeDispatchTest, AVetoedTransitionDoesNotEndAStopOnTerminalRun) {
     Rig rig(RuntimeMode::AUTO);
     automation::ParameterManager parameters;
@@ -365,7 +365,9 @@ TEST(ModeDispatchTest, AVetoedTransitionDoesNotEndAStopOnTerminalRun) {
                         std::string error;
                         EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
                     });
-                    while (!rig.mode.is_leaving_auto()) {
+                    const auto started_at = std::chrono::steady_clock::now();
+                    while (!rig.mode.is_leaving_auto() &&
+                           std::chrono::steady_clock::now() - started_at < std::chrono::seconds(5)) {
                         std::this_thread::yield();
                     }
                 }

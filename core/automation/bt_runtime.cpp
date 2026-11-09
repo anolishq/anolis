@@ -309,7 +309,7 @@ void BTRuntime::tick_loop() {
 
         // A transition out of AUTO has begun and the router will refuse this
         // run's calls (#762). Wait it out without touching was_auto: if it is
-        // vetoed, this is the same run continuing.
+        // vetoed, this is still the same run.
         if (mode_manager_.is_leaving_auto()) {
             std::this_thread::sleep_until(next_tick);
             next_tick += tick_period;
@@ -351,7 +351,8 @@ void BTRuntime::tick_loop() {
                 status_changed = status != last_tick_status_;
                 last_tick_status_ = status;
                 // A tick cut short because AUTO is ending says nothing about the
-                // run, which continues if the transition is vetoed (#762).
+                // run. If the transition is vetoed the tree runs again from its
+                // root (#762).
                 if ((status == BT::NodeStatus::SUCCESS || status == BT::NodeStatus::FAILURE) &&
                     stop_on_terminal_.load(std::memory_order_acquire) && !tick_saw_automation_stopped_.load()) {
                     run_ended_ = true;
