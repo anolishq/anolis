@@ -20,6 +20,11 @@ commit messages only.
   protection and came back with no safe-state re-assert. It now stays latched,
   is re-asserted when it answers again, and is released by a later re-entry into
   AUTO. The runtime log names each device kept latched. (#765)
+- **An outage that starts with INTERNAL can now engage the device-loss latch.**
+  The first failed read used to decide the whole outage, so a decode error
+  followed by silence never latched and the device's return re-asserted nothing.
+  UNAVAILABLE or DEADLINE_EXCEEDED later in the same outage now latches. A
+  transient INTERNAL alone still does not. (#764)
 
 ## [0.12.0] - 2026-11-09
 

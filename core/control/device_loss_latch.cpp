@@ -27,8 +27,7 @@ bool DeviceLossLatch::apply_reachability_edge(const std::string &device_handle, 
     // would force a human re-arm several times a day. A powered-off
     // board cannot answer at all, so this loses no detection for the
     // case the latch exists for.
-    const bool transport_failure = last_status == anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE ||
-                                   last_status == anolis::deviceprovider::v1::Status_Code_CODE_DEADLINE_EXCEEDED;
+    const bool transport_failure = state::is_transport_failure(last_status);
     bool engaged = false;
     bool reissue = false;
     {
