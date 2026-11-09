@@ -62,6 +62,10 @@ check-py:
 [doc("Build + test both lanes (`just test /path/to/anolis-provider-sim` names the sim).")]
 test provider="": test-cpp (test-py provider)
 
+# Check the bounded mode dispatch model (needs Java; see tla/README.md).
+test-tla:
+    python3 tla/check.py
+
 # Build and run the C++ test suite.
 test-cpp:
     cmake --build --preset {{preset}} --parallel

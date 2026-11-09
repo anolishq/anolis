@@ -1,5 +1,12 @@
 # Cross-repo compatibility pins consumed by anolis compatibility lanes.
 
+tla_tools:
+  repository: tlaplus/tlaplus
+  ref: v1.7.4
+  sha256: 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+  updated_utc: 2026-11-09
+  rationale: "Latest stable release. tlaplus publishes no digest for the jar, and the asset was replaced after it was first published, so the hash is pinned here and a version bump fails until it is updated (tla/check.py)"
+
 provider_sim:
   repository: anolishq/anolis-provider-sim
   ref: v0.2.8
