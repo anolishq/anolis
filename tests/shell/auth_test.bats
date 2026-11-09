@@ -588,6 +588,9 @@ _installed_cfg() {
     for v in 'auth_token:' 'auth_token: ~' 'auth_token: null' 'auth_token: Null' 'auth_token: NULL' \
         'auth_token:   # none' 'auth_token: null  # none' 'auth_token: !!null null'; do
         _installed_cfg "auth_enabled: true" "${v}"
+        mkdir -p "${PREFIX}/bin"
+        printf '#!/bin/sh\necho "anolis-runtime 0.11.1"\n' > "${PREFIX}/bin/anolis-runtime"
+        chmod +x "${PREFIX}/bin/anolis-runtime"
         run _warn_config_api_token
         [ "${output}" == "" ] || { echo "warned: ${v}"; return 1; }
         run phase_summary

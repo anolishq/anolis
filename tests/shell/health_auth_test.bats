@@ -102,6 +102,9 @@ _assert_every_call_carries_token() {
 }
 
 @test "health: a null http.auth_token uses runtime.env, as in the runtime" {
+    mkdir -p "${PREFIX}/bin"
+    printf '#!/bin/sh\necho "anolis-runtime 0.11.1"\n' > "${PREFIX}/bin/anolis-runtime"
+    chmod +x "${PREFIX}/bin/anolis-runtime"
     local v
     for v in '' '~' 'null' 'Null' 'NULL' '# none' '~  # none' '!!null null'; do
         printf 'http:\n  port: 8080\n  auth_enabled: true\n  auth_token: %s\n' "${v}" > "${PREFIX}/config/runtime.yaml"

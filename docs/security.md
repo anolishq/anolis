@@ -100,8 +100,10 @@ in the YAML file. Generate a token with e.g. `openssl rand -hex 32`. A literal
 reads `ANOLIS_API_TOKEN` only when the config sets no token, so the config's
 token wins. An empty string or a null value (a key with no value, `~`, `null`)
 sets no token, so `ANOLIS_API_TOKEN` applies; a quoted `"null"` is a string, and
-so a token. `install.sh` therefore refuses to build a bundle from a project
-whose configs set one, and an install whose `runtime.yaml` carries one warns
+so a token. Runtimes up to 0.11.0 read a null value as the string `null`, and
+`install.sh` treats it as a token on them. Since the config's token wins,
+`install.sh` refuses to build a bundle from a project whose configs set one, and
+an install whose `runtime.yaml` carries one warns
 that the per-device token in `/etc/anolis/runtime.env` is not in use (#529).
 
 Clients send it as a Bearer header:

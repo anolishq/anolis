@@ -19,7 +19,8 @@ commit messages only.
   `telemetry.influxdb.token` and `telemetry.influx_token` written with no
   value, `~` or `null` now leave the token unset, so the `ANOLIS_API_TOKEN` or
   `INFLUXDB_TOKEN` environment fallback applies. A quoted `"null"` is still a
-  string.
+  string. With `http.auth_enabled` true and no token from either place, the
+  runtime refuses the config, as it does for an unset token.
 
 ## [0.11.0] - 2026-11-08
 
