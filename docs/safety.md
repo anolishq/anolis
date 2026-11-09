@@ -101,9 +101,12 @@ can hurt someone or destroy a batch.
   restarting". The second half is the actionable part — the runtime must come
   back able to be started, not started. Today the runtime does this per device
   (anolishq/anolis#285, #299). A device that went unreachable stays
-  latched, and the behaviour tree may not actuate it until an operator re-enters
-  AUTO. When it answers again, the software safe state's calls for it are re-run
-  (under `none` that does nothing), and
+  latched, and the behaviour tree may not actuate it until a read has succeeded
+  and an operator then re-enters AUTO. Re-entering AUTO while it is still
+  unreachable leaves it latched, and one that never reads successfully again, including one
+  removed from the inventory, stays latched until the runtime restarts. When it
+  answers again, the software safe state's
+  calls for it are re-run (under `none` that does nothing), and
   `GET /v0/runtime/status` lists it under `device_loss_latched`. The latch does
   not hold manual calls or mode-transition hooks, and the runtime tells a stop
   from a fault only for a stop it observes (see the stop chain below).
