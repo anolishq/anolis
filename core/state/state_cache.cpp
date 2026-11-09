@@ -452,7 +452,9 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
         // this device was back", tracked by loss_reported -- NOT by
         // provider_available, which provider loss also clears without a sink
         // call. A board that is dark when its provider dies must still latch
-        // on the first in-band failure after the provider comes back.
+        // on the first in-band failure after the provider comes back. A
+        // further loss edge follows if the outage worsens to a transport
+        // failure (#764).
         bool report_loss = false;
         std::uint64_t loss_seq = 0;
         {

@@ -143,7 +143,8 @@ public:
      *
      * Called when a device transitions reachable <-> unreachable, with the
      * provider's status code for the failing read so the consumer can tell a
-     * transport failure from a decode one. `anolis_control` links `anolis_state`
+     * transport failure from a decode one. An outage that worsens to a transport
+     * failure reports a second loss edge (#764). `anolis_control` links `anolis_state`
      * and not the reverse, so the loss latch is reached through this callback
      * rather than a direct dependency -- the same shape as BTRuntime's fault
      * sink.

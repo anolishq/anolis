@@ -489,6 +489,20 @@ TEST_F(StateCacheReachabilityTest, ReturnEdgeSurvivesProviderRebuild) {
     EXPECT_GT(events[1].edge_seq, events[0].edge_seq) << "a rebuild must not restart the edge numbers";
 }
 
+// A rebuild carries how the outage was classified, so a device already reported
+// as a transport loss does not report another after a provider restart.
+TEST_F(StateCacheReachabilityTest, TransportLossCarriedAcrossARebuildFiresNoFurtherEdge) {
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE))
+        .WillOnce(failed_read(anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE));
+
+    state_cache->poll_once(*provider_registry);
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_EQ(events.size(), 1U);
+}
+
 // An OUT-OF-BAND failure -- the provider itself did not answer and its session
 // is now unhealthy -- is provider loss, not device loss, whichever thread
 // notices it first. The device goes unavailable but the sink is not told, the
