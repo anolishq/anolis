@@ -29,11 +29,21 @@ The code paths it stands for are `core/automation/mode_manager.cpp`,
 ## What it does not cover
 
 Device loss and the device-loss latch, provider supervision, ADPP, timing, argument
-validation, and failure counting. A provider is an environment that answers.
+validation, and failure counting. A provider is an environment that answers, and
+one output on one provider stands for the machine.
 
-A FAULT request made while already in FAULT is the no-op `set_mode` makes it. A
-restart that faults a machine in AUTO, a transition vetoed by a callback, and a tree
-call carried across two AUTO runs are not modelled.
+Hooks are abstracted hard. A leave-AUTO hook always makes the output safe and is
+assumed to cover every exit from AUTO, a hook on entering AUTO does not actuate,
+and a hook's own call is never refused, although the router can refuse one, for
+example in `IDLE`. The stop's ladder always makes the output safe: a stop chain
+hold that sends nothing, a plan that drives nothing, and a latch restored at
+startup are not modelled.
+
+A FAULT request made while already in FAULT is the no-op `set_mode` makes it, so
+one made during a recovery is lost here as it is in the code. A restart that faults
+a machine in AUTO and a transition vetoed by a callback are not modelled. There is
+no liveness property: `FaultAlwaysCommits` only says a FAULT that reaches its
+commit is not refused.
 
 ## Run it
 
@@ -50,7 +60,10 @@ mismatch.
 - `CONSTRAINT`, `ACTION_CONSTRAINT` and `CHECK_DEADLOCK` are not allowed.
 - `regressions/` and `witnesses/` are append-only. CI fails if an existing file
   changes. Add a new one instead, and say why in the PR.
-- A new invariant needs a regression that makes it fail.
+- A new invariant needs a regression that makes it fail. The invariant set is pinned
+  in `check.py`.
+- Invariant and guard text is not frozen. CI can only pin the configurations and
+  counts around it, so a reviewer has to read any change to `ModeDispatch.tla`.
 - State counts are pinned in `check.py`. If one changes, say why in the PR.
 - Every action must be taken at least once. An action that never fires is a dead
   part of the model.

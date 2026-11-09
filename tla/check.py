@@ -29,6 +29,7 @@ PASSING = {"before-hook.cfg": 983625, "after-hook.cfg": 1069497}
 # Each must fail on exactly this invariant. A failure for any other reason, a
 # parse error included, is not a pass.
 MUST_FAIL = {
+    "regressions/auto-gate-ignores-stop-latch.cfg": "NoAutoEntryWhileLatched",
     "regressions/issue-239-no-commit-gate.cfg": "NoAutoWhenHookless",
     "regressions/issue-528-fault-refused.cfg": "FaultAlwaysCommits",
     "regressions/issue-762-after-hook.cfg": "SafeWhenSettledOutsideAuto",
@@ -42,7 +43,17 @@ MUST_FAIL = {
     "witnesses/stop-holds.cfg": "NeverStopHolds",
 }
 
-WEAKENING = re.compile(r"\b(ACTION_CONSTRAINT|CONSTRAINT|CHECK_DEADLOCK)\b")
+# Every passing configuration checks exactly these, so dropping one is a failure.
+INVARIANTS = {
+    "TypeOK",
+    "SafeWhenSettledOutsideAuto",
+    "FaultAlwaysCommits",
+    "NoAutoWhenHookless",
+    "NoAutoEntryWhileLatched",
+    "SafeWhileStopHolds",
+}
+
+WEAKENING = re.compile(r"\b(ACTION_CONSTRAINTS?|CONSTRAINTS?|CHECK_DEADLOCK)\b")
 OVERCLAIM = re.compile(r"formally verified|provably|proven safe|mathematically", re.IGNORECASE)
 COVERAGE = re.compile(r"^<(\w+) line [^>]*>: (\d+):(\d+)$", re.MULTILINE)
 
@@ -64,7 +75,7 @@ def ensure_jar() -> None:
         JAR.parent.mkdir(exist_ok=True)
         url = f"https://github.com/tlaplus/tlaplus/releases/download/{ref}/tla2tools.jar"
         print(f"fetching {url}")
-        with urllib.request.urlopen(url) as response:  # noqa: S310 - fixed https URL, hash checked below
+        with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310 - fixed https URL, hash checked below
             JAR.write_bytes(response.read())
     actual = hashlib.sha256(JAR.read_bytes()).hexdigest()
     if actual != expected:
@@ -95,6 +106,9 @@ def check_no_weakening() -> None:
 
 
 def check_passing(tmp: Path, config: str, states: int) -> None:
+    checked = set(re.findall(r"^INVARIANTS?\s+(\w+)", (HERE / config).read_text(), re.MULTILINE))
+    if checked != INVARIANTS:
+        raise CheckError(f"{config}: invariants differ from the manifest: {sorted(checked ^ INVARIANTS)}")
     result = tlc(tmp, config, "-coverage", "1")
     if result.returncode != TLC_OK:
         raise CheckError(f"{config}: expected exit 0, got {result.returncode}\n{result.stdout[-3000:]}")
@@ -103,7 +117,10 @@ def check_passing(tmp: Path, config: str, states: int) -> None:
         found = distinct.group(1) if distinct else "none"
         raise CheckError(f"{config}: expected {states} distinct states, found {found}")
     # new:taken counts per action, so an action never taken is a dead one.
-    dead = [name for name, _, taken in COVERAGE.findall(result.stdout) if int(taken) == 0]
+    actions = COVERAGE.findall(result.stdout)
+    if not actions:
+        raise CheckError(f"{config}: TLC reported no action coverage")
+    dead = [name for name, _, taken in actions if int(taken) == 0]
     if dead:
         raise CheckError(f"{config}: actions never taken: {dead}")
     print(f"ok   {config}: {states} states")

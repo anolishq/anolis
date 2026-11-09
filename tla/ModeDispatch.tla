@@ -30,10 +30,11 @@ VARIABLES
     target,      \* per caller: the requested mode
     prev,        \* per caller: the mode it actually committed from
     tree,        \* "idle", "node", "wait"
-    faultLost    \* history: a FAULT request ended without FAULT committing
+    faultLost,   \* history: a FAULT request ended without FAULT committing
+    autoWhileLatched  \* history: AUTO was committed while the stop latch held
 
 vars == <<mode, output, latched, laddered, hookless, pc, from, target, prev,
-          tree, faultLost>>
+          tree, faultLost, autoWhileLatched>>
 
 -----------------------------------------------------------------------------
 (* The guards under test. Each is replaced in a regression configuration   *)
@@ -58,6 +59,8 @@ TreeDispatchModeOnly == mode = "AUTO" /\ ~latched
 \* Gates a transition into AUTO re-judges at commit (#239).
 AutoGate(c) == target[c] = "AUTO" => (~hookless /\ ~latched)
 AutoGateAbsent(c) == TRUE
+\* Without the e-stop half of the gate (install_estop_auto_gate).
+AutoGateNoLatch(c) == target[c] = "AUTO" => ~hookless
 
 OrdinaryMayCommit(c) == mode = from[c] /\ ~FaultPending /\ AutoGate(c)
 \* #763: an ordinary transition could commit during a pending FAULT.
@@ -80,16 +83,20 @@ Init ==
     /\ prev = [c \in Callers |-> mode]
     /\ tree = "idle"
     /\ faultLost = FALSE
+    /\ autoWhileLatched = FALSE
 
 Begin(c, t) ==
     /\ pc[c] = "idle"
     /\ pc' = [pc EXCEPT ![c] = "before"]
     /\ from' = [from EXCEPT ![c] = mode]
     /\ target' = [target EXCEPT ![c] = t]
-    /\ UNCHANGED <<mode, output, latched, laddered, hookless, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, prev, tree, faultLost, autoWhileLatched>>
 
+\* Refused at the request while a FAULT is pending; one already in flight when
+\* the FAULT starts is refused at its commit instead.
 RequestOrdinary(c) ==
-    \E t \in Modes : <<mode, t>> \in Ordinary /\ Begin(c, t)
+    /\ ~FaultPending
+    /\ \E t \in Modes : <<mode, t>> \in Ordinary /\ Begin(c, t)
 
 \* set_mode(FAULT) in FAULT is a no-op that returns at once.
 RequestFault ==
@@ -102,7 +109,7 @@ RunBefore(c) ==
     /\ pc' = [pc EXCEPT ![c] = "commit"]
     /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO"
                  THEN "safe" ELSE output
-    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 CommitOrdinary(c) ==
     /\ pc[c] = "commit"
@@ -110,8 +117,9 @@ CommitOrdinary(c) ==
        THEN /\ mode' = target[c]
             /\ prev' = [prev EXCEPT ![c] = mode]
             /\ pc' = [pc EXCEPT ![c] = "after"]
+            /\ autoWhileLatched' = (autoWhileLatched \/ (target[c] = "AUTO" /\ latched))
        ELSE /\ pc' = [pc EXCEPT ![c] = "idle"]
-            /\ UNCHANGED <<mode, prev>>
+            /\ UNCHANGED <<mode, prev, autoWhileLatched>>
     /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, faultLost>>
 
 CommitFault ==
@@ -124,7 +132,7 @@ CommitFault ==
        ELSE /\ pc' = [pc EXCEPT ![Fault] = "idle"]
             /\ faultLost' = TRUE
             /\ UNCHANGED <<mode, prev>>
-    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree>>
+    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, autoWhileLatched>>
 
 \* An after-hook is chosen by the mode actually committed from.
 RunAfter(c) ==
@@ -132,20 +140,20 @@ RunAfter(c) ==
     /\ pc' = [pc EXCEPT ![c] = "idle"]
     /\ output' = IF HookAt = "after" /\ prev[c] = "AUTO" /\ target[c] # "AUTO"
                  THEN "safe" ELSE output
-    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 \* The tick reads the mode once, then runs its nodes with no further check.
 TickStart ==
     /\ tree = "idle"
     /\ mode = "AUTO"
     /\ tree' = "node"
-    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost>>
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
 
 \* A node has entered the router and now waits for the provider lock.
 NodeWaits ==
     /\ tree = "node"
     /\ tree' = "wait"
-    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost>>
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
 
 \* The provider lock serializes the check, the send and every hook call, so
 \* one step can stand for them: a hook's own call is ordered after this one.
@@ -154,7 +162,7 @@ Dispatch ==
     /\ tree = "wait"
     /\ output' = IF TreeMayDispatch THEN "driven" ELSE output
     /\ tree' \in {"node", "idle"}
-    /\ UNCHANGED <<mode, latched, laddered, hookless, pc, from, target, prev, faultLost>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
 
 \* A restart that leaves AUTO uncovered. The branch that does this during AUTO
 \* faults the runtime and is not modelled.
@@ -162,24 +170,24 @@ RestartDropsHook ==
     /\ ~hookless
     /\ mode # "AUTO"
     /\ hookless' = TRUE
-    /\ UNCHANGED <<mode, output, latched, laddered, pc, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, output, latched, laddered, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 EngageStop ==
     /\ ~latched
     /\ latched' = TRUE
-    /\ UNCHANGED <<mode, output, laddered, hookless, pc, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, output, laddered, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 RunLadder ==
     /\ latched /\ ~laddered
     /\ laddered' = TRUE
     /\ output' = "safe"
-    /\ UNCHANGED <<mode, latched, hookless, pc, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, latched, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 ClearStop ==
     /\ latched /\ laddered
     /\ latched' = FALSE
     /\ laddered' = FALSE
-    /\ UNCHANGED <<mode, output, hookless, pc, from, target, prev, tree, faultLost>>
+    /\ UNCHANGED <<mode, output, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 Next ==
     \/ \E c \in Ops : RequestOrdinary(c) \/ CommitOrdinary(c)
@@ -207,6 +215,9 @@ FaultAlwaysCommits == ~faultLost
 
 \* AUTO is never entered without a hook covering it (#239).
 NoAutoWhenHookless == ~(mode = "AUTO" /\ hookless)
+
+\* AUTO is never entered while the stop latch holds.
+NoAutoEntryWhileLatched == ~autoWhileLatched
 
 \* After the stop's ladder has run, nothing drives the output until it clears.
 SafeWhileStopHolds == (latched /\ laddered) => output = "safe"
