@@ -318,3 +318,79 @@ TEST(ModeDispatchTest, TheTickLoopPausesWhileLeavingAuto) {
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
 }
+
+// Classified the same way at every gate: an earlier gate must not record a call
+// refused because AUTO ended as an ordinary failure.
+TEST(ModeDispatchTest, ATreeCallAfterAutoHasEndedIsMarkedStoppedAtTheFirstGate) {
+    Rig rig(RuntimeMode::IDLE);
+
+    const auto result = rig.router.execute_call(tree_call("step_one"), rig.providers);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.automation_stopped) << result.error_message;
+    EXPECT_TRUE(rig.order.empty());
+}
+
+// A tick cut short by a transition that is then vetoed must not end the run
+// under on_terminal: stop: the machine is still in AUTO and the tree must resume.
+TEST(ModeDispatchTest, AVetoedTransitionDoesNotEndAStopOnTerminalRun) {
+    Rig rig(RuntimeMode::AUTO);
+    automation::ParameterManager parameters;
+    automation::BTRuntime runtime(rig.state_cache, rig.router, rig.providers, rig.mode, &parameters);
+    runtime.set_stop_on_terminal(true);
+    const auto wait_for_ticks = [&runtime](std::uint64_t wanted) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (runtime.get_health().total_ticks < wanted && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    };
+
+    std::atomic<bool> vetoed{false};
+    rig.mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next != RuntimeMode::MANUAL) {
+            return true;
+        }
+        wait_for_ticks(1);  // the tick is over: its second node has been refused
+        vetoed = true;
+        return false;
+    });
+    std::thread transition;
+    std::atomic<bool> started{false};
+    ON_CALL(*rig.mock, call(_, _, _, _, _))
+        .WillByDefault(
+            Invoke([&](const std::string &, uint32_t, const std::string &name, const ValueMap &, CallResponse &) {
+                rig.order.push_back(name);
+                if (name == "step_one" && !started.exchange(true)) {
+                    transition = std::thread([&rig] {
+                        std::string error;
+                        EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
+                    });
+                    while (!rig.mode.is_leaving_auto()) {
+                        std::this_thread::yield();
+                    }
+                }
+                return true;
+            }));
+
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto tree_path =
+        std::filesystem::temp_directory_path() / ("anolis-mode-dispatch-veto-" + std::to_string(nonce) + ".xml");
+    {
+        std::ofstream out(tree_path, std::ios::binary);
+        out << kTwoCallTreeXml;
+    }
+    ASSERT_TRUE(runtime.load_tree(tree_path.string()));
+    std::string error;
+    ASSERT_TRUE(runtime.start(error)) << error;
+
+    wait_for_ticks(2);
+    if (transition.joinable()) {
+        transition.join();
+    }
+    EXPECT_TRUE(vetoed.load()) << "control: the transition must have been vetoed";
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::AUTO);
+    EXPECT_GE(runtime.get_health().total_ticks, 2U) << "the run ended on a tick cut short by the transition";
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}

@@ -100,6 +100,18 @@ CallRouter::ProviderLock CallRouter::get_or_create_provider_lock(const std::stri
     return provider_locks_.try_emplace(provider_id, std::make_shared<std::mutex>()).first->second;
 }
 
+bool CallRouter::automation_stopped_refuses(const CallRequest& request, CallResult& result) const {
+    if (request.safe_state || !request.is_behavior_tree || mode_manager_ == nullptr ||
+        mode_manager_->automation_may_dispatch()) {
+        return false;
+    }
+    result.error_message = "Automation has stopped: the runtime is leaving or has left AUTO";
+    result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+    result.automation_stopped = true;
+    LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
+    return true;
+}
+
 bool CallRouter::mode_gates_refuse(const CallRequest& request, CallResult& result) const {
     if (request.safe_state || mode_manager_ == nullptr) {
         return false;
@@ -151,8 +163,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
 
     // Dynamic gating lives here, not in validate_call(). That keeps the
     // validation-only path useful for static checks while reserving runtime
-    // mode/provider availability enforcement for real execution.
-    if (mode_gates_refuse(request, result)) {
+    // mode/provider availability enforcement for real execution. Asked first, so
+    // a tree call refused because AUTO ended is always classified as that (#762).
+    if (automation_stopped_refuses(request, result) || mode_gates_refuse(request, result)) {
         return result;
     }
 
@@ -276,16 +289,7 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // a transition out of AUTO starts, while the mode still reads AUTO, so a
     // tree command cannot land after a before-hook made the output safe.
     // Safe-state calls are exempt so the ladder can always run.
-    if (!request.safe_state && mode_manager_ != nullptr) {
-        if (request.is_behavior_tree && !mode_manager_->automation_may_dispatch()) {
-            result.error_message = "Automation has stopped: the runtime is leaving or has left AUTO";
-            result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
-            result.automation_stopped = true;
-            LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
-            return result;
-        }
-    }
-    if (mode_gates_refuse(request, result) ||
+    if (automation_stopped_refuses(request, result) || mode_gates_refuse(request, result) ||
         allowed_modes_refuse(request, *func_spec, resolved_function_name, result)) {
         return result;
     }

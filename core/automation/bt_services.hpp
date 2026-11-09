@@ -27,6 +27,8 @@ struct BTServiceContext {
     /// error)`. A non-empty return is a fault: the call has failed too often in
     /// a row, and the node throws it so the engine-fault path enters FAULT (#678).
     std::function<std::string(const std::string&, const std::string&, bool, const std::string&)> on_call_result;
+    /// Told that a call was refused because AUTO has ended or is ending (#762).
+    std::function<void()> on_automation_stopped;
 };
 
 inline constexpr const char* kBTServiceContextKey = "anolis.bt_service_context";

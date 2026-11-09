@@ -100,8 +100,9 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return true;
         }
 
-        // Before-callbacks of an ordinary request must not run alongside a FAULT
-        // that has started: they can actuate after its safe-state hooks (#763).
+        // An ordinary request made after a FAULT started must not run its
+        // before-callbacks: they could actuate after its safe-state hooks (#763).
+        // One already running when the FAULT starts is refused at its commit.
         if (new_mode != RuntimeMode::FAULT && fault_requests_pending_ > 0) {
             error = "Refused: a transition to FAULT is in progress";
             LOG_ERROR("[ModeManager] " << error);

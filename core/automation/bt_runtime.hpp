@@ -275,6 +275,7 @@ private:
     // Threading
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_on_terminal_{false};
+    std::atomic<bool> tick_saw_automation_stopped_{false};  ///< A call this tick was refused because AUTO is ending.
     std::atomic<int> max_consecutive_call_failures_{3};
     std::unique_ptr<std::thread> tick_thread_;
     std::atomic<std::thread::id> tick_thread_id_{};  ///< Set by the tick loop itself while it runs.

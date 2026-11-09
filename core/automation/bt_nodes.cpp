@@ -277,7 +277,11 @@ BT::NodeStatus CallDeviceNode::tick() {
 
     // A call refused because AUTO is ending says nothing about the device, and
     // counting it could turn a routine AUTO -> MANUAL into a FAULT (#762).
-    if (services->on_call_result && !result.automation_stopped) {
+    if (result.automation_stopped) {
+        if (services->on_automation_stopped) {
+            services->on_automation_stopped();
+        }
+    } else if (services->on_call_result) {
         const auto fault = services->on_call_result(device_handle.value(), function_name.value(), result.success,
                                                     result.error_message);
         if (!fault.empty()) {

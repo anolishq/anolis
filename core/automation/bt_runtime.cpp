@@ -340,6 +340,7 @@ void BTRuntime::tick_loop() {
         // Execute single BT tick
         BT::NodeStatus status = BT::NodeStatus::IDLE;
         try {
+            tick_saw_automation_stopped_.store(false);
             status = tick();
 
             // Update health tracking
@@ -349,8 +350,10 @@ void BTRuntime::tick_loop() {
                 last_tick_ms_ = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
                 status_changed = status != last_tick_status_;
                 last_tick_status_ = status;
+                // A tick cut short because AUTO is ending says nothing about the
+                // run, which continues if the transition is vetoed (#762).
                 if ((status == BT::NodeStatus::SUCCESS || status == BT::NodeStatus::FAILURE) &&
-                    stop_on_terminal_.load(std::memory_order_acquire)) {
+                    stop_on_terminal_.load(std::memory_order_acquire) && !tick_saw_automation_stopped_.load()) {
                     run_ended_ = true;
                 }
                 total_ticks_++;
@@ -477,6 +480,7 @@ void BTRuntime::populate_blackboard(BT::Tree &tree) {
                                      const std::string &error) {
         return record_call_result(device_handle, function, success, error);
     };
+    services.on_automation_stopped = [this] { tick_saw_automation_stopped_.store(true); };
     blackboard->set(kBTServiceContextKey, services);
 }
 
