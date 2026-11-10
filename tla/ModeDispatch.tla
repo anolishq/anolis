@@ -62,7 +62,22 @@ AutoGateAbsent(c) == TRUE
 \* Without the e-stop half of the gate (install_estop_auto_gate).
 AutoGateNoLatch(c) == target[c] = "AUTO" => ~hookless
 
-OrdinaryMayCommit(c) == mode = from[c] /\ ~FaultPending /\ AutoGate(c)
+\* A transition out of AUTO, to MANUAL or FAULT, is running its after-hooks.
+LeaveAutoAfterRunning == \E c \in Callers : pc[c] = "after" /\ prev[c] = "AUTO"
+\* Only an ordinary transition out of AUTO holds the window.
+LeaveAutoAfterRunningOrdinaryOnly == \E c \in Ops : pc[c] = "after" /\ prev[c] = "AUTO"
+
+\* #776: IDLE is not entered while an after-hook leaving AUTO has yet to run,
+\* since the IDLE gate would refuse its call. Judged at the request and again
+\* at the commit: the mode can go MANUAL -> AUTO -> MANUAL in between.
+IdleMayStart(t) == t = "IDLE" => ~LeaveAutoAfterRunning
+IdleMayCommit(t) == IdleMayStart(t)
+\* #776 as found: nothing held IDLE back.
+IdleIgnoresAfterHooks(t) == TRUE
+\* A fix that missed AUTO -> FAULT.
+IdleIgnoresFaultAfterHooks(t) == t = "IDLE" => ~LeaveAutoAfterRunningOrdinaryOnly
+
+OrdinaryMayCommit(c) == mode = from[c] /\ ~FaultPending /\ AutoGate(c) /\ IdleMayCommit(target[c])
 \* #763: an ordinary transition could commit during a pending FAULT.
 OrdinaryIgnoresFault(c) == mode = from[c] /\ AutoGate(c)
 
@@ -98,18 +113,20 @@ Begin(c, t) ==
 \* the hazard it guards against is theirs.
 RequestOrdinary(c) ==
     /\ ~FaultPending
-    /\ \E t \in Modes : <<mode, t>> \in Ordinary /\ Begin(c, t)
+    /\ \E t \in Modes : <<mode, t>> \in Ordinary /\ IdleMayStart(t) /\ Begin(c, t)
 
 \* set_mode(FAULT) in FAULT is a no-op that returns at once.
 RequestFault ==
     /\ mode # "FAULT"
     /\ Begin(Fault, "FAULT")
 
-\* A before-hook is chosen by the snapshot taken at the request.
+\* A before-hook is chosen by the snapshot taken at the request. Its call goes
+\* through the router too, and meets the IDLE gate if another exit from AUTO
+\* has since run and IDLE was entered.
 RunBefore(c) ==
     /\ pc[c] = "before"
     /\ pc' = [pc EXCEPT ![c] = "commit"]
-    /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO"
+    /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO" /\ mode # "IDLE"
                  THEN "safe" ELSE output
     /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
 
@@ -136,11 +153,12 @@ CommitFault ==
             /\ UNCHANGED <<mode, prev>>
     /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, autoWhileLatched>>
 
-\* An after-hook is chosen by the mode actually committed from.
+\* An after-hook is chosen by the mode actually committed from. Its call goes
+\* through the router, whose IDLE gate refuses it (#776).
 RunAfter(c) ==
     /\ pc[c] = "after"
     /\ pc' = [pc EXCEPT ![c] = "idle"]
-    /\ output' = IF HookAt = "after" /\ prev[c] = "AUTO" /\ target[c] # "AUTO"
+    /\ output' = IF HookAt = "after" /\ prev[c] = "AUTO" /\ target[c] # "AUTO" /\ mode # "IDLE"
                  THEN "safe" ELSE output
     /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
 

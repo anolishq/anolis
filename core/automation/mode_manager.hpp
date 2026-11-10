@@ -135,6 +135,12 @@ public:
      * if a FAULT is in progress, or if the mode changed while its own
      * before-callbacks ran.
      *
+     * A transition out of AUTO, to MANUAL or FAULT, stays in progress until
+     * its after-callbacks return. Until then a valid MANUAL -> IDLE is
+     * refused, so the IDLE gate cannot refuse an after-hook leaving AUTO
+     * (#776). Other requests are not refused for this, so a recovery from a
+     * FAULT after-callback still commits.
+     *
      * @param new_mode Requested mode
      * @param error Output error message if transition fails
      * @return true if transition succeeded, false if blocked
@@ -181,6 +187,9 @@ private:
     int fault_requests_pending_ = 0;
     // Transitions out of AUTO between validation and their commit (or return).
     int leaving_auto_pending_ = 0;
+    // Transitions out of AUTO that have committed and are running their
+    // after-callbacks (#776).
+    int leave_auto_after_callbacks_running_ = 0;
     std::vector<BeforeModeChangeCallback> before_callbacks_;
     std::vector<CommitGuard> commit_guards_;
     std::vector<ModeChangeCallback> callbacks_;

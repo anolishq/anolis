@@ -32,12 +32,14 @@ Device loss and the device-loss latch, provider supervision, ADPP, timing, argum
 validation, and failure counting. A provider is an environment that answers, and
 one output on one provider stands for the machine.
 
-Hooks are abstracted hard. A leave-AUTO hook always makes the output safe and is
-assumed to cover every exit from AUTO, a hook on entering AUTO does not actuate,
-and a hook's own call is never refused, although the router can refuse one, for
-example in `IDLE`. The stop's ladder always makes the output safe: a stop chain
-hold that sends nothing, a plan that drives nothing, and a latch restored at
-startup are not modelled.
+Hooks are abstracted hard. A leave-AUTO hook makes the output safe unless the
+`IDLE` gate refuses its call (#776). An after-hook meets that gate if `IDLE`
+commits before it runs; a before-hook only after another exit from AUTO has run
+its own hooks. A leave-AUTO hook is assumed to cover every exit from AUTO. A
+hook on entering AUTO does not actuate, and no other refusal of a hook's call is
+modelled, `allowed_modes` included. The stop's ladder always makes the output
+safe: a stop chain hold that sends nothing, a plan that drives nothing, and a
+latch restored at startup are not modelled.
 
 A FAULT request made while already in FAULT is the no-op `set_mode` makes it, so
 one made during a recovery is lost here as it is in the code. A restart that faults
