@@ -12,4 +12,4 @@ permissions:
 
 jobs:
   collect:
-    uses: anolishq/.github/.github/workflows/metrics.yml@2f08cae7f3b9bfaa817b822e256d9f66b1fdb18d # v2
+    uses: anolishq/.github/.github/workflows/metrics.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
