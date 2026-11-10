@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -131,7 +132,9 @@ public:
      *
      * A request for FAULT always ends in FAULT. While its before-callbacks run,
      * an ordinary transition cannot commit, so FAULT commits from the mode its
-     * before-callbacks were chosen for (#763). An ordinary request is refused
+     * before-callbacks were chosen for (#763). In FAULT a request for FAULT is a
+     * no-op, but a recovery from FAULT that it overlaps is refused at its
+     * commit, so the runtime stays in FAULT (#774). An ordinary request is refused
      * if a FAULT is in progress, or if the mode changed while its own
      * before-callbacks ran.
      *
@@ -190,6 +193,8 @@ private:
     // Transitions out of AUTO that have committed and are running their
     // after-callbacks (#776).
     int leave_auto_after_callbacks_running_ = 0;
+    // FAULT requests made so far, a no-op one in FAULT included (#774).
+    std::uint64_t fault_requests_ = 0;
     std::vector<BeforeModeChangeCallback> before_callbacks_;
     std::vector<CommitGuard> commit_guards_;
     std::vector<ModeChangeCallback> callbacks_;

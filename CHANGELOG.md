@@ -15,6 +15,13 @@ commit messages only.
 
 ### Fixed
 
+- **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
+  a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
+  its before-hooks did nothing, and the recovery then committed: the caller was
+  told FAULT and the runtime ended in MANUAL. The recovery is now refused at its
+  commit and the runtime stays in FAULT. Hooks the recovery already ran are not
+  undone. This is a new refusal, so the release that carries it needs an upgrade
+  note. (#774)
 - **An after-hook leaving AUTO can no longer be refused by an IDLE committed
   first.** An `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs
   after its transition commits. Another caller could commit `MANUAL -> IDLE` in

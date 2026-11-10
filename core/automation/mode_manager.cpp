@@ -109,8 +109,19 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
     } after_callbacks{*this};
 
+    // FAULT requests made before this one: a recovery from FAULT that sees the
+    // count move by its commit was overtaken by a FAULT request (#774).
+    std::uint64_t fault_requests_at_request = 0;
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
+
+        // Counted even when it is a no-op below: in FAULT, a request for FAULT
+        // still has to stop a recovery that is under way (#774).
+        if (new_mode == RuntimeMode::FAULT) {
+            ++fault_requests_;
+        }
+        fault_requests_at_request = fault_requests_;
 
         // No-op if already in requested mode
         if (current_mode_ == new_mode) {
@@ -198,6 +209,16 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         // the AUTO -> MANUAL after-hooks may not have run yet (#776).
         if (new_mode == RuntimeMode::IDLE && leave_auto_after_callbacks_running_ > 0) {
             error = "Refused: a transition out of AUTO is still running its after-hooks";
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
+
+        // A FAULT requested while this recovery's before-callbacks ran found the
+        // mode still FAULT and returned at once. Committing now would leave the
+        // runtime in MANUAL after it was told FAULT (#774).
+        if (previous_mode == RuntimeMode::FAULT && new_mode != RuntimeMode::FAULT &&
+            fault_requests_ != fault_requests_at_request) {
+            error = "Refused: a FAULT was requested during this recovery";
             LOG_ERROR("[ModeManager] " << error);
             return false;
         }

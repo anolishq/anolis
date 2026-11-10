@@ -566,3 +566,57 @@ TEST(ModeDispatchTest, AnInvalidIdleRequestDuringALeaveAutoAfterHookSaysItIsInva
     ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, error)) << error;
     EXPECT_EQ(idle_error, "Invalid mode transition: FAULT -> IDLE");
 }
+
+// #774. A FAULT requested while a FAULT -> MANUAL recovery runs its
+// before-callbacks found the mode still FAULT and returned at once, and the
+// recovery then committed: the caller was told FAULT and got MANUAL.
+TEST(ModeDispatchTest, AFaultRequestedDuringARecoveryEndsInFault) {
+    Rig rig(RuntimeMode::FAULT);
+    bool fault_ok = false;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::FAULT && next == RuntimeMode::MANUAL) {
+            std::thread other([&] {
+                std::string error;
+                fault_ok = rig.mode.set_mode(RuntimeMode::FAULT, error);
+            });
+            other.join();
+        }
+        return true;
+    });
+
+    std::string error;
+    const bool recovered = rig.mode.set_mode(RuntimeMode::MANUAL, error);
+
+    EXPECT_TRUE(fault_ok) << "control: the FAULT request reports success";
+    EXPECT_FALSE(recovered) << "the recovery committed over a FAULT requested during it";
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::FAULT);
+}
+
+// Only a FAULT request that overlaps the recovery stops it: one made before the
+// recovery started does not.
+TEST(ModeDispatchTest, ARecoveryStartedAfterAFaultRequestInFaultCommits) {
+    Rig rig(RuntimeMode::FAULT);
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
+}
+
+// The refused recovery says why, so the operator can see it was not a fault in
+// the recovery itself.
+TEST(ModeDispatchTest, ARecoveryOvertakenByAFaultRequestSaysSo) {
+    Rig rig(RuntimeMode::FAULT);
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::FAULT && next == RuntimeMode::MANUAL) {
+            std::thread other([&] {
+                std::string ignored;
+                rig.mode.set_mode(RuntimeMode::FAULT, ignored);
+            });
+            other.join();
+        }
+        return true;
+    });
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
+    EXPECT_EQ(error, "Refused: a FAULT was requested during this recovery");
+}
