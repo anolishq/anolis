@@ -201,9 +201,10 @@ to the same provider waits for it, so that hook has the last word on that provid
 
 A transition out of `AUTO` lasts until its `after_transition` hooks have run. Until
 then a request for `IDLE` is refused ("a transition out of AUTO is still running
-its after-hooks"), because the `IDLE` gate would refuse those hooks' calls. A
-client that sends its requests one at a time never sees this: a mode request
-returns after the hooks it triggers.
+its after-hooks"), because the `IDLE` gate would refuse those hooks' calls. A mode
+request returns after the hooks it triggers itself, so a client sees this only
+when something else left `AUTO`: the runtime's own FAULT, an e-stop, or another
+client. A retry once those hooks have run succeeds.
 
 Transition rules:
 

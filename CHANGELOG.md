@@ -21,8 +21,10 @@ commit messages only.
   between, directly or through a recovery from FAULT, and the IDLE gate then
   refused the hook's call, so the output it should have made safe stayed as the
   tree left it. A request for IDLE is now refused until those hooks have run,
-  checked at the request and again at the commit. A client that sends its
-  requests one at a time is not affected. (#776)
+  checked at the request and again at the commit. A client meets the refusal
+  only when something else left AUTO, such as the runtime's own FAULT, an e-stop
+  or another client, and a retry once the hooks have run succeeds. This is a new
+  refusal, so the release that carries it needs an upgrade note. (#776)
 
 ## [0.13.0] - 2026-11-10
 
