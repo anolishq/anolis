@@ -582,6 +582,6 @@ jobs:
       - name: Evaluate job results
         run: |
           echo "Job results: ${{ toJSON(needs.*.result) }}"
-      - name: Fail if any required job failed or was cancelled
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: exit 1
+      - uses: anolishq/.github/.github/actions/require-needs-passed@2f08cae7f3b9bfaa817b822e256d9f66b1fdb18d # v2
+        with:
+          results: ${{ join(needs.*.result, ' ') }}
