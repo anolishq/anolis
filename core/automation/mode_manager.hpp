@@ -136,10 +136,10 @@ public:
      * before-callbacks ran.
      *
      * A transition out of AUTO, to MANUAL or FAULT, stays in progress until
-     * its after-callbacks return. Until then a request for IDLE is refused, so
-     * the IDLE gate cannot refuse an after-hook leaving AUTO (#776). Other
-     * requests are not refused, so a recovery from a FAULT after-callback still
-     * commits.
+     * its after-callbacks return. Until then a valid MANUAL -> IDLE is
+     * refused, so the IDLE gate cannot refuse an after-hook leaving AUTO
+     * (#776). Other requests are not refused for this, so a recovery from a
+     * FAULT after-callback still commits.
      *
      * @param new_mode Requested mode
      * @param error Output error message if transition fails

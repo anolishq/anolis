@@ -24,9 +24,9 @@ commit messages only.
   its work on a transition out of AUTO, those hooks included, checked at the
   request and again at the commit. A client meets the refusal only when
   something else left AUTO, such as the runtime's own FAULT, an e-stop, another
-  client or an earlier request it stopped waiting for, and a retry once that
-  work is done succeeds. This is a new refusal, so the release that carries it
-  needs an upgrade note. (#776)
+  client or an earlier request it stopped waiting for. Once that work is done,
+  a retry is no longer refused for this reason. This is a new refusal, so the
+  release that carries it needs an upgrade note. (#776)
 
 ## [0.13.0] - 2026-11-10
 

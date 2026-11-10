@@ -205,7 +205,8 @@ work on that transition, `after_transition` hooks included, because the `IDLE` g
 would refuse those hooks' calls. A mode request returns after the work it triggers
 itself, so a client meets this only when something else left `AUTO`: the runtime's
 own FAULT, an e-stop, another client, or an earlier request it stopped waiting for.
-A retry of `MANUAL -> IDLE` once that work is done succeeds.
+Once that work is done, a retry of `MANUAL -> IDLE` is no longer refused for this
+reason.
 
 Transition rules:
 
