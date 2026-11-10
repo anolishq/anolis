@@ -272,3 +272,6 @@ vcpkg_installed/
 
 # Runtime data directory (run registry JSONL, etc.)
 anolis-data/
+
+# TLA+ tools, fetched by tla/check.py
+.tla-tools/

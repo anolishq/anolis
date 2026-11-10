@@ -6,6 +6,17 @@
   "customManagers": [
     {
       "customType": "regex",
+      "description": "Bump the TLA+ tools. The jar hash beside it is updated by hand, and CI fails until it is.",
+      "managerFilePatterns": [
+        "/^\\.ci/dependency-pins\\.yml$/"
+      ],
+      "matchStrings": [
+        "tla_tools:\\n\\s+repository: (?<depName>\\S+)\\n\\s+ref: (?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
       "description": "Bump the simulator release the quickstart downloads",
       "managerFilePatterns": [
         "/^docs/quickstart-simulator\\.md$/"
