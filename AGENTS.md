@@ -27,6 +27,9 @@ C++20 control runtime for the Anolis system.
 - Shared `.github` actions/workflows are SHA-pinned with a `# <tag>` comment so
   Renovate can track them — keep that comment when bumping.
 
+- `tla/` holds a bounded, non-normative model of mode dispatch. Changing transition
+  or dispatch logic? Read `tla/README.md` and run `just test-tla`.
+
 ## Repo-specific gotchas
 
 - **C++20**. In `core/`, log with the **`LOG_*` stream macros**

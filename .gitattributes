@@ -13,6 +13,8 @@
 *.proto text eol=lf
 *.cmake text eol=lf
 CMakeLists.txt text eol=lf
+*.tla text eol=lf
+tla/**/*.cfg text eol=lf
 
 # Scripts: LF for Unix, CRLF for Windows
 *.sh text eol=lf
