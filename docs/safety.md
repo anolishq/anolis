@@ -173,10 +173,13 @@ according to what it does, not who made it:
   last command, and goes unreachable during the stop as the runtime expects of
   a `power_cut` device. This holds with or without `safety.stop_chain`.
 - **A sensor: on a supply the stop does not cut.** A sensor on the switched
-  supply gains no safety, and loses its readings and anything set on it at
-  every stop. For example, an EZO circuit loses the compensation set with
-  `set_compensation`, and its readings are uncompensated until the provider
-  sends it again.
+  supply gains no safety, and loses anything set on it at every stop. For
+  example, an EZO circuit loses the compensation set with `set_compensation`,
+  and its readings are uncompensated until the provider sends it again. Its
+  readings may stop during the stop either way. On a bus shared with boards
+  the stop powers down, the bus itself can fail while they are unpowered. On
+  the reference rig, a 10 s `power_cut` stop failed every read on the shared
+  I2C bus, a BME280 on the Pi's supply included, until power returned.
 
 The same holds for third-party providers built on vendor driver libraries. A
 motor driver or relay board on the Linux I2C bus is wired as an actuator, and a
