@@ -156,6 +156,32 @@ whatever caused it.
 
 Design work on this model is tracked in anolishq/anolis#283.
 
+### Power domains under a `power_cut` stop
+
+A `power_cut` stop protects only what it de-energises. Under it, power a board
+according to what it does, not who made it:
+
+- **A board that moves or heats: logic and load both on the switched supply.**
+  Cutting only its load supply (a motor or heater rail) is not enough. While the
+  stop is in force, nothing writes to the board: an observed stop
+  (`safety.stop_chain`) holds the latch without sending safe-state calls, and the
+  latch refuses the `-> FAULT` hooks' actuating calls. A board whose logic stays
+  powered therefore keeps its last command, and drives it again the moment the
+  stop releases and its load supply returns, with no operator action: the
+  restart a stop's release must not cause. With its logic on the switched
+  supply, the board comes back from a stop in its power-on state, not with its
+  last command, and goes unreachable during the stop as the runtime expects of
+  a `power_cut` device. This holds with or without `safety.stop_chain`.
+- **A sensor: on a supply the stop does not cut.** A sensor on the switched
+  supply gains no safety, and loses its readings and anything set on it at
+  every stop. For example, an EZO circuit loses the compensation set with
+  `set_compensation`, and its readings are uncompensated until the provider
+  sends it again.
+
+The same holds for third-party providers built on vendor driver libraries. A
+motor driver or relay board on the Linux I2C bus is wired as an actuator, and a
+temperature, humidity or ADC board as a sensor, whichever provider drives it.
+
 ## Runtime Mode Safety Semantics
 
 | Runtime Mode | Automation Loop | Control Operations (`POST /v0/call`) | Notes                                                         |
@@ -405,6 +431,9 @@ hooks; the stop does not count them as a safe state.
 1. Provider startup sets actuators to safe defaults.
 2. Communication failures surface as degraded quality/error status.
 3. Restart behavior does not create unsafe transient outputs.
+4. Under a `power_cut` stop, each actuator board's logic is on the switched
+   supply with its load, and each sensor is on a supply the stop does not cut
+   (see Power domains under a `power_cut` stop).
 
 ### Capability and limits
 
