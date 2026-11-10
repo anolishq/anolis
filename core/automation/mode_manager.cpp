@@ -92,6 +92,23 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         }
     } pending{*this};
 
+    // Marks a committed transition out of AUTO as still in progress until its
+    // after-callbacks have returned (#776).
+    struct AfterCallbacks {
+        ModeManager &manager;
+        bool counted = false;
+        void begin_locked(bool leaving_auto) {
+            counted = leaving_auto;
+            manager.leave_auto_after_callbacks_running_ += counted ? 1 : 0;
+        }
+        ~AfterCallbacks() {
+            if (counted) {
+                std::lock_guard<std::mutex> lock(manager.mutex_);
+                --manager.leave_auto_after_callbacks_running_;
+            }
+        }
+    } after_callbacks{*this};
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -105,6 +122,15 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         // One already running when the FAULT starts is refused at its commit.
         if (new_mode != RuntimeMode::FAULT && fault_requests_pending_ > 0) {
             error = "Refused: a transition to FAULT is in progress";
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
+
+        // A transition out of AUTO is not over until its after-hooks have run.
+        // Entering IDLE first would put their calls under the IDLE gate, which
+        // refuses them (#776).
+        if (new_mode == RuntimeMode::IDLE && leave_auto_after_callbacks_running_ > 0) {
+            error = "Refused: a transition out of AUTO is still running its after-hooks";
             LOG_ERROR("[ModeManager] " << error);
             return false;
         }
@@ -165,6 +191,15 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return false;
         }
 
+        // Also checked here: the mode can leave this request's mode and return
+        // to it while its before-callbacks run, MANUAL -> AUTO -> MANUAL, and
+        // the AUTO -> MANUAL after-hooks may not have run yet (#776).
+        if (new_mode == RuntimeMode::IDLE && leave_auto_after_callbacks_running_ > 0) {
+            error = "Refused: a transition out of AUTO is still running its after-hooks";
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
+
         // Transition may have changed while callbacks were running.
         if (current_mode_ != previous_mode) {
             // While a FAULT is pending only another FAULT can commit (#763), so
@@ -213,6 +248,7 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
 
         current_mode_ = new_mode;
         pending.end_locked();
+        after_callbacks.begin_locked(previous_mode == RuntimeMode::AUTO);
     }
 
     LOG_INFO("[ModeManager] Mode changed: " << mode_to_string(previous_mode) << " -> " << mode_to_string(new_mode));

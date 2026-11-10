@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An after-hook leaving AUTO can no longer be refused by an IDLE committed
+  first.** An `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs
+  after its transition commits. Another caller could commit `MANUAL -> IDLE` in
+  between, directly or through a recovery from FAULT, and the IDLE gate then
+  refused the hook's call, so the output it should have made safe stayed as the
+  tree left it. A request for IDLE is now refused until those hooks have run,
+  checked at the request and again at the commit. A client that sends its
+  requests one at a time is not affected. (#776)
+
 ## [0.13.0] - 2026-11-10
 
 0.13.0 is a minor release because a request that used to succeed can now be

@@ -25,6 +25,8 @@
 #include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
+#include "runtime/actuation_gate.hpp"
+#include "runtime/config.hpp"
 #include "state/state_cache.hpp"
 
 using namespace anolis;
@@ -395,4 +397,156 @@ TEST(ModeDispatchTest, AVetoedTransitionDoesNotEndAStopOnTerminalRun) {
     runtime.stop();
     std::error_code ec;
     std::filesystem::remove(tree_path, ec);
+}
+
+// #776. An after-hook on AUTO -> MANUAL runs after that transition commits. A
+// MANUAL -> IDLE committed first, by another caller, would put the hook's call
+// under the IDLE gate. The other caller is forced here from an earlier
+// after-callback, the same place the runtime runs its after-hooks.
+TEST(ModeDispatchTest, EnteringIdleIsRefusedWhileALeaveAutoAfterHookRuns) {
+    Rig rig(RuntimeMode::AUTO);
+    bool idle_committed = true;
+    std::string idle_error;
+    rig.mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::IDLE) {
+            rig.order.emplace_back("idle_before_hook");
+        }
+        return true;
+    });
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::MANUAL) {
+            std::thread other([&] { idle_committed = rig.mode.set_mode(RuntimeMode::IDLE, idle_error); });
+            other.join();
+        }
+    });
+    runtime::ModeTransitionCallConfig call;
+    call.device_handle = "sim0/dev1";
+    call.function_name = "step_one";
+    control::CallResult hook_result;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::MANUAL) {
+            hook_result = rig.router.execute_call(runtime::mode_hook_request(call, next), rig.providers);
+        }
+    });
+
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+
+    EXPECT_FALSE(idle_committed) << "MANUAL -> IDLE committed before the leave-AUTO after-hook ran";
+    EXPECT_EQ(idle_error, "Refused: a transition out of AUTO is still running its after-hooks");
+    EXPECT_TRUE(hook_result.success) << "the leave-AUTO after-hook was refused: " << hook_result.error_message;
+    EXPECT_EQ(rig.order, std::vector<std::string>{"step_one"}) << "the refused request's before-hooks ran";
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
+}
+
+TEST(ModeDispatchTest, EnteringIdleIsAllowedOnceTheLeaveAutoAfterHooksReturn) {
+    Rig rig(RuntimeMode::AUTO);
+    rig.mode.on_mode_change([](RuntimeMode, RuntimeMode) {});
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+    EXPECT_TRUE(rig.mode.set_mode(RuntimeMode::IDLE, error)) << error;
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::IDLE);
+}
+
+TEST(ModeDispatchTest, AFaultIsNotRefusedWhileALeaveAutoAfterHookRuns) {
+    Rig rig(RuntimeMode::AUTO);
+    bool fault_committed = false;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::MANUAL) {
+            std::thread other([&] {
+                std::string error;
+                fault_committed = rig.mode.set_mode(RuntimeMode::FAULT, error);
+            });
+            other.join();
+        }
+    });
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+    EXPECT_TRUE(fault_committed);
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::FAULT);
+}
+
+// The same for AUTO -> FAULT: a recovery to MANUAL is allowed while FAULT's
+// after-hook runs (#770), but going on to IDLE is not.
+TEST(ModeDispatchTest, EnteringIdleIsRefusedWhileAFaultAfterHookFromAutoRuns) {
+    Rig rig(RuntimeMode::AUTO);
+    bool recovered = false;
+    bool idle_committed = true;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::FAULT) {
+            std::thread other([&] {
+                std::string error;
+                recovered = rig.mode.set_mode(RuntimeMode::MANUAL, error);
+                idle_committed = rig.mode.set_mode(RuntimeMode::IDLE, error);
+            });
+            other.join();
+        }
+    });
+    runtime::ModeTransitionCallConfig call;
+    call.device_handle = "sim0/dev1";
+    call.function_name = "step_one";
+    control::CallResult hook_result;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::FAULT) {
+            hook_result = rig.router.execute_call(runtime::mode_hook_request(call, next), rig.providers);
+        }
+    });
+
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, error)) << error;
+
+    EXPECT_TRUE(recovered) << "control: the recovery to MANUAL must still commit";
+    EXPECT_FALSE(idle_committed) << "IDLE committed before FAULT's after-hook ran";
+    EXPECT_TRUE(hook_result.success) << "FAULT's after-hook was refused: " << hook_result.error_message;
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
+}
+
+// The request for IDLE starts in MANUAL, before anything leaves AUTO. While its
+// before-hook runs, another caller goes MANUAL -> AUTO -> MANUAL, so the mode
+// reads MANUAL again at the commit while the AUTO -> MANUAL after-hook has yet
+// to run. The commit must still be refused.
+TEST(ModeDispatchTest, EnteringIdleIsRefusedAtCommitWhenAutoWasEnteredAndLeftMeanwhile) {
+    Rig rig(RuntimeMode::MANUAL);
+    std::atomic<bool> in_after_hook{false};
+    std::atomic<bool> idle_returned{false};
+    std::thread other;
+    const auto wait_for = [](const std::atomic<bool> &flag) {
+        const auto started_at = std::chrono::steady_clock::now();
+        while (!flag.load() && std::chrono::steady_clock::now() - started_at < std::chrono::seconds(5)) {
+            std::this_thread::yield();
+        }
+    };
+    rig.mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::IDLE) {
+            other = std::thread([&] {
+                std::string error;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << error;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+            });
+            wait_for(in_after_hook);
+        }
+        return true;
+    });
+    runtime::ModeTransitionCallConfig call;
+    call.device_handle = "sim0/dev1";
+    call.function_name = "step_one";
+    control::CallResult hook_result;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::MANUAL) {
+            in_after_hook = true;
+            wait_for(idle_returned);
+            hook_result = rig.router.execute_call(runtime::mode_hook_request(call, next), rig.providers);
+        }
+    });
+
+    std::string error;
+    const bool idle_committed = rig.mode.set_mode(RuntimeMode::IDLE, error);
+    idle_returned = true;
+    other.join();
+
+    ASSERT_TRUE(in_after_hook.load()) << "control: AUTO -> MANUAL must have reached its after-hook";
+    EXPECT_FALSE(idle_committed) << "IDLE committed before the leave-AUTO after-hook ran";
+    EXPECT_EQ(error, "Refused: a transition out of AUTO is still running its after-hooks");
+    EXPECT_TRUE(hook_result.success) << "the leave-AUTO after-hook was refused: " << hook_result.error_message;
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
 }
