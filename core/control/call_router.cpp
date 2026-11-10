@@ -247,7 +247,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // transition that clears this latch.
     if (!request.safe_state && request.is_behavior_tree && device_loss_latch_ != nullptr &&
         device_loss_latch_->is_latched(request.device_handle) && registry::is_actuating(*func_spec)) {
-        result.error_message = "Device was unreachable and has not been re-armed; re-enter AUTO to resume automation";
+        result.error_message =
+            "Device was unreachable and has not been re-armed; once a read succeeds, re-enter AUTO to resume "
+            "automation";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
         return result;
@@ -302,7 +304,9 @@ CallResult CallRouter::execute_call(const CallRequest& request, provider::Provid
     // nobody has re-armed.
     if (!request.safe_state && request.is_behavior_tree && device_loss_latch_ != nullptr &&
         device_loss_latch_->is_latched(request.device_handle) && registry::is_actuating(*func_spec)) {
-        result.error_message = "Device was unreachable and has not been re-armed; re-enter AUTO to resume automation";
+        result.error_message =
+            "Device was unreachable and has not been re-armed; once a read succeeds, re-enter AUTO to resume "
+            "automation";
         result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
         LOG_WARN("[CallRouter] " << result.error_message << " (" << request.device_handle << ")");
         return result;
