@@ -126,19 +126,21 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return false;
         }
 
-        // A transition out of AUTO is not over until its after-hooks have run.
-        // Entering IDLE first would put their calls under the IDLE gate, which
-        // refuses them (#776).
-        if (new_mode == RuntimeMode::IDLE && leave_auto_after_callbacks_running_ > 0) {
-            error = "Refused: a transition out of AUTO is still running its after-hooks";
-            LOG_ERROR("[ModeManager] " << error);
-            return false;
-        }
-
         // Validate transition
         if (!is_valid_transition(current_mode_, new_mode)) {
             error = std::string("Invalid mode transition: ") + mode_to_string(current_mode_) + " -> " +
                     mode_to_string(new_mode);
+            LOG_ERROR("[ModeManager] " << error);
+            return false;
+        }
+
+        // A transition out of AUTO is not over until its after-callbacks, its
+        // after-hooks among them, have returned. Entering IDLE first would put
+        // the hooks' calls under the IDLE gate, which refuses them (#776).
+        // Checked after the validity check, so only a valid MANUAL -> IDLE
+        // meets it.
+        if (new_mode == RuntimeMode::IDLE && leave_auto_after_callbacks_running_ > 0) {
+            error = "Refused: a transition out of AUTO is still running its after-hooks";
             LOG_ERROR("[ModeManager] " << error);
             return false;
         }

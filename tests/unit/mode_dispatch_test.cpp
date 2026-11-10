@@ -550,3 +550,19 @@ TEST(ModeDispatchTest, EnteringIdleIsRefusedAtCommitWhenAutoWasEnteredAndLeftMea
     EXPECT_TRUE(hook_result.success) << "the leave-AUTO after-hook was refused: " << hook_result.error_message;
     EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
 }
+
+// Only a valid MANUAL -> IDLE meets the refusal: an IDLE request from FAULT is
+// told it is invalid, not that hooks are running, so waiting would not help.
+TEST(ModeDispatchTest, AnInvalidIdleRequestDuringALeaveAutoAfterHookSaysItIsInvalid) {
+    Rig rig(RuntimeMode::AUTO);
+    std::string idle_error;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::FAULT) {
+            std::thread other([&] { rig.mode.set_mode(RuntimeMode::IDLE, idle_error); });
+            other.join();
+        }
+    });
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    EXPECT_EQ(idle_error, "Invalid mode transition: FAULT -> IDLE");
+}

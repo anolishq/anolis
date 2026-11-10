@@ -199,12 +199,13 @@ it commits: the runtime stops ticking the tree and refuses any tree call that ha
 not reached its provider. A command already sent cannot be recalled. A hook call
 to the same provider waits for it, so that hook has the last word on that provider.
 
-A transition out of `AUTO` lasts until its `after_transition` hooks have run. Until
-then a request for `IDLE` is refused ("a transition out of AUTO is still running
-its after-hooks"), because the `IDLE` gate would refuse those hooks' calls. A mode
-request returns after the hooks it triggers itself, so a client sees this only
-when something else left `AUTO`: the runtime's own FAULT, an e-stop, or another
-client. A retry once those hooks have run succeeds.
+After a transition out of `AUTO` commits, `MANUAL -> IDLE` is refused ("a transition
+out of AUTO is still running its after-hooks") until the runtime has finished its
+work on that transition, `after_transition` hooks included, because the `IDLE` gate
+would refuse those hooks' calls. A mode request returns after the work it triggers
+itself, so a client meets this only when something else left `AUTO`: the runtime's
+own FAULT, an e-stop, another client, or an earlier request it stopped waiting for.
+A retry of `MANUAL -> IDLE` once that work is done succeeds.
 
 Transition rules:
 

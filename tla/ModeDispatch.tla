@@ -120,11 +120,13 @@ RequestFault ==
     /\ mode # "FAULT"
     /\ Begin(Fault, "FAULT")
 
-\* A before-hook is chosen by the snapshot taken at the request.
+\* A before-hook is chosen by the snapshot taken at the request. Its call goes
+\* through the router too, and meets the IDLE gate if another exit from AUTO
+\* has since run and IDLE was entered.
 RunBefore(c) ==
     /\ pc[c] = "before"
     /\ pc' = [pc EXCEPT ![c] = "commit"]
-    /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO"
+    /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO" /\ mode # "IDLE"
                  THEN "safe" ELSE output
     /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
 
