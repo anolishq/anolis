@@ -13,6 +13,20 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-10
+
+0.13.0 is a minor release because a request that used to succeed can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR).
+
+Upgrade notes:
+
+- **A mode change can be refused while a FAULT is pending.** A client that gets
+  "Refused: a transition to FAULT is in progress" can retry once the FAULT has
+  committed.
+- **A device that is still unreachable stays latched through MANUAL -> AUTO.**
+  AUTO is still allowed. The device stays on the device-loss latch until it
+  answers and AUTO is entered again, and the runtime log names it.
+
 ### Fixed
 
 - **A tree command can no longer land after the machine has left AUTO.** Mode
