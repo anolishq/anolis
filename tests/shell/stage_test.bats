@@ -856,3 +856,15 @@ _assert_influx_refused() {
     [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
     rm -rf "${PROJECT_DIR}"
 }
+
+@test "#742 a token in either of duplicate token keys fails staging" {
+    local first second
+    for first in '""' "${INFLUX_TOKEN}"; do
+        if [[ "${first}" == '""' ]]; then second="${INFLUX_TOKEN}"; else second='""'; fi
+        PROJECT_DIR="$(_copy_fixture)"
+        printf '  influxdb:\n    token: %s\n    token: %s\n' "${first}" "${second}" \
+            >> "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+        _assert_influx_refused anolis-runtime.telemetry.yaml telemetry.influxdb.token || { echo "first ${first}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}

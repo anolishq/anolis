@@ -23,8 +23,9 @@ commit messages only.
   and replaced each device's own. The bundle step now stops on either key,
   naming the file and never the token, unless it is the quoted empty string;
   a null value is refused too. A line that names `influx_token` anywhere, in a
-  comment included, stops it as `auth_token` does. A bundle that used to build
-  can now be refused, so the release that carries this needs an upgrade note.
+  comment included, stops it as `auth_token` does. `install.sh --project`
+  builds a bundle too, so an install that used to succeed can now be refused,
+  and the release that carries this needs an upgrade note.
   (#742)
 - **A hook that moves toward actuation can no longer act after FAULT's hooks.**
   A before-hook of `MANUAL -> AUTO` already running when a FAULT started could

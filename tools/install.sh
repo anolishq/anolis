@@ -3625,9 +3625,9 @@ def merged(node, seen=()):
 TOKEN_WORDS = {
     "auth_token": "an API token's text, in a comment or string either; remove it. The install "
     "generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)",
-    "influx_token": "an InfluxDB token's text, in a comment or string either; remove it. Each "
-    "device's token belongs in /etc/anolis/runtime.env (INFLUXDB_TOKEN), which "
-    "--with-observability writes",
+    "influx_token": "an InfluxDB token's text, in a comment or string either; remove it. Set "
+    "each device's token as INFLUXDB_TOKEN in /etc/anolis/runtime.env: --with-observability "
+    "writes it, otherwise add the line by hand",
 }
 TOKEN_SCANS = [
     (
@@ -3684,9 +3684,9 @@ def check_token_nodes(root, name):
             sys.exit(
                 f"{name}: sets {key}. A bundle must not carry an InfluxDB token: every device "
                 f"installed from it would write with that token, in place of its own. Remove the key "
-                f"(a null value is refused too: only \"\" may stand for no token); each device's "
-                f"token belongs in /etc/anolis/runtime.env (INFLUXDB_TOKEN), which "
-                f"--with-observability writes"
+                f"(a null value is refused too: only \"\" may stand for no token); set each device's "
+                f"token as INFLUXDB_TOKEN in /etc/anolis/runtime.env: --with-observability writes "
+                f"it, otherwise add the line by hand"
             )
     for http in keyed(root, "http"):
         for tok in keyed(http, "auth_token"):
