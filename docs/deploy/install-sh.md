@@ -59,6 +59,14 @@ is a complete example, and the workbench writes projects in the same layout.
   `auth_token_file`, is not the token. A config that is not valid YAML or not
   UTF-8 stops the bundle step too, since it cannot be checked, and so does a
   merge key (`<<`) that brings in its own mapping (#529).
+- No config may set the InfluxDB token, `telemetry.influxdb.token` or the flat
+  `telemetry.influx_token`, to anything but `""`, a null value included. The
+  runtime prefers it over `INFLUXDB_TOKEN` in `/etc/anolis/runtime.env`, which
+  `--with-observability` writes per device, so a token in the config would
+  replace each device's own. The checks are those for `http.auth_token` above,
+  and a line that names `influx_token` stops the bundle step in the same way.
+  `token` alone is too common a word to scan for, so `influxdb.token` is
+  checked as a key only (#742).
 - The directory name must be letters, digits, `.`, `_` and `-`: the bundle step
   writes it into the configs as it is, and stops on any other name. A directory
   name may hold upper case letters, `.` or `_`, but a path's `<name>` may not:
