@@ -236,10 +236,11 @@ The runtime does enter FAULT autonomously in three cases:
 
 In each case the declared `*->FAULT` mode hooks run (in the third, the held
 latch refuses their actuating calls), and recovery is the ordinary
-`FAULT -> MANUAL` path. If FAULT is requested again while that recovery runs its
-`before_transition` hooks, the recovery is refused at its commit ("a FAULT was
-requested during this recovery") and the machine stays in FAULT. Hooks the
-recovery already ran are not undone. An operator who finds a machine in FAULT should check the runtime
+`FAULT -> MANUAL` path. If FAULT is requested again between the recovery's request
+and its commit, by the runtime, an e-stop press, a stop-chain change or a client,
+the recovery is refused at its commit ("a FAULT was requested during this
+recovery") and the machine stays in FAULT. Hooks the recovery already ran are not
+undone. A recovery started after the last such request commits. An operator who finds a machine in FAULT should check the runtime
 log and `GET /v0/automation/status` (`execution_reason: terminal_failure` indicates the
 engine faulted rather than an operator changing mode).
 

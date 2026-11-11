@@ -620,3 +620,35 @@ TEST(ModeDispatchTest, ARecoveryOvertakenByAFaultRequestSaysSo) {
     EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
     EXPECT_EQ(error, "Refused: a FAULT was requested during this recovery");
 }
+
+// The other way to lose a FAULT: while recovery R2 runs its before-hooks,
+// recovery R1 commits MANUAL and a real FAULT commits from MANUAL. At R2's
+// commit the mode reads FAULT again, so the "mode changed" check passes. The
+// FAULT request is counted in every mode, so R2 is still refused.
+TEST(ModeDispatchTest, ARecoveryIsRefusedWhenAnotherRecoveryAndARealFaultCommitMeanwhile) {
+    Rig rig(RuntimeMode::FAULT);
+    bool first_recovered = false;
+    bool faulted = false;
+    bool first_call = true;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (first_call && prev == RuntimeMode::FAULT && next == RuntimeMode::MANUAL) {
+            first_call = false;
+            std::thread other([&] {
+                std::string error;
+                first_recovered = rig.mode.set_mode(RuntimeMode::MANUAL, error);
+                faulted = rig.mode.set_mode(RuntimeMode::FAULT, error);
+            });
+            other.join();
+        }
+        return true;
+    });
+
+    std::string error;
+    const bool second_recovered = rig.mode.set_mode(RuntimeMode::MANUAL, error);
+
+    ASSERT_TRUE(first_recovered) << "control: the other recovery must commit";
+    ASSERT_TRUE(faulted) << "control: the FAULT must commit from MANUAL";
+    EXPECT_FALSE(second_recovered) << "the recovery committed MANUAL over a FAULT that had just committed";
+    EXPECT_EQ(error, "Refused: a FAULT was requested during this recovery");
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::FAULT);
+}

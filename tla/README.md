@@ -41,8 +41,11 @@ modelled, `allowed_modes` included. The stop's ladder always makes the output
 safe: a stop chain hold that sends nothing, a plan that drives nothing, and a
 latch restored at startup are not modelled.
 
-A FAULT request made while already in FAULT returns at once, as `set_mode` does,
-but a recovery from FAULT that it overlaps then does not commit (#774). A restart
+A FAULT request made while already in FAULT returns at once, as `set_mode` does.
+Every FAULT request, in any mode, still stops a recovery from FAULT that it
+overlaps (#774). A lost FAULT is judged by a history of FAULT requests that the
+recovery's guard does not read. There is one FAULT caller, so a FAULT requested
+while another FAULT runs its after-hooks is not modelled. A restart
 that faults a machine in AUTO and a transition vetoed by a callback are not
 modelled. There is no liveness property: `FaultAlwaysCommits` only says a FAULT
 request is not refused at its commit and not overtaken by a recovery.
