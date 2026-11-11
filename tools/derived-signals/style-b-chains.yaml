@@ -3,7 +3,7 @@
 # derivative / integration helpers.
 #
 # Strawman only. Nothing reads this file except lint.py.
-# Shared assumptions for all three styles are in exercise.md, "Ground rules".
+# Shared assumptions for all three styles are in README.md, "Ground rules".
 
 style: B
 period_ms: 2500

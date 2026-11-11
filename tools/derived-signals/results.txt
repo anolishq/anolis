@@ -3,7 +3,8 @@ trace                                             heater_guard.py         detect
 pad over 70 from t=100                      over_temp_pad @ 100.0    over_temp_pad @ 100.0    over_temp_pad @ 100.0
 liquid reading bad from t=50              no_good_reading @ 170.0  no_good_reading @ 170.0  no_good_reading @ 170.0
 pad 4 C below liquid from t=100             pad_detached @ 1902.5    pad_detached @ 1902.5    pad_detached @ 1902.5
-same, one bad pad reading at t=1000                       no trip                  no trip    pad_detached @ 1902.5
+same, one bad pad reading at t=1000         pad_detached @ 2805.0    pad_detached @ 2805.0    pad_detached @ 1902.5
+same, pad reading bad t=1900 to 1910        pad_detached @ 3715.0    pad_detached @ 3715.0    pad_detached @ 1902.5
 one 1.8 C pad sample at t=500                             no trip                  no trip                  no trip
 
 PART 2  replay over recorded telemetry, 2026-11-09T03:00Z to 15:00Z (22:00 to 10:00 EST)

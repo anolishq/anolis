@@ -95,13 +95,17 @@ class Detectors:
     """Case 4. The heater guard's stop decisions as per-tick detectors.
 
     on_bad is the policy for the detach timer when t1 or t2 is not good:
-    'reset' (what heater_guard.py does) or 'hold'.
+    'reset' (what heater_guard.py does) stops it; 'hold' leaves it running,
+    so it can run out, and trip, while the reading is still bad.
+
+    The no-good-reading clock starts at the first tick, as the guard's does
+    when it is constructed.
     """
 
     def __init__(self, pad_max=70.0, liquid_max=45.0, stale=120.0, delta=3.0, detach=1800.0, on_bad="reset"):
         self.p = (pad_max, liquid_max, stale, delta, detach)
         self.on_bad = on_bad
-        self.last_good = 0.0
+        self.last_good = None
         self.relay_seen = False
         self.since = None
         self.timer_starts = 0
@@ -109,7 +113,7 @@ class Detectors:
     def step(self, t, t1, t2, relay):
         pad_max, liquid_max, stale, delta, detach = self.p
         good = ok(t1) and ok(t2)
-        if good:
+        if good or self.last_good is None:
             self.last_good = t
         elif t - self.last_good > stale:
             return "no_good_reading"
@@ -126,6 +130,8 @@ class Detectors:
                 return "pad_detached"
         elif good or self.on_bad == "reset":
             self.since = None
+        elif self.since is not None and t - self.since > detach:
+            return "pad_detached"
         return None
 
 
@@ -195,13 +201,17 @@ def guard_traces():
     for r in stale:
         if r[0] >= 50.0:
             r[1] = None
-    detach = base(800)
+    detach = base(1600)
     for r in detach:
         if r[0] >= 100.0:
             r[2] = 21.0
     broken = [list(r) for r in detach]
     for r in broken:
         if r[0] == 1000.0:
+            r[2] = None
+    late = [list(r) for r in detach]
+    for r in late:
+        if 1900.0 <= r[0] <= 1910.0:
             r[2] = None
     glitch = base(800)
     for r in glitch:
@@ -212,6 +222,7 @@ def guard_traces():
         "liquid reading bad from t=50": stale,
         "pad 4 C below liquid from t=100": detach,
         "same, one bad pad reading at t=1000": broken,
+        "same, pad reading bad t=1900 to 1910": late,
         "one 1.8 C pad sample at t=500": glitch,
     }
 
@@ -350,7 +361,6 @@ def night(mask=None, trace=None):
     duty10, comp5 = Trailing(600), Trailing(300)
     kf = Kalman1()
     det_raw, det_clean = Detectors(), Detectors()
-    det_raw.last_good = det_clean.last_good = start
     hours = collections.defaultdict(lambda: {"on": 0, "n": 0, "d10": []})
     res = {
         "glitch": [],

@@ -66,8 +66,8 @@ python3 tools/derived-signals/reference.py \
   --guard ../anolis-projects/projects/bioreactor-v1/scripts/heater_guard.py
 ```
 
-It feeds five synthetic traces to the real `Guard` class and to the case 4
-detectors, and prints where each trips.
+It feeds six synthetic traces to the real `Guard` class and to the case 4
+detectors, and prints where each first trips.
 
 Part 2 replays every case over recordings from the rig, which are not
 published:
@@ -102,7 +102,14 @@ needs no data.
 
 Style B used its plain chain for 12 of 21 nodes, a two-input form for 7 and a
 block form for 2. Style C used 17 block types across 26 blocks, 10 of them
-unpublished intermediates. The counts are in `lint-results.txt`.
+unpublished intermediates. The node and line counts are in
+`lint-results.txt`; the form and type counts are read from the files.
+
+The comparison is one person's, and it is not even-handed: the expression
+style was not allowed unpublished intermediates or calls with two outputs,
+which is most of why it fails cases 5 and 8. `signals.yaml`, the file that
+was then made to run, is itself half formulas: 11 of its 22 blocks are
+`expr`.
 
 ## The block engine
 
@@ -111,9 +118,10 @@ off the runtime, so that a block file has a meaning that can be tested.
 
 `signals.yaml` differs from `style-c-blocks.yaml` in three ways. It uses ten
 block types where the strawman used seventeen, because arithmetic,
-comparison and logic are all the `expr` block. A stateful block has to say
-what an input that is not good does to it (`on_bad`), and leaving that out
-is a load error. Numbers found on the bench are named under `constants`.
+comparison and logic are all the `expr` block. Three of the stateful block
+types (`held_for`, `window_stats`, `integrate`) have to say what an input
+that is not good does to them (`on_bad`), and leaving that out is a load
+error. The other stateful types have no such setting yet. Numbers found on the bench are named under `constants`.
 
 ```bash
 python3 tools/derived-signals/engine_check.py \
@@ -126,18 +134,38 @@ three:
 
 - **A.** The file loads, and eleven deliberate mistakes in it are each
   refused, a misspelt setting and a left-out `on_bad` among them.
-- **B.** On the five guard traces `heater/trip` goes true at the same tick,
-  for the same reason, as the reference detectors under both bad-input
-  policies, and as `heater_guard.py` itself.
-- **C.** Over 17,281 ticks of the overnight run every compared signal equals
-  the reference to within 4e-15, and `ph/steady` changes state on the same
-  ticks over the calibration.
+- **B.** On the six guard traces `heater/trip` first goes true at the same
+  tick, for the same reason, as the reference detectors under both
+  bad-input policies, and as `heater_guard.py` itself. Only the first trip
+  is compared, not every tick.
+- **C.** Over 17,281 ticks of the overnight run, eleven of the seventeen
+  published signals are compared and each equals the reference to within
+  4e-15. `ph/steady` changes state on the same ticks over the calibration.
+  The four detectors and the suggested pad setpoint are not compared.
 
 The check was itself checked: `engine.py` was broken eight ways, one at a
 time, and `engine_check.py` had to fail each time. Seven did at once.
 Swapping the two window policies did not, because the recordings have no bad
 sample inside a window. The synthetic window trace in part B was added for
 that, and all eight now fail.
+
+An independent review then broke the engine 37 more ways, and the check
+caught 4. What it does not test:
+
+- **Bad input.** Every recorded sample that night has quality `OK`, so
+  nothing in part C exercises a bad input, three-valued logic or a
+  fallback.
+- **The difference between bad and not ready.** The comparison treats both
+  as "no value".
+- **Anything the two implementations share.** One person wrote both, one
+  after the other. They share their arithmetic, the sample-and-hold grid,
+  the 2.5 s period, and how a bad sample is made up for a synthetic trace.
+- **The slope in case 5.** All seven changes of `ph/steady` are decided by
+  the spread alone.
+
+Since the review, a fallback that gives the wrong value fails the run, and
+the reference's `hold` policy was changed to match the engine's: the timer
+runs on and can trip while the input is still bad.
 
 What the engine had to decide to run at all, and so what the RFC now has to
 decide on purpose:
@@ -151,6 +179,18 @@ decide on purpose:
   cannot tell it from a computed value.
 - `integrate` accepts `persist` and `reset_on` and implements neither.
 - Units are carried on published signals and never checked.
+
+Known defects, found in review and not fixed:
+
+- Several malformed files load and then fail while ticking: a window
+  shorter than the period, zero samples, a zero time constant.
+- A reading that is not a number, with quality `OK`, passes every
+  comparison as false and poisons `integrate` and `kalman1` for good.
+- `median` reports its last good values through any length of bad input.
+- A block-level fallback on a block with two outputs replaces both, and
+  `on_bad: hold` holds for ever.
+- `integrate`, `kalman1` and the window length assume a fixed period;
+  `held_for`, `since_true` and the slope use the time they are given.
 
 ## What this does not show
 

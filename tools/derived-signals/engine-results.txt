@@ -20,11 +20,13 @@ PART B  heater/trip on synthetic traces, evaluated every 2.5 s
   liquid reading bad from t=50           hold      no_good_reading @ 170.0    no_good_reading @ 170.0
   pad 4 C below liquid from t=100        reset       pad_detached @ 1902.5      pad_detached @ 1902.5
   pad 4 C below liquid from t=100        hold        pad_detached @ 1902.5      pad_detached @ 1902.5
-  same, one bad pad reading at t=1000    reset                     no trip                    no trip
+  same, one bad pad reading at t=1000    reset       pad_detached @ 2805.0      pad_detached @ 2805.0
   same, one bad pad reading at t=1000    hold        pad_detached @ 1902.5      pad_detached @ 1902.5
+  same, pad reading bad t=1900 to 1910   reset       pad_detached @ 3715.0      pad_detached @ 3715.0
+  same, pad reading bad t=1900 to 1910   hold        pad_detached @ 1902.5      pad_detached @ 1902.5
   one 1.8 C pad sample at t=500          reset                     no trip                    no trip
   one 1.8 C pad sample at t=500          hold                      no trip                    no trip
-  heater_guard.py trips at the same tick as the engine (reset policy) on all five: True
+  heater_guard.py trips at the same tick as the engine (reset policy) on all 6: True
   window of 10 with one bad sample, on_bad skip : ready on 31 of 40 ticks, the same as the reference
   window of 10 with one bad sample, on_bad reset: ready on 21 of 40 ticks, the same as the reference
 

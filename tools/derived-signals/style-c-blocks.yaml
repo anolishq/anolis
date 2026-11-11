@@ -3,7 +3,7 @@
 # project's own behavior-tree nodes and provider config schemas.
 #
 # Strawman only. Nothing reads this file except lint.py.
-# Shared assumptions for all three styles are in exercise.md, "Ground rules".
+# Shared assumptions for all three styles are in README.md, "Ground rules".
 #
 # An input is a device signal (provider/device/signal), another block's
 # output (block_id.port), a parameter ({ param: name }) or a constant.

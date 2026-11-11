@@ -3,7 +3,7 @@
 
 Three parts:
   A. signals.yaml loads, and eleven deliberate mistakes in it are each refused.
-  B. On the five synthetic guard traces the engine's `heater/trip` goes true
+  B. On the synthetic guard traces the engine's `heater/trip` goes true
      at the same tick, for the same reason, as the reference detectors (and as
      heater_guard.py itself, with --guard).
   C. Replayed over the recordings, every published signal equals the
@@ -125,7 +125,7 @@ def part_b(doc, guard_path):
         reference.GUARD_PY = guard_path
         Guard = reference.load_real_guard()
         args = argparse.Namespace(pad_max=70.0, liquid_max=45.0, stale=120.0, detach_delta=3.0, detach_seconds=1800.0)
-        same_all = True
+        same_all, count = True, len(reference.guard_traces())
         for rows in reference.guard_traces().values():
             guard = Guard(args)
             guard.last_good = 0.0
@@ -136,7 +136,7 @@ def part_b(doc, guard_path):
             t_real, _ = reference.first_trip(real, rows)
             t_eng, _ = engine_first_trip(doc, rows)
             same_all = same_all and t_real == t_eng
-        print(f"  heater_guard.py trips at the same tick as the engine (reset policy) on all five: {same_all}")
+        print(f"  heater_guard.py trips at the same tick as the engine (reset policy) on all {count}: {same_all}")
         ok = ok and same_all
     ok = window_policies() and ok
     print()
@@ -195,7 +195,7 @@ def part_c(doc, archive, room_csv):
 
     eng = engine.Engine(doc, PARAMS)
     stats = {sig: dict(both=0, readiness=0, worst=0.0) for sig in eng.published}
-    substituted = 0
+    substituted = fallback_wrong = 0
     for row, (t, snap) in zip(trace, reference.grid(series, start, end), strict=True):
         assert row["t"] == t
         out = eng.tick(t, snap)
@@ -205,7 +205,9 @@ def part_c(doc, archive, room_csv):
                 continue
             want = row[key]
             if key == "compensation_c" and want is None:
-                substituted += val.state == engine.GOOD and val.v == PARAMS["compensation_temp_c"]
+                used = val.state == engine.GOOD and val.v == PARAMS["compensation_temp_c"]
+                substituted += used
+                fallback_wrong += not used
                 continue
             have = val.v if val.state == engine.GOOD else None
             if (want is None) != (have is None):
@@ -225,7 +227,9 @@ def part_c(doc, archive, room_csv):
     print(
         f"  probes/compensation_c used its fallback parameter for the first {substituted} ticks, "
         f"while the 5-minute window filled"
+        + (f"; on {fallback_wrong} such ticks it gave something else   DIFFERENT" if fallback_wrong else "")
     )
+    ok = ok and fallback_wrong == 0
     not_compared = sorted(sig for sig, s in stats.items() if s["both"] == 0 and s["readiness"] == 0)
     print(f"  not compared here (no reference series): {', '.join(not_compared)}")
 
