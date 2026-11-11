@@ -335,8 +335,12 @@ ROOM = "room"
 BENCH_DUTY = {22: 27.5, 0: 23.2, 2: 18.9, 4: 18.1, 6: 17.6, 8: 16.9, 9: 16.9}
 
 
-def night(mask=None):
-    """One pass over the 2026-11-08 overnight run. mask=(a, b) hides t1 between a and b."""
+def night(mask=None, trace=None):
+    """One pass over the 2026-11-08 overnight run. mask=(a, b) hides t1 between a and b.
+
+    A list passed as `trace` receives one dict of every case's value per tick,
+    which engine_check.py compares the block engine against.
+    """
     start, end = ts("2026-11-09T03:00:00"), ts("2026-11-09T15:00:00")
     series = load(start, end, [T1, T2, RELAY, SP])
     series[ROOM] = load_room()
@@ -422,6 +426,23 @@ def night(mask=None):
         # case 8: one-state filter
         x, sig = kf.step(pred, t1c)
         res["last"] = dict(t=t, t1c=t1c, pred=pred, gap=gap, x=x, sig=sig, d10=d10)
+        if trace is not None:
+            trace.append(
+                dict(
+                    t=t,
+                    pad_c=t2c,
+                    liquid_c=t1c,
+                    pad_liquid_gap_c=gap,
+                    liquid_steady_c=pred,
+                    trip=bool(res["trips_raw"]) and res["trips_raw"][-1][0] == t,
+                    duty_10m=d10,
+                    power_w=None if d10 is None else d10 * VOLTS * AMPS,
+                    compensation_c=last_db,
+                    liquid_estimate_c=x,
+                    liquid_estimate_sigma_c=sig,
+                    energy_wh=energy_wh,
+                )
+            )
         if mask and abs(t - mask[1]) < DT / 2:
             res["mask_end"] = dict(x=x, sig=sig, actual=(t1.v - BIAS) if ok(t1) else None)
         if mask and abs(t - (mask[0] - DT)) < DT / 2:
@@ -438,6 +459,27 @@ def night(mask=None):
         rows={k: len(v) for k, v in series.items()},
     )
     return res
+
+
+PH_WINDOW = ("2026-11-02T14:45:00", "2026-11-02T16:45:00")
+
+
+def ph_changes():
+    """Case 5. Steady detection over the 2026-11-02 pH calibration: every change of state."""
+    start, end = ts(PH_WINDOW[0]), ts(PH_WINDOW[1])
+    series = load(start, end, [PH])
+    win, state, changes = Trailing(600), None, []
+    for t, s in grid(series, start, end):
+        if ok(s[PH]):
+            win.push(t, s[PH].v)
+        else:
+            win.clear()
+        slope, spread = win.slope_per_min(), win.spread()
+        steady = None if slope is None else (abs(slope) < 0.002 and spread < 0.02)
+        if steady != state:
+            changes.append((t, steady, slope, spread, s[PH].v if s[PH] else None))
+            state = steady
+    return changes
 
 
 def part2():
@@ -512,20 +554,7 @@ def part2():
     )
     print()
 
-    # case 5: steady detection on the 2026-11-02 pH calibration
-    start, end = ts("2026-11-02T14:45:00"), ts("2026-11-02T16:45:00")
-    series = load(start, end, [PH])
-    win, state, changes = Trailing(600), None, []
-    for t, s in grid(series, start, end):
-        if ok(s[PH]):
-            win.push(t, s[PH].v)
-        else:
-            win.clear()
-        slope, spread = win.slope_per_min(), win.spread()
-        steady = None if slope is None else (abs(slope) < 0.002 and spread < 0.02)
-        if steady != state:
-            changes.append((t, steady, slope, spread, s[PH].v if s[PH] else None))
-            state = steady
+    changes = ph_changes()
     print("case 5  pH steady = 10-min window full, |slope| < 0.002 pH/min, spread < 0.02 pH  (2026-11-02, EST)")
     print(f"    {len(changes)} state changes in 09:45 to 11:45 EST; the first ten:")
     for t, st, slope, spread, v in changes[:10]:

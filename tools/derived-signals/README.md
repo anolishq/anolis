@@ -17,6 +17,10 @@ writes the same nine in three declaration styles and compares them.
 | `style-c-blocks.yaml` | A graph of typed blocks. |
 | `lint.py` | Loads the three files, compares them, and breaks each on purpose. Needs PyYAML. |
 | `lint-results.txt` | Its output. |
+| `signals.yaml` | The nine cases as a block file that can be run. |
+| `engine.py` | A catalogue of ten block types and an interpreter for a block file. Stdlib only, plus PyYAML to load a file. |
+| `engine_check.py` | Compares the engine with `reference.py`, tick by tick. |
+| `engine-results.txt` | Its output on the same recordings. |
 
 ## Ground rules
 
@@ -100,13 +104,62 @@ Style B used its plain chain for 12 of 21 nodes, a two-input form for 7 and a
 block form for 2. Style C used 17 block types across 26 blocks, 10 of them
 unpublished intermediates. The counts are in `lint-results.txt`.
 
+## The block engine
+
+The spike for the RFC's open decision O3: the block style made executable,
+off the runtime, so that a block file has a meaning that can be tested.
+
+`signals.yaml` differs from `style-c-blocks.yaml` in three ways. It uses ten
+block types where the strawman used seventeen, because arithmetic,
+comparison and logic are all the `expr` block. A stateful block has to say
+what an input that is not good does to it (`on_bad`), and leaving that out
+is a load error. Numbers found on the bench are named under `constants`.
+
+```bash
+python3 tools/derived-signals/engine_check.py \
+  --guard ../anolis-projects/projects/bioreactor-v1/scripts/heater_guard.py
+```
+
+Parts A and B need no recordings. Part C takes the same `--archive` and
+`--room-csv` as `reference.py`. `engine-results.txt` is the output with all
+three:
+
+- **A.** The file loads, and eleven deliberate mistakes in it are each
+  refused, a misspelt setting and a left-out `on_bad` among them.
+- **B.** On the five guard traces `heater/trip` goes true at the same tick,
+  for the same reason, as the reference detectors under both bad-input
+  policies, and as `heater_guard.py` itself.
+- **C.** Over 17,281 ticks of the overnight run every compared signal equals
+  the reference to within 4e-15, and `ph/steady` changes state on the same
+  ticks over the calibration.
+
+The check was itself checked: `engine.py` was broken eight ways, one at a
+time, and `engine_check.py` had to fail each time. Seven did at once.
+Swapping the two window policies did not, because the recordings have no bad
+sample inside a window. The synthetic window trace in part B was added for
+that, and all eight now fail.
+
+What the engine had to decide to run at all, and so what the RFC now has to
+decide on purpose:
+
+- A value on a wire is good, not ready, or bad. `and` and `or` are
+  three-valued: one true operand decides an `or`, one false an `and`.
+- `held_for` with `on_bad: reset` passes the bad state of its input through
+  as its output. `since_true` starts its clock at the first tick.
+- A block-level `on_bad: { use: ... }` puts a fallback in place of an output
+  that is not good. Nothing marks the result as a fallback, so a consumer
+  cannot tell it from a computed value.
+- `integrate` accepts `persist` and `reset_on` and implements neither.
+- Units are carried on published signals and never checked.
+
 ## What this does not show
 
 - One machine, one night and one calibration session. Nothing here exercised
   inputs with skewed timestamps, a provider restart or a runtime restart.
 - One person wrote all three styles and the reference, in that order. The
   line counts depend on formatting choices.
-- No style was implemented, and `lint.py` is not a parser.
+- Only the block style was implemented, in Python, as an oracle. `lint.py`
+  is not a parser.
 - The filter in case 8 uses illustrative tuning. The 35.4 W in cases 6 and 9
   is 12 V × 2.95 A from a single current reading, not metered.
 - The two thresholds in case 5 were chosen before the run and not tuned

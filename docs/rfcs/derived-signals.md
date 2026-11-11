@@ -148,7 +148,23 @@ false, so a `trip` that ORs four detectors needs a rule for unknown operands.
 Question: what is the default policy of each stateful block, is stating it
 required, and what does a consumer of a boolean see when it is unknown?
 
-Settled by: the rule table, then new traces in the reference for each row.
+The spike had to pick rules to run at all. They are a starting point, not a
+decision:
+
+- A stateful block has no default. `held_for`, `window_stats` and
+  `integrate` must each state `on_bad`, and a file that leaves it out does
+  not load.
+- `and` and `or` are three-valued: one true operand decides an `or`, one
+  false operand an `and`, and otherwise an operand that is not good makes
+  the result not good.
+- `held_for` with `on_bad: reset` gives its input's bad state as its output
+  while the input is bad.
+- A block may name a fallback for an output that is not good. Nothing marks
+  the result as a fallback, so a consumer cannot tell it from a computed
+  value. That belongs with O1.
+
+Settled by: the rule table for every block type, with a synthetic trace for
+each row.
 
 ### O3. The block catalogue and its schema
 
@@ -159,12 +175,31 @@ how is a block type's settings schema written and checked? A misspelt
 setting was caught in none of the three styles; catching it needs the
 catalogue.
 
-Settled by: a spike that makes the block file executable off the runtime, in
-Python, and reproduces the reference outputs. It then serves as the oracle
-any implementation is tested against, and as a way to run a definition over
-recorded data before trusting it. The exercise's own first draft of the
-compensation signal rounded to 0.5 °C and changed value 111 times in one
-night; a deadband changed 8 times. Only the replay showed it.
+A spike has answered the first half. `tools/derived-signals/engine.py` runs
+a block file off the runtime, in Python:
+
+- Ten block types cover all nine cases: `median`, `expr`, `all_good`,
+  `since_true`, `latch`, `held_for`, `window_stats`, `deadband`, `kalman1`
+  and `integrate`. Arithmetic, comparison and logic are all `expr`.
+- Its outputs equal the reference at every tick of the overnight run and on
+  every synthetic trace, and it trips where `heater_guard.py` trips.
+- Eleven mistakes in a block file are refused at load, the misspelt setting
+  among them.
+
+It is the oracle a later implementation is tested against, and a way to run
+a definition over recorded data before trusting it. The exercise's own first
+draft of the compensation signal rounded to 0.5 °C and changed value 111
+times in one night; a deadband changed 8 times. Only the replay showed it.
+
+Recorded data is not enough of an oracle by itself. With the engine's two
+window policies swapped, the comparison still passed, because the recordings
+have no bad sample inside a window. Each bad-input policy needs a synthetic
+trace of its own.
+
+Still open: how a block type's schema is published (in the spike it is
+Python), who may add a type, whether the `expr` language is the right one
+(the spike uses a small subset of Python's expression syntax), and whether
+units are checked or only carried.
 
 ### O4. A home for machine constants
 
@@ -174,7 +209,8 @@ the filter tuning. Today they are in the runbook. `automation.parameters`
 is the only place for a number, and it is the operator's.
 
 Question: where does a constant found on the bench live, and can an operator
-change it?
+change it? The spike names them in a `constants` map at the top of the block
+file, beside the blocks that use them.
 
 ### O5. State across a restart
 
@@ -286,8 +322,8 @@ block file against the oracle from O3.
    evidence, before any decision is marked accepted.
 2. The open decisions are worked one at a time, each by the method named
    under it, and each lands here as a change to this file.
-3. O3's spike comes first, because O1, O2 and O5 can then be tested and not
-   only argued.
+3. O3's spike came first, so that O1, O2 and O5 can be tested against it and
+   not only argued.
 4. O10 is decided last, and reviewed independently before it is.
 5. Accepted, the RFC becomes an epic with increments.
 

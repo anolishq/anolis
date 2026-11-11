@@ -1,0 +1,48 @@
+PART A  loading signals.yaml
+  loads: 22 blocks of 10 types, 17 published signals, 6 device signals read
+  misspelt setting                   refused: block pad: unknown setting(s) ['sampels']
+  bad-input policy left out          refused: block pad_detached: missing setting 'on_bad'
+  unknown bad-input policy           refused: block ph_window: setting 'on_bad' must be one of ['skip', 'reset']
+  unknown block type                 refused: block pad: unknown type 'medain'
+  unknown output of a block          refused: block gap: block pad has no output 'out'
+  dependency loop                    refused: dependency loop among ['compensation', 'gap', 'liquid', 'liquid_5m', 'liquid_estimate']
+  undeclared name in a formula       refused: block gap: formula uses undeclared name 'liquidd'
+  unknown constant                   refused: block liquid: no constant 'liquid_bais_c'
+  unsupported syntax in a formula    refused: block liquid: formula uses unsupported syntax (BinOp)
+  setting of the wrong type          refused: block no_good_reading: setting 'longer_than_s' must be a number
+  one signal published twice         refused: block gap: heater/pad_c is published twice
+
+PART B  heater/trip on synthetic traces, evaluated every 2.5 s
+  trace                                  policy                  reference                     engine
+  pad over 70 from t=100                 reset       over_temp_pad @ 100.0      over_temp_pad @ 100.0
+  pad over 70 from t=100                 hold        over_temp_pad @ 100.0      over_temp_pad @ 100.0
+  liquid reading bad from t=50           reset     no_good_reading @ 170.0    no_good_reading @ 170.0
+  liquid reading bad from t=50           hold      no_good_reading @ 170.0    no_good_reading @ 170.0
+  pad 4 C below liquid from t=100        reset       pad_detached @ 1902.5      pad_detached @ 1902.5
+  pad 4 C below liquid from t=100        hold        pad_detached @ 1902.5      pad_detached @ 1902.5
+  same, one bad pad reading at t=1000    reset                     no trip                    no trip
+  same, one bad pad reading at t=1000    hold        pad_detached @ 1902.5      pad_detached @ 1902.5
+  one 1.8 C pad sample at t=500          reset                     no trip                    no trip
+  one 1.8 C pad sample at t=500          hold                      no trip                    no trip
+  heater_guard.py trips at the same tick as the engine (reset policy) on all five: True
+  window of 10 with one bad sample, on_bad skip : ready on 31 of 40 ticks, the same as the reference
+  window of 10 with one bad sample, on_bad reset: ready on 21 of 40 ticks, the same as the reference
+
+PART C  replay of the 2026-11-08 overnight run: 17281 ticks
+  signal                             ticks compared  ready/not-ready differs   largest difference
+  heater/pad_c                                17279                        0                    0
+  heater/liquid_c                             17281                        0                    0
+  heater/pad_liquid_gap_c                     17279                        0                    0
+  heater/liquid_steady_c                      16849                        0                    0
+  heater/trip                                 17281                        0                    0
+  heater/duty_10m                             17042                        0                    0
+  heater/power_w                              17042                        0             1.78e-15
+  probes/compensation_c                       17162                        0                    0
+  heater/liquid_estimate_c                    17281                        0             3.55e-15
+  heater/liquid_estimate_sigma_c              17281                        0             3.47e-18
+  heater/energy_wh                            17281                        0             2.22e-16
+  probes/compensation_c used its fallback parameter for the first 119 ticks, while the 5-minute window filled
+  not compared here (no reference series): heater/no_good_reading, heater/over_temp_liquid, heater/over_temp_pad, heater/pad_detached, heater/pad_suggested_c, ph/steady
+  ph/steady over the 2026-11-02 calibration: 7 changes of state, the same ticks as the reference
+
+ALL THE SAME
