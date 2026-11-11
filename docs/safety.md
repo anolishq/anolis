@@ -213,8 +213,8 @@ Once a FAULT has been requested, a transition that moves toward actuation, into
 remaining hook calls refused ("a FAULT was requested during this transition"). If
 it has not committed yet, it is refused at its commit as well ("during this
 transition", or "during this recovery" from FAULT). If it already committed, its
-remaining after-hooks are refused and the FAULT follows. A hook already sending to its
-provider finishes first, and a FAULT hook to the same provider waits for it, so
+remaining after-hooks are refused and the FAULT follows. A hook already sending to
+its provider finishes first, and a FAULT hook to the same provider waits for it, so
 FAULT's hooks have the last word on that provider. Hooks of a transition that
 leaves `AUTO` or enters `IDLE` are never refused for this reason, because by
 convention they make outputs safe and a FAULT from `MANUAL` may have no hook of
