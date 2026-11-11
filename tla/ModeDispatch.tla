@@ -31,10 +31,12 @@ VARIABLES
     prev,        \* per caller: the mode it actually committed from
     tree,        \* "idle", "node", "wait"
     faultLost,   \* history: a FAULT request ended without FAULT committing
+    faultSeen,   \* per caller: the mark the recovery guard reads (#774)
+    faultSince,  \* history, per caller: a FAULT was requested since this request began
     autoWhileLatched  \* history: AUTO was committed while the stop latch held
 
 vars == <<mode, output, latched, laddered, hookless, pc, from, target, prev,
-          tree, faultLost, autoWhileLatched>>
+          tree, faultLost, faultSeen, faultSince, autoWhileLatched>>
 
 -----------------------------------------------------------------------------
 (* The guards under test. Each is replaced in a regression configuration   *)
@@ -77,9 +79,16 @@ IdleIgnoresAfterHooks(t) == TRUE
 \* A fix that missed AUTO -> FAULT.
 IdleIgnoresFaultAfterHooks(t) == t = "IDLE" => ~LeaveAutoAfterRunningOrdinaryOnly
 
+\* #774: a recovery overtaken by a FAULT request made in FAULT does not commit.
+RecoveryMayCommit(c) == ~faultSeen[c]
+\* #774 as found: the FAULT request was a no-op and the recovery committed.
+RecoveryIgnoresFault(c) == TRUE
+
 OrdinaryMayCommit(c) == mode = from[c] /\ ~FaultPending /\ AutoGate(c) /\ IdleMayCommit(target[c])
-\* #763: an ordinary transition could commit during a pending FAULT.
-OrdinaryIgnoresFault(c) == mode = from[c] /\ AutoGate(c)
+                        /\ RecoveryMayCommit(c)
+\* #763: an ordinary transition could commit during a pending FAULT. Only
+\* that guard is dropped, so the regression fails for #763 alone.
+OrdinaryIgnoresFault(c) == mode = from[c] /\ AutoGate(c) /\ IdleMayCommit(target[c]) /\ RecoveryMayCommit(c)
 
 FaultMayCommit(c) == TRUE
 \* #528: a concurrent change made the FAULT refuse.
@@ -98,6 +107,8 @@ Init ==
     /\ prev = [c \in Callers |-> mode]
     /\ tree = "idle"
     /\ faultLost = FALSE
+    /\ faultSeen = [c \in Callers |-> FALSE]
+    /\ faultSince = [c \in Callers |-> FALSE]
     /\ autoWhileLatched = FALSE
 
 Begin(c, t) ==
@@ -114,11 +125,30 @@ Begin(c, t) ==
 RequestOrdinary(c) ==
     /\ ~FaultPending
     /\ \E t \in Modes : <<mode, t>> \in Ordinary /\ IdleMayStart(t) /\ Begin(c, t)
+    /\ faultSeen' = [faultSeen EXCEPT ![c] = FALSE]
+    /\ faultSince' = [faultSince EXCEPT ![c] = FALSE]
 
-\* set_mode(FAULT) in FAULT is a no-op that returns at once.
+\* Every FAULT request is counted, in any mode, and a recovery from FAULT under
+\* way when it is made sees it (#774).
+RecoveryInFlight(x) == pc[x] \in {"before", "commit"} /\ from[x] = "FAULT"
+FaultRequestSince == [x \in Callers |-> faultSince[x] \/ RecoveryInFlight(x)]
+MarkOnFaultRequest == [x \in Callers |-> faultSeen[x] \/ RecoveryInFlight(x)]
+\* A fix that counts only a FAULT request made in FAULT.
+MarkOnFaultRequestNotCounted == faultSeen
+
 RequestFault ==
     /\ mode # "FAULT"
     /\ Begin(Fault, "FAULT")
+    /\ faultSeen' = MarkOnFaultRequest
+    /\ faultSince' = FaultRequestSince
+
+\* set_mode(FAULT) in FAULT is a no-op that returns at once, but still counts.
+RequestFaultInFault ==
+    /\ mode = "FAULT"
+    /\ pc[Fault] = "idle"
+    /\ faultSeen' = [x \in Callers |-> faultSeen[x] \/ RecoveryInFlight(x)]
+    /\ faultSince' = FaultRequestSince
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
 
 \* A before-hook is chosen by the snapshot taken at the request. Its call goes
 \* through the router too, and meets the IDLE gate if another exit from AUTO
@@ -128,7 +158,7 @@ RunBefore(c) ==
     /\ pc' = [pc EXCEPT ![c] = "commit"]
     /\ output' = IF HookAt = "before" /\ from[c] = "AUTO" /\ target[c] # "AUTO" /\ mode # "IDLE"
                  THEN "safe" ELSE output
-    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 CommitOrdinary(c) ==
     /\ pc[c] = "commit"
@@ -137,9 +167,10 @@ CommitOrdinary(c) ==
             /\ prev' = [prev EXCEPT ![c] = mode]
             /\ pc' = [pc EXCEPT ![c] = "after"]
             /\ autoWhileLatched' = (autoWhileLatched \/ (target[c] = "AUTO" /\ latched))
+            /\ faultLost' = (faultLost \/ faultSince[c])
        ELSE /\ pc' = [pc EXCEPT ![c] = "idle"]
-            /\ UNCHANGED <<mode, prev, autoWhileLatched>>
-    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, faultLost>>
+            /\ UNCHANGED <<mode, prev, autoWhileLatched, faultLost>>
+    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, faultSeen, faultSince>>
 
 CommitFault ==
     /\ pc[Fault] = "commit"
@@ -151,7 +182,7 @@ CommitFault ==
        ELSE /\ pc' = [pc EXCEPT ![Fault] = "idle"]
             /\ faultLost' = TRUE
             /\ UNCHANGED <<mode, prev>>
-    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, autoWhileLatched>>
+    /\ UNCHANGED <<output, latched, laddered, hookless, from, target, tree, autoWhileLatched, faultSeen, faultSince>>
 
 \* An after-hook is chosen by the mode actually committed from. Its call goes
 \* through the router, whose IDLE gate refuses it (#776).
@@ -160,20 +191,20 @@ RunAfter(c) ==
     /\ pc' = [pc EXCEPT ![c] = "idle"]
     /\ output' = IF HookAt = "after" /\ prev[c] = "AUTO" /\ target[c] # "AUTO" /\ mode # "IDLE"
                  THEN "safe" ELSE output
-    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 \* The tick reads the mode once, then runs its nodes with no further check.
 TickStart ==
     /\ tree = "idle"
     /\ mode = "AUTO"
     /\ tree' = "node"
-    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 \* A node has entered the router and now waits for the provider lock.
 NodeWaits ==
     /\ tree = "node"
     /\ tree' = "wait"
-    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, output, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 \* The provider lock serializes the check, the send and every hook call, so
 \* one step can stand for them: a hook's own call is ordered after this one.
@@ -182,7 +213,7 @@ Dispatch ==
     /\ tree = "wait"
     /\ output' = IF TreeMayDispatch THEN "driven" ELSE output
     /\ tree' \in {"node", "idle"}
-    /\ UNCHANGED <<mode, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, latched, laddered, hookless, pc, from, target, prev, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 \* A restart that leaves AUTO uncovered. The branch that does this during AUTO
 \* faults the runtime and is not modelled.
@@ -190,28 +221,28 @@ RestartDropsHook ==
     /\ ~hookless
     /\ mode # "AUTO"
     /\ hookless' = TRUE
-    /\ UNCHANGED <<mode, output, latched, laddered, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, output, latched, laddered, pc, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 EngageStop ==
     /\ ~latched
     /\ latched' = TRUE
-    /\ UNCHANGED <<mode, output, laddered, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, output, laddered, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 RunLadder ==
     /\ latched /\ ~laddered
     /\ laddered' = TRUE
     /\ output' = "safe"
-    /\ UNCHANGED <<mode, latched, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, latched, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 ClearStop ==
     /\ latched /\ laddered
     /\ latched' = FALSE
     /\ laddered' = FALSE
-    /\ UNCHANGED <<mode, output, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched>>
+    /\ UNCHANGED <<mode, output, hookless, pc, from, target, prev, tree, faultLost, autoWhileLatched, faultSeen, faultSince>>
 
 Next ==
     \/ \E c \in Ops : RequestOrdinary(c) \/ CommitOrdinary(c)
-    \/ RequestFault
+    \/ RequestFault \/ RequestFaultInFault
     \/ CommitFault
     \/ \E c \in Callers : RunBefore(c) \/ RunAfter(c)
     \/ TickStart \/ NodeWaits \/ Dispatch
@@ -230,7 +261,8 @@ Settled == tree = "idle" /\ \A c \in Callers : pc[c] = "idle"
 \* word: no tree command landed after it (#762, #763).
 SafeWhenSettledOutsideAuto == (Settled /\ mode # "AUTO") => output = "safe"
 
-\* A FAULT request that reaches its commit is never refused (#528).
+\* A FAULT request is never lost: one that reaches its commit is not refused
+\* (#528), and one made in FAULT is not overtaken by a recovery (#774).
 FaultAlwaysCommits == ~faultLost
 
 \* AUTO is never entered without a hook covering it (#239).

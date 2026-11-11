@@ -24,7 +24,7 @@ TLC_INVARIANT_VIOLATED = 12
 
 # Exact state counts. A narrowed guard or a shrunken model shows up as a changed
 # number in the diff, which a reviewer has to explain.
-PASSING = {"before-hook.cfg": ("before", 951279), "after-hook.cfg": ("after", 1017246)}
+PASSING = {"before-hook.cfg": ("before", 1113765), "after-hook.cfg": ("after", 1187868)}
 
 # Each must fail on exactly this invariant. A failure for any other reason, a
 # parse error included, is not a pass.
@@ -36,6 +36,8 @@ MUST_FAIL = {
     "regressions/issue-762-before-hook.cfg": "SafeWhenSettledOutsideAuto",
     "regressions/issue-762-mode-recheck-only.cfg": "SafeWhenSettledOutsideAuto",
     "regressions/issue-763-ordinary-during-fault.cfg": "SafeWhenSettledOutsideAuto",
+    "regressions/issue-774-fault-counted-only-in-fault.cfg": "FaultAlwaysCommits",
+    "regressions/issue-774-fault-during-recovery.cfg": "FaultAlwaysCommits",
     "regressions/issue-776-fault-after-hook.cfg": "SafeWhenSettledOutsideAuto",
     "regressions/issue-776-idle-before-after-hook.cfg": "SafeWhenSettledOutsideAuto",
     "regressions/issue-776-idle-checked-at-request-only.cfg": "SafeWhenSettledOutsideAuto",

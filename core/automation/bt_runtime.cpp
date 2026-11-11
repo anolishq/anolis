@@ -439,7 +439,8 @@ void BTRuntime::tick_loop() {
                     << mode_error);
             } else if (mode_before == RuntimeMode::FAULT) {
                 // set_mode() no-ops when already in the target mode, so no hooks
-                // ran here and this tick changed nothing.
+                // ran here, but the request still refuses a recovery from FAULT
+                // that is under way (#774).
                 LOG_WARN("[BTRuntime] Tick exception while already in FAULT; autonomous actuation already halted.");
             } else {
                 LOG_ERROR("[BTRuntime] Halted autonomous actuation after a tick exception; mode is now "

@@ -41,11 +41,16 @@ modelled, `allowed_modes` included. The stop's ladder always makes the output
 safe: a stop chain hold that sends nothing, a plan that drives nothing, and a
 latch restored at startup are not modelled.
 
-A FAULT request made while already in FAULT is the no-op `set_mode` makes it, so
-one made during a recovery is lost here as it is in the code. A restart that faults
-a machine in AUTO and a transition vetoed by a callback are not modelled. There is
-no liveness property: `FaultAlwaysCommits` only says a FAULT that reaches its
-commit is not refused.
+A FAULT request made while already in FAULT returns at once, as `set_mode` does.
+Every FAULT request, in any mode, still stops a recovery from FAULT that it
+overlaps (#774). A lost FAULT is judged by a history of FAULT requests that the
+recovery's guard does not read. In the passing configurations the guard's mark
+and that history always agree, so those runs only show the guard is in place;
+the two #774 regressions show what dropping or narrowing it loses. There is one FAULT caller, so a FAULT requested
+while another FAULT runs its after-hooks is not modelled. A restart
+that faults a machine in AUTO and a transition vetoed by a callback are not
+modelled. There is no liveness property: `FaultAlwaysCommits` only says a FAULT
+request is not refused at its commit and not overtaken by a recovery.
 
 ## Run it
 
