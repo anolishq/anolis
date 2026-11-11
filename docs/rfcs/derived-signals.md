@@ -481,8 +481,33 @@ Question: is the layer's engine new code, FluxGraph extended with fan-in and
 value states, or a core that both share? One engine would let one model
 serve as the simulator's plant and as an estimator's predictor.
 
-Settled by: O1, O2 and O7 first, since they define what an engine has to
-do, then a count of what FluxGraph would have to change to do it.
+A spike has measured the fit. On an unpublished branch of FluxGraph, with
+nothing in the library changed, the ten block types of O3 were written as
+FluxGraph models and run against test vectors from `tools/derived-signals/
+vectors.py`. Every output matches at every tick, by state and by value,
+including 28,900 comparisons over the nine cases. So the engine's lifecycle,
+namespace and store carry a block graph as they are. What the model
+interface does not give a block:
+
+- A signal is one number, so each wire became two signals, a value and a
+  state.
+- A signal nobody has written reads as 0.
+- The compiler does not order models and does not see their inputs. Two
+  models that read each other's output compile and run, each a tick behind
+  the other, with no error.
+- Only a model can take two inputs, so every block was a model, and none of
+  FluxGraph's own transforms could be reused.
+- A model is not told the period when it is built, or the time when it runs.
+- A model's spec has no input or output ports, only parameters.
+
+Those land on the engine, the compiler, the graph spec, the signal store
+and the two interfaces: 1,550 of the library's 6,095 lines. The models,
+transforms, loaders and units, about 4,300 lines, keep their content and
+change how they read and write.
+
+Settled by: O1, O2 and O7 first, since they define what the new core has to
+do. The count above is the cost side; it says extending FluxGraph is a
+redesign of its core, not of the whole.
 
 ## Rejected
 

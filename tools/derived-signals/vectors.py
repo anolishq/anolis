@@ -14,6 +14,12 @@ right: a wrong rule in engine.py is a wrong expectation here.
 Files, tab-separated with a header line:
   <name>.inputs.tsv    tick  t  signal  state  value
   <name>.expected.tsv  tick  signal  state  value
+  <name>.graph.tsv     block  type  field  key  value
+<name>.graph.tsv is the block file flattened for a reader with no YAML
+parser: blocks in evaluation order, one row per input (field "in"), output
+("out", the value being the published signal, if any), setting ("param",
+durations in seconds) and fallback ("fallback"). An input's value is
+sig:<signal or block.port> or num:<number>.
 state is good, not_ready or bad; an input that is missing is not_ready.
 value is empty unless the state is good. Booleans are 1 and 0.
 """
@@ -94,6 +100,14 @@ BLOCK_VECTORS = {
     "held_hold": (block_doc("held_for", {"seconds": 50, "on_bad": "hold"}), bool_pulses()),
     "since_true": (block_doc("since_true", {"longer_than_s": 30}), bool_pulses()),
     "latch": (block_doc("latch", {}, inputs=("set",)), [{"set": r["x"]} for r in bool_pulses()]),
+    "all_good": (
+        block_doc("all_good", {}, inputs=("a", "b")),
+        [{"a": r["x"], "b": 1.0 if i != 50 else MISSING} for i, r in enumerate(ramp_with_faults())],
+    ),
+    "expr_divide": (
+        block_doc("expr", {"formula": "a / b"}, inputs=("a", "b")),
+        [{"a": r["x"], "b": float(i - 5)} for i, r in enumerate(ramp_with_faults())],
+    ),
     "deadband": (block_doc("deadband", {"step": 0.5}), ramp_with_faults()),
     "integrate": (block_doc("integrate", {"per": "1h", "on_bad": "skip"}), ramp_with_faults()),
     "kalman1": (
@@ -136,6 +150,34 @@ def cases_scenario(n=1700):
     return rows
 
 
+def graph_rows(doc, eng):
+    by_id = {b["id"]: b for b in doc["blocks"]}
+    published = {(bid, port): sig for sig, (bid, port, _) in eng.published.items()}
+    rows = ["block\ttype\tfield\tkey\tvalue"]
+
+    def source(src):
+        if src[0] == "signal":
+            return f"sig:{src[1]}"
+        if src[0] == "block":
+            return f"sig:{src[1]}.{src[2]}"
+        return f"num:{fmt(eng.params[src[1]] if src[0] == 'param' else src[1])}"
+
+    for bid in eng.order:
+        b, block = by_id[bid], eng.blocks[bid]
+        for name, src in eng.wiring[bid].items():
+            rows.append(f"{bid}\t{b['type']}\tin\t{name}\t{source(src)}")
+        for port in block.outputs:
+            rows.append(f"{bid}\t{b['type']}\tout\t{port}\t{published.get((bid, port), '')}")
+        for key, value in block.p.items():
+            text = value if isinstance(value, str) else fmt(value)
+            rows.append(f"{bid}\t{b['type']}\tparam\t{key}\t{text}")
+        if bid in eng.on_bad:
+            spec = eng.on_bad[bid]
+            use = "hold" if spec == "hold" else source(eng._source(f"block {bid}", spec["use"], {}, {}))
+            rows.append(f"{bid}\t{b['type']}\tfallback\t\t{use}")
+    return rows
+
+
 def to_sample(v):
     if v == MISSING:
         return None
@@ -167,6 +209,7 @@ def write(out_dir, name, doc, rows):
     (out_dir / f"{name}.inputs.tsv").write_text("\n".join(inputs) + "\n")
     (out_dir / f"{name}.expected.tsv").write_text("\n".join(expected) + "\n")
     (out_dir / f"{name}.blocks.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+    (out_dir / f"{name}.graph.tsv").write_text("\n".join(graph_rows(doc, eng)) + "\n")
     states = {line.split("\t")[2] for line in expected[1:]}
     return len(rows), len(eng.published), sorted(states)
 
