@@ -13,6 +13,57 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-10
+
+0.14.0 is a minor release because requests that used to succeed can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR). A
+refused mode change below is answered with HTTP 409 on `POST /v0/mode`. A
+refused hook call is logged.
+
+Upgrade notes:
+
+- **`MANUAL -> IDLE` can be refused while a transition out of AUTO finishes.**
+  "Refused: a transition out of AUTO is still running its after-hooks". The
+  refusal covers all of the runtime's work after a transition out of AUTO, so
+  it can happen even when no after-hooks are declared. It is seen only when
+  something else left AUTO, such as the runtime's own FAULT, an e-stop,
+  another client or an earlier request of the client's own that it stopped
+  waiting for. Retry once that transition's work is done. (#776)
+- **A recovery from FAULT can be refused.** "Refused: a FAULT was requested
+  during this recovery", when a FAULT is requested between the recovery's
+  request and its commit. In FAULT such a request changes nothing visible: it
+  comes from a FAULT on `POST /v0/mode`, an e-stop press, latched or not, a
+  change in a held stop chain's status, a tick exception or an inventory gate
+  refusal. A stop chain whose status keeps changing can keep refusing a slow
+  recovery. The machine stays in FAULT, unless another recovery committed
+  meanwhile; retry. (#774)
+- **A transition into AUTO, or `IDLE -> MANUAL`, can be refused at its
+  commit.** "Refused: a FAULT was requested during this transition", when a
+  FAULT is requested between the transition's request and its commit. If that
+  FAULT has not committed yet, the refusal is 0.13.0's "Refused: a transition
+  to FAULT is in progress" instead. When a FAULT commits entirely during the
+  before-hooks of `MANUAL -> AUTO` or `IDLE -> MANUAL`, the refusal used to read
+  "Concurrent mode change detected while processing transition callbacks" and
+  now gives the new reason. (#775)
+- **Hook calls of those transitions, and of a recovery from FAULT, can be
+  refused.** "Refused: a FAULT was requested during this transition", once a
+  FAULT has been requested since the transition was requested, before or after
+  its commit. A refused before-hook call means the transition is refused
+  too. With `fail_on_error: true`, the default, the 409 then reads
+  "Before-transition hook failed (`<from>` -> `<to>`): `<device>` `<function>` -
+  Refused: a FAULT was requested during this transition"; with `false`, it
+  gives the commit's reason, as in the two notes above. Hooks of a transition
+  that leaves AUTO or enters IDLE are never refused for this reason. (#775)
+- **`install.sh` refuses to build a bundle from a project that sets the
+  InfluxDB token.** `telemetry.influxdb.token` or the flat
+  `telemetry.influx_token`, unless it is `""`, and any other line that names
+  `influx_token`. This applies to `install.sh --project` as well as to
+  `--stage`. A bundle already built is not checked: `--local` installs it,
+  token included. Remove the key. `--with-observability` writes each device's
+  token as `INFLUXDB_TOKEN` into `/etc/anolis/runtime.env`; for an InfluxDB of
+  your own, add that line to the file after the install and run
+  `sudo systemctl restart anolis-runtime`. (#742)
+
 ### Fixed
 
 - **`install.sh` no longer ships a literal InfluxDB token in a bundle.** The
@@ -24,9 +75,8 @@ commit messages only.
   naming the file and never the token, unless it is the quoted empty string;
   a null value is refused too. A line that names `influx_token` anywhere, in a
   comment included, stops it as `auth_token` does. `install.sh --project`
-  builds a bundle too, so an install that used to succeed can now be refused,
-  and the release that carries this needs an upgrade note.
-  (#742)
+  builds a bundle too, so an install that used to succeed can now be refused.
+  See the upgrade note. (#742)
 - **A hook that moves toward actuation can no longer act after FAULT's hooks.**
   A before-hook of `MANUAL -> AUTO` already running when a FAULT started could
   actuate after FAULT's safe-state hooks: #763 refuses the transition at its
@@ -37,8 +87,7 @@ commit messages only.
   cannot enter AUTO with its before-hooks refused. Two refusals that used to
   read "Concurrent mode change detected" now give this reason instead. Hooks of
   a transition that leaves AUTO or enters IDLE are never refused for this
-  reason. This is a new refusal, so the release that carries it needs an
-  upgrade note. (#775)
+  reason. See the upgrade notes. (#775)
 - **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
   a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
   its before-hooks did nothing, and the recovery then committed: the caller was
@@ -47,8 +96,7 @@ commit messages only.
   made since its own request, so the runtime stays in FAULT. That also covers a
   FAULT that commits from MANUAL after a second recovery commits, while the
   first is still running its before-hooks. Hooks the recovery already ran are not
-  undone. This is a new refusal, so the release that carries it needs an upgrade
-  note. (#774)
+  undone. See the upgrade note. (#774)
 - **An after-hook leaving AUTO can no longer be refused by an IDLE committed
   first.** An `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs
   after its transition commits. Another caller could commit `MANUAL -> IDLE` in
@@ -59,8 +107,7 @@ commit messages only.
   request and again at the commit. A client meets the refusal only when
   something else left AUTO, such as the runtime's own FAULT, an e-stop, another
   client or an earlier request it stopped waiting for. Once that work is done,
-  a retry is no longer refused for this reason. This is a new refusal, so the
-  release that carries it needs an upgrade note. (#776)
+  a retry is no longer refused for this reason. See the upgrade note. (#776)
 
 ## [0.13.0] - 2026-11-10
 
