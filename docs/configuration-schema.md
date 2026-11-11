@@ -296,9 +296,9 @@ safety:
    `unknown`, never `clear`.
 2. On `in_force` or `unknown`, at startup after the first poll or at any
    time after, the software stop's latch engages without running its ladder.
-   After startup, an automation machine with HTTP enabled also enters `FAULT`;
-   the latch refuses the actuating calls of its `-> FAULT` hooks. At startup
-   the mode stays `IDLE` and `AUTO` is refused while the latch holds.
+   An automation machine also enters `FAULT`, at startup once automation is
+   initialised; the latch refuses the actuating calls of its `-> FAULT` hooks,
+   and `AUTO` is refused while the latch holds.
 3. While `in_force` or `unknown`, `POST /v0/estop/clear` is refused. Releasing
    the stop never clears the latch: the operator clears it once it reads
    `clear`.

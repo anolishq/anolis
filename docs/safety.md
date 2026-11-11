@@ -230,13 +230,12 @@ The runtime does enter FAULT autonomously in three cases:
 - **A provider restart republishes an inventory that fails the refuse-hookless gate**
   while in AUTO (#233).
 - **An observed stop chain changes to `in_force` or `unknown`** after startup, on
-  an automation machine with HTTP enabled, whether or not the software-stop latch
-  is already held (`safety.stop_chain`, #483). The latch is held without running
+  an automation machine, whether or not the software-stop latch is already held (`safety.stop_chain`, #483). The latch is held without running
   the ladder. A stop chain that holds at startup holds the latch and enters FAULT
   once automation is initialised (#547).
 
-In each case the declared `*->FAULT` mode hooks run (in the third, the held
-latch refuses their actuating calls), and recovery is the ordinary
+In each case the declared `*->FAULT` mode hooks run, unless the machine is already
+in FAULT (in the third, the held latch refuses their actuating calls), and recovery is the ordinary
 `FAULT -> MANUAL` path. If FAULT is requested again between the recovery's request
 and its commit, by the runtime, an e-stop press, a stop-chain change or a client,
 the recovery is refused at its commit ("a FAULT was requested during this
