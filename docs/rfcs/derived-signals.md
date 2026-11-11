@@ -1,7 +1,8 @@
 # RFC: derived signals
 
-Status: draft, third revision. Nothing is implemented. One decision is made
-(O0: build it, as a capability of the platform); nothing else is accepted.
+Status: draft, fourth revision. Nothing is implemented. Two decisions are
+made (O0: build it, as a capability of the platform; O11: FluxGraph,
+reworked, is the engine); nothing else is accepted.
 This is a register of decisions: a few proposed, most open, each open one
 with what would settle it. The first revision was reviewed independently;
 [the review](derived-signals-review.md) lists what it found and what
@@ -141,6 +142,42 @@ about this rig:
   this layer.
 - A value only a person looks at, once, can stay in the workbench.
 
+### O11. The engine
+
+Decided: FluxGraph, with its core reworked as version 2. FluxGraph becomes
+the signal-graph engine for the simulator and for this layer, so one model
+can be a simulator's plant and an estimator's predictor.
+
+The fit was measured first. On a branch of FluxGraph, with nothing in the
+library changed, the ten block types of O3 were written as FluxGraph models
+and run against test vectors from `tools/derived-signals/vectors.py`. Every
+output matches at every tick, by state and by value, including 28,900
+comparisons over the nine cases. What the 1.x model interface does not give
+a block:
+
+- A signal is one number, so each wire became two signals, a value and a
+  state.
+- A signal nobody has written reads as 0.
+- The compiler does not order models and does not see their inputs. Two
+  models that read each other's output compile and run, each a tick behind
+  the other, with no error.
+- Only a model can take two inputs, so every block was a model, and none of
+  FluxGraph's own transforms could be reused.
+- A model is not told the period when it is built, or the time when it runs.
+- A model's spec has no input or output ports, only parameters.
+
+Those land on the engine, the compiler, the graph spec, the signal store
+and the two interfaces: 1,550 of the library's 6,095 lines. The models,
+transforms, loaders and units keep their content and change how they read
+and write.
+
+**The design is now in two places.** What a value's state is, what a block
+does with a bad input, the block catalogue, saving and restoring state, and
+the sample clock are the engine's, and are argued in
+[FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182). This document keeps what is Anolis's: how a derived signal gets an
+identity, where the layer runs, where its definition and its constants
+live, and the safety boundary.
+
 ## Proposed
 
 These are the starting position. Each stands until an open decision
@@ -263,79 +300,35 @@ the enumeration.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
 
-Exercise: one bad pad reading in the middle of a 30-minute hold moves the
-trip from 1902.5 s to 2805.0 s, because `heater_guard.py` restarts its
-timer. A detector that holds through the bad reading trips at 1902.5 s. No
-style made the author choose. And with the pad reading bad, "pad above 70"
-is neither true nor false, so a `trip` that ORs four detectors is not good
-on every tick where a thermocouple is bad and nothing has tripped yet.
+Moved to the engine: section 7 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) has the rules and the rule table.
 
-Question: what is the default policy of each stateful block, is stating it
-required, and what does a consumer of a boolean see when it is unknown?
-
-The spike had to pick rules to run at all. They are a starting point, not a
-decision:
-
-- `held_for`, `window_stats` and `integrate` must each state `on_bad`, and a
-  file that leaves it out does not load. `median`, `kalman1`, `latch`,
-  `since_true` and `deadband` have no such setting, and `median` goes on
-  reporting its last good values through any length of bad input, which
-  breaks P4.
-- `and` and `or` are three-valued: one true operand decides an `or`, one
-  false operand an `and`, and otherwise an operand that is not good makes
-  the result not good.
-- `held_for` with `on_bad: reset` gives its input's bad state as its output
-  while the input is bad. With `hold` its timer runs on and can trip while
-  the input is still bad.
-- A block may name a fallback for an output that is not good. On a block
-  with two outputs it replaces both.
-
-Settled by: the rule table for every block type and each of bad and not
-ready, with a synthetic trace for each row, compared at every tick.
+The evidence stays here. One bad pad reading in the middle of a 30-minute
+hold moves the trip from 1902.5 s to 2805.0 s, because `heater_guard.py`
+restarts its timer, and a detector that holds through it trips at 1902.5 s.
+No declaration style made the author choose. With the pad reading bad, "pad
+above 70" is neither true nor false, so a `trip` that ORs four detectors is
+not good on every tick where a thermocouple is bad and nothing has tripped
+yet.
 
 ### O3. The block catalogue and its schema
 
-The exercise used 17 block types. Several overlap, and it was one rig.
+Moved to the engine: sections 4, 9 and 11 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182).
 
-Question: what is the smallest catalogue that covers the seven needs, and
-how is a block type's settings schema written and checked?
+`tools/derived-signals/engine.py` stays as the Python reference the first
+test vectors are written from. Ten block types express all nine cases. It
+is not an independent oracle:
 
-A spike has answered part of the first half. `tools/derived-signals/engine.py`
-runs a block file off the runtime, in Python:
+- The review broke it 37 ways and the comparison with `reference.py` caught
+  4. The recorded night has no bad sample, and both were written by one
+  person on one sample-and-hold grid.
+- `vectors.py` and the C++ runner on the FluxGraph branch compare by state,
+  at every tick, on synthetic inputs that include bad and missing samples.
+  That comparison caught sixteen of sixteen deliberate breakages, once two
+  vectors were added. Its expected values are still this engine's own.
 
-- Ten block types express all nine cases, with arithmetic, comparison and
-  logic all in `expr`. The ninth case is expressed and not implemented: the
-  total neither persists nor resets.
-- On the overnight run, eleven of its seventeen published signals equal the
-  reference at every tick. The trip signal goes true where
-  `heater_guard.py` trips on the synthetic traces.
-- Eleven mistakes in a block file are refused at load, the misspelt setting
-  among them.
-
-It is not yet the oracle it is meant to become. The review broke the engine
-37 ways and the comparison caught 4:
-
-- The recorded night has no bad sample, so nothing in it tests bad input,
-  three-valued logic or a fallback.
-- The comparison treats bad and not ready as the same thing.
-- The engine and the reference were written by one person, one after the
-  other, and share their arithmetic and their sample-and-hold grid.
-- The synthetic traces compare only the first trip.
-
-So recorded data is not enough of an oracle, and neither is one author's
-second implementation. The check needs a synthetic trace for each row of
-O2's table, compared by state at every tick, and expected values worked out
-independently of the engine.
-
-A replay still earned its place: the exercise's first draft of the
-compensation signal rounded to 0.5 °C and sent 111 values in one night,
-where a deadband sent 8. Only the replay showed it.
-
-Still open: how a block type's schema is published (in the spike it is
-Python), who may add a type, whether the `expr` language is the right one
-(the spike uses a small subset of Python's expression syntax), whether
-units are checked or only carried, what a not-a-number reading with quality
-`OK` does, and which settings are checked for range at load.
+A replay over recorded data still earned its place: the exercise's first
+draft of the compensation signal rounded to 0.5 °C and sent 111 values in
+one night, where a deadband sent 8. Only the replay showed it.
 
 ### O4. A home for machine constants
 
@@ -352,12 +345,14 @@ two operator parameters.
 
 ### O5. State across a restart
 
-A running total wants to survive a runtime restart and to reset when a run
-starts. A window or a median wants neither. Parameters set over HTTP are
-already not persisted ([automation.md](../automation.md), "Runtime
-Parameters").
+The mechanism moved to the engine: section 8 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) gives every block a
+way to save and restore its state.
 
-Question: which block state persists, where, and which events reset it?
+What stays here: which state the runtime saves, where it keeps it, and which
+events reset it. A running total wants to survive a runtime restart and to
+reset when a run starts. A window or a median wants neither. Parameters set
+over HTTP are already not persisted ([automation.md](../automation.md),
+"Runtime Parameters").
 
 ### O6. From a detector to an action, and the safety boundary
 
@@ -390,6 +385,12 @@ every mode belongs in the device. What is left to decide is whether
 anything other than the tree may act on a derived signal.
 
 ### O7. Time
+
+The engine's side is decided in direction: one fixed period per graph, and
+an input written from outside carries the time it was sampled and a maximum
+age, past which it is not good (section 6 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182)). What stays here is how
+the runtime meets that: when it ticks the graph, what sample time it gives
+each cached value, and what the period and the maximum ages should be.
 
 - Polling is one thread reading devices one after another, and a successful
   call re-reads its device from the caller's thread
@@ -468,47 +469,6 @@ block file against the oracle from O3. They have to include the registry
 and health integration, which is where the cost is, not only the
 computation.
 
-### O11. The engine
-
-FluxGraph, the simulator's library, is already a graph of signals,
-transforms and models with one writer per signal, a fixed evaluation order
-and loops only through a delay. P3 copies those rules. As it stands it does
-not fit: an edge takes one input and gives one output, so combining signals
-needs a compiled model; a signal is a number and a unit with no quality or
-time; and a missing input reads as 0 or the last value.
-
-Question: is the layer's engine new code, FluxGraph extended with fan-in and
-value states, or a core that both share? One engine would let one model
-serve as the simulator's plant and as an estimator's predictor.
-
-A spike has measured the fit. On an unpublished branch of FluxGraph, with
-nothing in the library changed, the ten block types of O3 were written as
-FluxGraph models and run against test vectors from `tools/derived-signals/
-vectors.py`. Every output matches at every tick, by state and by value,
-including 28,900 comparisons over the nine cases. So the engine's lifecycle,
-namespace and store carry a block graph as they are. What the model
-interface does not give a block:
-
-- A signal is one number, so each wire became two signals, a value and a
-  state.
-- A signal nobody has written reads as 0.
-- The compiler does not order models and does not see their inputs. Two
-  models that read each other's output compile and run, each a tick behind
-  the other, with no error.
-- Only a model can take two inputs, so every block was a model, and none of
-  FluxGraph's own transforms could be reused.
-- A model is not told the period when it is built, or the time when it runs.
-- A model's spec has no input or output ports, only parameters.
-
-Those land on the engine, the compiler, the graph spec, the signal store
-and the two interfaces: 1,550 of the library's 6,095 lines. The models,
-transforms, loaders and units, about 4,300 lines, keep their content and
-change how they read and write.
-
-Settled by: O1, O2 and O7 first, since they define what the new core has to
-do. The count above is the cost side; it says extending FluxGraph is a
-redesign of its core, not of the whole.
-
 ## Rejected
 
 - **Computing in the behavior tree only.** The tree runs only in `AUTO`, and
@@ -531,11 +491,9 @@ what belongs there.
 
 ## How this proceeds
 
-1. O0 is decided.
-2. O1, O2 and O7 come next, together: what a value's state is, what a
-   block does with a bad one, and what the sample clock is. The engine
-   check is rebuilt as O3 describes, so that they can be tested and not
-   only argued.
+1. O0 and O11 are decided.
+2. The engine's semantics are argued in FluxGraph's proposal, and its
+   conformance vectors are written there.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
