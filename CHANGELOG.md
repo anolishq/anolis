@@ -18,8 +18,7 @@ commit messages only.
 0.14.0 is a minor release because requests that used to succeed can now be
 refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR). A
 refused mode change below is answered with HTTP 409 on `POST /v0/mode`. A
-refused hook call is logged, and with `fail_on_error: true`, the default, a
-refused before-hook call also refuses its transition.
+refused hook call is logged.
 
 Upgrade notes:
 
@@ -32,31 +31,38 @@ Upgrade notes:
   waiting for. Retry once that transition's work is done. (#776)
 - **A recovery from FAULT can be refused.** "Refused: a FAULT was requested
   during this recovery", when a FAULT is requested between the recovery's
-  request and its commit. The machine stays in FAULT, unless another recovery
-  committed meanwhile; retry. (#774)
+  request and its commit. In FAULT such a request changes nothing visible: it
+  comes from a FAULT on `POST /v0/mode`, an e-stop press, latched or not, a
+  change in a held stop chain's status, a tick exception or an inventory gate
+  refusal. A stop chain whose status keeps changing can keep refusing a slow
+  recovery. The machine stays in FAULT, unless another recovery committed
+  meanwhile; retry. (#774)
 - **A transition into AUTO, or `IDLE -> MANUAL`, can be refused at its
   commit.** "Refused: a FAULT was requested during this transition", when a
   FAULT is requested between the transition's request and its commit. If that
   FAULT has not committed yet, the refusal is 0.13.0's "Refused: a transition
-  to FAULT is in progress" instead. Two refusals that used to read "Concurrent
-  mode change detected while processing transition callbacks" now give the new
-  reason. (#775)
+  to FAULT is in progress" instead. When a FAULT commits entirely during the
+  before-hooks of `MANUAL -> AUTO` or `IDLE -> MANUAL`, the refusal used to read
+  "Concurrent mode change detected while processing transition callbacks" and
+  now gives the new reason. (#775)
 - **Hook calls of those transitions, and of a recovery from FAULT, can be
   refused.** "Refused: a FAULT was requested during this transition", once a
   FAULT has been requested since the transition was requested, before or after
-  its commit. With `fail_on_error: true`, a refused before-hook call refuses
-  the transition, and the 409 reads "Before-transition hook failed (`<from>` ->
-  `<to>`): `<device>` `<function>` - Refused: a FAULT was requested during this
-  transition". Hooks of a transition that leaves AUTO or enters IDLE are never
-  refused for this reason. (#775)
-- **`install.sh` refuses a project or bundle that sets the InfluxDB token.**
-  `telemetry.influxdb.token` or the flat `telemetry.influx_token`, unless it is
-  `""`, and any line that names `influx_token`. This applies to
-  `install.sh --project` as well as to building a bundle. Remove the key.
-  `--with-observability` writes each device's token as `INFLUXDB_TOKEN` into
-  `/etc/anolis/runtime.env`; for an InfluxDB of your own, add that line to the
-  file after the install and run `sudo systemctl restart anolis-runtime`.
-  (#742)
+  its commit. A refused before-hook call means the transition is refused
+  too. With `fail_on_error: true`, the default, the 409 then reads
+  "Before-transition hook failed (`<from>` -> `<to>`): `<device>` `<function>` -
+  Refused: a FAULT was requested during this transition"; with `false`, it
+  gives the commit's reason, as in the two notes above. Hooks of a transition
+  that leaves AUTO or enters IDLE are never refused for this reason. (#775)
+- **`install.sh` refuses to build a bundle from a project that sets the
+  InfluxDB token.** `telemetry.influxdb.token` or the flat
+  `telemetry.influx_token`, unless it is `""`, and any other line that names
+  `influx_token`. This applies to `install.sh --project` as well as to
+  `--stage`. A bundle already built is not checked: `--local` installs it,
+  token included. Remove the key. `--with-observability` writes each device's
+  token as `INFLUXDB_TOKEN` into `/etc/anolis/runtime.env`; for an InfluxDB of
+  your own, add that line to the file after the install and run
+  `sudo systemctl restart anolis-runtime`. (#742)
 
 ### Fixed
 
