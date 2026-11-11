@@ -272,8 +272,14 @@ Ordered roughly by how much else waits on each.
 
 ### O1. Quality, and the "not ready" state
 
-A derived signal needs to say three things: a good value, not ready yet (a
-window still filling, a filter not started), and bad input.
+The engine's side is argued in [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182), sections 3 and 7. A signal there has
+one of four states: `good`; `uncertain`, a value that is usable and rests
+on something substituted, held or doubtful; `not_ready` (a window still
+filling, a filter not started); and `bad`. A block whose memory has no end,
+such as a latch, a timer or a running total, reports by what is in front of
+it and gives counters beside its value: how long it has run, how much of
+that its input was not good, and how many gaps there were. What stays here
+is how those four states and those counters meet the runtime's quality.
 
 What exists:
 
@@ -289,10 +295,24 @@ What exists:
   and marks the provider unavailable separately
   (`core/state/state_cache.cpp`).
 
-Questions: which of those four make an input not good; do the three states
-map onto the existing names or does "not ready" need its own, which would be
-a breaking change to two published enumerations; and how is a value that
-came from a fallback told apart from one that was computed.
+Questions:
+
+- Going in: which of those four shapes the runtime writes to the engine as
+  `bad`, which as `not_ready`, and whether any is `uncertain`. An old value
+  need not be decided here: the engine judges age itself, from the sample
+  time and the input's maximum age (O7).
+- Coming out: do the engine's four states map onto the existing four names,
+  or do `uncertain` and `not_ready` need their own, which would be a
+  breaking change to two published enumerations. `STALE` and `uncertain`
+  are not the same thing: one says a value is old, the other that it is
+  usable and doubtful.
+- What a consumer does with `uncertain`. The stop chain and the tree act on
+  quality, so each has to say whether an `uncertain` trip is acted on, and
+  whether a `good` one is acted on without reading its counters. The
+  proposal lists, in its section 7.11, each value it calls `good` that
+  rests on something a block no longer remembers.
+- How a value that came from a fallback is told apart from one that was
+  computed. In the engine it is `uncertain`.
 
 Settled by: a table of every producer and consumer of quality in the
 runtime, the protocol, the exporter and the workbench, then a decision on
@@ -386,11 +406,33 @@ anything other than the tree may act on a derived signal.
 
 ### O7. Time
 
-The engine's side is decided in direction: one fixed period per graph, and
-an input written from outside carries the time it was sampled and a maximum
-age, past which it is not good (section 6 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182)). What stays here is how
-the runtime meets that: when it ticks the graph, what sample time it gives
-each cached value, and what the period and the maximum ages should be.
+The engine's side is written, as the first amendment to [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) (sections 6,
+7.2 and 8). A graph has one fixed period. The host passes the time to each
+call, as whole nanoseconds, and the engine runs every tick that is due.
+Every write carries the time its sample was taken; the write with the
+latest time stands, and is not good past the input's maximum age. A call
+says whether it was a gap: a stall too long to catch up, a restore, or the
+host saying its clock stepped.
+
+What the engine asks of its host, and what the runtime does today:
+
+- **A clock that does not step, shared by every sample time and every
+  call.** Signal timestamps are each provider's own wall clock, and
+  freshness is judged against the runtime's
+  ([#796](https://github.com/anolishq/anolis/issues/796)). A value stamped
+  ahead of the runtime's clock goes stale late
+  ([#793](https://github.com/anolishq/anolis/issues/793)).
+- **Every sample written as it is taken, not only the latest.** The cache
+  keeps one value per signal. A host that stalls and then hands the engine
+  only what it holds has the ticks it missed run on that one value: in the
+  proposal's own test of this, a latched trip and eight times the energy.
+  The engine cannot see what it was never given.
+- **A word when the clock steps or a state is restored**, so that the next
+  call is a gap and not an hour of catch-up.
+
+What stays here is how the runtime meets that: which clock it uses, when it
+ticks the graph, what sample time it gives each cached value, and what the
+period and the maximum ages should be.
 
 - Polling is one thread reading devices one after another, and a successful
   call re-reads its device from the caller's thread
@@ -453,7 +495,9 @@ candidates and what is known about each:
 - **In the runtime.** No new process and no protocol change. The
   computation shares a process with the stop logic, a slow evaluation on the
   poll thread would delay every device read, and P1's registry entry still
-  has to be made.
+  has to be made. The poll thread keeps only the latest value of each
+  signal, so a placement that ticks the graph from the cache inherits the
+  stall case under O7.
 - **In a provider.** Process isolation, any language through an SDK, and a
   registry entry by the ordinary route, which answers most of O8. It needs
   a way to receive other providers' signals, which ADPP does not have.
@@ -493,7 +537,10 @@ what belongs there.
 
 1. O0 and O11 are decided.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
-   conformance vectors are written there.
+   conformance vectors are written there. It is amended a section at a
+   time. Time and the host interface, and how doubt passes through a
+   block's memory, are written; models, the estimator and the length of a
+   gap are still to come.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
