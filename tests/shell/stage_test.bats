@@ -770,3 +770,101 @@ _config_paths() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"config/../../other/config/provider-bar.yaml"* ]]
 }
+
+# --- #742: a literal InfluxDB token never reaches a bundle --------------------
+
+INFLUX_TOKEN="shared-influx-secret-123"
+
+# Staging must fail naming <file> and <key>, point at the per-device token,
+# never print the token, and leave no file holding it.
+_assert_influx_refused() {
+    local file="$1" key="$2"
+    STAGE_DIR="${OUT}"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ] || { echo "staged"; return 1; }
+    [[ "$output" == *"${file}"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" == *"${key}"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" == *"INFLUXDB_TOKEN"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" == *"runtime.env"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" != *"${INFLUX_TOKEN}"* ]]
+    ! grep -rqF -- "${INFLUX_TOKEN}" "${OUT}"
+}
+
+@test "#742 a literal telemetry.influxdb.token fails staging (the issue's reproduction)" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '  influxdb:\n    url: http://influx.example:8086\n    token: "%s"\n' "${INFLUX_TOKEN}" \
+        >> "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+    _assert_influx_refused anolis-runtime.telemetry.yaml telemetry.influxdb.token
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#742 a literal flat telemetry.influx_token fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'telemetry:\n  enabled: true\n  influx_token: %s\n' "${INFLUX_TOKEN}" \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_influx_refused anolis-runtime.manual.yaml telemetry.influx_token
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#742 a token brought in by a merge key fails staging" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'base: &b {token: %s}\ntelemetry:\n  influxdb:\n    <<: *b\n' "${INFLUX_TOKEN}" \
+        >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+    _assert_influx_refused anolis-runtime.manual.yaml telemetry.influxdb.token
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#742 a quoted empty InfluxDB token is not a token: staging succeeds" {
+    local v
+    for v in '""' "''"; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf '  influxdb:\n    token: %s\n' "${v}" >> "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+        printf 'telemetry:\n  influx_token: %s\n' "${v}" >> "${PROJECT_DIR}/config/anolis-runtime.manual.yaml"
+        run assemble_bundle "${OUT}/staging-${#v}" x86_64
+        [ "$status" -eq 0 ] || { echo "refused: ${v}: ${output}"; return 1; }
+        rm -rf "${PROJECT_DIR}"
+    done
+}
+
+@test "#742 a null InfluxDB token is refused: staging fails" {
+    local v
+    for v in '' '~' 'null'; do
+        PROJECT_DIR="$(_copy_fixture)"
+        printf '  influxdb:\n    token: %s\n' "${v}" >> "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+        run assemble_bundle "${OUT}/staging" x86_64
+        [ "$status" -ne 0 ] || { echo "staged: [${v}]"; return 1; }
+        [[ "$output" == *"anolis-runtime.telemetry.yaml: sets telemetry.influxdb.token"* ]] || { echo "${output}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}
+
+@test "#742 an influx_token named in a comment is refused" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf '# influx_token: %s\n' "${INFLUX_TOKEN}" >> "${PROJECT_DIR}/config/provider-foo.yaml"
+    STAGE_DIR="${OUT}"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"provider-foo.yaml: names influx_token in a line other than"* ]] || { echo "${output}"; return 1; }
+    [[ "$output" != *"${INFLUX_TOKEN}"* ]]
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#742 a token key outside telemetry.influxdb is not the InfluxDB token" {
+    PROJECT_DIR="$(_copy_fixture)"
+    printf 'token: not-influx\n' >> "${PROJECT_DIR}/config/provider-foo.yaml"
+    run assemble_bundle "${OUT}/staging" x86_64
+    [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
+    rm -rf "${PROJECT_DIR}"
+}
+
+@test "#742 a token in either of duplicate token keys fails staging" {
+    local first second
+    for first in '""' "${INFLUX_TOKEN}"; do
+        if [[ "${first}" == '""' ]]; then second="${INFLUX_TOKEN}"; else second='""'; fi
+        PROJECT_DIR="$(_copy_fixture)"
+        printf '  influxdb:\n    token: %s\n    token: %s\n' "${first}" "${second}" \
+            >> "${PROJECT_DIR}/config/anolis-runtime.telemetry.yaml"
+        _assert_influx_refused anolis-runtime.telemetry.yaml telemetry.influxdb.token || { echo "first ${first}"; return 1; }
+        rm -rf "${PROJECT_DIR}" "${OUT}/staging"
+    done
+}

@@ -3569,7 +3569,7 @@ def read(f):
     try:
         return f.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        sys.exit(f"{f.name}: not valid UTF-8; cannot check it for http.auth_token")
+        sys.exit(f"{f.name}: not valid UTF-8; cannot check it for a token")
 
 
 # #529: the API token is generated per device at install time, into
@@ -3586,6 +3586,11 @@ def read(f):
 # null (`auth_token:`, `~`, `null`) is refused like any other. A file that does
 # not parse cannot be shown to be free of a token, so it is refused too; the
 # parser's message is not printed, because it quotes the offending line.
+#
+# #742: the InfluxDB token is the same kind of per-device secret. The runtime
+# takes a non-empty telemetry.influxdb.token (or the flat telemetry.influx_token)
+# over INFLUXDB_TOKEN from /etc/anolis/runtime.env, so both keys are refused the
+# same way, under a top-level `telemetry` key.
 class SelfMerge(Exception):
     pass
 
@@ -3614,19 +3619,33 @@ def merged(node, seen=()):
 # exactly the key set to an empty quoted string: `auth_token: ""` or
 # `auth_token: ''`, indented, with nothing after it. That is block style only:
 # the flow form `http: {auth_token: ""}` is refused too.
-TOKEN_WORD = re.compile(r"(?<![A-Za-z0-9_])auth_token(?![A-Za-z0-9_])", re.IGNORECASE)
-TOKEN_EMPTY_LINE = re.compile(r"[ \t]*auth_token:[ \t]*(\"\"|'')[ \t]*")
+#
+# The flat influx_token gets the same scan (#742). The nested influxdb.token is
+# checked by the node walk only: `token` alone is too common a word to scan for.
+TOKEN_WORDS = {
+    "auth_token": "an API token's text, in a comment or string either; remove it. The install "
+    "generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)",
+    "influx_token": "an InfluxDB token's text, in a comment or string either; remove it. "
+    "--with-observability writes each device's token as INFLUXDB_TOKEN into "
+    "/etc/anolis/runtime.env; for an InfluxDB of your own, add that line to the file after the "
+    "install and restart anolis-runtime",
+}
+TOKEN_SCANS = [
+    (
+        word,
+        re.compile(rf"(?<![A-Za-z0-9_]){word}(?![A-Za-z0-9_])", re.IGNORECASE),
+        re.compile(rf"[ \t]*{word}:[ \t]*(\"\"|'')[ \t]*"),
+        what,
+    )
+    for word, what in TOKEN_WORDS.items()
+]
 
 
 def check_token_text(text, name):
     for line in re.split(r"\r\n|\r|\n", text):
-        if TOKEN_WORD.search(line) and not TOKEN_EMPTY_LINE.fullmatch(line):
-            sys.exit(
-                f"{name}: names auth_token in a line other than `auth_token: \"\"` on its own. "
-                f"A bundle must not carry an API token's text, in a comment or string either; "
-                f"remove it. The install generates a token per device into "
-                f"/etc/anolis/runtime.env (ANOLIS_API_TOKEN)"
-            )
+        for word, found, empty_line, what in TOKEN_SCANS:
+            if found.search(line) and not empty_line.fullmatch(line):
+                sys.exit(f"{name}: names {word} in a line other than `{word}: \"\"` on its own. A bundle must not carry {what}")
 
 
 def check_token(text, name):
@@ -3635,23 +3654,45 @@ def check_token(text, name):
     except yaml.YAMLError as e:
         line = getattr(getattr(e, "problem_mark", None), "line", None)
         where = f" (line {line + 1})" if line is not None else ""
-        sys.exit(f"{name}: not valid YAML{where}; cannot check it for http.auth_token")
+        sys.exit(f"{name}: not valid YAML{where}; cannot check it for a token")
     if not isinstance(root, yaml.MappingNode):
         return
     try:
         check_token_nodes(root, name)
     except SelfMerge:
-        sys.exit(f"{name}: a merge key (<<) brings in its own mapping; cannot check it for http.auth_token")
+        sys.exit(f"{name}: a merge key (<<) brings in its own mapping; cannot check it for a token")
+
+
+def keyed(node, key):
+    """The values under `key` in a mapping node, duplicates and merges included."""
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    return [v for k, v in merged(node) if isinstance(k, yaml.ScalarNode) and k.value == key]
+
+
+def quoted_empty(node):
+    return isinstance(node, yaml.ScalarNode) and node.style in ("'", '"') and node.value == ""
 
 
 def check_token_nodes(root, name):
-    for k, http in merged(root):
-        if not (isinstance(k, yaml.ScalarNode) and k.value == "http" and isinstance(http, yaml.MappingNode)):
-            continue
-        for k2, tok in merged(http):
-            if not (isinstance(k2, yaml.ScalarNode) and k2.value == "auth_token"):
+    for telemetry in keyed(root, "telemetry"):
+        found = [("telemetry.influx_token", v) for v in keyed(telemetry, "influx_token")]
+        for influxdb in keyed(telemetry, "influxdb"):
+            found += [("telemetry.influxdb.token", v) for v in keyed(influxdb, "token")]
+        for key, tok in found:
+            if quoted_empty(tok):
                 continue
-            if isinstance(tok, yaml.ScalarNode) and tok.style in ("'", '"') and tok.value == "":
+            sys.exit(
+                f"{name}: sets {key}. A bundle must not carry an InfluxDB token: every device "
+                f"installed from it would write with that token, in place of its own. Remove the key "
+                f"(a null value is refused too: only \"\" may stand for no token); --with-observability "
+                f"writes each device's token as INFLUXDB_TOKEN into /etc/anolis/runtime.env; for an "
+                f"InfluxDB of your own, add that line to the file after the install and restart "
+                f"anolis-runtime"
+            )
+    for http in keyed(root, "http"):
+        for tok in keyed(http, "auth_token"):
+            if quoted_empty(tok):
                 continue
             sys.exit(
                 f"{name}: sets http.auth_token. A bundle must not carry an API token: every device "
