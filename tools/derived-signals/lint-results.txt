@@ -1,0 +1,22 @@
+published signals: A 17, B 17, C 17; identical sets: True
+
+                               A expressions        B chains        C blocks
+non-comment lines                         58             113             119
+declared nodes                            17              21              26
+nodes not published                        0               4              10
+formula strings                           17               7               3
+
+breakage test: is each mistake caught, and by what
+  misspelt reference to another derived signal        caught        caught        caught
+      A: heater/pad_liquid_gap_c: unknown name(s) ['liquid_cc']
+      B: heater/pad_liquid_gap_c: no derived signal derived/heater/liquid_cc
+      C: gap: input liquidd.y names no block output or device signal
+  dependency loop                                     caught        caught        caught
+      A: cycle among ['heater/liquid_c', 'heater/liquid_estimate_c', 'heater/liquid_estimate_sigma_c', 'heater/pad_liquid_gap_c', 'probes/compensation_c']
+      B: cycle among ['heater/liquid_c', 'heater/liquid_estimate_c', 'heater/liquid_estimate_sigma_c', 'heater/pad_liquid_gap_c', 'probes/compensation_c']
+      C: cycle among ['compensation', 'gap', 'liquid', 'liquid_5m', 'liquid_estimate']
+  misspelt name inside a formula                      caught        caught        caught
+      A: heater/pad_c: unknown name(s) ['medain']
+      B: heater/pad_liquid_gap_c: formula uses undeclared name(s) ['liquidd']
+      C: pad_below_liquid: formula uses undeclared name(s) ['t11']
+  misspelt setting of a filter or block           not caught    not caught    not caught

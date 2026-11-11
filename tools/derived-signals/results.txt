@@ -1,0 +1,54 @@
+PART 1  guard detectors on synthetic traces, evaluated every 2.5 s
+trace                                             heater_guard.py         detectors, reset          detectors, hold
+pad over 70 from t=100                      over_temp_pad @ 100.0    over_temp_pad @ 100.0    over_temp_pad @ 100.0
+liquid reading bad from t=50              no_good_reading @ 170.0  no_good_reading @ 170.0  no_good_reading @ 170.0
+pad 4 C below liquid from t=100             pad_detached @ 1902.5    pad_detached @ 1902.5    pad_detached @ 1902.5
+same, one bad pad reading at t=1000                       no trip                  no trip    pad_detached @ 1902.5
+one 1.8 C pad sample at t=500                             no trip                  no trip                  no trip
+
+PART 2  replay over recorded telemetry, 2026-11-09T03:00Z to 15:00Z (22:00 to 10:00 EST)
+rows loaded (with up to 72 h carry-in): t1_c 84540, t2_c 91702, relay1_on 17215, setpoint1_c 6, room 1050
+setpoint1_c: last change row is 0.1 h before the window opens
+longest time without a row inside the window: t1_c 29 s, t2_c 17 s, relay1_on 184 s
+
+case 1  glitch rejection: ticks where raw pad and median-of-3 differ by more than 5 C: 1
+    12:26:47Z  raw 1.80  median3 29.50
+
+cases 2, 3  at 15:00:00Z: corrected liquid 25.10 C, pad-liquid gap 5.20 C, predicted steady liquid 24.86 C (k 1.1)
+    suggested pad for a 25 / 30 / 37 C liquid in a 20.5 C room: 29.95 / 40.45 / 55.15
+
+case 4  detectors over the night: trips on raw pad 0, on cleaned pad 0; detach timer started 1 time(s) on raw, 0 on cleaned
+
+case 6  relay duty from 2.5 s sample-and-hold of change rows
+    hour(EST)  duty   rig record    10-min window min..max
+    22         27.8%    27.5%        22.9..32.5%
+    00         23.5%    23.2%        18.8..27.9%
+    02         19.9%    18.9%        15.4..24.2%
+    04         17.6%    18.1%        13.3..22.5%
+    06         18.1%    17.6%        12.5..23.3%
+    08         17.4%    16.9%        11.2..21.2%
+    09         16.9%    16.9%        13.3..20.8%
+    energy over the 12 h window: 84.8 Wh, mean 7.07 W (12 V x 2.95 A while on; not metered)
+
+case 7  compensation temperature: 5-min mean of corrected liquid, rounded to 0.5 C: 111 value(s) sent over the night; the unrounded mean changed (at 0.01 C) 3466 times
+    03:04:57Z  21.0 C
+    03:08:17Z  21.5 C
+    03:08:37Z  21.0 C
+    03:08:47Z  21.5 C
+    03:32:12Z  22.0 C
+    03:32:17Z  21.5 C
+    03:32:20Z  22.0 C
+    with a 0.5 C deadband on the mean instead of rounding: 8 value(s): 21.17, 21.67, 22.17, 22.68, 23.18, 23.68, 24.18, 24.68
+
+case 8  one-state filter at 15:00:00Z: estimate 24.98 C, sigma 0.009 C
+    with the liquid reading hidden 13:00Z to 14:00Z: sigma 0.009 -> 0.036 C; estimate at 14:00Z 24.83 C against a reading of 24.80 C
+
+case 5  pH steady = 10-min window full, |slope| < 0.002 pH/min, spread < 0.02 pH  (2026-11-02, EST)
+    7 state changes in 09:45 to 11:45 EST; the first ten:
+    09:54:57  moving  slope -0.0101/min  spread 0.232  pH 7.091
+    10:09:42  steady  slope -0.0015/min  spread 0.019  pH 7.059
+    10:24:12  moving  slope -0.0004/min  spread 0.058  pH 7.000
+    10:34:10  steady  slope -0.0000/min  spread 0.008  pH 7.000
+    11:15:07  moving  slope +0.0001/min  spread 0.081  pH 7.079
+    11:37:40  steady  slope -0.0016/min  spread 0.019  pH 4.018
+    11:39:27  moving  slope -0.0012/min  spread 0.026  pH 4.000
