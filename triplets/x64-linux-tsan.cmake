@@ -7,12 +7,17 @@
 #   cmake -DVCPKG_TARGET_TRIPLET=x64-linux-tsan ...
 #
 # CRITICAL:
-# - MUST use dynamic linkage (TSAN docs: "static linking is not supported")
+# - Libraries link statically. vcpkg builds abseil static on Linux whatever
+#   the triplet says, so a shared protobuf carries its own abseil copy, with
+#   its own hash seed. A protobuf map filled inside libprotobuf can then miss
+#   lookups made from the executable, so a call argument that was sent reads
+#   as missing. TSAN's "static linking is not supported" means a fully static
+#   executable (-static); the C runtime and libtsan stay dynamic here.
 # - DO NOT force VCPKG_BUILD_TYPE (prevents Debug/Release ABI mismatches)
 
 set(VCPKG_TARGET_ARCHITECTURE x64)
 set(VCPKG_CRT_LINKAGE dynamic)
-set(VCPKG_LIBRARY_LINKAGE dynamic)
+set(VCPKG_LIBRARY_LINKAGE static)
 
 set(VCPKG_CMAKE_SYSTEM_NAME Linux)
 
