@@ -16,7 +16,7 @@ and the architecture to `x86_64` or `arm64`:
 
 ```bash
 ANOLIS=0.14.0
-SIM=0.2.8
+SIM=0.3.0
 ARCH=x86_64
 
 mkdir anolis-try && cd anolis-try
