@@ -63,9 +63,12 @@ is a complete example, and the workbench writes projects in the same layout.
   `telemetry.influx_token`, to anything but `""`, a null value included. The
   runtime prefers it over `INFLUXDB_TOKEN` in `/etc/anolis/runtime.env`, so a
   token in the config would replace each device's own. `--with-observability`
-  writes `INFLUXDB_TOKEN` there; for an InfluxDB of your own, add the line to
-  that file by hand. An install keeps the file when it already holds the API
-  token. The checks are those for `http.auth_token` above,
+  writes `INFLUXDB_TOKEN` there. For an InfluxDB of your own, add the line
+  after the install, which creates the file, and then
+  `sudo systemctl restart anolis-runtime`. A file without the API token is
+  replaced by the next install, but one that holds it is kept, the line
+  included. Uninstalling removes the file, so add the line again after a
+  reinstall. The checks are those for `http.auth_token` above,
   and a line that names `influx_token` stops the bundle step in the same way.
   `token` alone is too common a word to scan for, so `influxdb.token` is
   checked as a key only (#742).

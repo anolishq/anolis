@@ -3625,9 +3625,10 @@ def merged(node, seen=()):
 TOKEN_WORDS = {
     "auth_token": "an API token's text, in a comment or string either; remove it. The install "
     "generates a token per device into /etc/anolis/runtime.env (ANOLIS_API_TOKEN)",
-    "influx_token": "an InfluxDB token's text, in a comment or string either; remove it. Set "
-    "each device's token as INFLUXDB_TOKEN in /etc/anolis/runtime.env: --with-observability "
-    "writes it, otherwise add the line by hand",
+    "influx_token": "an InfluxDB token's text, in a comment or string either; remove it. "
+    "--with-observability writes each device's token as INFLUXDB_TOKEN into "
+    "/etc/anolis/runtime.env; for an InfluxDB of your own, add that line to the file after the "
+    "install and restart anolis-runtime",
 }
 TOKEN_SCANS = [
     (
@@ -3684,9 +3685,10 @@ def check_token_nodes(root, name):
             sys.exit(
                 f"{name}: sets {key}. A bundle must not carry an InfluxDB token: every device "
                 f"installed from it would write with that token, in place of its own. Remove the key "
-                f"(a null value is refused too: only \"\" may stand for no token); set each device's "
-                f"token as INFLUXDB_TOKEN in /etc/anolis/runtime.env: --with-observability writes "
-                f"it, otherwise add the line by hand"
+                f"(a null value is refused too: only \"\" may stand for no token); --with-observability "
+                f"writes each device's token as INFLUXDB_TOKEN into /etc/anolis/runtime.env; for an "
+                f"InfluxDB of your own, add that line to the file after the install and restart "
+                f"anolis-runtime"
             )
     for http in keyed(root, "http"):
         for tok in keyed(http, "auth_token"):
