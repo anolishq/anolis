@@ -652,3 +652,215 @@ TEST(ModeDispatchTest, ARecoveryIsRefusedWhenAnotherRecoveryAndARealFaultCommitM
     EXPECT_EQ(error, "Refused: a FAULT was requested during this recovery");
     EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::FAULT);
 }
+
+namespace {
+
+runtime::ModeTransitionCallConfig hook(const std::string &function) {
+    runtime::ModeTransitionCallConfig call;
+    call.device_handle = "sim0/dev1";
+    call.function_name = function;
+    return call;
+}
+
+// FAULT's safe-state hook, which runs on its own thread while the transition
+// under test is inside one of its callbacks.
+void fault_with_safe_hook(Rig &rig) {
+    std::thread other([&rig] {
+        std::string error;
+        ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, error)) << error;
+    });
+    other.join();
+}
+
+}  // namespace
+
+// #775. A MANUAL -> AUTO before-hook is running when a FAULT starts and runs
+// its safe-state hook. The entry hook's call must not land after that.
+TEST(ModeDispatchTest, AnEntryHookIsRefusedOnceAFaultStartsDuringIt) {
+    Rig rig(RuntimeMode::MANUAL);
+    rig.mode.on_before_mode_change([&](RuntimeMode, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::FAULT) {
+            rig.router.execute_call(runtime::mode_hook_request(hook("step_two"), next), rig.providers);
+        }
+        return true;
+    });
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            fault_with_safe_hook(rig);
+            entry_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+        }
+        return true;
+    });
+
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::AUTO, error));
+
+    EXPECT_FALSE(entry_result.success) << "the entry hook actuated after FAULT's safe-state hook";
+    EXPECT_EQ(entry_result.error_message, "Refused: a FAULT was requested during this transition");
+    EXPECT_EQ(rig.order, std::vector<std::string>{"step_two"});
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::FAULT);
+}
+
+// Control: with no FAULT, the stamped entry hook runs.
+TEST(ModeDispatchTest, AnEntryHookRunsWhenNoFaultIsRequested) {
+    Rig rig(RuntimeMode::MANUAL);
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        entry_result =
+            rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode), rig.providers);
+        return true;
+    });
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << error;
+    EXPECT_TRUE(entry_result.success) << entry_result.error_message;
+    EXPECT_EQ(rig.order, std::vector<std::string>{"step_one"});
+}
+
+// A recovery's hook moves toward actuation too.
+TEST(ModeDispatchTest, ARecoveryHookIsRefusedOnceAFaultIsRequestedDuringIt) {
+    Rig rig(RuntimeMode::FAULT);
+    control::CallResult recovery_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::FAULT && next == RuntimeMode::MANUAL) {
+            fault_with_safe_hook(rig);
+            recovery_result = rig.router.execute_call(
+                runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode), rig.providers);
+        }
+        return true;
+    });
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
+    EXPECT_FALSE(recovery_result.success);
+    EXPECT_EQ(recovery_result.error_message, "Refused: a FAULT was requested during this transition");
+    EXPECT_TRUE(rig.order.empty());
+}
+
+// A leave-AUTO hook makes outputs safe, so it is never refused for a FAULT: a
+// FAULT from MANUAL may have no hook of its own to do it.
+TEST(ModeDispatchTest, ALeaveAutoAfterHookRunsEvenAfterAFaultIsRequested) {
+    Rig rig(RuntimeMode::AUTO);
+    control::CallResult leave_result;
+    rig.mode.on_mode_change([&](RuntimeMode prev, RuntimeMode next) {
+        if (prev == RuntimeMode::AUTO && next == RuntimeMode::MANUAL) {
+            fault_with_safe_hook(rig);
+            leave_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+        }
+    });
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, error)) << error;
+    EXPECT_TRUE(leave_result.success) << leave_result.error_message;
+    EXPECT_EQ(rig.order, std::vector<std::string>{"step_one"});
+}
+
+// Nor is a hook into IDLE.
+TEST(ModeDispatchTest, AnIdleEntryHookRunsEvenAfterAFaultIsRequested) {
+    Rig rig(RuntimeMode::MANUAL);
+    control::CallResult idle_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (next == RuntimeMode::IDLE) {
+            fault_with_safe_hook(rig);
+            idle_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                  rig.providers);
+        }
+        return true;
+    });
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::IDLE, error)) << "control: refused at commit by the FAULT (#763)";
+    EXPECT_TRUE(idle_result.success) << idle_result.error_message;
+}
+
+// Outside a transition's callbacks nothing is stamped, so an entry hook built
+// elsewhere is not refused by a FAULT long past.
+TEST(ModeDispatchTest, NoTransitionIsNotedOutsideItsCallbacks) {
+    Rig rig(RuntimeMode::MANUAL);
+    EXPECT_FALSE(rig.mode.fault_requests_at_current_transition().has_value());
+    std::optional<std::uint64_t> during;
+    rig.mode.on_before_mode_change([&](RuntimeMode, RuntimeMode, std::string &) {
+        during = rig.mode.fault_requests_at_current_transition();
+        return true;
+    });
+    std::string error;
+    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << error;
+    EXPECT_TRUE(during.has_value());
+    EXPECT_FALSE(rig.mode.fault_requests_at_current_transition().has_value());
+}
+
+// A FAULT that comes and goes while MANUAL -> AUTO runs its before-hooks: the
+// mode reads MANUAL again at the commit and no FAULT is pending, but the entry
+// hooks were refused, so AUTO must not commit without them.
+TEST(ModeDispatchTest, AutoIsRefusedAtCommitWhenAFaultCameAndWentDuringIt) {
+    Rig rig(RuntimeMode::MANUAL);
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            std::thread other([&] {
+                std::string ignored;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, ignored)) << ignored;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, ignored)) << ignored;
+            });
+            other.join();
+            entry_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+        }
+        return true;  // as fail_on_error: false
+    });
+
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << "AUTO committed with its entry hook refused";
+    EXPECT_EQ(error, "Refused: a FAULT was requested during this transition");
+    EXPECT_FALSE(entry_result.success);
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
+}
+
+// The check after the provider lock: the FAULT is requested after the router's
+// first gates passed and before it takes the lock.
+TEST(ModeDispatchTest, AnEntryHookIsRefusedAfterTheProviderLockWhenAFaultStartsMeanwhile) {
+    Rig rig(RuntimeMode::MANUAL);
+    ModeChangingLatch latch;
+    latch.mode = &rig.mode;
+    latch.target = RuntimeMode::FAULT;
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            rig.router.set_actuation_latch(&latch);
+            entry_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+            rig.router.set_actuation_latch(nullptr);
+        }
+        return true;
+    });
+
+    std::string error;
+    rig.mode.set_mode(RuntimeMode::AUTO, error);
+
+    ASSERT_TRUE(latch.committed) << "control: the FAULT must have committed inside the window";
+    EXPECT_FALSE(entry_result.success);
+    EXPECT_EQ(entry_result.error_message, "Refused: a FAULT was requested during this transition");
+    EXPECT_TRUE(rig.order.empty());
+}
+
+// A transition nested on the same thread restores the outer one's value. The
+// nested FAULT notes no value of its own, so leaving it behind would read empty.
+TEST(ModeDispatchTest, ANestedTransitionRestoresTheOuterTransitionsValue) {
+    Rig rig(RuntimeMode::MANUAL);
+    std::optional<std::uint64_t> before_nested;
+    std::optional<std::uint64_t> after_nested;
+    bool nested_once = true;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (nested_once && prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            nested_once = false;
+            before_nested = rig.mode.fault_requests_at_current_transition();
+            std::string ignored;
+            rig.mode.set_mode(RuntimeMode::FAULT, ignored);
+            after_nested = rig.mode.fault_requests_at_current_transition();
+        }
+        return true;
+    });
+    std::string error;
+    rig.mode.set_mode(RuntimeMode::AUTO, error);
+    ASSERT_TRUE(before_nested.has_value());
+    EXPECT_EQ(after_nested, before_nested);
+}

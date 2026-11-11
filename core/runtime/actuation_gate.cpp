@@ -44,6 +44,15 @@ control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, aut
     return request;
 }
 
+control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode prev,
+                                       automation::RuntimeMode next, const automation::ModeManager &mode_manager) {
+    auto request = mode_hook_request(call, next);
+    if (automation::ModeManager::moves_toward_actuation(prev, next)) {
+        request.fault_requests_at_transition = mode_manager.fault_requests_at_current_transition();
+    }
+    return request;
+}
+
 // The gate is satisfied only by a declared hook that fires on `AUTO -> FAULT` and
 // drives a safe state there (#232).
 bool has_fault_safe_state_hook(const AutomationConfig &automation) {

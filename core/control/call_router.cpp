@@ -116,6 +116,16 @@ bool CallRouter::mode_gates_refuse(const CallRequest& request, CallResult& resul
     if (request.safe_state || mode_manager_ == nullptr) {
         return false;
     }
+    // A hook of a transition that moves toward actuation, once a FAULT has been
+    // requested since that transition began: FAULT's hooks have the last word
+    // (#775). Checked again after the provider lock, like every gate here.
+    if (request.fault_requests_at_transition.has_value() &&
+        mode_manager_->fault_requested_since(*request.fault_requests_at_transition)) {
+        result.error_message = "Refused: a FAULT was requested during this transition";
+        result.status_code = anolis::deviceprovider::v1::Status_Code_CODE_FAILED_PRECONDITION;
+        LOG_WARN("[CallRouter] " << request.device_handle << ": " << result.error_message);
+        return true;
+    }
     // Block control operations in IDLE mode. E-stop safe-state actions bypass
     // gating so the ladder can still drive actuators to a safe state.
     if (mode_manager_->is_idle()) {

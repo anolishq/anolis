@@ -135,6 +135,11 @@ to a safe value:
 > reports `safe_state_achieved: false`. Once `safety.safe_state` declares a rung,
 > the stop's latch refuses this hook and the rung alone drives the outputs.
 
+A hook of a transition into `AUTO`, `FAULT -> MANUAL` or `IDLE -> MANUAL` is also
+refused once a FAULT has been requested since its transition was requested. If
+that happens before the transition commits, the transition does not commit (#775,
+see [safety.md](safety.md#runtime-mode-safety-semantics)).
+
 <!-- validate: runtime-config fragment -->
 
 ```yaml

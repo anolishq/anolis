@@ -6,9 +6,11 @@
  */
 
 #include <chrono>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include "protocol.pb.h"
@@ -54,6 +56,11 @@ struct CallRequest {
     // IActuationLatch::admits_fault_entry_hooks); every other gate still
     // applies. Never set from an HTTP call.
     bool fault_entry_hook = false;
+    // Set on a hook call of an ordinary transition that moves toward
+    // actuation: the count of FAULT requests when that transition was
+    // requested. The call is refused once a FAULT has been requested since, so
+    // it cannot act after FAULT's hooks (#775). Never set from an HTTP call.
+    std::optional<std::uint64_t> fault_requests_at_transition;
 };
 
 /**

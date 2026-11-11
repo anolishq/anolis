@@ -120,6 +120,28 @@ public:
     bool automation_may_dispatch() const;
 
     /**
+     * Whether a transition moves toward actuation: into AUTO, FAULT -> MANUAL
+     * or IDLE -> MANUAL. Such a transition is refused at its commit, and its
+     * hook calls are refused, once a FAULT has been requested since it was
+     * requested (#774, #775). A transition that leaves AUTO or enters IDLE
+     * does not.
+     */
+    static bool moves_toward_actuation(RuntimeMode from, RuntimeMode to);
+
+    /**
+     * The count of FAULT requests noted when the ordinary transition running
+     * on this thread was requested, while its callbacks run; empty outside one,
+     * and for FAULT (#775). Held per thread, not per ModeManager.
+     */
+    std::optional<std::uint64_t> fault_requests_at_current_transition() const;
+
+    /**
+     * Whether a FAULT has been requested since `fault_requests` was noted, in
+     * any mode, the no-op one in FAULT included (#775).
+     */
+    bool fault_requested_since(std::uint64_t fault_requests) const;
+
+    /**
      * Request mode transition.
      *
      * Validates transition rules:
