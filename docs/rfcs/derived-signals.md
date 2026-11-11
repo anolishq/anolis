@@ -1,12 +1,20 @@
 # RFC: derived signals
 
-Status: draft, second revision. Nothing is implemented and nothing here is
-accepted. This is a register of decisions: a few proposed, most open, each
-open one with what would settle it. The first revision was reviewed
-independently; [the review](derived-signals-review.md) lists what it found
-and what changed.
+Status: draft, third revision. Nothing is implemented. One decision is made
+(O0: build it, as a capability of the platform); nothing else is accepted.
+This is a register of decisions: a few proposed, most open, each open one
+with what would settle it. The first revision was reviewed independently;
+[the review](derived-signals-review.md) lists what it found and what
+changed.
 
 ## The problem
+
+Anolis presents every device as signals and functions, whatever the
+hardware. That is half of a general machine runtime. The other half is
+what a machine does with its signals before anything acts on them: filter
+one, combine several, run them through a transfer function or a model, and
+get a value that is itself a signal. Control platforms that last have this
+as part of the platform (see Prior art). Here it is missing.
 
 A signal today is what a provider reads from a device. Nothing between the
 state cache and its consumers computes one value from another:
@@ -40,7 +48,11 @@ script beside the runtime. On the bioreactor reference rig
 
 A derived signal is a value computed from other signals and published as a
 signal, so that the tree, an operator, telemetry and a dashboard read it the
-way they read a device signal.
+way they read a device signal. The computation is a graph of blocks: signals
+in, signals out.
+
+The rig above is where the idea is tested, not what justifies it. O0 below
+shows that each of its needs could be met some other way.
 
 ## Evidence
 
@@ -68,50 +80,66 @@ cases, the method and the limits. In short:
 
 The findings that bear on a decision are cited under it below as "exercise".
 
-## Open before anything else
+## Decided
 
 ### O0. Whether a new layer is needed
 
-The strongest case against building this:
+Decided: yes, as a capability of the platform. The reference rig does not
+force it, and that was tested.
 
-- **Most of the needs read one device.** Of the seven, the glitch filter,
-  the bias correction, the heater trip and the relay duty read only the
-  heater board, and the steady test reads only the pH probe. A provider can
-  compute a value from its own device's readings, and firmware can do more:
-  the runbook's own diagnosis of the heater guard is that "nothing in the
-  runtime or the gen1 firmware limits temperature". A trip inside the
-  provider or the firmware can turn its own heater off in any mode, with no
-  runtime involved, which no layer above the runtime can do.
-- **The compensation case is a call the tree already makes.** It needs a
-  reading, a quality check and an offset, and then smoothing and a deadband
-  (exercise: without them the value changed 110 times in one night).
-- **Only the pad and liquid relation crosses providers**, and it is an aid
-  to the operator, not a control input.
-- **The tree may already be able to compute.** The BehaviorTree.CPP library
-  the runtime links has a scripting language with arithmetic and
-  comparison, and [safety.md](../safety.md) already describes precondition
-  scripts in trees. No tree or test here uses it.
+**The case against, worked through.** Each of the rig's seven needs was
+placed where it would go without a new layer:
 
-What survives of the case for it:
+| Need | Where it could live | What that takes |
+| --- | --- | --- |
+| Heater trip | The heater board's firmware | Over-temperature, sensor-fault and no-rise checks exist there, and its command watchdog covers a lost controller. Their limits are build flags, and the provider cannot yet read or clear a fault. |
+| Glitch removal | Firmware | Only the trip needed it. The firmware already waits for three readings in a row. |
+| Thermocouple bias | The provider's config, as an offset for that board | The provider has no calibration setting today. |
+| Relay duty | The provider | The firmware reports on-time and period for each cycle. The provider exposes the on-time and does not mark it for polling. |
+| "Is pH steady" | The workbench | It keeps ten minutes of each reading and already works out its range. |
+| Probe compensation | The behavior tree | Nothing. See below. |
+| Pad and liquid relation | The runbook, or a calculator in the workbench | It is the only need that crosses providers. |
 
-- The heater stays on in `MANUAL`, where the tree does not run, so a tree
-  cannot guard it.
-- A value computed in the tree is not a signal: no telemetry, no operator
-  panel, no dashboard.
-- A computation in a provider is written again in every provider that needs
-  it, in that provider's language, and a provider author cannot know the
-  machine's constants.
-- A value that crosses providers has nowhere to live.
+**The tree can already compute.** `tools/derived-signals/tree-probe/` runs
+four trees in the released runtime (0.13.0) with a mock sensor, using only
+the script nodes built into the BehaviorTree.CPP library:
 
-Question: is the need a general layer, or a small set of fixes in other
-places (a threshold check in the heater firmware or provider, tree
-scripting, one smoothing node)?
+- arithmetic on a live reading, and a condition on the result;
+- values kept from one tick to the next;
+- the whole compensation pattern: a quality gate, smoothing, a deadband, and
+  a device call only when the held value changes. It made one call at
+  start, none after the input moved by 0.3, and four as the smoothed value
+  followed a move of 3.0.
 
-Settled by: writing each of the seven needs in the place the case against
-would put it, and seeing which are left.
+Replayed over the recorded night, that smoothing and deadband send 8 values,
+the same as the window version in the exercise.
 
-The rest of this document assumes the answer is a layer. If it is not, most
-of it falls away.
+**Why build it anyway.** The decision is about what the runtime is, not
+about this rig:
+
+- A general runtime cannot ask every machine to push its computation into
+  firmware, a provider, a tree or a UI, each in a different language, none
+  of them able to see the others' values.
+- A value computed in a tree is not a signal: it reaches no telemetry, no
+  operator panel and no other consumer, and it exists only in `AUTO`.
+- A value that needs two providers' signals has nowhere to live.
+- Filters, transfer functions and estimators are a body of theory with
+  known building blocks. Offering those blocks once, with defined behaviour
+  for bad input and for time, is the platform's job.
+
+**What the test leaves behind: a rule for what goes where.**
+
+- Protection that must hold in every mode, and when the runtime is down,
+  belongs in the device: firmware, or failing that its provider. The layer
+  is not a safety function.
+- A correction to one device's own reading that every consumer wants, such
+  as a calibration offset or a glitch at the source, belongs in that
+  device's provider.
+- Sequencing and decisions belong in the tree, which may compute for its own
+  use with the scripting it already has.
+- A value computed from signals that should itself be a signal belongs in
+  this layer.
+- A value only a person looks at, once, can stay in the workbench.
 
 ## Proposed
 
@@ -357,9 +385,9 @@ invokes the software stop, in which modes, and what does a trip that is not
 good do? `heater_guard.py` also stops on a failed HTTP read, which nothing
 inside the runtime can observe.
 
-Settled by: O0 first. If the heater's trip belongs in its firmware or
-provider, the remaining needs are aids to the operator and this decision
-reduces to the prohibition above.
+O0's boundary rule answers part of this: protection that has to hold in
+every mode belongs in the device. What is left to decide is whether
+anything other than the tree may act on a derived signal.
 
 ### O7. Time
 
@@ -378,9 +406,14 @@ reduces to the prohibition above.
   detector for "no good reading for 120 s" does not run for as long as the
   read blocks.
 
-Question: what period does the layer run at and on which thread, how old may
-an input be, and what would telemetry need to record for a definition to
-replay faithfully?
+- A transfer function, a filter or an estimator is defined for a sample
+  period. Its inputs arrive by polling, at a nominal period with jitter,
+  each device at its own instant. The layer therefore needs a sample clock
+  of its own and a stated rule for bringing each input onto it.
+
+Question: what period does the layer run at and on which thread, how is an
+input brought onto that period, how old may an input be, and what would
+telemetry need to record for a definition to replay faithfully?
 
 Settled by: measuring input age and cross-device skew on recorded data.
 
@@ -435,38 +468,49 @@ block file against the oracle from O3. They have to include the registry
 and health integration, which is where the cost is, not only the
 computation.
 
+### O11. The engine
+
+FluxGraph, the simulator's library, is already a graph of signals,
+transforms and models with one writer per signal, a fixed evaluation order
+and loops only through a delay. P3 copies those rules. As it stands it does
+not fit: an edge takes one input and gives one output, so combining signals
+needs a compiled model; a signal is a number and a unit with no quality or
+time; and a missing input reads as 0 or the last value.
+
+Question: is the layer's engine new code, FluxGraph extended with fan-in and
+value states, or a core that both share? One engine would let one model
+serve as the simulator's plant and as an estimator's predictor.
+
+Settled by: O1, O2 and O7 first, since they define what an engine has to
+do, then a count of what FluxGraph would have to change to do it.
+
 ## Rejected
 
 - **Computing in the behavior tree only.** The tree runs only in `AUTO`, and
-  its blackboard is visible to nothing. Whether the tree should compute for
-  its own use, with the scripting it already links, is part of O0.
+  its blackboard is visible to nothing. The tree may still compute for its
+  own use, with the scripting it already links (O0).
 - **Computing in the historian only.** InfluxDB tasks or Grafana queries can
   show a derived value. Nothing on the machine can act on it, and the
   definition would live outside the machine's configuration.
-- **FluxGraph as the engine, as it stands.** Its edges take one input and
-  give one output, so combining signals needs a compiled model. A signal is
-  a number and a unit with no quality or time, and a missing input reads as
-  0 or the last value. Its compile-time rules are the ones P3 copies: one
-  writer per signal, a fixed evaluation order, loops only through a delay.
-  Revisit if one plant model is wanted for both the simulator and an
-  estimator.
 
-Not rejected, and decided under O0: computing in the device's own provider
-or firmware.
+Computing in a device's own provider or firmware is not rejected. O0 says
+what belongs there.
 
 ## Not in scope
 
-- Estimators, as a need. The design should not rule them out, and nothing
-  asks for one yet.
+- Any particular estimator or model. Transfer functions, filters and
+  estimators are what the layer is for; which ones ship first is the
+  catalogue's question (O3).
 - Any change to ADPP. O10 may propose one; this RFC does not.
 - Workbench surfaces.
 
 ## How this proceeds
 
-1. O0 is worked first: each of the seven needs written where the case
-   against would put it.
-2. If a layer is still wanted, O1 and O2 come next, with the engine check
-   rebuilt as O3 describes so that they can be tested and not only argued.
+1. O0 is decided.
+2. O1, O2 and O7 come next, together: what a value's state is, what a
+   block does with a bad one, and what the sample clock is. The engine
+   check is rebuilt as O3 describes, so that they can be tested and not
+   only argued.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.

@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <!--
+    The compensation pattern with no new node: gate on quality, smooth,
+    hold the output until it has moved 0.5, and call the device only when
+    the held value changes. `input` stands in for the liquid temperature;
+    set_sea_level_pressure stands in for set_compensation.
+  -->
+  <BehaviorTree ID="ScriptedCompensation">
+    <Sequence>
+      <CheckQuality device_handle="adafruit0/env0" signal_id="pressure" expected_quality="OK"/>
+      <GetParameter param="input" value="{raw}"/>
+      <RunOnce><Script code="ema := raw; sent := raw; send := 1"/></RunOnce>
+      <Script code="ema := ema + 0.2 * (raw - ema)"/>
+      <Script code="moved := (ema - sent) &gt;= 0.5 || (sent - ema) &gt;= 0.5; sent := moved ? ema : sent; send := (send == 1 || moved) ? 1 : 0"/>
+      <Fallback>
+        <Sequence>
+          <ScriptCondition code="send == 1"/>
+          <BuildArgsJson arg1_name="sea_level_pressure" arg1_type="double" arg1_num="{sent}" json="{args}"/>
+          <CallDevice device_handle="adafruit0/env0" function_name="set_sea_level_pressure" args="{args}"/>
+          <Script code="send := 0"/>
+        </Sequence>
+        <AlwaysSuccess/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+</root>

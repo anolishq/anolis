@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="ScriptProbe">
+    <Sequence>
+      <ReadSignal device_handle="adafruit0/env0" signal_id="temperature" value="{raw}" quality="{q}"/>
+      <Script code="corrected := raw - 1.2"/>
+      <ScriptCondition code="corrected &gt; 30"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

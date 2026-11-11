@@ -28,7 +28,7 @@ an open decision.
 | # | Finding | Evidence | Outcome |
 | --- | --- | --- | --- |
 | 1 | P1 said a value in the state cache is read unchanged by HTTP state and the operator panel. It is not: `GET /v0/state` lists devices from the registry, and units are in the registry. | `core/http/handlers/state_handlers.cpp`; `core/state/state_cache.hpp` | P1 rewritten. The registry entry is now an open item under O8. |
-| 2 | The case against building a layer was not made. Most of the needs read one device and could be computed in its provider or firmware, where a trip can also act. The tree's library already has scripting. | `tools/derived-signals/signals.yaml`; anolis-projects `bioreactor-v1/docs/runbook.md`, "Heater"; [safety.md](../safety.md), "The runtime does enter FAULT autonomously" | New open decision O0, worked first. |
+| 2 | The case against building a layer was not made. Most of the needs read one device and could be computed in its provider or firmware, where a trip can also act. The tree's library already has scripting. | `tools/derived-signals/signals.yaml`; anolis-projects `bioreactor-v1/docs/runbook.md`, "Heater"; [safety.md](../safety.md), "The runtime does enter FAULT autonomously" | Worked as O0, and tested by running trees in the released runtime. Decided: build it as a platform capability; the rig does not force it. |
 | 3 | O6 asked whether safety settings may name a derived signal. For the stop chain the answer is already no: a status that reads in force or unknown holds the latch and sends no safe-state calls, so a derived trip there would leave the heater on. | `core/control/safe_state.cpp`, `SafeStateController::hold` | O6 now states the prohibition. |
 | 4 | P2 hid an actor. If the layer calls nothing and the tree does not run in `MANUAL`, something new must invoke the stop, which adds a cause of autonomous `FAULT` to a list the safety doc keeps closed. | [safety.md](../safety.md) | Stated under P2 and O6. |
 | 5 | P4 did not say what "good" is. The cache keeps a value with quality `OK` when its provider goes down, and `ReadSignal` gives the tree a number whatever its quality. | `core/state/state_cache.cpp`; `core/automation/bt_nodes.cpp` | Four shapes of "not good" listed under O1. |
@@ -63,8 +63,10 @@ an open decision.
 - The formula evaluator refuses attribute access, subscripts, powers,
   chained comparisons and unknown calls.
 
-## Recommendation carried forward
+## Recommendation, and what became of it
 
-Work O0 before any other decision. If the heater's trip belongs in its
-firmware or provider, what is left are aids to the operator, and the
-layer's safety scope reduces to one prohibition.
+The review recommended working O0 before any other decision. That was
+done. Each of the rig's needs has a home outside a new layer, and the
+heater's trip belongs in its firmware. The layer goes ahead as a
+capability of the platform, with a rule for what belongs where, and its
+safety scope reduces to one prohibition and one open question.

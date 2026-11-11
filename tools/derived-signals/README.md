@@ -21,6 +21,7 @@ writes the same nine in three declaration styles and compares them.
 | `engine.py` | A catalogue of ten block types and an interpreter for a block file. Stdlib only, plus PyYAML to load a file. |
 | `engine_check.py` | Compares the engine with `reference.py`, tick by tick. |
 | `engine-results.txt` | Its output on the same recordings. |
+| `tree-probe/` | Four behavior trees and a runner that show what a tree in the released runtime can already compute. `results.txt` there is its output. |
 
 ## Ground rules
 
