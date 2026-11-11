@@ -47,10 +47,7 @@ control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, aut
 control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode prev,
                                        automation::RuntimeMode next, const automation::ModeManager &mode_manager) {
     auto request = mode_hook_request(call, next);
-    const bool toward_actuation = next == automation::RuntimeMode::AUTO ||
-                                  (next == automation::RuntimeMode::MANUAL &&
-                                   (prev == automation::RuntimeMode::FAULT || prev == automation::RuntimeMode::IDLE));
-    if (toward_actuation) {
+    if (automation::ModeManager::moves_toward_actuation(prev, next)) {
         request.fault_requests_at_transition = mode_manager.fault_requests_at_current_transition();
     }
     return request;

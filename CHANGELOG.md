@@ -20,9 +20,11 @@ commit messages only.
   actuate after FAULT's safe-state hooks: #763 refuses the transition at its
   commit, but not a hook call already under way. A hook of a transition into
   AUTO, `FAULT -> MANUAL` or `IDLE -> MANUAL` is now refused once a FAULT has
-  been requested since its transition began, checked after the provider lock.
-  Hooks of a transition that leaves AUTO or enters IDLE are never refused.
-  (#775)
+  been requested since its transition began, checked again after the provider
+  lock, and that transition is refused at its commit, so it cannot enter AUTO
+  with its hooks refused. Hooks of a transition that leaves AUTO or enters IDLE
+  are never refused for this reason. This is a new refusal, so the release that
+  carries it needs an upgrade note. (#775)
 - **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
   a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
   its before-hooks did nothing, and the recovery then committed: the caller was

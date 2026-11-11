@@ -733,6 +733,7 @@ TEST(ModeDispatchTest, ARecoveryHookIsRefusedOnceAFaultIsRequestedDuringIt) {
     std::string error;
     EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::MANUAL, error));
     EXPECT_FALSE(recovery_result.success);
+    EXPECT_EQ(recovery_result.error_message, "Refused: a FAULT was requested during this transition");
     EXPECT_TRUE(rig.order.empty());
 }
 
@@ -785,4 +786,80 @@ TEST(ModeDispatchTest, NoTransitionIsNotedOutsideItsCallbacks) {
     ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << error;
     EXPECT_TRUE(during.has_value());
     EXPECT_FALSE(rig.mode.fault_requests_at_current_transition().has_value());
+}
+
+// A FAULT that comes and goes while MANUAL -> AUTO runs its before-hooks: the
+// mode reads MANUAL again at the commit and no FAULT is pending, but the entry
+// hooks were refused, so AUTO must not commit without them.
+TEST(ModeDispatchTest, AutoIsRefusedAtCommitWhenAFaultCameAndWentDuringIt) {
+    Rig rig(RuntimeMode::MANUAL);
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            std::thread other([&] {
+                std::string ignored;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::FAULT, ignored)) << ignored;
+                ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, ignored)) << ignored;
+            });
+            other.join();
+            entry_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+        }
+        return true;  // as fail_on_error: false
+    });
+
+    std::string error;
+    EXPECT_FALSE(rig.mode.set_mode(RuntimeMode::AUTO, error)) << "AUTO committed with its entry hook refused";
+    EXPECT_EQ(error, "Refused: a FAULT was requested during this transition");
+    EXPECT_FALSE(entry_result.success);
+    EXPECT_EQ(rig.mode.current_mode(), RuntimeMode::MANUAL);
+}
+
+// The check after the provider lock: the FAULT is requested after the router's
+// first gates passed and before it takes the lock.
+TEST(ModeDispatchTest, AnEntryHookIsRefusedAfterTheProviderLockWhenAFaultStartsMeanwhile) {
+    Rig rig(RuntimeMode::MANUAL);
+    ModeChangingLatch latch;
+    latch.mode = &rig.mode;
+    latch.target = RuntimeMode::FAULT;
+    control::CallResult entry_result;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            rig.router.set_actuation_latch(&latch);
+            entry_result = rig.router.execute_call(runtime::mode_hook_request(hook("step_one"), prev, next, rig.mode),
+                                                   rig.providers);
+            rig.router.set_actuation_latch(nullptr);
+        }
+        return true;
+    });
+
+    std::string error;
+    rig.mode.set_mode(RuntimeMode::AUTO, error);
+
+    ASSERT_TRUE(latch.committed) << "control: the FAULT must have committed inside the window";
+    EXPECT_FALSE(entry_result.success);
+    EXPECT_EQ(entry_result.error_message, "Refused: a FAULT was requested during this transition");
+    EXPECT_TRUE(rig.order.empty());
+}
+
+// A transition nested on the same thread restores the outer one's value.
+TEST(ModeDispatchTest, ANestedTransitionRestoresTheOuterTransitionsValue) {
+    Rig rig(RuntimeMode::MANUAL);
+    std::optional<std::uint64_t> before_nested;
+    std::optional<std::uint64_t> after_nested;
+    bool nested_once = true;
+    rig.mode.on_before_mode_change([&](RuntimeMode prev, RuntimeMode next, std::string &) {
+        if (nested_once && prev == RuntimeMode::MANUAL && next == RuntimeMode::AUTO) {
+            nested_once = false;
+            before_nested = rig.mode.fault_requests_at_current_transition();
+            std::string ignored;
+            rig.mode.set_mode(RuntimeMode::IDLE, ignored);
+            after_nested = rig.mode.fault_requests_at_current_transition();
+        }
+        return true;
+    });
+    std::string error;
+    rig.mode.set_mode(RuntimeMode::AUTO, error);
+    ASSERT_TRUE(before_nested.has_value());
+    EXPECT_EQ(after_nested, before_nested);
 }

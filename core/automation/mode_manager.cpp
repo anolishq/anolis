@@ -72,6 +72,11 @@ std::optional<std::uint64_t> ModeManager::fault_requests_at_current_transition()
     return current_transition_fault_requests;
 }
 
+bool ModeManager::moves_toward_actuation(RuntimeMode from, RuntimeMode to) {
+    return to == RuntimeMode::AUTO ||
+           (to == RuntimeMode::MANUAL && (from == RuntimeMode::FAULT || from == RuntimeMode::IDLE));
+}
+
 bool ModeManager::fault_requested_since(std::uint64_t fault_requests) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return fault_requests_ != fault_requests;
@@ -239,12 +244,15 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
             return false;
         }
 
-        // A FAULT requested while this recovery's before-callbacks ran found the
-        // mode still FAULT and returned at once. Committing now would leave the
-        // runtime in MANUAL after it was told FAULT (#774).
-        if (previous_mode == RuntimeMode::FAULT && new_mode != RuntimeMode::FAULT &&
-            fault_requests_ != fault_requests_at_request) {
-            error = "Refused: a FAULT was requested during this recovery";
+        // A FAULT requested since this transition toward actuation was
+        // requested. For a recovery, a FAULT made in FAULT returned at once,
+        // and committing now would leave the runtime in MANUAL after it was
+        // told FAULT (#774). For any of them, a FAULT that came and went
+        // during its before-callbacks had its hooks refused (#775), and it
+        // must not commit without them.
+        if (moves_toward_actuation(previous_mode, new_mode) && fault_requests_ != fault_requests_at_request) {
+            error = previous_mode == RuntimeMode::FAULT ? "Refused: a FAULT was requested during this recovery"
+                                                        : "Refused: a FAULT was requested during this transition";
             LOG_ERROR("[ModeManager] " << error);
             return false;
         }
