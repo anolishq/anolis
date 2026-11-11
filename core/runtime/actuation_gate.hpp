@@ -51,6 +51,18 @@ struct ModeTransitionCallConfig;
 control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode next);
 
 /**
+ * @brief The same request, stamped so the router refuses it once a FAULT is
+ *        requested during the transition, when the transition moves toward
+ *        actuation: into AUTO, or FAULT -> MANUAL, or IDLE -> MANUAL (#775).
+ *
+ * A hook of a transition that leaves AUTO or enters IDLE is never stamped: it
+ * is the kind that makes outputs safe, and refusing it could leave them as the
+ * tree left them. Call it from the callback of the transition it belongs to.
+ */
+control::CallRequest mode_hook_request(const ModeTransitionCallConfig &call, automation::RuntimeMode prev,
+                                       automation::RuntimeMode next, const automation::ModeManager &mode_manager);
+
+/**
  * @brief True when the config declares a hook that fires on `AUTO -> FAULT`.
  *
  * Exposed so callers that need to reason about "does this machine have a

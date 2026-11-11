@@ -15,6 +15,14 @@ commit messages only.
 
 ### Fixed
 
+- **A hook that moves toward actuation can no longer act after FAULT's hooks.**
+  A before-hook of `MANUAL -> AUTO` already running when a FAULT started could
+  actuate after FAULT's safe-state hooks: #763 refuses the transition at its
+  commit, but not a hook call already under way. A hook of a transition into
+  AUTO, `FAULT -> MANUAL` or `IDLE -> MANUAL` is now refused once a FAULT has
+  been requested since its transition began, checked after the provider lock.
+  Hooks of a transition that leaves AUTO or enters IDLE are never refused.
+  (#775)
 - **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
   a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
   its before-hooks did nothing, and the recovery then committed: the caller was

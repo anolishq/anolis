@@ -37,9 +37,14 @@ Hooks are abstracted hard. A leave-AUTO hook makes the output safe unless the
 commits before it runs; a before-hook only after another exit from AUTO has run
 its own hooks. A leave-AUTO hook is assumed to cover every exit from AUTO. A
 hook on entering AUTO does not actuate, and no other refusal of a hook's call is
-modelled, `allowed_modes` included. The stop's ladder always makes the output
-safe: a stop chain hold that sends nothing, a plan that drives nothing, and a
-latch restored at startup are not modelled.
+modelled, `allowed_modes` included. So the refusal of an entry hook once a FAULT
+is requested (#775) is covered by unit tests, not here: letting entry hooks
+actuate `output`, which stands for the tree's command, makes a transition
+refused after its entry hook ran break `SafeWhenSettledOutsideAuto` for reasons
+that have nothing to do with FAULT. Modelling it needs a separate output for
+hook-driven state and an invariant about FAULT. The stop's ladder always makes
+the output safe: a stop chain hold that sends nothing, a plan that drives
+nothing, and a latch restored at startup are not modelled.
 
 A FAULT request made while already in FAULT returns at once, as `set_mode` does.
 Every FAULT request, in any mode, still stops a recovery from FAULT that it

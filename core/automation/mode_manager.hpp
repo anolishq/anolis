@@ -120,6 +120,19 @@ public:
     bool automation_may_dispatch() const;
 
     /**
+     * The count of FAULT requests noted when the ordinary transition running
+     * on this thread was requested, while its callbacks run; empty outside one,
+     * and for FAULT (#775).
+     */
+    std::optional<std::uint64_t> fault_requests_at_current_transition() const;
+
+    /**
+     * Whether a FAULT has been requested since `fault_requests` was noted, in
+     * any mode, the no-op one in FAULT included (#775).
+     */
+    bool fault_requested_since(std::uint64_t fault_requests) const;
+
+    /**
      * Request mode transition.
      *
      * Validates transition rules:

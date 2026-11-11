@@ -63,6 +63,20 @@ bool ModeManager::automation_may_dispatch() const {
     return current_mode_ == RuntimeMode::AUTO && leaving_auto_pending_ == 0;
 }
 
+namespace {
+// The ordinary transition whose callbacks run on this thread, if any (#775).
+thread_local std::optional<std::uint64_t> current_transition_fault_requests;
+}  // namespace
+
+std::optional<std::uint64_t> ModeManager::fault_requests_at_current_transition() const {
+    return current_transition_fault_requests;
+}
+
+bool ModeManager::fault_requested_since(std::uint64_t fault_requests) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_requests_ != fault_requests;
+}
+
 bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
     RuntimeMode previous_mode;
     std::vector<BeforeModeChangeCallback> before_callbacks_copy;
@@ -163,6 +177,18 @@ bool ModeManager::set_mode(RuntimeMode new_mode, std::string &error) {
         before_callbacks_copy = before_callbacks_;
         callbacks_copy = callbacks_;
     }  // Lock released here
+
+    // Lets a hook of this transition be refused once a FAULT is requested
+    // (#775). Restored on return, so a transition nested on this thread does
+    // not leave its value behind.
+    struct CurrentTransition {
+        std::optional<std::uint64_t> saved = current_transition_fault_requests;
+        explicit CurrentTransition(std::optional<std::uint64_t> value) { current_transition_fault_requests = value; }
+        CurrentTransition(const CurrentTransition &) = delete;
+        CurrentTransition &operator=(const CurrentTransition &) = delete;
+        ~CurrentTransition() { current_transition_fault_requests = saved; }
+    } current_transition{new_mode == RuntimeMode::FAULT ? std::nullopt
+                                                        : std::optional<std::uint64_t>(fault_requests_at_request)};
 
     // Execute before-transition callbacks (may veto transition)
     // NOTE: FAULT transitions are fail-safe and cannot be vetoed by callbacks.

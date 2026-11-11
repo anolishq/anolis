@@ -208,6 +208,14 @@ own FAULT, an e-stop, another client, or an earlier request it stopped waiting f
 Once that work is done, a retry of `MANUAL -> IDLE` is no longer refused for this
 reason.
 
+Once a FAULT has been requested, a hook of an ordinary transition that moves
+toward actuation, into `AUTO`, `FAULT -> MANUAL` or `IDLE -> MANUAL`, is refused
+("a FAULT was requested during this transition"). A hook already sending to its
+provider finishes first, and a FAULT hook to the same provider waits for it, so
+FAULT's hooks have the last word. Hooks of a transition that leaves `AUTO` or
+enters `IDLE` always run: they are the ones that make outputs safe, and a FAULT
+from `MANUAL` may have no hook of its own to do it.
+
 Transition rules:
 
 1. `IDLE <-> MANUAL`

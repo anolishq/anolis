@@ -588,7 +588,7 @@ bool Runtime::init_automation(std::string &error) {
                     }
 
                     for (const auto &call : hook.calls) {
-                        const auto request = mode_hook_request(call, next);
+                        const auto request = mode_hook_request(call, prev, next, *mode_manager_);
                         // Under a rung the latch holds a FAULT entry's actuating
                         // hooks on purpose: the ladder is the safe-state authority
                         // (#251). Not made, so not reported as failures (#648).
@@ -644,7 +644,7 @@ bool Runtime::init_automation(std::string &error) {
                     }
 
                     for (const auto &call : hook.calls) {
-                        const auto request = mode_hook_request(call, next);
+                        const auto request = mode_hook_request(call, prev, next, *mode_manager_);
                         if (request.fault_entry_hook && call_router_->latch_refuses(request)) {
                             ++held;
                             continue;
