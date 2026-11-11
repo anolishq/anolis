@@ -72,8 +72,7 @@ it in `CallRouter`, as the protocol requires (#566). `GET
 
 1. `allowed_modes`: a call in any other mode is refused with
    `FAILED_PRECONDITION`, naming the modes and the current one. This holds for
-   manual calls, the behavior tree and mode-transition hooks alike (a hook is
-   judged against the current mode, not its transition's, #784). Empty means
+   manual calls, the behavior tree and mode-transition hooks alike. Empty means
    every mode. A runtime without automation has no mode and judges calls as
    `MANUAL`.
 2. `min_interval_ms`: a call that arrives sooner than this after the last one
@@ -137,9 +136,9 @@ to a safe value:
 > the stop's latch refuses this hook and the rung alone drives the outputs.
 
 A hook of a transition into `AUTO`, `FAULT -> MANUAL` or `IDLE -> MANUAL` is also
-refused once a FAULT has been requested since its transition was requested, and
-that transition does not commit (#775, see
-[safety.md](safety.md#runtime-mode-safety-semantics)).
+refused once a FAULT has been requested since its transition was requested. If
+that happens before the transition commits, the transition does not commit (#775,
+see [safety.md](safety.md#runtime-mode-safety-semantics)).
 
 <!-- validate: runtime-config fragment -->
 

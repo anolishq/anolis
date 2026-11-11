@@ -842,7 +842,8 @@ TEST(ModeDispatchTest, AnEntryHookIsRefusedAfterTheProviderLockWhenAFaultStartsM
     EXPECT_TRUE(rig.order.empty());
 }
 
-// A transition nested on the same thread restores the outer one's value.
+// A transition nested on the same thread restores the outer one's value. The
+// nested FAULT notes no value of its own, so leaving it behind would read empty.
 TEST(ModeDispatchTest, ANestedTransitionRestoresTheOuterTransitionsValue) {
     Rig rig(RuntimeMode::MANUAL);
     std::optional<std::uint64_t> before_nested;
@@ -853,7 +854,7 @@ TEST(ModeDispatchTest, ANestedTransitionRestoresTheOuterTransitionsValue) {
             nested_once = false;
             before_nested = rig.mode.fault_requests_at_current_transition();
             std::string ignored;
-            rig.mode.set_mode(RuntimeMode::IDLE, ignored);
+            rig.mode.set_mode(RuntimeMode::FAULT, ignored);
             after_nested = rig.mode.fault_requests_at_current_transition();
         }
         return true;
