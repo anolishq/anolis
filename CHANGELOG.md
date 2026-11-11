@@ -15,6 +15,18 @@ commit messages only.
 
 ### Fixed
 
+- **`install.sh` no longer ships a literal InfluxDB token in a bundle.** The
+  bundle step refused a literal `http.auth_token` (#529) but not
+  `telemetry.influxdb.token` or the flat `telemetry.influx_token`. The runtime
+  prefers a configured token over `INFLUXDB_TOKEN` in
+  `/etc/anolis/runtime.env`, so one shipped in a bundle reached every device
+  and replaced each device's own. The bundle step now stops on either key,
+  naming the file and never the token, unless it is the quoted empty string;
+  a null value is refused too. A line that names `influx_token` anywhere, in a
+  comment included, stops it as `auth_token` does. `install.sh --project`
+  builds a bundle too, so an install that used to succeed can now be refused,
+  and the release that carries this needs an upgrade note.
+  (#742)
 - **A hook that moves toward actuation can no longer act after FAULT's hooks.**
   A before-hook of `MANUAL -> AUTO` already running when a FAULT started could
   actuate after FAULT's safe-state hooks: #763 refuses the transition at its
