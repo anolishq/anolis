@@ -13,6 +13,29 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-10
+
+0.14.0 is a minor release because requests that used to succeed can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR). A
+refused mode change below is answered with HTTP 409 on `POST /v0/mode`; a
+refused hook call is logged.
+
+Upgrade notes:
+
+- **`MANUAL -> IDLE` can be refused while a transition out of AUTO finishes.**
+  "Refused: a transition out of AUTO is still running its after-hooks". It is
+  seen only when something else left AUTO, such as the runtime's own FAULT, an
+  e-stop or another client. Retry once that transition's work is done. (#776)
+- **A recovery from FAULT can be refused.** "Refused: a FAULT was requested
+  during this recovery", when a FAULT is requested between the recovery's
+  request and its commit. The machine stays in FAULT; retry. (#774)
+- **A transition into AUTO, or `IDLE -> MANUAL`, can be refused, and so can its
+  hooks.** "Refused: a FAULT was requested during this transition", when a FAULT
+  is requested after the transition was requested. Its remaining hook calls are
+  refused with the same message. Two refusals that used to read "Concurrent mode
+  change detected while processing transition callbacks" now give this reason.
+  (#775)
+
 ### Fixed
 
 - **A hook that moves toward actuation can no longer act after FAULT's hooks.**
