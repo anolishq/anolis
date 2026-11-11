@@ -25,29 +25,30 @@ commit messages only.
   cannot enter AUTO with its before-hooks refused. Two refusals that used to
   read "Concurrent mode change detected" now give this reason instead. Hooks of
   a transition that leaves AUTO or enters IDLE are never refused for this
-  reason. This is a new refusal, so the release that carries it needs an upgrade
-  note. (#775) - **A FAULT requested during a recovery from FAULT is no longer
-  lost.** In FAULT, a request for FAULT returned at once, so one made while
-  `FAULT -> MANUAL` ran its before-hooks did nothing, and the recovery then
-  committed: the caller was told FAULT and the runtime ended in MANUAL. Every
-  FAULT request, in any mode, is now counted, and a recovery from FAULT is
-  refused at its commit if one was made since its own request, so the runtime
-  stays in FAULT. That also covers a FAULT that commits from MANUAL after a
-  second recovery commits, while the first is still running its before-hooks.
-  Hooks the recovery already ran are not undone. This is a new refusal, so the
-  release that carries it needs an upgrade note. (#774) - **An after-hook
-  leaving AUTO can no longer be refused by an IDLE committed first.** An
-  `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs after its
-  transition commits. Another caller could commit `MANUAL -> IDLE` in between,
-  directly or through a recovery from FAULT, and the IDLE gate then refused the
-  hook's call, so the output it should have made safe stayed as the tree left
-  it. `MANUAL -> IDLE` is now refused until the runtime has finished its work on
-  a transition out of AUTO, those hooks included, checked at the request and
-  again at the commit. A client meets the refusal only when something else left
-  AUTO, such as the runtime's own FAULT, an e-stop, another client or an earlier
-  request it stopped waiting for. Once that work is done, a retry is no longer
-  refused for this reason. This is a new refusal, so the release that carries it
-  needs an upgrade note. (#776)
+  reason. This is a new refusal, so the release that carries it needs an
+  upgrade note. (#775)
+- **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
+  a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
+  its before-hooks did nothing, and the recovery then committed: the caller was
+  told FAULT and the runtime ended in MANUAL. Every FAULT request, in any mode,
+  is now counted, and a recovery from FAULT is refused at its commit if one was
+  made since its own request, so the runtime stays in FAULT. That also covers a
+  FAULT that commits from MANUAL after a second recovery commits, while the
+  first is still running its before-hooks. Hooks the recovery already ran are not
+  undone. This is a new refusal, so the release that carries it needs an upgrade
+  note. (#774)
+- **An after-hook leaving AUTO can no longer be refused by an IDLE committed
+  first.** An `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs
+  after its transition commits. Another caller could commit `MANUAL -> IDLE` in
+  between, directly or through a recovery from FAULT, and the IDLE gate then
+  refused the hook's call, so the output it should have made safe stayed as the
+  tree left it. `MANUAL -> IDLE` is now refused until the runtime has finished
+  its work on a transition out of AUTO, those hooks included, checked at the
+  request and again at the commit. A client meets the refusal only when
+  something else left AUTO, such as the runtime's own FAULT, an e-stop, another
+  client or an earlier request it stopped waiting for. Once that work is done,
+  a retry is no longer refused for this reason. This is a new refusal, so the
+  release that carries it needs an upgrade note. (#776)
 
 ## [0.13.0] - 2026-11-10
 
