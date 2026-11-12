@@ -215,6 +215,19 @@ TEST(RuntimeZeroDevicesTest, ARestartThatDropsAPolledDeviceLatchesItWithoutAPoll
 
     anolis::runtime::SignalHandler::install();
     std::thread loop([&runtime] { runtime.run(); });
+    // run() polls at once. Crash the helper only after that poll has read
+    // sensor0, so it cannot instead find the helper dead and mark the device
+    // unavailable itself, which would latch it without the restart path.
+    const auto polled_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < polled_by) {
+        const auto state = runtime.get_state_cache().get_device_state("bread0/sensor0");
+        if (state != nullptr && state->signals.count("ok") != 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto polled = runtime.get_state_cache().get_device_state("bread0/sensor0");
+    const bool first_poll_read_sensor = polled != nullptr && polled->signals.count("ok") != 0;
     std::ofstream(drop) << "drop";     // the restarted helper will not list sensor0
     std::ofstream(trigger) << "exit";  // the helper removes it and exits
 
@@ -234,6 +247,7 @@ TEST(RuntimeZeroDevicesTest, ARestartThatDropsAPolledDeviceLatchesItWithoutAPoll
     anolis::runtime::SignalHandler::install();
     std::filesystem::remove(drop);
 
+    ASSERT_TRUE(first_poll_read_sensor) << "the first poll never read sensor0";
     ASSERT_NE(current, first) << "the provider was not replaced by a restart";
     EXPECT_TRUE(runtime.get_registry().get_devices_for_provider("bread0").empty());
     EXPECT_EQ(latched, std::vector<std::string>{"bread0/sensor0"});

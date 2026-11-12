@@ -25,8 +25,8 @@ commit messages only.
   state. The restart marks the provider's devices unavailable first, so this
   holds even when the restart finishes before any poll has seen the provider
   die. A device removed from the provider's configuration latches the same
-  way, and stays in `device_loss_latched` until it is registered again or the
-  runtime restarts. (#801)
+  way. It stays in `device_loss_latched` until it is registered again, reads
+  successfully and AUTO is re-entered, or until the runtime restarts. (#801)
 
 ## [0.14.0] - 2026-11-10
 
