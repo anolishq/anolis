@@ -428,7 +428,11 @@ What the engine asks of its host, and what the runtime does today:
   proposal's own test of this, a latched trip and eight times the energy.
   The engine cannot see what it was never given.
 - **A word when the clock steps or a state is restored**, so that the next
-  call is a gap and not an hour of catch-up.
+  call is a gap and not an hour of catch-up, **and how long the graph was
+  away** where the runtime knows. Told, a restored total has the downtime
+  in what it missed. Not told, the engine takes the gap as longer than
+  anything it counts, and a total with a limit on what it may miss is
+  `bad` until it is reset.
 
 What stays here is how the runtime meets that: which clock it uses, when it
 ticks the graph, what sample time it gives each cached value, and what the
@@ -538,9 +542,9 @@ what belongs there.
 1. O0 and O11 are decided.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
    conformance vectors are written there. It is amended a section at a
-   time. Time and the host interface, and how doubt passes through a
-   block's memory, are written; models, the estimator and the length of a
-   gap are still to come.
+   time. Time and the host interface, how doubt passes through a block's
+   memory, and what a gap does to each block are written; models and the
+   estimator are still to come.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
