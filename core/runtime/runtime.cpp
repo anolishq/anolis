@@ -279,7 +279,7 @@ bool Runtime::init_providers(std::string &error) {
     for (const auto &entry : watchdogs.too_old) {
         LOG_INFO("[Runtime] preflight: " << entry << " has ACTUATE functions, but its watchdog reading is older than "
                                          << health::kWatchdogReadingMaxAgeMs
-                                         << " ms; whether it is armed was not checked");
+                                         << " ms or its age is unreadable; whether it is armed was not checked");
     }
     // Polling feeds those watchdogs once the runtime runs (#599).
     for (const auto &line :

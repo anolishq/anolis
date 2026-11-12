@@ -76,8 +76,9 @@ nothing about them. The reading may be cached: a provider can report its last
 good reading after later reads fail, with `watchdog_status_age_ms` giving its
 age (anolis-provider-sdk `docs/metrics.md`). A reading older than 30 s, or
 whose age does not parse, is not checked: the runtime logs at INFO that it did
-not check that device's watchdog, whether the reading said armed or not. No
-warning is therefore not evidence that a watchdog is armed.
+not check that device's watchdog, whether the reading said armed or not. A
+reading with no age, from a provider that reads the status live, is checked as
+before. No warning is therefore not evidence that a watchdog is armed.
 
 Authority matters: every layer above can fail, so a stop is only as reliable as
 the lowest layer that can enforce it alone. The runtime is the weakest layer in
