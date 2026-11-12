@@ -234,7 +234,9 @@ A provider that hangs, crashes or is restarted does not latch its devices:
 provider loss is not device loss (see [safety.md](safety.md)). Its devices go
 unavailable, with `device_availability` events, and come back without a latch.
 Once the provider is back, a read it reports failed for a device latches that
-device as usual.
+device as usual. A device the restarted provider no longer lists, and that had
+no successful read since it went unavailable, latches when it is dropped: no
+read can report it any more.
 
 Notes:
 

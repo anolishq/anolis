@@ -13,6 +13,17 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A device dropped by a provider restart while unavailable now latches.**
+  Provider loss does not latch its devices; the first failed read after the
+  restart does. A device the restarted provider no longer lists is never read
+  again, so on a bus that was still dark it was never latched. The runtime then
+  stayed in AUTO with no latch, and nothing would re-assert the device's safe
+  state if it came back. Such a device now takes a transport loss edge when it is
+  dropped, and its first successful read after it is registered again
+  re-asserts its safe state. (#801)
+
 ## [0.14.0] - 2026-11-10
 
 0.14.0 is a minor release because requests that used to succeed can now be

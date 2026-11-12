@@ -15,6 +15,7 @@
 #include <cstring>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 #include "events/event_emitter.hpp"
 #include "logging/logger.hpp"
@@ -198,11 +199,26 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
     // report it again: no poll reads it, so no `available: true` can follow a
     // loss already sent for it. Say it is gone, under the lock like the
     // availability edges (#402).
+    //
+    // A device dropped while unavailable is a transport loss (#801). Provider
+    // loss reports no edge (#301) on the promise that the first in-band read
+    // after the restart will, but a device the restarted provider no longer
+    // lists is never read again: on a dark bus it is the board, not just its
+    // provider, that is gone. An outage already reported as a transport loss
+    // needs no second edge (#764).
+    std::vector<std::pair<std::string, std::uint64_t>> dropped_losses;
+    const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto &[handle, prior] : carried) {
+        for (auto [handle, prior] : carried) {
             if (device_states_.find(handle) == device_states_.end()) {
                 emit_device_removed(provider_id, handle.substr(provider_id.size() + 1));
+                if (!shutting_down && device_reachability_sink_ && !prior.provider_available &&
+                    !(prior.loss_reported && prior.loss_was_transport)) {
+                    prior.loss_reported = true;
+                    prior.loss_was_transport = true;
+                    dropped_losses.emplace_back(handle, ++reachability_edge_seq_);
+                }
                 // Keep the loss on record, so the device's return is a return
                 // edge if it is registered again (#424).
                 if (prior.loss_reported) {
@@ -210,6 +226,11 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
                 }
             }
         }
+    }
+
+    // Outside the lock, as in poll_device (#285).
+    for (const auto &[handle, seq] : dropped_losses) {
+        device_reachability_sink_(handle, false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, seq);
     }
 
     LOG_INFO("[StateCache] Rebuilt poll configs for " << new_device_count << " devices from provider " << provider_id);
