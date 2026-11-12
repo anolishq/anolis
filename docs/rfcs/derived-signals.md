@@ -543,8 +543,10 @@ what belongs there.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
    conformance vectors are written there. It is amended a section at a
    time. Time and the host interface, how doubt passes through a block's
-   memory, and what a gap does to each block are written; models and the
-   estimator are still to come.
+   memory, what a gap does to each block, and how models are stepped are
+   written; the estimator is still to come. A model there is linear and
+   stepped exactly, and one too fast for the graph's period is refused,
+   which bears on O7's question of what the period should be.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
