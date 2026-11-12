@@ -236,6 +236,24 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
     LOG_INFO("[StateCache] Rebuilt poll configs for " << new_device_count << " devices from provider " << provider_id);
 }
 
+void StateCache::mark_provider_lost(const std::string &provider_id) {
+    // What poll_once does when it finds the provider unavailable: the devices go
+    // unavailable, with a device_availability event, and the sink is not told.
+    const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::string prefix = provider_id + "/";
+    for (auto &[handle, state] : device_states_) {
+        if (handle.rfind(prefix, 0) != 0) {
+            continue;
+        }
+        state.provider_available = false;
+        if (!shutting_down && !state.unavailable_emitted) {
+            state.unavailable_emitted = true;
+            emit_device_availability(provider_id, handle.substr(prefix.size()), false);
+        }
+    }
+}
+
 void StateCache::start_polling(provider::ProviderRegistry &provider_registry) {
     if (polling_active_) {
         LOG_WARN("[StateCache] Polling already active");

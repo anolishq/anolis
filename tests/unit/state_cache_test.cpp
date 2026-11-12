@@ -1148,6 +1148,24 @@ TEST_F(StateCacheEdgeOrderTest, DeviceDroppedByARestartWhileItsProviderWasLostLa
     EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
 }
 
+// #801: a restart can finish before the poll loop has seen its provider gone,
+// leaving the device's state "available". Runtime::restart_provider marks the
+// provider lost before the rebuild, as the poll loop would have, so the drop
+// still latches.
+TEST_F(StateCacheEdgeOrderTest, RestartFasterThanThePollLoopStillLatchesADroppedDevice) {
+    state_cache->set_device_reachability_sink(runtime_sink);
+    state_cache->poll_once(*provider_registry);  // a good read; no poll sees the provider die
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1")->provider_available);
+
+    state_cache->mark_provider_lost("sim0");
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "provider loss alone does not latch (#301)";
+
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+}
+
 // #801: the loss recorded for a dropped device is a transport loss, so a device
 // that returns still dark is the same outage and reports no second loss edge
 // (#764).

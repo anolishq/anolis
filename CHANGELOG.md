@@ -15,14 +15,18 @@ commit messages only.
 
 ### Fixed
 
-- **A device dropped by a provider restart while unavailable now latches.**
-  Provider loss does not latch its devices; the first failed read after the
-  restart does. A device the restarted provider no longer lists is never read
-  again, so on a bus that was still dark it was never latched. The runtime then
-  stayed in AUTO with no latch, and nothing would re-assert the device's safe
-  state if it came back. Such a device now takes a transport loss edge when it is
-  dropped, and its first successful read after it is registered again
-  re-asserts its safe state. (#801)
+- **A device a provider restart drops now latches.** Provider loss does not
+  latch its devices; the first failed read after the restart does. A device
+  the restarted provider no longer lists is never read again, so on a bus that
+  was still dark it was never latched. The runtime then stayed in AUTO with no
+  latch, and nothing would re-assert the device's safe state if it came back.
+  Such a device now takes a transport loss edge when it is dropped, and its
+  first successful read after it is registered again re-asserts its safe
+  state. The restart marks the provider's devices unavailable first, so this
+  holds even when the restart finishes before any poll has seen the provider
+  die. A device removed from the provider's configuration latches the same
+  way, and stays in `device_loss_latched` until it is registered again or the
+  runtime restarts. (#801)
 
 ## [0.14.0] - 2026-11-10
 

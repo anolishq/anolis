@@ -305,11 +305,12 @@ restart (a provider crash, then the runtime starting it again) runs nothing:
 the runtime does not run the safe state, and provider loss is not reported as
 device loss, so the device-loss latch does not engage and nothing is
 re-asserted when the devices come back. The exception is a device the restarted
-provider no longer lists while it is unavailable, as on a bus that is still
-dark: it latches when it is dropped (anolishq/anolis#801), and if it is
-registered again, its first successful read re-asserts its safe state. Outputs
-stay as the devices and the restarted provider leave them. anolis-provider-bread from 0.10.0 drives its
-outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
+provider no longer lists, as on a bus that is still dark: it latches when it is
+dropped (anolishq/anolis#801), and if it is registered again, its first
+successful read re-asserts its safe state. A device removed from the
+provider's configuration latches the same way across a restart. Outputs stay
+as the devices and the restarted provider leave them. anolis-provider-bread
+from 0.10.0 drives its outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
 open loop at PWM 0, RLHTs to setpoints 0, open loop and duty 0. So a supervised
 restart of bread turns those outputs off, unless its config sets
 `provider.outputs_on_startup: leave`; set that with `safety.on_startup: leave`

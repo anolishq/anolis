@@ -226,17 +226,20 @@ Notes:
 ### Device-loss latch
 
 `GET /v0/runtime/status` carries `device_loss_latched`: an array of device
-handles whose provider answered a read and reported the device itself
-unreachable (`UNAVAILABLE` or `DEADLINE_EXCEEDED` for that device), and that
-have not been re-armed since.
+handles that have not been re-armed since either their provider answered a
+read and reported the device itself unreachable (`UNAVAILABLE` or
+`DEADLINE_EXCEEDED` for that device), or a supervised restart of their provider
+came back without them.
 
 A provider that hangs, crashes or is restarted does not latch its devices:
 provider loss is not device loss (see [safety.md](safety.md)). Its devices go
 unavailable, with `device_availability` events, and come back without a latch.
 Once the provider is back, a read it reports failed for a device latches that
-device as usual. A device the restarted provider no longer lists, and that had
-no successful read since it went unavailable, latches when it is dropped: no
-read can report it any more.
+device as usual. A device the restarted provider no longer lists latches when
+it is dropped, since no read can report it any more (anolishq/anolis#801). That
+includes a device removed from the provider's own configuration: it stays in
+`device_loss_latched` until it is registered again and reads successfully, and
+then re-entering AUTO releases it, or until the runtime restarts.
 
 Notes:
 

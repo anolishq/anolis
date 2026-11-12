@@ -188,6 +188,19 @@ public:
     void rebuild_poll_configs(const std::string &provider_id);
 
     /**
+     * @brief Mark every device of a provider unavailable, as the poll loop does
+     *        when it finds the provider gone.
+     *
+     * Provider loss, not device loss: no reachability edge (#301). The runtime
+     * calls this before rebuild_poll_configs when it restarts a provider, so a
+     * restart that finishes before the next poll still leaves the devices
+     * unavailable, and one the new inventory drops is latched (#801).
+     *
+     * @param provider_id Provider that was lost
+     */
+    void mark_provider_lost(const std::string &provider_id);
+
+    /**
      * @brief Start the background polling thread.
      *
      * Requires `initialize()` to have completed successfully. If polling is

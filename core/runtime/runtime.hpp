@@ -97,6 +97,7 @@ public:
     control::SafeStateController &get_safe_state() { return *safe_state_controller_; }
     const control::StopChainMonitor &get_stop_chain() const { return *stop_chain_; }
     control::CallRouter &get_call_router() { return *call_router_; }
+    const control::DeviceLossLatch &get_device_loss_latch() const { return *device_loss_latch_; }
 #if ANOLIS_ENABLE_AUTOMATION
     // Null unless automation is enabled in the config.
     automation::ModeManager *get_mode_manager() { return mode_manager_.get(); }
