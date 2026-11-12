@@ -65,8 +65,12 @@ so they cannot drift.
 6. Optional typed metric fields, parsed from the provider's `metrics` map
    using a strict allowlist:
    - integers: `io_ok`, `io_failed`, `io_retried_attempts`,
-     `watchdog_timeout_ms`, `watchdog_trip_count`, `sample_success_count`,
-     `sample_failure_count`, `call_success_count`, `call_failure_count`
+     `watchdog_timeout_ms`, `watchdog_trip_count`, `watchdog_status_age_ms`,
+     `sample_success_count`, `sample_failure_count`, `call_success_count`,
+     `call_failure_count`. `watchdog_status_age_ms` is the age of the reading
+     the other `watchdog_*` fields carry: a provider may report a cached
+     reading, and keeps reporting its last good one after later reads fail, so
+     an armed or tripped value is current only while its age is small.
    - booleans: `watchdog_armed`, `watchdog_tripped`, `missing`, `excluded`
    - identity strings: `startup_firmware`, `startup_product_code`,
      `firmware_version` — non-empty, truncated to 128 bytes, omitted when

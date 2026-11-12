@@ -145,6 +145,7 @@ TEST(HealthLineProtocolTest, DeviceLineWithTypedAllowlist) {
     rd.metrics["watchdog_timeout_ms"] = "5000";
     rd.metrics["watchdog_tripped"] = "false";
     rd.metrics["watchdog_trip_count"] = "2";
+    rd.metrics["watchdog_status_age_ms"] = "1500";
     rd.metrics["address"] = "0x10";  // not allowlisted -> skipped
     ds.reported = rd;
     ps.devices.push_back(ds);
@@ -155,7 +156,8 @@ TEST(HealthLineProtocolTest, DeviceLineWithTypedAllowlist) {
               "anolis_device_health,runtime_name=bioreactor,provider_id=bread0,device_id=dcmt0 "
               "health=\"OK\",registered=true,staleness_ms=120i,stale_signal_count=0i,fault_signal_count=0i,"
               "io_ok=142i,io_failed=3i,io_retried_attempts=7i,"
-              "watchdog_timeout_ms=5000i,watchdog_trip_count=2i,watchdog_armed=true,watchdog_tripped=false "
+              "watchdog_timeout_ms=5000i,watchdog_trip_count=2i,watchdog_status_age_ms=1500i,watchdog_armed=true,"
+              "watchdog_tripped=false "
               "1700000000000");
 }
 
