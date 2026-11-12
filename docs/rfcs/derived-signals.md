@@ -543,10 +543,14 @@ what belongs there.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
    conformance vectors are written there. It is amended a section at a
    time. Time and the host interface, how doubt passes through a block's
-   memory, what a gap does to each block, and how models are stepped are
-   written; the estimator is still to come. A model there is linear and
-   stepped exactly, and one too fast for the graph's period is refused,
-   which bears on O7's question of what the period should be.
+   memory, what a gap does to each block, how models are stepped, and the
+   estimator are written, and nothing is left there that is known to be
+   wrong as it stands. A model is linear and stepped exactly, and one too
+   fast for the graph's period is refused, which bears on O7's question
+   of what the period should be. An estimator's `good` means that none of
+   its own tests has failed, not that it is right: what the stop chain
+   does with one (O6) has to allow for a sensor that is biased or stuck,
+   which no test of its sees.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
