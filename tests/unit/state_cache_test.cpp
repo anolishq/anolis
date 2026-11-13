@@ -1105,6 +1105,125 @@ TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileLatchedReturnsWithAReturnEdge)
     EXPECT_EQ(latch.release_reachable(), std::vector<std::string>{"sim0/dev1"});
 }
 
+// #801: a board that goes dark with its provider. Provider loss reports no
+// edge (#301), and the restarted provider, probing the still-dark bus, no
+// longer lists the device, so no later read can report one either. Dropped
+// from the inventory while unavailable, the device takes a transport loss
+// edge then: it latches, and its return after it is registered again is a
+// return edge that re-asserts safe state, as in #424.
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedByARestartWhileItsProviderWasLostLatches) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    std::vector<anolis::deviceprovider::v1::Status_Code> loss_codes;
+    state_cache->set_device_reachability_sink([&](const std::string &handle, bool reachable,
+                                                  anolis::deviceprovider::v1::Status_Code status,
+                                                  std::uint64_t edge_seq) {
+        if (!reachable) {
+            loss_codes.push_back(status);
+        }
+        runtime_sink(handle, reachable, status, edge_seq);
+    });
+
+    state_cache->poll_once(*provider_registry);  // 1. a good read
+    available = false;                           // 2. the provider dies
+    state_cache->poll_once(*provider_registry);
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "provider loss alone does not latch (#301)";
+
+    available = true;  // 3. the restarted provider lists no devices
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1") == nullptr);
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a device dropped while unavailable latches";
+    EXPECT_EQ(loss_codes, (std::vector<anolis::deviceprovider::v1::Status_Code>{
+                              anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE}));
+
+    RegisterMockDevice();  // 4. it returns under the same id
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_EQ(reissues, 1) << "its first good read is a return edge, re-asserting safe state once";
+    EXPECT_EQ(loss_codes.size(), 1U) << "no second loss edge";
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
+}
+
+// #801: a restart can finish before the poll loop has seen its provider gone,
+// leaving the device's state "available". Runtime::restart_provider marks the
+// provider lost before the rebuild, as the poll loop would have, so the drop
+// still latches.
+TEST_F(StateCacheEdgeOrderTest, RestartFasterThanThePollLoopStillLatchesADroppedDevice) {
+    state_cache->set_device_reachability_sink(runtime_sink);
+    state_cache->poll_once(*provider_registry);  // a good read; no poll sees the provider die
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1")->provider_available);
+
+    state_cache->mark_provider_lost("sim0");
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "provider loss alone does not latch (#301)";
+
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+}
+
+// #801: the loss recorded for a dropped device is a transport loss, so a device
+// that returns still dark is the same outage and reports no second loss edge
+// (#764).
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedThenReturnedStillDarkReportsNoSecondLoss) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    int losses = 0;
+    state_cache->set_device_reachability_sink([&](const std::string &handle, bool reachable,
+                                                  anolis::deviceprovider::v1::Status_Code status,
+                                                  std::uint64_t edge_seq) {
+        losses += reachable ? 0 : 1;
+        runtime_sink(handle, reachable, status, edge_seq);
+    });
+
+    state_cache->poll_once(*provider_registry);
+    available = false;
+    state_cache->poll_once(*provider_registry);
+    available = true;
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    ASSERT_EQ(losses, 1);
+
+    RegisterMockDevice();
+    state_cache->rebuild_poll_configs("sim0");
+    std::ostringstream discarded;  // the failed read logs an ERROR line
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    t_fail_reads = true;
+    state_cache->poll_once(*provider_registry);
+    t_fail_reads = false;
+    std::cerr.rdbuf(old);
+
+    EXPECT_EQ(losses, 1) << "the same outage reported a second loss edge";
+    EXPECT_EQ(reissues, 0);
+}
+
+// #801: an in-band loss the latch ignores (INTERNAL: the device answered, but
+// badly) that ends with a restart dropping the device worsens to a transport
+// loss, as a later UNAVAILABLE read would (#764).
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedAfterANonTransportLossLatches) {
+    state_cache->set_device_reachability_sink(runtime_sink);
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                            anolis::deviceprovider::v1::Status_Code &status) {
+            status = anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
+            return false;
+        }));
+
+    std::ostringstream discarded;  // the failed read logs an ERROR line
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    state_cache->poll_once(*provider_registry);
+    std::cerr.rdbuf(old);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "INTERNAL does not latch";
+
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+}
+
 // A device removed while reachable and registered again comes back as a new
 // device: no loss is on record, so its first read is not a return.
 TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileReachableReturnsWithNoEdge) {
