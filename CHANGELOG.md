@@ -13,7 +13,7 @@ commit messages only.
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-11-12
+## [0.15.0] - 2026-11-13
 
 0.15.0 is a minor release because calls that used to be made can now be
 refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR): a
