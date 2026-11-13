@@ -15,7 +15,7 @@ Set the two versions to the latest releases of
 and the architecture to `x86_64` or `arm64`:
 
 ```bash
-ANOLIS=0.14.0
+ANOLIS=0.15.0
 SIM=0.3.0
 ARCH=x86_64
 
