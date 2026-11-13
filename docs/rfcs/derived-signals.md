@@ -555,7 +555,11 @@ what belongs there.
    sequence of writes and calls. Three things in that bear on a host here
    (O7): after a restore or a stepped clock it writes again only the
    inputs that have no maximum age, an input's initial value does not
-   come back, and it gives the inputs of one scan one time.
+   come back, and it gives the inputs of one scan one time. Its
+   catalogue now has a rate limit and a PID. With an input it cannot use
+   a PID gives no value, so what an actuator gets then is this runtime's
+   to say (O6), and it winds up behind a limit unless it is told what
+   was applied.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
