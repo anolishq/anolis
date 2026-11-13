@@ -1,0 +1,1152 @@
+diff --git a/tests/unit/bt_nodes_test.cpp b/tests/unit/bt_nodes_test.cpp
+index 281aa46..e1fce8e 100644
+--- a/tests/unit/bt_nodes_test.cpp
++++ b/tests/unit/bt_nodes_test.cpp
+@@ -493,3 +493,1147 @@ TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
+     expect_ports(anolis::automation::EmitOnChangeOrIntervalNode::providedPorts(), {"key", "emit"});
+     expect_ports(anolis::automation::BuildArgsJsonNode::providedPorts(), {"arg1_name", "json"});
+ }
++
++// ---- PROBE (uncommitted, stage-two authoring assessment) ----
++#include <behaviortree_cpp/xml_parsing.h>
++
++#include <cstdlib>
++#include <fstream>
++
++TEST_F(BTNodesTest, ProbeDumpNodeModel) {
++    BT::BehaviorTreeFactory factory;
++    register_nodes(factory);
++    factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
++    factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice");
++    factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
++    const char* out = std::getenv("ANOLIS_PROBE_OUT");
++    ASSERT_NE(out, nullptr);
++    std::ofstream(std::string(out) + "/anolis-nodes-model.xml") << BT::writeTreeNodesModelXML(factory, false);
++    std::ofstream(std::string(out) + "/anolis-nodes-model-with-builtins.xml") << BT::writeTreeNodesModelXML(factory, true);
++}
++
++TEST_F(BTNodesTest, ProbeScriptOnTypedEntries) {
++    BT::BehaviorTreeFactory factory;
++    register_nodes(factory);
++    parameter_manager_.define("impeller_enable", anolis::automation::ParameterType::BOOL, true);
++    parameter_manager_.define("impeller_pwm", anolis::automation::ParameterType::DOUBLE, 180.0);
++    parameter_manager_.define("sample_pwm", anolis::automation::ParameterType::DOUBLE, 90.0);
++    const std::string xml = R"(<?xml version="1.0"?>
++<root BTCPP_format="4">
++  <BehaviorTree ID="MainTree">
++    <Sequence>
++      <GetParameterBool param="impeller_enable" value="{impeller_enable}"/>
++      <GetParameter param="impeller_pwm" value="{impeller_pwm}"/>
++      <GetParameter param="sample_pwm" value="{sample_pwm}"/>
++      <PeriodicPulseWindow enabled="true" startup_delay_s="0" interval_s="60" pulse_s="5"
++                           now_ms="{now}" active="{sample_active}" pulse_index="{idx}" elapsed_ms="{el}"/>
++      <Script code="m1 := sample_active ? sample_pwm : 0; m2 := impeller_enable ? impeller_pwm : 0"/>
++      <BuildArgsJson arg1_name="motor1_pwm" arg1_type="int64" arg1_num="{m1}"
++                     arg2_name="motor2_pwm" arg2_type="int64" arg2_num="{m2}" json="{args}"/>
++    </Sequence>
++  </BehaviorTree>
++</root>
++)";
++    auto blackboard = make_blackboard(true);
++    blackboard->set<int64_t>("now", 1000);
++    BT::Tree tree;
++    try {
++        tree = factory.createTreeFromText(xml, blackboard);
++        auto status = tree.tickOnce();
++        std::cout << "PROBE status=" << BT::toStr(status) << " args=" << blackboard->get<std::string>("args") << "\n";
++    } catch (const std::exception& e) {
++        std::cout << "PROBE exception: " << e.what() << "\n";
++        FAIL();
++    }
++}
++
++TEST_F(BTNodesTest, ProbeGrootDefaultSaveSemantics) {
++    BT::BehaviorTreeFactory factory;
++    register_nodes(factory);
++    auto run = [&](const char* label, const std::string& body) {
++        const std::string xml = "<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\">" + body + "</BehaviorTree></root>";
++        auto blackboard = make_blackboard(true);
++        try {
++            auto tree = factory.createTreeFromText(xml, blackboard);
++            auto status = tree.tickOnce();
++            std::string args = "<unset>";
++            try { args = blackboard->get<std::string>("args"); } catch (...) {}
++            std::cout << "PROBE " << label << ": status=" << BT::toStr(status) << " args=" << args << "\n";
++        } catch (const std::exception& e) {
++            std::cout << "PROBE " << label << ": EXCEPTION " << e.what() << "\n";
++        }
++    };
++    run("buildargs-original", R"(<BuildArgsJson arg1_name="motor1_pwm" arg1_type="int64" arg1_num="5" json="{args}"/>)");
++    run("buildargs-groot-default-save",
++        R"(<BuildArgsJson json="{args}" arg1_name="motor1_pwm" arg1_type="int64" arg1_num="5" arg1_bool="" arg1_str=""
++            arg2_name="" arg2_type="" arg2_num="" arg2_bool="" arg2_str=""/>)");
++    run("pulse-original", R"(<PeriodicPulseWindow enabled="true" interval_s="60" pulse_s="5" active="{a}" pulse_index="{i}" elapsed_ms="{e}"/>)");
++    run("pulse-groot-default-save",
++        R"(<PeriodicPulseWindow enabled="true" startup_delay_s="0" interval_s="60" pulse_s="5" max_pulses_per_hour="0" now_ms="" active="{a}" pulse_index="{i}" elapsed_ms="{e}"/>)");
++}
++
++TEST_F(BTNodesTest, ProbeLoadGrootSavedFiles) {
++    const char* dir = std::getenv("ANOLIS_PROBE_TREES");
++    ASSERT_NE(dir, nullptr);
++    for (const char* rel : {"b3/demo.xml", "b3/bioreactor.xml", "b6/demo.xml", "b6/bioreactor.xml", "b6/orig/bioreactor.xml"}) {
++        BT::BehaviorTreeFactory factory;
++        register_nodes(factory);
++        factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
++        factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice");
++        factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
++        try {
++            auto tree = factory.createTreeFromFile(std::string(dir) + "/" + rel, make_blackboard(true));
++            size_t n = 0;
++            tree.applyVisitor([&n](BT::TreeNode*) { ++n; });
++            std::cout << "PROBE load " << rel << ": OK nodes=" << n << "\n";
++        } catch (const std::exception& e) {
++            std::cout << "PROBE load " << rel << ": EXCEPTION " << e.what() << "\n";
++        }
++    }
++}
++
++// ---- PROBE: vocabulary lens (uncommitted, throwaway) ----
++#include <nlohmann/json.hpp>
++
++#include <chrono>
++#include <cmath>
++#include <map>
++#include <memory>
++#include <set>
++#include <thread>
++#include <variant>
++
++namespace {
++
++struct VocabCalls {
++    std::vector<std::string> log;
++};
++VocabCalls* g_vocab_calls = nullptr;
++std::set<std::string> g_vocab_fail;  // "handle function"
++
++std::string vocab_norm(std::string args) {
++    if (args.rfind("json:", 0) == 0) args = args.substr(5);
++    try {
++        return nlohmann::json::parse(args).dump();
++    } catch (...) {
++        return "UNPARSEABLE(" + args + ")";
++    }
++}
++
++BT::NodeStatus vocab_record(const std::string& handle, const std::string& fn, const std::string& args,
++                            const std::string& reason) {
++    const bool fail = g_vocab_fail.count(handle + " " + fn) > 0;
++    g_vocab_calls->log.push_back(handle + " " + fn + " " + args + " reason=" + reason + (fail ? " FAIL" : ""));
++    return fail ? BT::NodeStatus::FAILURE : BT::NodeStatus::SUCCESS;
++}
++
++// Stand-in for CallDevice with the real node's ports: records instead of calling.
++class VocabCallDevice : public BT::SyncActionNode {
++public:
++    VocabCallDevice(const std::string& name, const BT::NodeConfig& config) : BT::SyncActionNode(name, config) {}
++    static BT::PortsList providedPorts() { return anolis::automation::CallDeviceNode::providedPorts(); }
++    BT::NodeStatus tick() override {
++        return vocab_record(getInput<std::string>("device_handle").value(),
++                            getInput<std::string>("function_name").value(),
++                            vocab_norm(getInput<std::string>("args").value_or("{}")),
++                            getInput<std::string>("reason").value_or(""));
++    }
++};
++
++// Prototype: one node type per device function, ports from the function's arguments.
++struct ProtoArg {
++    std::string name;
++    std::string type;  // int64|double|bool|string
++};
++struct ProtoFn {
++    std::string handle;
++    std::string function;
++    std::vector<ProtoArg> args;
++};
++
++class ProtoFnNode : public BT::SyncActionNode {
++public:
++    ProtoFnNode(const std::string& name, const BT::NodeConfig& config, ProtoFn fn)
++        : BT::SyncActionNode(name, config), fn_(std::move(fn)) {}
++
++    static BT::PortsList ports_for(const ProtoFn& fn) {
++        BT::PortsList ports = {
++            BT::InputPort<int64_t>("resend_s", "Send on change, and again every this many seconds (0: change only)"),
++            BT::InputPort<int64_t>("min_spacing_ms", 0, "Least time between sends"),
++            BT::InputPort<std::string>("reason", "", "Reason recorded with an ungated send")};
++        for (const auto& a : fn.args) {
++            if (a.type == "bool") {
++                ports.insert(BT::InputPort<bool>(a.name));
++            } else if (a.type == "string") {
++                ports.insert(BT::InputPort<std::string>(a.name));
++            } else {
++                ports.insert(BT::InputPort<double>(a.name));
++            }
++        }
++        return ports;
++    }
++
++    BT::NodeStatus tick() override {
++        nlohmann::json args = nlohmann::json::object();
++        for (const auto& a : fn_.args) {
++            if (a.type == "bool") {
++                args[a.name] = getInput<bool>(a.name).value();
++            } else if (a.type == "string") {
++                args[a.name] = getInput<std::string>(a.name).value();
++            } else if (a.type == "int64") {
++                args[a.name] = std::llround(getInput<double>(a.name).value());
++            } else {
++                args[a.name] = getInput<double>(a.name).value();
++            }
++        }
++        const std::string key = args.dump();
++        std::string reason = getInput<std::string>("reason").value_or("");
++        const auto resend_s = getInput<int64_t>("resend_s");
++        if (resend_s) {
++            const int64_t min_spacing_ms = getInput<int64_t>("min_spacing_ms").value_or(0);
++            const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                       std::chrono::steady_clock::now().time_since_epoch())
++                                       .count();
++            bool emit = false;
++            if (!has_last_) {
++                emit = true;
++                reason = "first";
++            } else if (key != last_key_ && now_ms - last_ms_ >= min_spacing_ms) {
++                emit = true;
++                reason = "changed";
++            } else if (*resend_s > 0 && now_ms - last_ms_ >= *resend_s * 1000) {
++                emit = true;
++                reason = "keepalive";
++            }
++            if (!emit) {
++                return BT::NodeStatus::SUCCESS;
++            }
++            has_last_ = true;
++            last_ms_ = now_ms;
++            last_key_ = key;
++        }
++        return vocab_record(fn_.handle, fn_.function, key, reason);
++    }
++
++private:
++    ProtoFn fn_;
++    bool has_last_ = false;
++    int64_t last_ms_ = 0;
++    std::string last_key_;
++};
++
++void register_proto(BT::BehaviorTreeFactory& factory, const std::string& sep = "-") {
++    const std::vector<ProtoFn> fns = {
++        {"bread0/dcmt0", "set_open_loop", {{"motor1_pwm", "int64"}, {"motor2_pwm", "int64"}}},
++        {"bread0/dcmt1", "set_open_loop", {{"motor1_pwm", "int64"}, {"motor2_pwm", "int64"}}},
++        {"bread0/rlht0", "set_periods_ms", {{"period1_ms", "int64"}, {"period2_ms", "int64"}}},
++        {"bread0/rlht0", "set_tc_select", {{"channel1_thermocouple", "int64"}, {"channel2_thermocouple", "int64"}}},
++        {"bread0/rlht0",
++         "set_pid_x10",
++         {{"kp1_x10", "int64"},
++          {"ki1_x10", "int64"},
++          {"kd1_x10", "int64"},
++          {"kp2_x10", "int64"},
++          {"ki2_x10", "int64"},
++          {"kd2_x10", "int64"}}},
++        {"bread0/rlht0", "set_mode", {{"mode", "string"}}},
++        {"bread0/rlht0", "set_setpoints", {{"setpoint1_c", "double"}, {"setpoint2_c", "double"}}},
++        {"bread0/rlht0", "set_open_duty_pct", {{"duty1_pct", "int64"}, {"duty2_pct", "int64"}}},
++        {"ezo0/ph0", "set_compensation", {{"temperature_c", "double"}}},
++        {"ezo0/do0", "set_compensation", {{"temperature_c", "double"}}},
++    };
++    for (const auto& fn : fns) {
++        std::string id = fn.handle;
++        id = id.substr(0, id.find('/')) + sep + id.substr(id.find('/') + 1) + sep + fn.function;
++        BT::TreeNodeManifest manifest{BT::NodeType::ACTION, id, ProtoFnNode::ports_for(fn), {}};
++        factory.registerBuilder(
++            manifest, [fn](const std::string& name, const BT::NodeConfig& config) -> std::unique_ptr<BT::TreeNode> {
++                return std::make_unique<ProtoFnNode>(name, config, fn);
++            });
++    }
++}
++
++void define_bioreactor_params(anolis::automation::ParameterManager& pm) {
++    using T = anolis::automation::ParameterType;
++    const auto b = [&](const char* n, bool v) { ASSERT_TRUE(pm.define(n, T::BOOL, v)); };
++    const auto i = [&](const char* n, int64_t v) { ASSERT_TRUE(pm.define(n, T::INT64, v)); };
++    const auto d = [&](const char* n, double v) { ASSERT_TRUE(pm.define(n, T::DOUBLE, v)); };
++    b("impeller_enable", false);
++    i("impeller_pwm", 100);
++    for (const std::string p : {"dose1", "dose2"}) {
++        b((p + "_enable").c_str(), false);
++        i((p + "_pwm").c_str(), 240);
++        i((p + "_startup_delay_s").c_str(), 60);
++        i((p + "_interval_s").c_str(), 900);
++        i((p + "_pulse_s").c_str(), 5);
++        i((p + "_max_pulses_per_hour").c_str(), 0);
++    }
++    b("sample_enable", false);
++    i("sample_pwm", 240);
++    i("sample_startup_delay_s", 60);
++    i("sample_interval_s", 900);
++    i("sample_pulse_s", 5);
++    i("sample_requests", 0);
++    i("sample_request_delay_s", 0);
++    i("sample_request_pulse_s", 5);
++    b("heater_enable", false);
++    d("heater_pad_setpoint_c", 0.0);
++    d("compensation_temp_c", 25.0);
++    i("command_keepalive_s", 30);
++    i("command_min_spacing_ms", 500);
++}
++
++// What the runtime change would do in populate_blackboard(): every parameter,
++// under its own name and type, on the root blackboard before each tick.
++void mirror_params(const anolis::automation::ParameterManager& pm, const BT::Blackboard::Ptr& bb) {
++    for (const auto& [name, def] : pm.get_all_definitions()) {
++        std::visit([&](const auto& v) { bb->set(name, v); }, def.value);
++    }
++}
++
++void register_runtime_nodes(BT::BehaviorTreeFactory& factory, bool real_call_device) {
++    factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
++    if (real_call_device) {
++        factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice");
++    } else {
++        factory.registerNodeType<VocabCallDevice>("CallDevice");
++    }
++    factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
++    factory.registerNodeType<anolis::automation::GetParameterNode>("GetParameter");
++    factory.registerNodeType<anolis::automation::GetParameterBoolNode>("GetParameterBool");
++    factory.registerNodeType<anolis::automation::GetParameterInt64Node>("GetParameterInt64");
++    factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
++    factory.registerNodeType<anolis::automation::PeriodicPulseWindowNode>("PeriodicPulseWindow");
++    factory.registerNodeType<anolis::automation::RequestedPulseWindowNode>("RequestedPulseWindow");
++    factory.registerNodeType<anolis::automation::EmitOnChangeOrIntervalNode>("EmitOnChangeOrInterval");
++    factory.registerNodeType<anolis::automation::BuildArgsJsonNode>("BuildArgsJson");
++}
++
++struct VocabFile {
++    const char* label;
++    std::string path;
++    bool mirror;
++    bool proto;
++};
++
++std::vector<VocabFile> vocab_files() {
++    const char* orig = std::getenv("ANOLIS_VOCAB_ORIG");
++    const char* dir = std::getenv("ANOLIS_VOCAB_DIR");
++    EXPECT_NE(orig, nullptr);
++    EXPECT_NE(dir, nullptr);
++    const std::string d = dir ? dir : "";
++    return {{"original", orig ? orig : "", false, false},
++            {"v1_builtins_flat", d + "/v1_builtins_flat.xml", false, false},
++            {"v1_builtins_subtrees", d + "/v1_builtins_subtrees.xml", false, false},
++            {"v2_params_on_blackboard", d + "/v2_params_on_blackboard.xml", true, false},
++            {"v3_device_function_nodes", d + "/v3_device_function_nodes.xml", true, true}};
++}
++
++}  // namespace
++
++// Loads each tree with the node types the runtime registers (real CallDevice),
++// counts nodes, and ticks it once against an empty device registry.
++TEST_F(BTNodesTest, ProbeVocabLoadAndCount) {
++    define_bioreactor_params(parameter_manager_);
++    for (const auto& f : vocab_files()) {
++        BT::BehaviorTreeFactory factory;
++        register_runtime_nodes(factory, true);
++        if (f.proto) register_proto(factory);
++        try {
++            auto bb = make_blackboard(true);
++            auto tree = factory.createTreeFromFile(f.path, bb);
++            size_t n = 0;
++            std::map<std::string, int> by_type;
++            tree.applyVisitor([&](BT::TreeNode* node) {
++                ++n;
++                ++by_type[node->registrationName()];
++            });
++            std::ostringstream types;
++            for (const auto& [t, c] : by_type) types << " " << t << "=" << c;
++            g_vocab_calls = new VocabCalls();
++            g_vocab_fail.clear();
++            if (f.mirror) mirror_params(parameter_manager_, bb);
++            std::string tick;
++            try {
++                tick = BT::toStr(tree.tickOnce());
++            } catch (const std::exception& e) {
++                tick = std::string("THROW ") + e.what();
++            }
++            std::cout << "PROBE vocab load " << f.label << ": nodes=" << n << " first_tick=" << tick << " |" << types.str()
++                      << "\n";
++            delete g_vocab_calls;
++            g_vocab_calls = nullptr;
++        } catch (const std::exception& e) {
++            std::cout << "PROBE vocab load " << f.label << ": EXCEPTION " << e.what() << "\n";
++            ADD_FAILURE();
++        }
++    }
++}
++
++// Drives the original and each rewrite through one scenario, with CallDevice
++// replaced by a recorder, and compares the call traces step by step.
++TEST_F(BTNodesTest, ProbeVocabTraceEquivalence) {
++    define_bioreactor_params(parameter_manager_);
++    struct Variant {
++        VocabFile file;
++        BT::Tree tree;
++        BT::Blackboard::Ptr bb;
++        VocabCalls calls;
++        size_t mark = 0;
++    };
++    std::vector<std::unique_ptr<Variant>> variants;
++    for (const auto& f : vocab_files()) {
++        BT::BehaviorTreeFactory factory;
++        register_runtime_nodes(factory, false);
++        if (f.proto) register_proto(factory);
++        auto v = std::make_unique<Variant>();
++        v->file = f;
++        v->bb = make_blackboard(true);
++        v->tree = factory.createTreeFromFile(f.path, v->bb);
++        variants.push_back(std::move(v));
++    }
++    g_vocab_fail.clear();
++
++    const auto set = [&](const char* name, anolis::automation::ParameterValue value) {
++        std::string err;
++        ASSERT_TRUE(parameter_manager_.set(name, value, err)) << name << ": " << err;
++    };
++    const auto tick_all = [&](int n) {
++        for (int k = 0; k < n; ++k) {
++            for (auto& v : variants) {
++                g_vocab_calls = &v->calls;
++                if (v->file.mirror) mirror_params(parameter_manager_, v->bb);
++                try {
++                    v->calls.log.push_back(std::string("ROOT ") + BT::toStr(v->tree.tickOnce()));
++                } catch (const std::exception& e) {
++                    v->calls.log.push_back(std::string("THROW ") + e.what());
++                }
++            }
++        }
++    };
++    int total_calls = 0;
++    const auto check = [&](const char* step) {
++        auto& ref = *variants.front();
++        const std::vector<std::string> ref_slice(ref.calls.log.begin() + static_cast<long>(ref.mark), ref.calls.log.end());
++        int calls = 0;
++        for (const auto& line : ref_slice) calls += line.rfind("ROOT", 0) == 0 ? 0 : 1;
++        total_calls += calls;
++        std::cout << "PROBE vocab step [" << step << "] original: " << calls << " calls\n";
++        for (const auto& line : ref_slice) {
++            if (line.rfind("ROOT SUCCESS", 0) != 0) std::cout << "    " << line << "\n";
++        }
++        for (auto& v : variants) {
++            const std::vector<std::string> slice(v->calls.log.begin() + static_cast<long>(v->mark), v->calls.log.end());
++            v->mark = v->calls.log.size();
++            if (v.get() == &ref) continue;
++            const bool same = slice == ref_slice;
++            std::cout << "  " << v->file.label << ": " << (same ? "SAME" : "DIFFERENT") << "\n";
++            if (!same) {
++                for (const auto& line : slice) std::cout << "    > " << line << "\n";
++            }
++            EXPECT_TRUE(same) << step << " " << v->file.label;
++        }
++    };
++    const auto sleep_ms = [](int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
++
++    set("command_min_spacing_ms", int64_t{0});
++    tick_all(2);
++    check("start: everything disabled");
++
++    set("impeller_enable", true);
++    tick_all(2);
++    check("impeller on");
++
++    set("sample_startup_delay_s", int64_t{0});
++    set("sample_enable", true);
++    tick_all(2);
++    check("periodic sampler on, no startup delay");
++
++    set("dose1_startup_delay_s", int64_t{0});
++    set("dose1_enable", true);
++    tick_all(2);
++    check("dose1 on");
++
++    set("dose1_interval_s", int64_t{1});
++    tick_all(2);
++    check("dose1 schedule refused (pulse 5 s > interval 1 s)");
++
++    set("dose1_interval_s", int64_t{900});
++    tick_all(2);
++    check("dose1 schedule valid again");
++
++    set("sample_enable", false);
++    tick_all(2);
++    check("periodic sampler off");
++
++    set("sample_request_pulse_s", int64_t{1});
++    set("sample_requests", int64_t{1});
++    tick_all(2);
++    check("sample now");
++
++    sleep_ms(1200);
++    tick_all(2);
++    check("requested pulse over");
++
++    set("heater_pad_setpoint_c", 40.0);
++    set("heater_enable", true);
++    tick_all(2);
++    check("heater on at 40");
++
++    g_vocab_fail.insert("bread0/rlht0 set_tc_select");
++    set("heater_pad_setpoint_c", 41.0);
++    set("compensation_temp_c", 30.0);
++    tick_all(2);
++    check("setpoint 41 with set_tc_select failing; compensation 30 in the same tick");
++    g_vocab_fail.clear();
++
++    g_vocab_fail.insert("bread0/rlht0 set_mode");
++    set("heater_enable", false);
++    tick_all(2);
++    check("heater off with set_mode failing");
++    g_vocab_fail.clear();
++
++    g_vocab_fail.insert("bread0/dcmt0 set_open_loop");
++    set("impeller_pwm", int64_t{120});
++    set("dose2_startup_delay_s", int64_t{0});
++    set("dose2_enable", true);
++    tick_all(3);
++    check("dcmt0 write failing on a change; dcmt1 changes in the same tick");
++    g_vocab_fail.clear();
++    tick_all(2);
++    check("dcmt0 write no longer failing");
++
++    for (auto& v : variants) v->tree.haltTree();
++    tick_all(2);
++    check("after haltTree (what a tick exception does)");
++
++    set("command_min_spacing_ms", int64_t{400});
++    set("impeller_pwm", int64_t{130});
++    tick_all(1);
++    check("change inside min spacing");
++    sleep_ms(500);
++    tick_all(1);
++    check("min spacing passed");
++
++    set("command_keepalive_s", int64_t{1});
++    sleep_ms(1200);
++    tick_all(2);
++    check("keepalive due");
++
++    std::cout << "PROBE vocab trace: " << total_calls << " calls compared across " << variants.size() - 1
++              << " rewrites\n";
++}
++
++// Small facts the proposals lean on.
++TEST_F(BTNodesTest, ProbeVocabAsides) {
++    const auto run = [&](const char* label, const std::string& body, const std::function<void(BT::Blackboard::Ptr)>& setup,
++                         int ticks = 1) {
++        BT::BehaviorTreeFactory factory;
++        register_runtime_nodes(factory, false);
++        register_proto(factory);
++        const std::string xml =
++            "<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\">" + body + "</BehaviorTree></root>";
++        auto bb = make_blackboard(true);
++        VocabCalls calls;
++        g_vocab_calls = &calls;
++        g_vocab_fail.clear();
++        BT::Tree tree;
++        try {
++            tree = factory.createTreeFromText(xml, bb);
++        } catch (const std::exception& e) {
++            std::cout << "PROBE aside " << label << ": LOAD EXCEPTION " << e.what() << "\n";
++            return;
++        }
++        std::string out;
++        for (int k = 0; k < ticks; ++k) {
++            try {
++                if (setup) setup(bb);
++                out += std::string(" ") + BT::toStr(tree.tickOnce());
++            } catch (const std::exception& e) {
++                out += std::string(" TICK EXCEPTION ") + e.what();
++            }
++        }
++        std::string args;
++        try {
++            args = " args=" + bb->get<std::string>("args");
++        } catch (...) {
++        }
++        std::cout << "PROBE aside " << label << ": loaded;" << out << args << " calls=" << calls.log.size() << "\n";
++        for (const auto& line : calls.log) std::cout << "    " << line << "\n";
++    };
++
++    run("script-builds-json-by-concat",
++        R"(<Script code="m1 := 90; args := '{&quot;motor1_pwm&quot;:' .. m1 .. '}'"/>)", nullptr);
++    run("int64-entry-into-double-port",
++        R"(<BuildArgsJson arg1_name="p" arg1_type="int64" arg1_num="{p}" json="{args}"/>)",
++        [](BT::Blackboard::Ptr bb) { bb->set<int64_t>("p", 100); });
++    run("double-entry-into-int64-port",
++        R"(<PeriodicPulseWindow enabled="true" interval_s="{iv}" pulse_s="5" active="{a}"/>)",
++        [](BT::Blackboard::Ptr bb) { bb->set<double>("iv", 60.0); });
++    run("sequence-with-builtin-Sleep-under-tickOnce",
++        R"(<Sequence><CallDevice device_handle="a/b" function_name="step1"/><Sleep msec="300"/><CallDevice device_handle="a/b" function_name="step2"/></Sequence>)",
++        [](BT::Blackboard::Ptr) { std::this_thread::sleep_for(std::chrono::milliseconds(170)); }, 4);
++    run("onFailure-script-writes-bool-port-entry-on-first-tick",
++        R"(<Sequence><ForceSuccess><PeriodicPulseWindow enabled="true" interval_s="1" pulse_s="5" active="{act}" _onFailure="act := false"/></ForceSuccess><CheckBool value="{act}" expected="false"/><Script code="m := act ? 7 : 0"/></Sequence>)",
++        nullptr, 2);
++    run("script-number-into-int64-port",
++        R"(<Sequence><Script code="iv := 60"/><PeriodicPulseWindow enabled="true" interval_s="{iv}" pulse_s="5" active="{a}"/></Sequence>)",
++        nullptr);
++    run("script-reads-int64-entry",
++        R"(<Sequence><Script code="m := flag ? p : 0"/><BuildArgsJson arg1_name="p" arg1_type="int64" arg1_num="{m}" json="{args}"/></Sequence>)",
++        [](BT::Blackboard::Ptr bb) {
++            bb->set<int64_t>("p", 100);
++            bb->set<bool>("flag", true);
++        });
++    run("skipIf-on-undefined-entry", R"(<Sequence><AlwaysSuccess _skipIf="!nope"/></Sequence>)", nullptr);
++    run("script-reads-undefined-entry", R"(<Script code="x := nope + 1"/>)", nullptr);
++    run("script-syntax-error", R"(<Script code="x := := 1"/>)", nullptr);
++    run("attribute-not-a-declared-port", R"(<CheckBool value="true" bogus="1"/>)", nullptr);
++    run("all-children-skipped-root", R"(<Sequence><AlwaysSuccess _skipIf="true"/></Sequence>)", nullptr);
++    run("SkipUnlessUpdated-on-entry-rewritten-with-same-value",
++        R"(<Sequence><Script code="k := 5"/><SkipUnlessUpdated entry="{k}"><CallDevice device_handle="a/b" function_name="f"/></SkipUnlessUpdated></Sequence>)",
++        nullptr, 3);
++    run("emit-state-is-committed-before-the-call-succeeds",
++        R"(<Sequence><EmitOnChangeOrInterval key="k1" keepalive_s="0" emit="{emit}" reason="{r}"/><ForceSuccess _skipIf="!emit"><CallDevice device_handle="ezo0/ph0" function_name="set_compensation" reason="{r}"/></ForceSuccess></Sequence>)",
++        [](BT::Blackboard::Ptr) { g_vocab_fail.insert("ezo0/ph0 set_compensation"); }, 4);
++    run("typed-literal-missing-required-arg", R"(<bread0-rlht0-set_mode/>)", nullptr);
++    run("unknown-device-function-node", R"(<bread0-rlht0-set_moed mode="open_loop"/>)", nullptr);
++
++    for (const std::string sep : {".", "-", "_", "__", ":", "/"}) {
++        BT::BehaviorTreeFactory f;
++        try {
++            register_proto(f, sep);
++            const std::string id = "bread0" + sep + "rlht0" + sep + "set_mode";
++            auto bb = make_blackboard(true);
++            VocabCalls calls;
++            g_vocab_calls = &calls;
++            auto tree = f.createTreeFromText("<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\"><" + id +
++                                                 " mode=\"open_loop\"/></BehaviorTree></root>",
++                                             bb);
++            std::cout << "PROBE aside node-id-separator '" << sep << "': " << BT::toStr(tree.tickOnce())
++                      << " calls=" << calls.log.size() << "\n";
++        } catch (const std::exception& e) {
++            std::cout << "PROBE aside node-id-separator '" << sep << "': EXCEPTION " << e.what() << "\n";
++        }
++    }
++    BT::BehaviorTreeFactory factory;
++    register_proto(factory);
++    const char* dir = std::getenv("ANOLIS_VOCAB_DIR");
++    ASSERT_NE(dir, nullptr);
++    std::ofstream(std::string(dir) + "/out/proto-device-function-model.xml") << BT::writeTreeNodesModelXML(factory, false);
++}
++
++// ---- REPRO: runtime lens (uncommitted, throwaway). Real nodes, real BTRuntime, real CallRouter. ----
++#include <filesystem>
++#include <mutex>
++
++#include "automation/bt_runtime.hpp"
++#include "automation/mode_manager.hpp"
++#include "provider/i_provider_handle.hpp"
++
++namespace {
++
++namespace rp = anolis::deviceprovider::v1;
++
++std::string repro_value(const rp::Value& v) {
++    switch (v.kind_case()) {
++        case rp::Value::kDoubleValue:
++            return "double:" + std::to_string(v.double_value());
++        case rp::Value::kInt64Value:
++            return "int64:" + std::to_string(v.int64_value());
++        case rp::Value::kBoolValue:
++            return v.bool_value() ? "bool:true" : "bool:false";
++        case rp::Value::kStringValue:
++            return "string:" + v.string_value();
++        default:
++            return "<other>";
++    }
++}
++
++// What the provider end of CallRouter::execute_call received.
++struct ReproProvider : anolis::provider::IProviderHandle {
++    std::string id = "sim0";
++    mutable std::mutex m;
++    std::vector<std::string> log;
++    std::map<std::string, int> fail;  // function -> calls left to fail (-1 = always)
++    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++
++    bool start() override { return true; }
++    bool is_available() const override { return true; }
++    bool stop() override { return true; }
++    bool hello(rp::HelloResponse&) override { return true; }
++    bool list_devices(std::vector<rp::Device>& devices) override {
++        rp::Device dev;
++        dev.set_device_id("dev1");
++        devices.push_back(dev);
++        return true;
++    }
++    bool describe_device(const std::string&, rp::DescribeDeviceResponse& response) override {
++        response.mutable_device()->set_device_id("dev1");
++        auto* caps = response.mutable_capabilities();
++        auto add = [&](const char* name, uint32_t fid, int arg_required) {  // -1: no arg
++            auto* fn = caps->add_functions();
++            fn->set_name(name);
++            fn->set_function_id(fid);
++            if (arg_required >= 0) {
++                auto* a = fn->add_args();
++                a->set_name("value");
++                a->set_type(rp::VALUE_TYPE_DOUBLE);
++                a->set_required(arg_required == 1);
++            }
++        };
++        add("set_opt", 1, 0);  // one OPTIONAL double argument "value"
++        add("set_req", 2, 1);  // one REQUIRED double argument "value"
++        add("noargs", 3, -1);
++        add("step1", 4, -1);
++        add("step2", 5, -1);
++        return true;
++    }
++    bool read_signals(const std::string&, const std::vector<std::string>&, rp::ReadSignalsResponse&,
++                      rp::Status_Code&) override {
++        return false;
++    }
++    bool call(const std::string& device_id, uint32_t, const std::string& function_name,
++              const std::map<std::string, rp::Value>& args, rp::CallResponse&) override {
++        std::lock_guard<std::mutex> lock(m);
++        std::string line = device_id + " " + function_name + "(";
++        bool first = true;
++        for (const auto& [k, v] : args) {
++            line += (first ? "" : ", ") + k + "=" + repro_value(v);
++            first = false;
++        }
++        line += ") nargs=" + std::to_string(args.size());
++        bool ok = true;
++        auto it = fail.find(function_name);
++        if (it != fail.end() && it->second != 0) {
++            ok = false;
++            if (it->second > 0) --it->second;
++        }
++        const auto ms =
++            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
++        log.push_back("t+" + std::to_string(ms) + "ms " + line + (ok ? " -> provider OK" : " -> provider FAIL"));
++        return ok;
++    }
++    bool get_health(rp::GetHealthResponse&) override { return true; }
++    std::string last_error() const override { return "injected provider failure"; }
++    rp::Status_Code last_status_code() const override { return rp::Status_Code_CODE_INTERNAL; }
++    const std::string& provider_id() const override { return id; }
++
++    std::vector<std::string> snapshot() const {
++        std::lock_guard<std::mutex> lock(m);
++        return log;
++    }
++};
++
++// The wiring Runtime does: registry discovered from the provider, a CallRouter
++// with the mode manager attached, and a BTRuntime that populates the blackboard.
++struct ReproRig {
++    anolis::registry::DeviceRegistry registry;
++    anolis::state::StateCache state_cache{registry, 100};
++    anolis::control::CallRouter router{registry, state_cache};
++    anolis::provider::ProviderRegistry providers;
++    anolis::automation::ModeManager mode{anolis::automation::RuntimeMode::MANUAL};
++    anolis::automation::ParameterManager params;
++    std::shared_ptr<ReproProvider> provider = std::make_shared<ReproProvider>();
++    anolis::automation::BTRuntime runtime{state_cache, router, providers, mode, &params};
++    std::filesystem::path tree_path;
++
++    ReproRig() {
++        providers.add_provider("sim0", provider);
++        registry.discover_provider("sim0", *provider);
++        router.set_mode_manager(&mode, "OVERRIDE");
++    }
++    ~ReproRig() { runtime.stop(); }
++
++    bool load(const std::string& label, const std::string& body_or_root, bool full_root = false) {
++        const char* out = std::getenv("ANOLIS_REPRO_OUT");
++        const std::filesystem::path dir = out ? std::filesystem::path(out) / "trees" : std::filesystem::temp_directory_path();
++        std::filesystem::create_directories(dir);
++        tree_path = dir / (label + ".xml");
++        const std::string xml = full_root ? body_or_root
++                                          : "<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\">" + body_or_root +
++                                                "</BehaviorTree></root>";
++        std::ofstream(tree_path, std::ios::binary) << xml;
++        return runtime.load_tree(tree_path.string());
++    }
++    bool to_auto() {
++        std::string err;
++        return mode.set_mode(anolis::automation::RuntimeMode::AUTO, err);
++    }
++    // Direct ticks on this thread, through BTRuntime::tick().
++    std::string ticks(int n) {
++        std::string out;
++        for (int i = 0; i < n; ++i) {
++            try {
++                out += std::string(" ") + BT::toStr(runtime.tick());
++            } catch (const std::exception& e) {
++                out += std::string(" EXCEPTION[") + e.what() + "]";
++            }
++        }
++        return out;
++    }
++    void dump(const std::string& label) {
++        const auto calls = provider->snapshot();
++        std::cout << "REPRO " << label << ": provider received " << calls.size() << " call(s)\n";
++        for (const auto& c : calls) std::cout << "REPRO     " << c << "\n";
++        for (const auto& f : runtime.status().call_failures) {
++            std::cout << "REPRO     call_failures: " << f.device_handle << " " << f.function
++                      << " consecutive=" << f.consecutive_failures << " last_error=" << f.last_error << "\n";
++        }
++    }
++};
++
++void repro_case(const std::string& label, const std::string& body, int n = 1, bool full_root = false,
++                const std::function<void(ReproRig&)>& setup = nullptr) {
++    ReproRig rig;
++    if (setup) setup(rig);
++    if (!rig.load(label, body, full_root)) {
++        std::cout << "REPRO " << label << ": LOAD FAILED\n";
++        return;
++    }
++    if (!rig.to_auto()) {
++        std::cout << "REPRO " << label << ": could not enter AUTO\n";
++        return;
++    }
++    std::cout << "REPRO " << label << ": loaded; tick status:" << rig.ticks(n) << "\n";
++    rig.dump(label);
++}
++
++}  // namespace
++
++// (1) A6
++TEST(ReproRuntime, A6CallDeviceArgs) {
++    const auto call = [](const std::string& fn, const std::string& args_attr) {
++        return "<CallDevice device_handle=\"sim0/dev1\" function_name=\"" + fn + "\" " + args_attr + "/>";
++    };
++    repro_case("a6-01-opt-json-prefix-CONTROL", call("set_opt", R"(args='json:{"value":25.0}')"));
++    repro_case("a6-02-opt-bare-braces", call("set_opt", R"(args='{"value":25.0}')"));
++    repro_case("a6-03-req-bare-braces", call("set_req", R"(args='{"value":25.0}')"));
++    repro_case("a6-04-opt-never-written", call("set_opt", R"(args="{never_written}")"));
++    repro_case("a6-05-req-never-written", call("set_req", R"(args="{never_written}")"));
++    repro_case("a6-06-opt-written-by-BuildArgsJson-CONTROL",
++               "<Sequence><BuildArgsJson arg1_name=\"value\" arg1_type=\"double\" arg1_num=\"25\" json=\"{a}\"/>" +
++                   call("set_opt", R"(args="{a}")") + "</Sequence>");
++    repro_case("a6-07-opt-args-attribute-absent", call("set_opt", ""));
++    repro_case("a6-08-opt-malformed-json-with-prefix", call("set_opt", R"(args='json:{"value":25.0')"));
++    repro_case("a6-09-opt-bare-not-brace-wrapped", call("set_opt", R"(args='[1]')"));
++    // The typo an author makes: a key that is written, but under another name.
++    repro_case("a6-10-opt-typo-in-key-name",
++               "<Sequence><BuildArgsJson arg1_name=\"value\" arg1_type=\"double\" arg1_num=\"25\" json=\"{pump_args}\"/>" +
++                   call("set_opt", R"(args="{pump_arg}")") + "</Sequence>");
++}
++
++// (2) C4
++namespace {
++std::string repro_gate_tree(int keepalive_s, const std::string& fn = "set_opt") {
++    return R"(<ReactiveSequence>
++  <EmitOnChangeOrInterval key="k1" keepalive_s=")" +
++           std::to_string(keepalive_s) + R"(" emit="{emit}" reason="{r}"/>
++  <Fallback>
++    <Sequence>
++      <CheckBool value="{emit}" expected="true"/>
++      <ForceSuccess>
++        <CallDevice device_handle="sim0/dev1" function_name=")" +
++           fn + R"(" args='json:{"value":25.0}' reason="{r}"/>
++      </ForceSuccess>
++    </Sequence>
++    <AlwaysSuccess/>
++  </Fallback>
++</ReactiveSequence>)";
++}
++
++// Runs the real tick loop at 20 Hz for `run_ms` (or until FAULT) and reports.
++void repro_loop_case(const std::string& label, const std::string& body, int fail_calls, int run_ms,
++                     const std::string& fn = "set_opt") {
++    using namespace anolis::automation;
++    ReproRig rig;
++    rig.provider->fail[fn] = fail_calls;
++    ASSERT_TRUE(rig.load(label, body));
++    ASSERT_TRUE(rig.to_auto());
++    rig.provider->t0 = std::chrono::steady_clock::now();
++    ASSERT_TRUE(rig.runtime.start(20));
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(run_ms);
++    while (std::chrono::steady_clock::now() < deadline && rig.mode.current_mode() == RuntimeMode::AUTO) {
++        std::this_thread::sleep_for(std::chrono::milliseconds(10));
++    }
++    const auto ran_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
++                                                                              rig.provider->t0)
++                            .count();
++    const auto mode = rig.mode.current_mode();
++    rig.runtime.stop();
++    std::cout << "REPRO " << label << ": ran " << ran_ms << " ms, total_ticks=" << rig.runtime.get_health().total_ticks
++              << ", mode at end=" << mode_to_string(mode) << ", last_error='" << rig.runtime.get_health().last_error
++              << "'\n";
++    rig.dump(label);
++}
++}  // namespace
++
++TEST(ReproRuntime, C4GatedWriteFailure) {
++    repro_loop_case("c4-01-keepalive0-fail-once", repro_gate_tree(0), 1, 2000);
++    repro_loop_case("c4-02-keepalive0-fail-always", repro_gate_tree(0), -1, 2000);
++    repro_loop_case("c4-03-keepalive1-fail-once", repro_gate_tree(1), 1, 2600);
++    repro_loop_case("c4-04-keepalive1-fail-always", repro_gate_tree(1), -1, 4500);
++    repro_loop_case("c4-05-CONTROL-no-gate-fail-always",
++                    R"(<ForceSuccess><CallDevice device_handle="sim0/dev1" function_name="set_opt" args='json:{"value":25.0}'/></ForceSuccess>)",
++                    -1, 2000);
++    // The router refusing (argument validation), not the provider failing.
++    repro_loop_case("c4-06-keepalive0-router-refuses-always",
++                    R"(<ReactiveSequence>
++  <EmitOnChangeOrInterval key="k1" keepalive_s="0" emit="{emit}" reason="{r}"/>
++  <Fallback><Sequence><CheckBool value="{emit}" expected="true"/>
++    <ForceSuccess><CallDevice device_handle="sim0/dev1" function_name="set_req" reason="{r}"/></ForceSuccess>
++  </Sequence><AlwaysSuccess/></Fallback>
++</ReactiveSequence>)",
++                    0, 1500, "set_req");
++}
++
++// C4: a changed key after a failure does send again, and the failures add up.
++TEST(ReproRuntime, C4KeyChangesAccumulateFailures) {
++    using namespace anolis::automation;
++    ReproRig rig;
++    ASSERT_TRUE(rig.params.define("temp", ParameterType::DOUBLE, 25.0));
++    rig.provider->fail["set_opt"] = -1;
++    ASSERT_TRUE(rig.load("c4-07-keepalive0-key-changes", R"(<ReactiveSequence>
++  <GetParameter param="temp" value="{t}"/>
++  <BuildArgsJson arg1_name="value" arg1_type="double" arg1_num="{t}" json="{a}"/>
++  <EmitOnChangeOrInterval key="{a}" keepalive_s="0" emit="{emit}" reason="{r}"/>
++  <Fallback><Sequence><CheckBool value="{emit}" expected="true"/>
++    <ForceSuccess><CallDevice device_handle="sim0/dev1" function_name="set_opt" args="{a}" reason="{r}"/></ForceSuccess>
++  </Sequence><AlwaysSuccess/></Fallback>
++</ReactiveSequence>)"));
++    ASSERT_TRUE(rig.to_auto());
++    std::string out = rig.ticks(5);
++    out += " | set temp=26:";
++    std::string err;
++    rig.params.set("temp", 26.0, err);
++    out += rig.ticks(5);
++    out += " | set temp=27:";
++    rig.params.set("temp", 27.0, err);
++    out += rig.ticks(2);
++    std::cout << "REPRO c4-07-keepalive0-key-changes: direct ticks:" << out << "\n";
++    rig.dump("c4-07-keepalive0-key-changes");
++}
++
++// (3) C7
++TEST(ReproRuntime, C7NodesInsideSubTree) {
++    const auto root = [](const std::string& subtree_attrs, const std::string& sub_body) {
++        return std::string(R"(<root BTCPP_format="4" main_tree_to_execute="MainTree">
++  <BehaviorTree ID="MainTree"><Sequence><SubTree ID="Sub" )") +
++               subtree_attrs + R"(/></Sequence></BehaviorTree>
++  <BehaviorTree ID="Sub">)" +
++               sub_body + R"(</BehaviorTree>
++</root>)";
++    };
++    const auto with_param = [](ReproRig& rig) {
++        rig.params.define("temp", anolis::automation::ParameterType::DOUBLE, 25.0);
++    };
++    const std::string get_param = R"(<GetParameter param="temp" value="{t}"/>)";
++    const std::string call_dev = R"(<CallDevice device_handle="sim0/dev1" function_name="noargs"/>)";
++    const std::string read_sig = R"(<ReadSignal device_handle="sim0/dev1" signal_id="s" value="{v}" quality="{q}"/>)";
++
++    for (const auto& [name, attrs] : std::vector<std::pair<std::string, std::string>>{
++             {"no-autoremap", ""}, {"autoremap", R"(_autoremap="true")"}}) {
++        repro_case("c7-GetParameter-in-subtree-" + name, root(attrs, get_param), 1, true, with_param);
++        repro_case("c7-CallDevice-in-subtree-" + name, root(attrs, call_dev), 1, true, with_param);
++        repro_case("c7-ReadSignal-in-subtree-" + name, root(attrs, read_sig), 1, true, with_param);
++    }
++    repro_case("c7-CONTROL-GetParameter-at-root", get_param, 1, false, with_param);
++    repro_case("c7-CONTROL-ReadSignal-at-root", read_sig, 1, false, with_param);
++    // Two levels down.
++    repro_case("c7-CallDevice-two-subtrees-deep-no-autoremap",
++               R"(<root BTCPP_format="4" main_tree_to_execute="MainTree">
++  <BehaviorTree ID="MainTree"><SubTree ID="Mid"/></BehaviorTree>
++  <BehaviorTree ID="Mid"><SubTree ID="Sub"/></BehaviorTree>
++  <BehaviorTree ID="Sub"><CallDevice device_handle="sim0/dev1" function_name="noargs"/></BehaviorTree>
++</root>)",
++               1, true);
++    // Does a value written in the subtree reach the parent, and a parent value reach the subtree?
++    repro_case("c7-parent-entry-read-in-subtree-no-autoremap",
++               R"(<root BTCPP_format="4" main_tree_to_execute="MainTree">
++  <BehaviorTree ID="MainTree"><Sequence>
++    <BuildArgsJson arg1_name="value" arg1_type="double" arg1_num="25" json="{a}"/>
++    <SubTree ID="Sub"/></Sequence></BehaviorTree>
++  <BehaviorTree ID="Sub"><CallDevice device_handle="sim0/dev1" function_name="set_opt" args="{a}"/></BehaviorTree>
++</root>)",
++               1, true);
++    repro_case("c7-parent-entry-read-in-subtree-autoremap",
++               R"(<root BTCPP_format="4" main_tree_to_execute="MainTree">
++  <BehaviorTree ID="MainTree"><Sequence>
++    <BuildArgsJson arg1_name="value" arg1_type="double" arg1_num="25" json="{a}"/>
++    <SubTree ID="Sub" _autoremap="true"/></Sequence></BehaviorTree>
++  <BehaviorTree ID="Sub"><CallDevice device_handle="sim0/dev1" function_name="set_opt" args="{a}"/></BehaviorTree>
++</root>)",
++               1, true);
++}
++
++// (4) A5
++TEST(ReproRuntime, A5UnknownUnderscoreAttributesAndUndeclaredParameter) {
++    const auto call = [](const std::string& attr) {
++        return "<Sequence><CallDevice device_handle=\"sim0/dev1\" function_name=\"noargs\" " + attr +
++               "/><AlwaysSuccess/></Sequence>";
++    };
++    repro_case("a5-01-CONTROL-_skipIf-true", call(R"(_skipIf="true")"));
++    repro_case("a5-02-typo-_skipif-true", call(R"(_skipif="true")"));
++    repro_case("a5-03-_onlyIf-false-on-4.9.0", call(R"(_onlyIf="false")"));
++    repro_case("a5-04-CONTROL-no-attribute", call(""));
++    repro_case("a5-05-non-underscore-unknown-attribute", call(R"(bogus="1")"));
++    repro_case("a5-06-GetParameter-undeclared-parameter", R"(<GetParameter param="not_declared" value="{x}"/>)");
++    repro_case("a5-07-GetParameter-bool-parameter-wrong-node", R"(<GetParameter param="flag" value="{x}"/>)", 1, false,
++               [](ReproRig& rig) { rig.params.define("flag", anolis::automation::ParameterType::BOOL, true); });
++    std::cout << "REPRO a5 BT.CPP library version: " << BT::LibraryVersionString() << "\n";
++}
++
++// (5) C3 and (8) A4: real nodes, blackboard read directly.
++TEST_F(BTNodesTest, ReproC3PulseWindowStaleActive) {
++    BT::BehaviorTreeFactory factory;
++    register_nodes(factory);
++    auto bb = make_blackboard(true);
++    auto tree = factory.createTreeFromText(
++        R"(<root BTCPP_format="4"><BehaviorTree ID="MainTree">
++  <PeriodicPulseWindow enabled="true" startup_delay_s="0" interval_s="{iv}" pulse_s="2" now_ms="{now}"
++                       active="{active}" pulse_index="{idx}" elapsed_ms="{el}"/>
++</BehaviorTree></root>)",
++        bb);
++    bb->set<int64_t>("iv", 5);
++    bb->set<int64_t>("now", 0);
++    const auto s1 = tree.tickOnce();
++    std::cout << "REPRO c3 tick1 valid schedule (interval 5, pulse 2, t=0): status=" << BT::toStr(s1)
++              << " active=" << bb->get<bool>("active") << "\n";
++    bb->set<int64_t>("iv", 0);  // refused: interval_s <= 0
++    bb->set<int64_t>("now", 4000);
++    const auto s2 = tree.tickOnce();
++    std::cout << "REPRO c3 tick2 invalid schedule (interval 0, t=4000, outside any pulse): status=" << BT::toStr(s2)
++              << " active=" << bb->get<bool>("active") << " idx=" << bb->get<int64_t>("idx") << "\n";
++    bb->set<int64_t>("iv", 1);  // refused: pulse_s > interval_s
++    const auto s3 = tree.tickOnce();
++    std::cout << "REPRO c3 tick3 invalid schedule (pulse 2 > interval 1): status=" << BT::toStr(s3)
++              << " active=" << bb->get<bool>("active") << "\n";
++}
++
++TEST_F(BTNodesTest, ReproA4BuildArgsEmptyStr) {
++    BT::BehaviorTreeFactory factory;
++    register_nodes(factory);
++    const auto run = [&](const char* label, const std::string& body) {
++        auto bb = make_blackboard(true);
++        try {
++            auto tree = factory.createTreeFromText(
++                "<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\">" + body + "</BehaviorTree></root>", bb);
++            const auto status = tree.tickOnce();
++            std::string args = "<unset>";
++            try {
++                args = bb->get<std::string>("args");
++            } catch (...) {
++            }
++            std::cout << "REPRO " << label << ": status=" << BT::toStr(status) << " args=" << args << "\n";
++        } catch (const std::exception& e) {
++            std::cout << "REPRO " << label << ": LOAD/TICK EXCEPTION " << e.what() << "\n";
++        }
++    };
++    run("a4-01-CONTROL-num-only", R"(<BuildArgsJson arg1_name="p" arg1_type="int64" arg1_num="5" json="{args}"/>)");
++    run("a4-02-num-and-empty-str",
++        R"(<BuildArgsJson arg1_name="p" arg1_type="int64" arg1_num="5" arg1_str="" json="{args}"/>)");
++    run("a4-03-num-and-empty-str-and-empty-name-slots",
++        R"(<BuildArgsJson arg1_name="p" arg1_type="int64" arg1_num="5" arg1_str="" arg2_name="" arg2_type="" arg2_str="" json="{args}"/>)");
++    run("a4-04-str-only-empty", R"(<BuildArgsJson arg1_name="p" arg1_str="" json="{args}"/>)");
++    run("a4-05-num-and-empty-bool", R"(<BuildArgsJson arg1_name="p" arg1_num="5" arg1_bool="" json="{args}"/>)");
++}
++
++// (7) C6: a tree left RUNNING when the mode leaves AUTO, then AUTO again. Real tick loop.
++TEST(ReproRuntime, C6ReenterAutoWithRunningTree) {
++    using namespace anolis::automation;
++    ReproRig rig;
++    ASSERT_TRUE(rig.load("c6-sequence-with-sleep",
++                         R"(<Sequence>
++  <CallDevice device_handle="sim0/dev1" function_name="step1"/>
++  <Sleep msec="3000"/>
++  <CallDevice device_handle="sim0/dev1" function_name="step2"/>
++</Sequence>)"));
++    ASSERT_TRUE(rig.to_auto());
++    rig.provider->t0 = std::chrono::steady_clock::now();
++    const auto since = [&] {
++        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
++                                                                     rig.provider->t0)
++            .count();
++    };
++    ASSERT_TRUE(rig.runtime.start(20));
++    while (rig.provider->snapshot().empty() && since() < 2000) std::this_thread::sleep_for(std::chrono::milliseconds(5));
++    std::this_thread::sleep_for(std::chrono::milliseconds(300));
++    std::string err;
++    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::MANUAL, err)) << err;
++    std::cout << "REPRO c6 t+" << since() << "ms -> MANUAL (tree mid-Sleep); total_ticks="
++              << rig.runtime.get_health().total_ticks << " status=" << to_string(rig.runtime.status().status) << "\n";
++    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
++    std::cout << "REPRO c6 t+" << since() << "ms still MANUAL; total_ticks=" << rig.runtime.get_health().total_ticks
++              << " calls so far=" << rig.provider->snapshot().size() << "\n";
++    ASSERT_TRUE(rig.mode.set_mode(RuntimeMode::AUTO, err)) << err;
++    std::cout << "REPRO c6 t+" << since() << "ms -> AUTO again\n";
++    std::this_thread::sleep_for(std::chrono::milliseconds(2600));
++    rig.runtime.stop();
++    std::cout << "REPRO c6 t+" << since() << "ms stopped; total_ticks=" << rig.runtime.get_health().total_ticks << "\n";
++    rig.dump("c6-sequence-with-sleep");
++}
++
++// ---- PROBE: ReadSignal on a string signal ----
++namespace {
++struct StrSignalProvider : ReproProvider {
++    bool describe_device(const std::string& d, rp::DescribeDeviceResponse& response) override {
++        ReproProvider::describe_device(d, response);
++        auto* caps = response.mutable_capabilities();
++        auto* s = caps->add_signals();
++        s->set_signal_id("control_mode");
++        s->set_value_type(rp::VALUE_TYPE_STRING);
++        s->set_poll_hint_hz(1.0);
++        auto* t = caps->add_signals();
++        t->set_signal_id("temp");
++        t->set_value_type(rp::VALUE_TYPE_DOUBLE);
++        t->set_poll_hint_hz(1.0);
++        return true;
++    }
++    bool read_signals(const std::string&, const std::vector<std::string>&, rp::ReadSignalsResponse& response,
++                      rp::Status_Code&) override {
++        response.set_device_id("dev1");
++        auto* a = response.add_values();
++        a->set_signal_id("control_mode");
++        a->mutable_value()->set_type(rp::VALUE_TYPE_STRING);
++        a->mutable_value()->set_string_value("closed");
++        a->set_quality(rp::SignalValue_Quality_QUALITY_OK);
++        auto* b = response.add_values();
++        b->set_signal_id("temp");
++        b->mutable_value()->set_type(rp::VALUE_TYPE_DOUBLE);
++        b->mutable_value()->set_double_value(37.5);
++        b->set_quality(rp::SignalValue_Quality_QUALITY_OK);
++        return true;
++    }
++};
++}  // namespace
++
++TEST(ReproRuntime, ReadSignalOnStringSignal) {
++    anolis::registry::DeviceRegistry registry;
++    anolis::state::StateCache state_cache{registry, 100};
++    anolis::control::CallRouter router{registry, state_cache};
++    anolis::provider::ProviderRegistry providers;
++    auto provider = std::make_shared<StrSignalProvider>();
++    providers.add_provider("sim0", provider);
++    registry.discover_provider("sim0", *provider);
++    std::cout << "REPRO rs initialize=" << state_cache.initialize() << "\n";
++    state_cache.poll_once(providers);
++
++    BT::BehaviorTreeFactory factory;
++    factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
++    for (const char* sig : {"temp", "control_mode"}) {
++        auto bb = BT::Blackboard::create();
++        anolis::automation::BTServiceContext services;
++        services.state_cache = &state_cache;
++        services.call_router = &router;
++        services.provider_registry = &providers;
++        bb->set(anolis::automation::kBTServiceContextKey, services);
++        const std::string xml = std::string("<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\"><ReadSignal device_handle=\"sim0/dev1\" signal_id=\"") +
++                                sig + "\" value=\"{v}\" quality=\"{q}\"/></BehaviorTree></root>";
++        auto tree = factory.createTreeFromText(xml, bb);
++        const auto status = tree.tickOnce();
++        std::string v = "<unset>", q = "<unset>";
++        try { v = std::to_string(bb->get<double>("v")); } catch (...) {}
++        try { q = bb->get<std::string>("q"); } catch (...) {}
++        std::cout << "REPRO rs signal=" << sig << " status=" << BT::toStr(status) << " value=" << v << " quality=" << q << "\n";
++    }
++}
