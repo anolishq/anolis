@@ -13,6 +13,18 @@ commit messages only.
 
 ## [Unreleased]
 
+### Changed
+
+- **A cached watchdog reading is checked only while it is recent.** A
+  provider may now report the `watchdog_*` health keys from a cached reading,
+  with its age in `watchdog_status_age_ms`, and keep reporting its last good
+  reading after later reads fail (anolis-provider-sdk `docs/metrics.md`). The
+  startup check that warns about an actuating device whose `watchdog_armed` is
+  `false` skips a reading older than 30 s, or whose age does not parse, and logs
+  at INFO that it did not check that device's watchdog. A reading with no age
+  is checked as before. The health timeseries carries `watchdog_status_age_ms`
+  as an integer field. (#732)
+
 ### Fixed
 
 - **A device a provider restart drops now latches.** Provider loss does not

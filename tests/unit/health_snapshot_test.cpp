@@ -299,7 +299,7 @@ TEST_F(HealthSnapshotCollectorTest, WatchdogPreflightWaitsForTheSession) {
     RegisterDevices(1);
     mock_provider->session_busy = true;
     EXPECT_CALL(*mock_provider, get_health(_)).Times(1).WillOnce(Return(false));
-    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).disarmed.empty());
     EXPECT_FALSE(mock_provider->last_try_wait.has_value());
 }
 
@@ -561,16 +561,19 @@ protected:
         registry->discover_provider("sim0", *mock_provider);
     }
 
-    // Each provider-reported device health gets the given watchdog_armed value;
-    // nullopt omits the key.
-    void ReportWatchdogArmed(std::optional<std::string> armed) {
-        ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([armed](GetHealthResponse &response) {
+    // Each provider-reported device health gets the given watchdog_armed value
+    // and watchdog_status_age_ms; nullopt omits the key.
+    void ReportWatchdogArmed(std::optional<std::string> armed, std::optional<std::string> age_ms = std::nullopt) {
+        ON_CALL(*mock_provider, get_health(_)).WillByDefault(Invoke([armed, age_ms](GetHealthResponse &response) {
             for (const char *id : {"drive", "sensor"}) {
                 auto *dh = response.add_devices();
                 dh->set_device_id(id);
                 dh->set_state(anolis::deviceprovider::v1::DeviceHealth::STATE_OK);
                 if (armed.has_value()) {
                     (*dh->mutable_metrics())["watchdog_armed"] = *armed;
+                }
+                if (age_ms.has_value()) {
+                    (*dh->mutable_metrics())["watchdog_status_age_ms"] = *age_ms;
                 }
             }
             return true;
@@ -584,24 +587,65 @@ protected:
 
 TEST_F(WatchdogPreflightTest, ReportsActuatingDeviceWithWatchdogDisarmed) {
     ReportWatchdogArmed("false");
-    const auto devices = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
-    ASSERT_EQ(devices.size(), 1u);  // the READ-only device is not an actuator
-    EXPECT_EQ(devices[0], "sim0/drive");
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    ASSERT_EQ(result.disarmed.size(), 1u);  // the READ-only device is not an actuator
+    EXPECT_EQ(result.disarmed[0], "sim0/drive");
+    EXPECT_TRUE(result.too_old.empty());
 }
 
 TEST_F(WatchdogPreflightTest, AbsentKeyIsSilent) {
     ReportWatchdogArmed(std::nullopt);
-    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    EXPECT_TRUE(result.too_old.empty());
 }
 
 TEST_F(WatchdogPreflightTest, ArmedWatchdogIsSilent) {
     ReportWatchdogArmed("true");
-    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    EXPECT_TRUE(result.too_old.empty());
 }
 
 TEST_F(WatchdogPreflightTest, NoReportedHealthIsSilent) {
     ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
-    EXPECT_TRUE(health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry).empty());
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    EXPECT_TRUE(result.too_old.empty());
+}
+
+// A cached reading (anolis-provider-sdk docs/metrics.md, #732) is checked only
+// while it is recent. An older one is unknown, like an absent key, and named
+// so the operator knows the check did not run: a stale "true" must not read as
+// armed, and a stale "false" is not news about the watchdog now.
+TEST_F(WatchdogPreflightTest, ReadingAtTheAgeBoundIsChecked) {
+    ReportWatchdogArmed("false", std::to_string(health::kWatchdogReadingMaxAgeMs));
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_EQ(result.disarmed, std::vector<std::string>{"sim0/drive"});
+    EXPECT_TRUE(result.too_old.empty());
+}
+
+TEST_F(WatchdogPreflightTest, DisarmedReadingOverTheAgeBoundIsUnchecked) {
+    ReportWatchdogArmed("false", std::to_string(health::kWatchdogReadingMaxAgeMs + 1));
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    ASSERT_EQ(result.too_old.size(), 1u);  // the READ-only device is not named
+    EXPECT_EQ(result.too_old[0],
+              "sim0/drive (watchdog_status_age_ms=" + std::to_string(health::kWatchdogReadingMaxAgeMs + 1) + ")");
+}
+
+TEST_F(WatchdogPreflightTest, ArmedReadingOverTheAgeBoundIsUnchecked) {
+    ReportWatchdogArmed("true", "600000");
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    EXPECT_EQ(result.too_old, std::vector<std::string>{"sim0/drive (watchdog_status_age_ms=600000)"});
+}
+
+TEST_F(WatchdogPreflightTest, UnparseableAgeIsUnchecked) {
+    ReportWatchdogArmed("false", "soon");
+    const auto result = health::actuating_devices_with_watchdog_disarmed(*provider_registry, *registry);
+    EXPECT_TRUE(result.disarmed.empty());
+    EXPECT_EQ(result.too_old, std::vector<std::string>{"sim0/drive (watchdog_status_age_ms=soon)"});
 }
 
 // ---------------------------------------------------------------------------

@@ -269,10 +269,17 @@ bool Runtime::init_providers(std::string &error) {
     // The firmware command watchdog is what stops a device when the runtime or
     // its provider is lost (#297). Keyed on the SDK-reserved watchdog_armed
     // metric; a device that does not report it makes no claim and stays quiet.
-    for (const auto &handle : health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_)) {
+    const auto watchdogs = health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_);
+    for (const auto &handle : watchdogs.disarmed) {
         LOG_WARN("[Runtime] preflight: " << handle
                                          << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
                                             "watchdog will not stop it if the runtime or its provider is lost");
+    }
+    // A cached reading older than the bound says nothing about the watchdog now (#732).
+    for (const auto &entry : watchdogs.too_old) {
+        LOG_INFO("[Runtime] preflight: " << entry << " has ACTUATE functions, but its watchdog reading is older than "
+                                         << health::kWatchdogReadingMaxAgeMs
+                                         << " ms or its age is unreadable; whether it is armed was not checked");
     }
     // Polling feeds those watchdogs once the runtime runs (#599).
     for (const auto &line :
