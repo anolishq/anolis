@@ -1,0 +1,93 @@
+# Style A: one expression per derived signal.
+# Prior art: Ignition expression tags, Prometheus recording rules, EPICS CALC.
+#
+# Strawman only. Nothing reads this file except lint.py.
+# Shared assumptions for all three styles are in README.md, "Ground rules".
+
+style: A
+period_ms: 2500
+
+# Device signals get short names, because a handle contains "/", which is
+# also division. (EPICS solves the same problem with the letters A to U.)
+inputs:
+  t1: bread0/rlht0/t1_c
+  t2: bread0/rlht0/t2_c
+  relay: bread0/rlht0/relay1_on
+  pad_setpoint: bread0/rlht0/setpoint1_c
+  room: adafruit0/room0/temperature
+  ph: ezo0/ph0/ph_value
+
+# Operator-settable numbers come from automation.parameters, by name.
+params: [liquid_bias_c, loss_k, liquid_target_c, compensation_temp_c]
+
+signals:
+  # case 1
+  heater/pad_c:
+    unit: "°C"
+    expr: median(t2, 3)
+
+  # case 2
+  heater/liquid_c:
+    unit: "°C"
+    expr: t1 - liquid_bias_c
+  heater/pad_liquid_gap_c:
+    unit: "°C"
+    expr: pad_c - liquid_c
+
+  # case 3
+  heater/liquid_steady_c:
+    unit: "°C"
+    expr: room + (pad_setpoint - room) / (1 + loss_k)
+  heater/pad_suggested_c:
+    unit: "°C"
+    expr: liquid_target_c + loss_k * (liquid_target_c - room)
+
+  # case 4
+  heater/over_temp_pad:
+    expr: t2 > 70
+  heater/over_temp_liquid:
+    expr: t1 > 45
+  heater/no_good_reading:
+    # Works on quality, so it is never unknown itself.
+    expr: since(ok(t1) and ok(t2)) > 120
+  heater/pad_detached:
+    # The fourth argument is the on-bad policy. Without it the expression
+    # does not say what a bad reading does to the timer.
+    expr: held(latch(relay) and t2 < t1 - 3, 1800, on_bad=reset)
+  heater/trip:
+    expr: over_temp_pad or over_temp_liquid or no_good_reading or pad_detached
+
+  # case 5
+  ph/steady:
+    expr: abs(slope(ph, 10m)) < 0.002 and spread(ph, 10m) < 0.02
+
+  # case 6
+  heater/duty_10m:
+    unit: "1"
+    expr: mean(relay, 10m)
+  heater/power_w:
+    unit: W
+    expr: duty_10m * 12 * 2.95
+
+  # case 7
+  probes/compensation_c:
+    unit: "°C"
+    expr: deadband(mean(liquid_c, 5m), 0.5) ?? compensation_temp_c
+
+  # case 8: does not fit. An expression yields one value; the filter has two
+  # outputs and five tuning numbers. Written as two calls that must be known
+  # to share one state.
+  heater/liquid_estimate_c:
+    unit: "°C"
+    expr: kalman1(z=liquid_c, steady=liquid_steady_c, tau=12600, q=1e-6, r=0.0025).x
+  heater/liquid_estimate_sigma_c:
+    unit: "°C"
+    expr: kalman1(z=liquid_c, steady=liquid_steady_c, tau=12600, q=1e-6, r=0.0025).sigma
+
+  # case 9: the expression cannot say whether the total survives a restart
+  # or when it resets, so that goes beside it.
+  heater/energy_wh:
+    unit: Wh
+    expr: integral(if(relay, 12 * 2.95, 0)) / 3600
+    persist: true
+    reset_on: run_start

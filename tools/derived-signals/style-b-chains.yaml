@@ -1,0 +1,143 @@
+# Style B: one source signal and an ordered chain of filters.
+# Prior art: ESPHome sensor filters, Home Assistant filter / threshold /
+# derivative / integration helpers.
+#
+# Strawman only. Nothing reads this file except lint.py.
+# Shared assumptions for all three styles are in README.md, "Ground rules".
+
+style: B
+period_ms: 2500
+
+signals:
+  # case 1
+  - id: heater/pad_c
+    unit: "°C"
+    source: bread0/rlht0/t2_c
+    filters:
+      - median: { samples: 3 }
+
+  # case 2
+  - id: heater/liquid_c
+    unit: "°C"
+    source: bread0/rlht0/t1_c
+    filters:
+      - offset: { minus_param: liquid_bias_c }
+  # Two inputs: a chain has one source, so this needs a second form.
+  - id: heater/pad_liquid_gap_c
+    unit: "°C"
+    combine:
+      inputs: { pad: derived/heater/pad_c, liquid: derived/heater/liquid_c }
+      formula: pad - liquid
+
+  # case 3: two inputs and a parameter. The second form again, and its
+  # "formula" is style A.
+  - id: heater/liquid_steady_c
+    unit: "°C"
+    combine:
+      inputs: { room: adafruit0/room0/temperature, pad: bread0/rlht0/setpoint1_c }
+      params: [loss_k]
+      formula: room + (pad - room) / (1 + loss_k)
+  - id: heater/pad_suggested_c
+    unit: "°C"
+    combine:
+      inputs: { room: adafruit0/room0/temperature }
+      params: [loss_k, liquid_target_c]
+      formula: liquid_target_c + loss_k * (liquid_target_c - room)
+
+  # case 4
+  - id: heater/over_temp_pad
+    source: bread0/rlht0/t2_c
+    filters:
+      - threshold: { above: 70 }
+  - id: heater/over_temp_liquid
+    source: bread0/rlht0/t1_c
+    filters:
+      - threshold: { above: 45 }
+  # About the quality of two signals, not the value of one: no source fits.
+  - id: heater/no_good_reading
+    combine:
+      inputs: { t1: bread0/rlht0/t1_c, t2: bread0/rlht0/t2_c }
+      formula: since(ok(t1) and ok(t2)) > 120
+  - id: heater/relay_seen
+    publish: false
+    source: bread0/rlht0/relay1_on
+    filters:
+      - latch: {}
+  - id: heater/pad_below_liquid
+    publish: false
+    combine:
+      inputs: { seen: derived/heater/relay_seen, t1: bread0/rlht0/t1_c, t2: bread0/rlht0/t2_c }
+      formula: seen and t2 < t1 - 3
+  - id: heater/pad_detached
+    source: derived/heater/pad_below_liquid
+    filters:
+      - held_for: { seconds: 1800, on_bad: reset }
+  - id: heater/trip
+    combine:
+      inputs:
+        a: derived/heater/over_temp_pad
+        b: derived/heater/over_temp_liquid
+        c: derived/heater/no_good_reading
+        d: derived/heater/pad_detached
+      formula: a or b or c or d
+
+  # case 5: two statistics of one window, then a test on both. The chain
+  # forks, so each statistic is its own signal.
+  - id: ph/slope_per_min
+    publish: false
+    source: ezo0/ph0/ph_value
+    filters:
+      - slope: { window: 10m, per: 1m }
+  - id: ph/spread
+    publish: false
+    source: ezo0/ph0/ph_value
+    filters:
+      - spread: { window: 10m }
+  - id: ph/steady
+    combine:
+      inputs: { slope: derived/ph/slope_per_min, spread: derived/ph/spread }
+      formula: abs(slope) < 0.002 and spread < 0.02
+
+  # case 6
+  - id: heater/duty_10m
+    unit: "1"
+    source: bread0/rlht0/relay1_on
+    filters:
+      - mean: { window: 10m }
+  - id: heater/power_w
+    unit: W
+    source: derived/heater/duty_10m
+    filters:
+      - scale: { by: 35.4 }
+
+  # case 7: reads well. This is what the style is for.
+  - id: probes/compensation_c
+    unit: "°C"
+    source: derived/heater/liquid_c
+    filters:
+      - mean: { window: 5m }
+      - deadband: { step: 0.5 }
+    on_bad: { use_param: compensation_temp_c }
+
+  # case 8: does not fit. Two inputs, two outputs, internal state. It needs
+  # a third form, which is style C.
+  - id: heater/liquid_estimate_c
+    unit: "°C"
+    block:
+      type: kalman1
+      inputs: { z: derived/heater/liquid_c, steady: derived/heater/liquid_steady_c }
+      params: { tau_s: 12600, q: 1.0e-6, r: 0.0025 }
+      output: x
+  - id: heater/liquid_estimate_sigma_c
+    unit: "°C"
+    block:
+      same_as: heater/liquid_estimate_c
+      output: sigma
+
+  # case 9
+  - id: heater/energy_wh
+    unit: Wh
+    source: bread0/rlht0/relay1_on
+    filters:
+      - scale: { by: 35.4 }
+      - integrate: { per: 1h, persist: true, reset_on: run_start }

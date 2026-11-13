@@ -1,0 +1,151 @@
+# Style C: a graph of typed blocks with named inputs and outputs.
+# Prior art: IEC 61499 function blocks, Simulink, FluxGraph models, and this
+# project's own behavior-tree nodes and provider config schemas.
+#
+# Strawman only. Nothing reads this file except lint.py.
+# Shared assumptions for all three styles are in README.md, "Ground rules".
+#
+# An input is a device signal (provider/device/signal), another block's
+# output (block_id.port), a parameter ({ param: name }) or a constant.
+# A block publishes a port by naming it under "publish".
+
+style: C
+period_ms: 2500
+
+blocks:
+  # case 1
+  - id: pad
+    type: median
+    in: { x: bread0/rlht0/t2_c }
+    params: { samples: 3 }
+    publish: { y: { signal: heater/pad_c, unit: "°C" } }
+
+  # case 2
+  - id: liquid
+    type: subtract
+    in: { a: bread0/rlht0/t1_c, b: { param: liquid_bias_c } }
+    publish: { y: { signal: heater/liquid_c, unit: "°C" } }
+  - id: gap
+    type: subtract
+    in: { a: pad.y, b: liquid.y }
+    publish: { y: { signal: heater/pad_liquid_gap_c, unit: "°C" } }
+
+  # case 3, in arithmetic blocks: room + (pad - room) / (1 + k)
+  - id: pad_above_room
+    type: subtract
+    in: { a: bread0/rlht0/setpoint1_c, b: adafruit0/room0/temperature }
+  - id: one_plus_k
+    type: add
+    in: { a: 1, b: { param: loss_k } }
+  - id: liquid_above_room
+    type: divide
+    in: { a: pad_above_room.y, b: one_plus_k.y }
+  - id: liquid_steady
+    type: add
+    in: { a: adafruit0/room0/temperature, b: liquid_above_room.y }
+    publish: { y: { signal: heater/liquid_steady_c, unit: "°C" } }
+  # The same relation the other way round, as one "expr" block. Its formula
+  # is style A, but its inputs are declared, so they can be checked.
+  - id: pad_suggested
+    type: expr
+    in:
+      target: { param: liquid_target_c }
+      k: { param: loss_k }
+      room: adafruit0/room0/temperature
+    params: { formula: target + k * (target - room) }
+    publish: { y: { signal: heater/pad_suggested_c, unit: "°C" } }
+
+  # case 4
+  - id: over_temp_pad
+    type: compare
+    in: { a: bread0/rlht0/t2_c, b: 70 }
+    params: { op: ">" }
+    publish: { y: { signal: heater/over_temp_pad } }
+  - id: over_temp_liquid
+    type: compare
+    in: { a: bread0/rlht0/t1_c, b: 45 }
+    params: { op: ">" }
+    publish: { y: { signal: heater/over_temp_liquid } }
+  - id: readings_good
+    type: all_good
+    in: { a: bread0/rlht0/t1_c, b: bread0/rlht0/t2_c }
+  - id: no_good_reading
+    type: since_true
+    in: { x: readings_good.y }
+    params: { longer_than_s: 120 }
+    publish: { y: { signal: heater/no_good_reading } }
+  - id: relay_seen
+    type: latch
+    in: { set: bread0/rlht0/relay1_on }
+  - id: pad_below_liquid
+    type: expr
+    in: { t1: bread0/rlht0/t1_c, t2: bread0/rlht0/t2_c }
+    params: { formula: t2 < t1 - 3 }
+  - id: detach_condition
+    type: all_of
+    in: { a: relay_seen.y, b: pad_below_liquid.y }
+  - id: pad_detached
+    type: held_for
+    in: { x: detach_condition.y }
+    params: { seconds: 1800, on_bad: reset }
+    publish: { y: { signal: heater/pad_detached } }
+  - id: trip
+    type: any_of
+    in: { a: over_temp_pad.y, b: over_temp_liquid.y, c: no_good_reading.y, d: pad_detached.y }
+    publish: { y: { signal: heater/trip } }
+
+  # case 5: one window block with two outputs.
+  - id: ph_window
+    type: window_stats
+    in: { x: ezo0/ph0/ph_value }
+    params: { window: 10m }
+  - id: ph_steady
+    type: expr
+    in: { slope: ph_window.slope_per_min, spread: ph_window.spread }
+    params: { formula: abs(slope) < 0.002 and spread < 0.02 }
+    publish: { y: { signal: ph/steady } }
+
+  # case 6
+  - id: duty
+    type: window_stats
+    in: { x: bread0/rlht0/relay1_on }
+    params: { window: 10m }
+    publish: { mean: { signal: heater/duty_10m, unit: "1" } }
+  - id: power
+    type: gain
+    in: { x: duty.mean }
+    params: { by: 35.4 }
+    publish: { y: { signal: heater/power_w, unit: W } }
+
+  # case 7
+  - id: liquid_5m
+    type: window_stats
+    in: { x: liquid.y }
+    params: { window: 5m }
+  - id: compensation
+    type: deadband
+    in: { x: liquid_5m.mean }
+    params: { step: 0.5 }
+    on_bad: { use: { param: compensation_temp_c } }
+    publish: { y: { signal: probes/compensation_c, unit: "°C" } }
+
+  # case 8: fits without a special form. Two inputs, two outputs, state and
+  # tuning numbers are what a block already is.
+  - id: liquid_estimate
+    type: kalman1
+    in: { z: liquid.y, steady: liquid_steady.y }
+    params: { tau_s: 12600, q: 1.0e-6, r: 0.0025 }
+    publish:
+      x: { signal: heater/liquid_estimate_c, unit: "°C" }
+      sigma: { signal: heater/liquid_estimate_sigma_c, unit: "°C" }
+
+  # case 9
+  - id: relay_power
+    type: gain
+    in: { x: bread0/rlht0/relay1_on }
+    params: { by: 35.4 }
+  - id: energy
+    type: integrate
+    in: { x: relay_power.y }
+    params: { per: 1h, persist: true, reset_on: run_start }
+    publish: { y: { signal: heater/energy_wh, unit: Wh } }

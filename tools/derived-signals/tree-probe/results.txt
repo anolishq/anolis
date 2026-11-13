@@ -1,0 +1,9 @@
+anolis-runtime 0.13.0, anolis-provider-adafruit in mock mode, tree ticking at 5 Hz
+
+tree-a.xml  entered AUTO; after 1 s: completed on tick 1  (expected completed)
+tree-b.xml  entered AUTO; after 1 s: failed on tick 1  (expected failed)
+tree-c.xml  entered AUTO; after 3 s: 15 ticks, the last 12 without success  (a counter kept between ticks makes every tick from the fourth fail)
+tree-d.xml  entered AUTO; running after 40 ticks
+    device calls in the first 2 s, input 1000.0:        1
+    device calls in the next 2 s, input moved by 0.3:   0
+    device calls in the next 4 s, input moved by 3.0:   4
