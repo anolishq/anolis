@@ -1420,7 +1420,10 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     // Rebuild the cache poll plan before swapping the live provider handle so
     // subsequent reads and post-call refreshes observe the replacement device
-    // inventory immediately after publication.
+    // inventory immediately after publication. The provider was lost, so its
+    // devices are unavailable first, even when no poll has seen the loss yet: a
+    // device the new inventory drops is then latched (#801).
+    state_cache_->mark_provider_lost(provider_id);
     state_cache_->rebuild_poll_configs(provider_id);
 
     // Swap registry entry only after replacement provider startup + discovery succeeds.
