@@ -17,15 +17,17 @@ commit messages only.
 
 0.15.0 is a minor release because calls that used to be made can now be
 refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR): a
-device a provider restart drops is now latched, and the behavior tree's calls
-to it are refused until it is read successfully and AUTO is re-entered.
+device a provider restart drops is now latched, and the behavior tree's
+actuating calls to it are refused until it is read successfully and AUTO is
+re-entered.
 
 Upgrade notes:
 
 - **A device a provider restart drops is latched.** It appears in
   `device_loss_latched`, every MANUAL -> AUTO logs that it stays latched, and
-  a tree call to it is refused with "Device was unreachable and has not been
-  re-armed; once a read succeeds, re-enter AUTO to resume automation". That
+  an actuating tree call to it is refused with "Device was unreachable and has
+  not been re-armed; once a read succeeds, re-enter AUTO to resume
+  automation". That
   includes a device removed from the provider's own configuration: it stays
   latched until it is registered again and reads successfully, or until the
   runtime restarts. (#801)
