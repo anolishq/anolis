@@ -550,7 +550,12 @@ what belongs there.
    of what the period should be. An estimator's `good` means that none of
    its own tests has failed, not that it is right: what the stop chain
    does with one (O6) has to allow for a sensor that is biased or stuck,
-   which no test of its sees.
+   which no test of its sees. The whole text has since been read cold
+   and amended for it, and its host contract is checked on every short
+   sequence of writes and calls. Three things in that bear on a host here
+   (O7): after a restore or a stepped clock it writes again only the
+   inputs that have no maximum age, an input's initial value does not
+   come back, and it gives the inputs of one scan one time.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is decided last, and reviewed independently before it is.
