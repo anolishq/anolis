@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -13,6 +14,7 @@
 #include "automation/bt_services.hpp"
 #include "automation/parameter_manager.hpp"
 #include "control/call_router.hpp"
+#include "logging/logger.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
 #include "state/state_cache.hpp"
@@ -211,6 +213,31 @@ TEST_F(BTNodesTest, GetParameterNodeSucceedsForInt64) {
 
     EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
     EXPECT_DOUBLE_EQ(7.0, blackboard->get<double>("out"));
+}
+
+// A tree re-ticks GetParameter every engine tick, so a successful read logs
+// nothing at INFO; a failed one still logs at ERROR (#612).
+TEST_F(BTNodesTest, GetParameterNodeLogsNoSuccessfulReadAtInfo) {
+    ASSERT_TRUE(parameter_manager_.define("impeller_pwm", anolis::automation::ParameterType::INT64, int64_t{100}));
+
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    auto tree = factory.createTreeFromText(make_get_parameter_tree_xml("impeller_pwm"), blackboard);
+    auto missing = factory.createTreeFromText(make_get_parameter_tree_xml("no_such_param"), blackboard);
+
+    anolis::logging::Logger::set_level(anolis::logging::Level::LVL_INFO);
+    std::ostringstream captured;
+    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    for (int tick = 0; tick < 3; ++tick) {
+        EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
+    }
+    EXPECT_EQ(BT::NodeStatus::FAILURE, missing.tickOnce());
+    std::cerr.rdbuf(old);
+
+    const std::string log = captured.str();
+    EXPECT_EQ(log.find("Read parameter"), std::string::npos) << log;
+    EXPECT_NE(log.find("[ERROR] [GetParameterNode] Parameter not found: no_such_param"), std::string::npos) << log;
 }
 
 TEST_F(BTNodesTest, GetParameterNodeFailsForNonNumericTypes) {
