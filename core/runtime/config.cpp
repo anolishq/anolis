@@ -920,14 +920,16 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     if (!ensure_mapping(entry.second, path, error)) {
                         return false;
                     }
-                    warn_unknown_keys(entry.second, path, {"device_handle", "signal_id", "constant"});
+                    warn_unknown_keys(entry.second, path, {"device_handle", "signal_id", "constant", "not_acting_on"});
                     if (entry.second["constant"]) {
                         input.constant = entry.second["constant"].as<double>();
+                    } else if (entry.second["not_acting_on"]) {
+                        input.not_acting_on = entry.second["not_acting_on"].as<std::string>();
                     } else if (entry.second["device_handle"] && entry.second["signal_id"]) {
                         input.device_handle = entry.second["device_handle"].as<std::string>();
                         input.signal_id = entry.second["signal_id"].as<std::string>();
                     } else {
-                        error = path + " needs a constant, or a device_handle and a signal_id";
+                        error = path + " needs a constant, a not_acting_on, or a device_handle and a signal_id";
                         return false;
                     }
                     config.derived.inputs.push_back(std::move(input));

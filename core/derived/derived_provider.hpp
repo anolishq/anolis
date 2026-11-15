@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -28,7 +29,10 @@ namespace derived {
 
 class DerivedProvider : public provider::IProviderHandle {
 public:
-    DerivedProvider(DerivedConfig config, const state::StateCache &state_cache);
+    /// `acting`: whether the runtime's automation is acting on a device, by its handle.
+    using Acting = std::function<bool(const std::string &)>;
+
+    DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting);
     ~DerivedProvider() override;
 
     DerivedProvider(const DerivedProvider &) = delete;
@@ -84,6 +88,7 @@ private:
 
     DerivedConfig config_;
     const state::StateCache &state_cache_;
+    Acting acting_;
     std::unique_ptr<fluxgraph::v2::Engine> engine_;
     std::vector<Input> inputs_;
     std::int64_t interval_ns_ = 0;

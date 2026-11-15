@@ -243,7 +243,17 @@ bool Runtime::init_providers(std::string &error) {
 
     // The derived-signals spike (RFC O10): one more provider, in process and not supervised.
     if (config_.derived.enabled) {
-        auto derived = std::make_shared<derived::DerivedProvider>(config_.derived, *state_cache_);
+        // Acting: in AUTO, and the device not held by the device-loss latch.
+        auto acting = [this](const std::string &device_handle) {
+#if ANOLIS_ENABLE_AUTOMATION
+            return mode_manager_ && mode_manager_->current_mode() == automation::RuntimeMode::AUTO &&
+                   !device_loss_latch_->is_latched(device_handle);
+#else
+            (void)device_handle;
+            return false;
+#endif
+        };
+        auto derived = std::make_shared<derived::DerivedProvider>(config_.derived, *state_cache_, acting);
         if (!derived->start()) {
             error = "Failed to start derived signals '" + config_.derived.id + "': " + derived->last_error();
             return false;

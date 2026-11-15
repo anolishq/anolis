@@ -44,9 +44,10 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone. The runs with `--call-ms`, `--skew-ms`, `--max-age` or
-`--graph-line` were built that way against the commit pinned, and the
-other six against the working tree that became it.
+clone, which is how every figure here was made: the two runs with
+`--rearm-at` against the commit pinned, those with `--call-ms`,
+`--skew-ms`, `--max-age` or `--graph-line` against the one before it,
+`c3ec3a5`, and the other six against the working tree that became that.
 
 ## What it did
 
@@ -62,6 +63,8 @@ refused write.
 | `--call-ms 250` | 3.4 s | n/a |
 | `--stall-s 3 --seconds 25` | 3.1 s | 1500, 1500 rpm |
 | `--unreachable-s 3 --at 8` | never again | 0 rpm, and stays there |
+| `--unreachable-s 3 --at 8 --rearm-at 14 --seconds 26` | 15.9 s | 31, 1656 rpm (+10%) |
+| the same with `--graph motor-pid-follow.yaml` | 17.2 s | 28, 1500 rpm |
 | `--skew-ms 2000 --seconds 6` | never | the motor does not start |
 | `--skew-ms -2000 --seconds 6` | never | the motor does not start |
 
@@ -95,13 +98,19 @@ else was given:
    what a provider on another machine with a clock 2 s out would do. The
    only trace is the engine's count of writes thrown away: 120 in the
    6 s ahead, and 40 behind.
-3. **The graph cannot see the runtime's mode.** With the motor's reads
-   failing, the graph's output went `bad`, the tree sent nothing, the
-   device-loss latch took the runtime to FAULT and the safe state set the
-   duty to 0. That is the runtime doing its job. The graph then ran on
-   with the motor at rest, raised `duty` to its limit of 1 and published
-   it as OK, for nobody. FluxGraph's proposal is being amended for it: a
-   controller gets an input that says nothing is acting on it.
+3. **The graph has to be told when nothing acts on it.** With the
+   motor's reads failing, the graph's output went `bad`, the tree sent
+   nothing, the device-loss latch took the runtime to FAULT and the safe
+   state set the duty to 0. That is the runtime doing its job. The graph
+   then ran on with the motor at rest, raised `duty` to its limit of 1
+   and published it as OK, for nobody; and when an operator re-armed the
+   runtime, MANUAL and back to AUTO, the tree sent that 1 at once and the
+   speed went to 1656 rpm, 10% over. FluxGraph's proposal was amended
+   for it: a controller takes `follow`. `motor-pid-follow.yaml` wires it
+   to an input the spike writes, true while the runtime is not in AUTO or
+   holds the motor in its device-loss latch. With that the graph's `duty`
+   read 0 through the fault, as the motor's did, and from the re-arm the
+   speed rose from rest to 1500 rpm and did not pass it.
 4. **After a stall the graph can run before the poll does.** The engine's
    thread and the poll threads all wake together. In the runs with
    `--max-age 5s` the first call after the stall read the speed from

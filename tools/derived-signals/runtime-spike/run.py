@@ -8,7 +8,7 @@
 It writes a runtime config into --out, starts the runtime, goes to AUTO, samples /v0/state every 50 ms into
 samples.csv, and prints what the loop did. --stall-s stops the runtime process for that long, --at seconds in;
 --unreachable-s has the simulator fail the motor's reads for that long, --at seconds in. --graph names another
-graph file with the same inputs and outputs.
+graph file with the same inputs and outputs; one that has `follow: idle` is given `idle`.
 """
 
 import argparse
@@ -81,7 +81,7 @@ derived:
     setpoint: {{constant: {setpoint}}}
     speed: {{device_handle: sim0/motorctl0, signal_id: motor1_speed}}
     applied: {{device_handle: sim0/motorctl0, signal_id: motor1_duty}}
-"""
+{idle}"""
 
 
 def free_port():
@@ -119,6 +119,9 @@ def main():
     parser.add_argument("--stall-s", type=float, default=0.0)
     parser.add_argument("--unreachable-s", type=float, default=0.0)
     parser.add_argument("--at", type=float, default=10.0)
+    parser.add_argument(
+        "--rearm-at", type=float, default=0.0, help="go to MANUAL and back to AUTO then, as an operator would"
+    )
     parser.add_argument("--graph", type=Path, default=HERE / "motor-pid.yaml")
     parser.add_argument("--max-age", default="1s", help="of the speed and of the applied duty")
     parser.add_argument("--graph-line", default="", help="one more top-level line for the graph, as max_catch_up: 3")
@@ -141,6 +144,7 @@ def main():
             poll_ms=args.poll_ms,
             call_ms=args.call_ms,
             skew_ms=args.skew_ms,
+            idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
             tree=HERE / "tree.xml",
             graph=out / "graph.yaml",
             setpoint=SETPOINT,
@@ -171,7 +175,7 @@ def main():
         http(base, "/v0/mode", {"mode": "AUTO"})
         start = time.monotonic()
 
-        rows, stalled = [], False
+        rows, stalled, rearmed = [], False, False
         while (t := time.monotonic() - start) < args.seconds:
             if args.stall_s and not stalled and t >= args.at:
                 runtime.send_signal(signal.SIGSTOP)
@@ -194,6 +198,10 @@ def main():
                 except urllib.error.HTTPError as e:
                     sys.exit(f"the fault could not be injected: {e.code} {e.read().decode()}")
                 stalled = True
+            if args.rearm_at and not rearmed and t >= args.rearm_at:
+                http(base, "/v0/mode", {"mode": "MANUAL"})
+                http(base, "/v0/mode", {"mode": "AUTO"})
+                rearmed = True
             try:
                 got = signals(http(base, "/v0/state"))
             except OSError:
@@ -247,6 +255,12 @@ def main():
         after = [v for t, v in speeds if t >= args.at]
         print(
             f"  from {args.at} s on: lowest {min(after):.1f}, highest {max(after):.1f} rpm "
+            f"({100 * (max(after) / SETPOINT - 1):+.1f}%)"
+        )
+    if args.rearm_at:
+        after = [v for t, v in speeds if t >= args.rearm_at]
+        print(
+            f"  from the re-arm at {args.rearm_at} s: highest {max(after):.1f} rpm "
             f"({100 * (max(after) / SETPOINT - 1):+.1f}%)"
         )
     print(f"  mean over the last 3 s: {sum(tail) / len(tail):.1f} rpm")

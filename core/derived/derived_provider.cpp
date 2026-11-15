@@ -122,8 +122,8 @@ void set_timestamp(google::protobuf::Timestamp *timestamp, std::int64_t ns) {
 
 }  // namespace
 
-DerivedProvider::DerivedProvider(DerivedConfig config, const state::StateCache &state_cache)
-    : config_(std::move(config)), state_cache_(state_cache) {}
+DerivedProvider::DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting)
+    : config_(std::move(config)), state_cache_(state_cache), acting_(std::move(acting)) {}
 
 DerivedProvider::~DerivedProvider() { stop(); }
 
@@ -214,6 +214,8 @@ void DerivedProvider::call_once() {
         fg::Status written;
         if (input.config.constant) {
             written = engine_->write(input.config.name, fg::State::good, *input.config.constant, now);
+        } else if (!input.config.not_acting_on.empty()) {
+            written = engine_->write(input.config.name, fg::State::good, !acting_(input.config.not_acting_on), now);
         } else {
             const auto cached = state_cache_.get_signal_value(input.config.device_handle, input.config.signal_id);
             if (!cached) {

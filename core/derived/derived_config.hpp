@@ -20,6 +20,7 @@ struct DerivedInputConfig {
     std::string device_handle;       // "provider/device"; empty for a constant
     std::string signal_id;           //
     std::optional<double> constant;  // Written at every call, stamped with the call's time
+    std::string not_acting_on;       // "provider/device": true while the runtime's automation is not acting on it
 };
 
 struct DerivedConfig {
