@@ -13,6 +13,32 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-15
+
+0.16.0 is a minor release because an existing config now polls differently
+(`docs/dependencies.md`: before 1.0, a change that makes an existing config
+behave differently bumps MINOR). Each provider is polled on its own thread and
+schedule, so a provider whose own poll fits `polling.interval_ms` is now read
+every interval, even while another provider is slow.
+
+Upgrade notes:
+
+- **Polls come at the configured interval, per provider.** Before, one poll
+  of every provider in turn ran as long as its slowest part, and every provider
+  waited for it. On the reference rig, at `polling.interval_ms` 2500, bread
+  and adafruit went from about 3.2 s between reads to 2.5 s: about 28 % more
+  reads and bus transactions. (#831)
+- **The overrun warning names the provider.** "Poll took longer than interval
+  (N ms)" is now "Poll of provider X took longer than interval (N ms)", logged
+  for each provider whose own poll overruns. A log filter on the old text
+  needs updating. (#831)
+- **A new warning, "provider/device went N ms between successful reads, over
+  M ms".** At most once every 30 s per provider. A device that warns is close
+  to tripping its command watchdog. (#831)
+- **Parameter reads leave the INFO log.** A successful `GetParameter` read
+  logs at DEBUG. A filter or count on "Read parameter" lines at INFO now finds
+  none. (#612)
+
 ### Added
 
 - **A warning when a device goes too long between reads.** Polling is what
