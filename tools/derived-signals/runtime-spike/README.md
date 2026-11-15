@@ -44,8 +44,9 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone, which is how every figure here was made: the two runs with
-`--rearm-at` against the commit pinned, those with `--call-ms`,
+clone, which is how every figure here was made: the runs with
+`--rearm-at`, `--signal-fault-s` or `--call-latency-ms` against the
+commit pinned, those with `--call-ms`,
 `--skew-ms`, `--max-age` or `--graph-line` against the one before it,
 `c3ec3a5`, and the other six against the working tree that became that.
 
@@ -65,6 +66,8 @@ refused write.
 | `--unreachable-s 3 --at 8` | never again | 0 rpm, and stays there |
 | `--unreachable-s 3 --at 8 --rearm-at 14 --seconds 26` | 15.9 s | 31, 1656 rpm (+10%) |
 | the same with `--graph motor-pid-follow.yaml` | 17.2 s | 28, 1500 rpm |
+| `--graph motor-pid-follow.yaml --signal-fault-s 3 --at 1` | 4.4 s | 645, 1500 rpm |
+| `--graph motor-pid-follow.yaml --call-latency-ms 300 --at 0.2` | 16.3 s | 29, 1871 rpm (+25%) |
 | `--skew-ms 2000 --seconds 6` | never | the motor does not start |
 | `--skew-ms -2000 --seconds 6` | never | the motor does not start |
 
@@ -141,13 +144,29 @@ else was given:
    `not_ready`, and a value the cache does not hold is `bad`. Out: the
    same backwards, with a value of 0 where the engine has none, since the
    protocol cannot say "no value". The tree gates on OK, so an
-   `uncertain` command is not sent. That is O1, guessed at, and no run
-   here made a sample STALE.
-9. **Not tested: a clock that steps.** The calls and the sample times
+   `uncertain` command is not sent. That is O1, guessed at. No run made
+   a sample STALE: the simulator never reports one, and the runtime
+   judges age when a value is read and does not write STALE into the
+   cache, so in these runs the engine's own maximum age was the only
+   judge of an old sample.
+9. **While the graph has no command the motor keeps the last one.**
+   With the speed reading FAULT for 3 s during the step, the graph's
+   `duty` was `bad`, the tree sent nothing, and the motor ran on at the
+   duty it had, 0.48, from 890 to 1420 rpm with nothing controlling it.
+   When the speed came back the controller started from that duty and
+   the loop settled with no dip. Nothing in the runtime or the graph
+   says for how long a command may stand: a provider's watchdog, where
+   it has one, is the only bound.
+10. **A slow call is dead time twice.** With every call to the motor
+    taking 300 ms the speed went 25% over and took 16 s to settle. The
+    tree waits for each call, so it commands at 3 Hz and not 10, and the
+    provider answers one request at a time, so the poll of the motor
+    waits behind the call too.
+11. **Not tested: a clock that steps.** The calls and the sample times
    are both the wall clock (O7). A step of it would reach the engine,
    which refuses a call earlier than the last; the spike then rebases.
    `--skew-ms` moves the sample times and not the clock.
-10. **The first output is `bad`.** The engine is called before the first
+12. **The first output is `bad`.** The engine is called before the first
     poll has put the speed in the cache.
 
 ## What is not here

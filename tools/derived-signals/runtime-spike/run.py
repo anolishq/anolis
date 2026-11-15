@@ -25,7 +25,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SETPOINT = 1500.0
-FN_UNREACHABLE = 6  # chaos_control/inject_device_unreachable in anolis-provider-sim
+# Functions of chaos_control in anolis-provider-sim
+FN_SIGNAL_FAULT, FN_CALL_LATENCY, FN_UNREACHABLE = 2, 3, 6
 COUNTS = [
     "host_calls",
     "host_ticks",
@@ -118,6 +119,8 @@ def main():
     parser.add_argument("--call-ms", type=int, default=0)
     parser.add_argument("--stall-s", type=float, default=0.0)
     parser.add_argument("--unreachable-s", type=float, default=0.0)
+    parser.add_argument("--signal-fault-s", type=float, default=0.0, help="the speed reads FAULT for that long")
+    parser.add_argument("--call-latency-ms", type=int, default=0, help="every call to the motor takes that long")
     parser.add_argument("--at", type=float, default=10.0)
     parser.add_argument(
         "--rearm-at", type=float, default=0.0, help="go to MANUAL and back to AUTO then, as an operator would"
@@ -183,18 +186,24 @@ def main():
                 runtime.send_signal(signal.SIGCONT)
                 stalled = True
                 continue
-            if args.unreachable_s and not stalled and t >= args.at:
+            if (args.unreachable_s or args.signal_fault_s or args.call_latency_ms) and not stalled and t >= args.at:
+                text = lambda v: {"type": "string", "string": v}  # noqa: E731
+                whole = lambda v: {"type": "int64", "int64": int(v)}  # noqa: E731
+                if args.unreachable_s:
+                    fn, more = FN_UNREACHABLE, {"duration_ms": whole(args.unreachable_s * 1000)}
+                elif args.signal_fault_s:
+                    fn = FN_SIGNAL_FAULT
+                    more = {"signal_id": text("motor1_speed"), "duration_ms": whole(args.signal_fault_s * 1000)}
+                else:
+                    fn, more = FN_CALL_LATENCY, {"latency_ms": whole(args.call_latency_ms)}
                 call = {
                     "provider_id": "sim0",
                     "device_id": "chaos_control",
-                    "function_id": FN_UNREACHABLE,
-                    "args": {
-                        "device_id": {"type": "string", "string": "motorctl0"},
-                        "duration_ms": {"type": "int64", "int64": int(args.unreachable_s * 1000)},
-                    },
+                    "function_id": fn,
+                    "args": {"device_id": text("motorctl0")} | more,
                 }
                 try:
-                    print("  inject_device_unreachable:", http(base, "/v0/call", call))
+                    print("  injected:", http(base, "/v0/call", call)["status"])
                 except urllib.error.HTTPError as e:
                     sys.exit(f"the fault could not be injected: {e.code} {e.read().decode()}")
                 stalled = True
@@ -239,12 +248,13 @@ def main():
         if abs(v - SETPOINT) > 0.05 * SETPOINT:
             break
         settled = t
-    disturbed = args.stall_s or args.unreachable_s
+    disturbed = args.stall_s or args.unreachable_s or args.signal_fault_s or args.call_latency_ms
     before = [v for t, v in speeds if t < args.at] if disturbed else [v for _, v in speeds]
     tail = [v for t, v in speeds if t >= args.seconds - 3.0]
     print(
         f"{args.graph.name}: poll {args.poll_ms} ms, call {args.call_ms or 'period'} ms, stall {args.stall_s} s, "
-        f"unreachable {args.unreachable_s} s, at {args.at} s, max_age {args.max_age}, skew {args.skew_ms} ms, "
+        f"unreachable {args.unreachable_s} s, speed FAULT {args.signal_fault_s} s, "
+        f"call latency {args.call_latency_ms} ms, at {args.at} s, max_age {args.max_age}, skew {args.skew_ms} ms, "
         f"{args.graph_line or 'no line more'}, "
         f"{len(rows)} samples"
     )
