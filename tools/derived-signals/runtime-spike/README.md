@@ -10,8 +10,9 @@ host does to a graph. It is not a design and is not for merging.
 `core/derived/` wraps the version 2 core of FluxGraph
 ([proposal](https://github.com/anolishq/fluxgraph/pull/182),
 [core](https://github.com/anolishq/fluxgraph/pull/185)) behind
-`IProviderHandle`, in process. A thread of its own writes the graph's
-inputs from the state cache and calls the engine once a period. The
+`IProviderHandle`, in process. The state cache tells it of each read of a
+device as it returns; a thread of its own writes those samples to the
+engine and calls it once a period. The
 graph's published outputs are the signals of one device, `graph`, of one
 more provider, so the registry, the poll thread, HTTP, telemetry and
 health reach them through the code they already have. It calls nothing
