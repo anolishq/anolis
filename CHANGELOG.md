@@ -15,12 +15,15 @@ commit messages only.
 
 ### Added
 
-- **A warning when a provider goes too long between polls.** Polling is what
+- **A warning when a device goes too long between reads.** Polling is what
   feeds a device's command watchdog, and `polling.interval_ms` is only the
-  shortest gap between two polls. At startup the runtime takes the shortest
-  `watchdog_timeout_ms` each provider's devices report, and from then on logs
-  "Provider X went N ms between polls, over M ms" when a provider's polls are
-  more than half that apart, at most once every 30 s per provider. (#831)
+  shortest gap between two reads. At startup and after a provider restart, the
+  runtime takes the shortest `watchdog_timeout_ms` each provider's devices
+  report. From then on it logs "provider/device went N ms between successful
+  reads, over M ms" when two successful polls of a device are more than three
+  quarters of that apart, at most once every 30 s per provider. A failed read
+  ends the measurement. At #599's margin, a 5000 ms watchdog polled every
+  2500 ms, it warns from 3750 ms. (#831)
 
 ### Fixed
 

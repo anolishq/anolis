@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <format>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -284,35 +285,8 @@ void StateCache::start_polling(provider::ProviderRegistry &provider_registry) {
     polling_threads_.reserve(provider_ids.size());
     for (const auto &provider_id : provider_ids) {
         polling_threads_.emplace_back([this, provider_id, &provider_registry]() {
-            std::chrono::steady_clock::time_point last_start{};
-            std::chrono::steady_clock::time_point last_gap_warning{};
             while (polling_active_) {
                 const auto poll_start = std::chrono::steady_clock::now();
-
-                // The gap a device's watchdog sees is this one, start to start,
-                // not polling.interval_ms (#831).
-                if (last_start != std::chrono::steady_clock::time_point{}) {
-                    const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(poll_start - last_start);
-                    std::optional<std::chrono::milliseconds> limit;
-                    {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        const auto found = poll_gap_limits_.find(provider_id);
-                        if (found != poll_gap_limits_.end()) {
-                            limit = found->second;
-                        }
-                    }
-                    if (limit && gap > *limit &&
-                        (last_gap_warning == std::chrono::steady_clock::time_point{} ||
-                         poll_start - last_gap_warning >= kOutageLogInterval)) {
-                        last_gap_warning = poll_start;
-                        LOG_WARN("[StateCache] Provider "
-                                 << provider_id << " went " << gap.count() << " ms between polls, over "
-                                 << limit->count()
-                                 << " ms, half the shortest command watchdog timeout its devices report; a longer "
-                                    "gap can trip that watchdog");
-                    }
-                }
-                last_start = poll_start;
 
                 // This provider's targets, copied to keep the lock short. A
                 // rebuild after a restart changes them between polls.
@@ -482,7 +456,43 @@ void StateCache::poll_provider(const std::string &provider_id, const std::vector
     clear_outage_and_maybe_log_recovery();
 
     for (const auto *cfg : configs) {
-        poll_device(cfg->provider_id, cfg->device_id, cfg->signal_ids, *provider);
+        const bool read_ok = poll_device(cfg->provider_id, cfg->device_id, cfg->signal_ids, *provider);
+        note_read_gap(provider_id, cfg->provider_id + "/" + cfg->device_id, read_ok);
+    }
+}
+
+void StateCache::note_read_gap(const std::string &provider_id, const std::string &device_handle, bool read_ok) {
+    // What a device's command watchdog sees is the time between two frames to
+    // it, and a successful read is one. Measured per device, between two
+    // successful polls, so it includes a wait behind a slow call (#831). A
+    // failed read ends the measurement: a dark bus is not a slow poll, and the
+    // device-loss latch already covers it.
+    const auto now = std::chrono::steady_clock::now();
+    std::optional<std::string> warning;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!read_ok) {
+            last_good_read_.erase(device_handle);
+            return;
+        }
+        const auto previous = last_good_read_.find(device_handle);
+        const auto limit = poll_gap_limits_.find(provider_id);
+        if (previous != last_good_read_.end() && limit != poll_gap_limits_.end()) {
+            const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(now - previous->second);
+            auto &last_warning = last_gap_warning_[provider_id];
+            if (gap > limit->second &&
+                (last_warning == std::chrono::steady_clock::time_point{} || now - last_warning >= kOutageLogInterval)) {
+                last_warning = now;
+                warning = std::format(
+                    "[StateCache] {} went {} ms between successful reads, over {} ms, three quarters of the shortest "
+                    "command watchdog timeout {}'s devices report; a gap past the timeout trips that watchdog",
+                    device_handle, gap.count(), limit->second.count(), provider_id);
+            }
+        }
+        last_good_read_[device_handle] = now;
+    }
+    if (warning) {
+        LOG_WARN(*warning);
     }
 }
 

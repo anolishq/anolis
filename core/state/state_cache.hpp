@@ -221,13 +221,14 @@ public:
     void stop_polling();
 
     /**
-     * @brief Warn when a provider goes longer than its limit between two polls.
+     * @brief Warn when a provider's device goes longer than its limit between
+     *        two successful reads.
      *
-     * The runtime sets half the shortest command watchdog timeout a provider's
-     * devices report (#831). Polling is what feeds those watchdogs (#599), and
-     * `polling.interval_ms` is only the shortest gap: a slow call or read on the
-     * provider stretches it. A provider with no entry is not checked. The
-     * warning is rate-limited per provider.
+     * The runtime sets three quarters of the shortest command watchdog timeout
+     * a provider's devices report (#831). Polling is what feeds those watchdogs
+     * (#599), and `polling.interval_ms` is only the shortest gap: a slow call or
+     * read on the provider stretches it. A provider with no entry is not
+     * checked. The warning is rate-limited per provider.
      */
     void set_poll_gap_limits(std::map<std::string, std::chrono::milliseconds> limits);
 
@@ -318,9 +319,12 @@ private:
     std::atomic<bool> preinit_poll_warning_emitted_;
     std::vector<std::thread> polling_threads_;
     std::chrono::milliseconds poll_interval_;
-    // Longest gap between two polls of a provider before a warning (#831).
-    // Guarded by `mutex_`.
+    // Longest gap between two successful reads of a provider's device before
+    // a warning, by provider; when each device was last read successfully; and
+    // when each provider last warned (#831). Guarded by `mutex_`.
     std::map<std::string, std::chrono::milliseconds> poll_gap_limits_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> last_good_read_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> last_gap_warning_;
 
     struct ProviderOutageLogState {
         bool in_outage = false;
@@ -333,6 +337,10 @@ private:
     // outage logging. `configs` holds only that provider's poll targets.
     void poll_provider(const std::string &provider_id, const std::vector<const PollConfig *> &configs,
                        provider::ProviderRegistry &provider_registry);
+
+    // Helper: Record a poll read of a device and warn if it came too long
+    // after the last successful one (#831).
+    void note_read_gap(const std::string &provider_id, const std::string &device_handle, bool read_ok);
 
     // Helper: Poll single device
     bool poll_device(const std::string &provider_id, const std::string &device_id,

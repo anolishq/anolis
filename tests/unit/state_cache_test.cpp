@@ -1398,9 +1398,10 @@ TEST(StateCachePollingTest, SlowProviderDoesNotDelayAnotherProvidersPolls) {
         << " ms over " << fast_reads.size() << " reads";
 }
 
-// A provider that goes longer between polls than its gap limit is named, with
-// the gap, so the trip it risks is not a surprise (#831). One under its limit,
-// or with no limit set, is not.
+// A device whose successful reads are further apart than its provider's gap
+// limit is named, with the gap, so the trip it risks is not a surprise (#831).
+// One under its limit, with no limit set, or whose reads fail in between (a
+// dark bus, not a slow poll) is not.
 TEST(StateCachePollingTest, WarnsWhenAProviderGoesPastItsPollGapLimit) {
     constexpr int kIntervalMs = 50;
 
@@ -1427,11 +1428,14 @@ TEST(StateCachePollingTest, WarnsWhenAProviderGoesPastItsPollGapLimit) {
                 signal->set_poll_hint_hz(1.0);
                 return true;
             }));
+        auto reads = std::make_shared<int>(0);
         ON_CALL(*provider, read_signals(_, _, _, _))
-            .WillByDefault(Invoke([read_time](const std::string &, const std::vector<std::string> &,
-                                              ReadSignalsResponse &, anolis::deviceprovider::v1::Status_Code &) {
+            .WillByDefault(Invoke([read_time, reads, provider_id](const std::string &, const std::vector<std::string> &,
+                                                                  ReadSignalsResponse &,
+                                                                  anolis::deviceprovider::v1::Status_Code &) {
                 std::this_thread::sleep_for(read_time);
-                return true;
+                // flaky0 fails every other read.
+                return provider_id != "flaky0" || (++*reads % 2) == 0;
             }));
         providers.add_provider(provider_id, provider);
         registry.discover_provider(provider_id, *provider);
@@ -1440,10 +1444,13 @@ TEST(StateCachePollingTest, WarnsWhenAProviderGoesPastItsPollGapLimit) {
     add_provider("late0", std::chrono::milliseconds(250));
     add_provider("ontime0", std::chrono::milliseconds(0));
     add_provider("unlimited0", std::chrono::milliseconds(250));
+    add_provider("flaky0", std::chrono::milliseconds(100));
 
     state::StateCache cache(registry, kIntervalMs);
     ASSERT_TRUE(cache.initialize());
-    cache.set_poll_gap_limits({{"late0", std::chrono::milliseconds(150)}, {"ontime0", std::chrono::milliseconds(150)}});
+    cache.set_poll_gap_limits({{"late0", std::chrono::milliseconds(150)},
+                               {"ontime0", std::chrono::milliseconds(150)},
+                               {"flaky0", std::chrono::milliseconds(150)}});
     std::ostringstream captured;
     std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
     cache.start_polling(providers);
@@ -1452,14 +1459,14 @@ TEST(StateCachePollingTest, WarnsWhenAProviderGoesPastItsPollGapLimit) {
     std::cerr.rdbuf(old);
 
     const std::string log = captured.str();
-    EXPECT_NE(log.find("Provider late0 went "), std::string::npos) << log;
-    EXPECT_NE(log.find(" ms between polls, over 150 ms"), std::string::npos) << log;
-    EXPECT_EQ(log.find("Provider ontime0 went "), std::string::npos) << log;
-    EXPECT_EQ(log.find("Provider unlimited0 went "), std::string::npos) << log;
+    EXPECT_NE(log.find("late0/d went "), std::string::npos) << log;
+    EXPECT_NE(log.find(" ms between successful reads, over 150 ms"), std::string::npos) << log;
+    EXPECT_EQ(log.find("ontime0/d went "), std::string::npos) << log;
+    EXPECT_EQ(log.find("unlimited0/d went "), std::string::npos) << log;
+    EXPECT_EQ(log.find("flaky0/d went "), std::string::npos) << log;
     // Rate-limited: one warning for late0 in a second of polls.
     size_t warnings = 0;
-    for (size_t at = log.find("Provider late0 went "); at != std::string::npos;
-         at = log.find("Provider late0 went ", at + 1)) {
+    for (size_t at = log.find("late0/d went "); at != std::string::npos; at = log.find("late0/d went ", at + 1)) {
         ++warnings;
     }
     EXPECT_EQ(warnings, 1U) << log;

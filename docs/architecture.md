@@ -139,8 +139,9 @@ Key: BTs never bypass CallRouter or StateCache.
 
 **Current Architecture:** Multi-threaded
 
-- **State Polling**: Dedicated background thread in StateCache
-  - Runs continuous loop at configured interval (default 500ms)
+- **State Polling**: One background thread per provider in StateCache
+  - Each runs its own loop at the configured interval (default 500ms), so a
+    slow call on one provider does not delay another's reads (#831)
   - Thread-safe via mutex-protected state snapshots
   - Non-blocking to runtime main loop
 
