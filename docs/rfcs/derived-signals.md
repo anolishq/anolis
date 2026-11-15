@@ -81,6 +81,12 @@ cases, the method and the limits. In short:
 
 The findings that bear on a decision are cited under it below as "exercise".
 
+A second body of evidence is a spike: FluxGraph's version 2 core linked
+into the runtime, closing a speed loop on the simulator's motor through a
+behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, eighteen
+runs of one loop on one machine, and its README has each run and what it
+found. Its findings are cited below as "spike".
+
 ## Decided
 
 ### O0. Whether a new layer is needed
@@ -220,6 +226,31 @@ A derived signal can be the reason a call is made. It does not make one.
 This moves a question; it does not answer it. Something else has to act on a
 derived trip when the tree is not running. O6 owns that.
 
+Spike: it holds for a control loop. The graph gave a duty as a signal, and
+a tree of four stock nodes read it, built the call's arguments and called
+the motor. Two things follow from the layer not being the caller.
+
+- **The layer is told when nothing acts on its output.** With the motor's
+  reads failing, the device-loss latch took the runtime to `FAULT` and the
+  safe state set the duty to 0. The graph ran on, took its duty to the
+  limit of 1 and published it as `OK`. When an operator re-armed the
+  runtime the tree sent that 1 at once, and the speed went 10% over. The
+  engine's controller now takes an input for this (its twelfth
+  amendment): while it is true the controller gives back what the
+  actuator reports and starts from there afterwards. The runtime writes
+  it: true while the mode is not `AUTO`, or while the device is held by
+  the device-loss latch. With it, the same run rose from rest and did not
+  pass its setpoint. So the layer needs the mode and the latch as inputs,
+  which no signal carries today.
+- **How long a command stands is its caller's to bound.** With the speed
+  reading `FAULT` for 3 s the graph had no duty to give, the tree sent
+  nothing, and the motor ran on at its last duty with nothing controlling
+  it. That is the right thing for the layer to do and the wrong thing to
+  leave unbounded. The bound is the tree's: a tree that has had no `OK`
+  command for a stated time sends a safe value or faults. A provider's
+  watchdog, where it has one, is behind that. The engine gives an output
+  no lifetime, and this RFC asks it for none.
+
 ### P3. Evaluation is periodic, in dependency order
 
 All derived signals are evaluated together, once per period, in an order
@@ -265,6 +296,47 @@ A typed block matches how a behavior-tree node's ports are declared. It does
 not match how the runtime reads its own config, which is parsed by hand and
 warns on an unknown key (`core/runtime/config.cpp`). Refusing a definition
 at load is a new convention here.
+
+### P6. The layer runs in the runtime, behind the provider interface
+
+This was O10, and is proposed on one spike of one placement. The engine
+is wrapped as an implementation of `IProviderHandle` in the runtime's own
+process. A thread of its own writes the graph's inputs from the state
+cache and calls the engine once a period. The graph's published outputs
+are the signals of one device of one more provider.
+
+Spike: this is cheap. 532 lines wrap the engine, 55 read its config and
+25 start it. The registry, the poll threads, HTTP, change events,
+telemetry and health reached the outputs through the code they already
+have, with no change to any of them, which answers most of O8 by the
+ordinary route. A host slower than the graph's period was unremarkable:
+called every 250 ms against a period of 100 ms the loop settled within
+0.3 s of when it does called on the period.
+
+What it costs, and what is not settled:
+
+- It bends the invariant that a provider is an isolated process
+  ([architecture.md](../architecture.md)). The handle is not supervised:
+  the main loop walks the configured providers.
+- The outputs reach the cache up to one poll after the tick that made
+  them.
+- After a stall the engine's thread can run before the poll threads do,
+  and reads what the cache held before the stall. With an input's maximum
+  age near its sample interval the engine refuses the old sample and
+  waits. With a maximum age of 5 s a controller started again from a speed
+  3 s old and 750 rpm wrong. A layer that reads the cache has no way to
+  ask for a poll first; one that is handed each read as it returns would
+  not need to.
+- The computation shares a process with the stop logic.
+
+The other placement, in a provider, is not built. It keeps process
+isolation and any language through an SDK, and needs a way to receive
+other providers' signals, which ADPP does not have. Reading the runtime's
+HTTP API back does not work at startup: providers start before the HTTP
+server. Established systems tend to have both tiers: light calculations
+beside the measured values, and heavy estimators as separate processes
+that publish to the same place (ROS 2 `robot_localization`, the PX4
+estimator). Nothing here rules that out later.
 
 ## Open
 
@@ -314,9 +386,27 @@ Questions:
 - How a value that came from a fallback is told apart from one that was
   computed. In the engine it is `uncertain`.
 
-Settled by: a table of every producer and consumer of quality in the
-runtime, the protocol, the exporter and the workbench, then a decision on
-the enumeration.
+Proposed, on the spike:
+
+- Going in: `OK` is `good`, `STALE` is `uncertain`, `FAULT` is `bad`,
+  `UNKNOWN` is `not_ready`, and a value the cache does not hold is `bad`.
+- Coming out, for now: the same backwards, so `uncertain` is published as
+  `STALE`, with a value of 0 where the engine has none, since the
+  protocol cannot say "no value". A consumer that gates on `OK` then does
+  not act on an `uncertain` value, as the spike's tree would not.
+- Later: a fifth quality for `uncertain`. `STALE` says a value is old and
+  `uncertain` that it is usable and doubtful, and publishing one as the
+  other loses that. It is a change to ADPP and to two published
+  enumerations, and is proposed here and not made.
+
+Spike: no run made a value `STALE` or `uncertain`. The simulator never
+reports the first, and the runtime judges age when a value is read and
+does not write `STALE` into the cache, so the engine's own maximum age
+was the only judge of an old sample.
+
+Still to settle: a table of every producer and consumer of quality in the
+runtime, the protocol, the exporter and the workbench, and what the stop
+chain does with `uncertain`.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
 
@@ -438,6 +528,35 @@ What stays here is how the runtime meets that: which clock it uses, when it
 ticks the graph, what sample time it gives each cached value, and what the
 period and the maximum ages should be.
 
+Proposed, on the spike: **a sample's time is the time the runtime's read
+of it returned, on the runtime's monotonic clock**, and the engine is
+called on that clock. Every sample time and every call are then one clock
+by construction, and a step of the wall clock does not reach the engine.
+
+- Spike: the spike used the provider's timestamps, and a provider whose
+  clock is not the runtime's stopped the loop. With every sample stamped
+  2 s behind, each was past its maximum age of 1 s when it arrived. With
+  every sample 2 s ahead, the engine threw each away, as its rule for a
+  sample stamped far ahead says. Either way the output was `bad` from
+  start to end, the motor never moved, and the only trace was the
+  engine's count of writes thrown away.
+- What it costs: a sample's time is late by as long as the read took,
+  and a provider's own, more exact timestamp is not used. The provider's
+  timestamp stays what telemetry and HTTP show.
+- The proposal is not built. The spike moved sample times and did not
+  step a clock.
+
+Two more things the spike measured:
+
+- The poll interval is not a loop's sample rate. The call router polls a
+  device at once after every call to it, so a loop that commands at the
+  tree's 10 Hz reads the motor at 10 Hz whatever `polling.interval_ms`
+  says. A graph that only watches sees the poll interval.
+- A slow call is dead time twice. With every call to the motor taking
+  300 ms the speed went 25% over. The tree waits for each call, and the
+  provider answers one request at a time, so the poll of the motor waits
+  behind the call.
+
 - Polling is one thread reading devices one after another, and a successful
   call re-reads its device from the caller's thread
   (`core/control/call_router.cpp`). There is no moment at which the cache is
@@ -493,29 +612,10 @@ P5 is accepted.
 
 ### O10. Where the layer runs
 
-Left until O1 to O9 have said what any placement has to provide. The
-candidates and what is known about each:
-
-- **In the runtime.** No new process and no protocol change. The
-  computation shares a process with the stop logic, a slow evaluation on the
-  poll thread would delay every device read, and P1's registry entry still
-  has to be made. The poll thread keeps only the latest value of each
-  signal, so a placement that ticks the graph from the cache inherits the
-  stall case under O7.
-- **In a provider.** Process isolation, any language through an SDK, and a
-  registry entry by the ordinary route, which answers most of O8. It needs
-  a way to receive other providers' signals, which ADPP does not have.
-  Reading the runtime's HTTP API back does not work at startup: providers
-  start before the HTTP server (`core/runtime/runtime.cpp`).
-- **Both.** Established systems tend to have two tiers: light calculations
-  beside the measured values, and heavy estimators as separate processes
-  that publish to the same place (ROS 2 `robot_localization`, the PX4
-  estimator).
-
-Settled by: two throwaway spikes, one per placement, each running the same
-block file against the oracle from O3. They have to include the registry
-and health integration, which is where the cost is, not only the
-computation.
+Proposed as P6: in the runtime, behind the provider interface. One of the
+two spikes this asked for is built, and the other, in a provider, is not.
+What is open is under P6: supervision of a handle that is not a process,
+and how the layer is handed each read so that it does not race the poll.
 
 ## Rejected
 
@@ -534,7 +634,8 @@ what belongs there.
 - Any particular estimator or model. Transfer functions, filters and
   estimators are what the layer is for; which ones ship first is the
   catalogue's question (O3).
-- Any change to ADPP. O10 may propose one; this RFC does not.
+- Any change to ADPP. O1 proposes one, a fifth quality; this RFC does not
+  make it.
 - Workbench surfaces.
 
 ## How this proceeds
@@ -544,8 +645,12 @@ what belongs there.
    conformance vectors are written there. It is amended a section at a
    time. Time and the host interface, how doubt passes through a block's
    memory, what a gap does to each block, how models are stepped, and the
-   estimator are written, and nothing is left there that is known to be
-   wrong as it stands. A model is linear and stepped exactly, and one too
+   estimator are written. It keeps a list of what is known to be wrong
+   as it stands: at this writing an estimator that flags itself under
+   ordinary timing, a derivative of a low-pass, an input true for one
+   call that a fast host can miss, that a value does not say why it is
+   not good, and that an output has no lifetime (P2 says whose that
+   is). A model is linear and stepped exactly, and one too
    fast for the graph's period is refused, which bears on O7's question
    of what the period should be. An estimator's `good` means that none of
    its own tests has failed, not that it is right: what the stop chain
@@ -559,10 +664,19 @@ what belongs there.
    catalogue now has a rate limit and a PID. With an input it cannot use
    a PID gives no value, so what an actuator gets then is this runtime's
    to say (O6), and it winds up behind a limit unless it is told what
-   was applied.
+   was applied. Four amendments since bear on a host. A graph lists the
+   outputs its host hands to an actuator, and a controller that feeds
+   one acts once a call and not once for every tick a late call catches
+   up: in the spike, with samples that stayed usable through a 3 s
+   stall, the graph that listed no command overshot by 26% and the one
+   that did, not at all. A controller's derivative and a window's slope
+   are over the times the samples carry. A total that has missed more
+   than it may keeps its value, as `uncertain`. And a controller takes
+   `follow` (P2).
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
-4. O10 is decided last, and reviewed independently before it is.
+4. O10 is proposed as P6 on one spike. It is reviewed independently before
+   it is decided.
 5. Accepted, the RFC becomes an epic with increments.
 
 ## Prior art
