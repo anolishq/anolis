@@ -44,7 +44,9 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone, which is how every figure here was made, at the commit pinned.
+clone. The runs with `--call-ms`, `--skew-ms`, `--max-age` or
+`--graph-line` were built that way against the commit pinned, and the
+other six against the working tree that became it.
 
 ## What it did
 
