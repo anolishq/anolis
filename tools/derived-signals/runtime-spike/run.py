@@ -26,7 +26,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SETPOINT = 1500.0
 FN_UNREACHABLE = 6  # chaos_control/inject_device_unreachable in anolis-provider-sim
-COUNTS = ["host_calls", "host_ticks", "host_most_ticks", "host_gaps", "host_refused_calls", "host_refused_writes"]
+COUNTS = [
+    "host_calls",
+    "host_ticks",
+    "host_most_ticks",
+    "host_gaps",
+    "host_refused_calls",
+    "host_refused_writes",
+    "host_thrown",
+]
 
 CONFIG = """
 runtime:
@@ -68,6 +76,7 @@ derived:
   id: derived0
   graph: {graph}
   call_interval_ms: {call_ms}
+  sample_skew_ms: {skew_ms}
   inputs:
     setpoint: {{constant: {setpoint}}}
     speed: {{device_handle: sim0/motorctl0, signal_id: motor1_speed}}
@@ -111,6 +120,9 @@ def main():
     parser.add_argument("--unreachable-s", type=float, default=0.0)
     parser.add_argument("--at", type=float, default=10.0)
     parser.add_argument("--graph", type=Path, default=HERE / "motor-pid.yaml")
+    parser.add_argument("--max-age", default="1s", help="of the speed and of the applied duty")
+    parser.add_argument("--graph-line", default="", help="one more top-level line for the graph, as max_catch_up: 3")
+    parser.add_argument("--skew-ms", type=int, default=0, help="added to every sample time the graph is given")
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--dump", action="store_true", help="print one /v0/state answer and stop")
     args = parser.parse_args()
@@ -128,10 +140,14 @@ def main():
             sim_config=sim_config,
             poll_ms=args.poll_ms,
             call_ms=args.call_ms,
+            skew_ms=args.skew_ms,
             tree=HERE / "tree.xml",
-            graph=args.graph.resolve(),
+            graph=out / "graph.yaml",
             setpoint=SETPOINT,
         )
+    )
+    (out / "graph.yaml").write_text(
+        args.graph.read_text().replace("max_age: 1s", f"max_age: {args.max_age}") + args.graph_line + "\n"
     )
     log = open(out / "runtime.log", "w")
     runtime = subprocess.Popen(
@@ -220,7 +236,9 @@ def main():
     tail = [v for t, v in speeds if t >= args.seconds - 3.0]
     print(
         f"{args.graph.name}: poll {args.poll_ms} ms, call {args.call_ms or 'period'} ms, stall {args.stall_s} s, "
-        f"unreachable {args.unreachable_s} s, at {args.at} s, {len(rows)} samples"
+        f"unreachable {args.unreachable_s} s, at {args.at} s, max_age {args.max_age}, skew {args.skew_ms} ms, "
+        f"{args.graph_line or 'no line more'}, "
+        f"{len(rows)} samples"
     )
     print(f"  first within 5% of {SETPOINT:g} rpm at {within} s; within 5% from {settled} s to the end")
     if before:

@@ -44,66 +44,100 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone, which is how every figure here was made, on that branch as it
-stood on 2026-11-15.
+clone, which is how every figure here was made, at the commit pinned.
 
 ## What it did
 
 Each row is one run of `run.py` with the flags given, a step from rest to
-1500 rpm, sampled over HTTP every 50 ms.
+1500 rpm, sampled over HTTP every 50 ms. No run had a refused call or a
+refused write.
 
-| Flags | Within 5% at | Highest | After the disturbance | Ticks in one call, most |
-| --- | --- | --- | --- | --- |
-| none | 3.2 s | 1500 rpm | n/a | 1 |
-| `--poll-ms 500` | 3.1 s | 1500 rpm | n/a | 1 |
-| `--stall-s 3 --seconds 25` | 3.1 s | 1500 rpm | 1500 rpm throughout | 30 |
-| `--stall-s 3 --at 1` | 4.5 s | 1500 rpm | lowest 1402 rpm | 30 |
-| `--stall-s 3 --at 1 --graph motor-pid-no-commands.yaml` | 4.8 s | 1500 rpm | lowest 1389 rpm | 30 |
-| `--unreachable-s 3 --at 8` | 3.1 s | 1500 rpm | 0 rpm, and stays there | 1 |
+| Flags | Within 5% for good from | Lowest and highest after the disturbance |
+| --- | --- | --- |
+| none | 3.2 s | n/a |
+| `--poll-ms 500` | 3.1 s | n/a |
+| `--call-ms 130` | 3.2 s | n/a |
+| `--call-ms 250` | 3.4 s | n/a |
+| `--stall-s 3 --seconds 25` | 3.1 s | 1500, 1500 rpm |
+| `--unreachable-s 3 --at 8` | never again | 0 rpm, and stays there |
+| `--skew-ms 2000 --seconds 6` | never | the motor does not start |
+| `--skew-ms -2000 --seconds 6` | never | the motor does not start |
 
-No run had a gap, a refused call or a refused write.
+A stall of 3 s one second into the step, `--stall-s 3 --at 1`, with what
+else was given:
+
+| Also | Within 5% for good from | Lowest and highest after it |
+| --- | --- | --- |
+| nothing | 4.5 s | 1402, 1500 rpm |
+| `--graph motor-pid-no-commands.yaml` | 4.8 s | 1389, 1500 rpm |
+| `--max-age 5s` | 6.5 s | 1216, 1500 rpm |
+| `--max-age 5s --graph-line "act_for: 30"` | 5.4 s | 1389, 1771 rpm (+18%) |
+| `--max-age 5s --graph motor-pid-no-commands.yaml` | 5.4 s | 1389, 1893 rpm (+26%) |
+| `--max-age 5s --graph-line "max_catch_up: 3"` | 6.7 s | 1165, 1500 rpm |
 
 ## What it found
 
-1. **The cost of this placement is small.** 522 lines in `core/derived/`,
-   about 50 in the config loader, 14 in `Runtime::init_providers` and a
-   target in CMake. The registry, HTTP, change events and health needed no
-   change. It bends the invariant that a provider is an isolated process,
-   and the handle is not supervised: the main loop walks
-   `config_.providers`.
-2. **The poll interval is not the loop's sample rate.** The call router
-   polls a device at once after every call to it, so a loop that commands
-   at the tree's 10 Hz reads the motor at 10 Hz whatever
-   `polling.interval_ms` says. A graph that only watches would see 2 Hz at
-   the default.
+1. **The cost of this placement is small.** About 520 lines in
+   `core/derived/`, 50 in the config loader, 14 in
+   `Runtime::init_providers` and a target in CMake. The registry, HTTP,
+   change events and health needed no change. It bends the invariant that
+   a provider is an isolated process, and the handle is not supervised:
+   the main loop walks `config_.providers`.
+2. **A provider whose clock is not the runtime's stops the loop, and
+   says little.** With every sample stamped 2 s behind, each was past the
+   input's maximum age of 1 s when it arrived. With every sample 2 s
+   ahead, the engine threw each away, as its rule for a sample stamped
+   far ahead says. Either way the
+   graph's output was `bad` from start to end and the motor never moved.
+   Sample times are each provider's own wall clock (#796), so this is
+   what a provider on another machine with a clock 2 s out would do. The
+   only trace is the engine's count of writes thrown away: 120 in the
+   6 s ahead, and 40 behind.
 3. **The graph cannot see the runtime's mode.** With the motor's reads
    failing, the graph's output went `bad`, the tree sent nothing, the
    device-loss latch took the runtime to FAULT and the safe state set the
    duty to 0. That is the runtime doing its job. The graph then ran on
    with the motor at rest, raised `duty` to its limit of 1 and published
-   it as OK, for nobody. Its integral did not wind up, since the PID stops
-   it at a limit, and `track` was not used, since the PID only tracks when
-   it starts again after an input it could not use. A layer that is told
-   nothing of AUTO, FAULT or the latch gives a command that is `good`
-   while nothing acts on it.
-4. **Quality had to be mapped both ways, and the mapping decides what the
+   it as OK, for nobody. FluxGraph's proposal is being amended for it: a
+   controller gets an input that says nothing is acting on it.
+4. **After a stall the graph can run before the poll does.** The engine's
+   thread and the poll threads all wake together. In the runs with
+   `--max-age 5s` the first call after the stall read the speed from
+   before it, 3 s old and still within its maximum age, and the
+   controller started again from that: bumpless against a measurement
+   that was wrong by 750 rpm, and a dip to 1165 rpm when the true one
+   arrived a tick later. With the maximum age at 1 s the same stall cost
+   nothing: the old sample was refused, and the controller waited for a
+   new one. A maximum age near the sample interval is what makes a stall
+   safe, and a placement that reads the cache has no way to ask for a
+   poll first.
+5. **Listing the command is what stops the windup.** With samples that
+   stay usable through the stall, the graph that lists no command ran its
+   controller on all 30 ticks it caught up and overshot by 26%; told to
+   act for 30 periods it overshot by 18%; acting for the default of 3 it
+   did not overshoot.
+6. **The poll interval is not the loop's sample rate.** The call router
+   polls a device at once after every call to it, so a loop that commands
+   at the tree's 10 Hz reads the motor at 10 Hz whatever
+   `polling.interval_ms` says. A graph that only watches would see 2 Hz at
+   the default.
+7. **A host slower than the graph's period is unremarkable.** Called
+   every 130 ms and every 250 ms against a period of 100 ms, the engine
+   ran 2 and 3 ticks in a call and the loop settled within 0.3 s of when
+   it does called on the period.
+8. **Quality had to be mapped both ways, and the mapping decides what the
    tree sends.** In: OK is `good`, STALE `uncertain`, FAULT `bad`, UNKNOWN
    `not_ready`, and a value the cache does not hold is `bad`. Out: the
    same backwards, with a value of 0 where the engine has none, since the
    protocol cannot say "no value". The tree gates on OK, so an
    `uncertain` command is not sent. That is O1, guessed at, and no run
-   here tested the guess.
-5. **The stall runs did not tell the two graphs apart.** A 3 s stall made
-   one call run 30 ticks. With the speed's `max_age` at 1 s the samples
-   were too old for most of those ticks, the PID gave no value on them
-   and kept its integral, with the command listed or not. The difference
-   between 1402 and 1389 rpm is within what one run varies by.
-6. **Not tested: the clock.** The calls and the sample times are both the
-   wall clock, the simulator's and the runtime's on one machine (O7). A
-   step of it would reach the engine, which refuses a call earlier than
-   the last; the spike then rebases. No run stepped the clock.
-7. **The first output is `bad`.** The engine is called before the first
-   poll has put the speed in the cache.
+   here made a sample STALE.
+9. **Not tested: a clock that steps.** The calls and the sample times
+   are both the wall clock (O7). A step of it would reach the engine,
+   which refuses a call earlier than the last; the spike then rebases.
+   `--skew-ms` moves the sample times and not the clock.
+10. **The first output is `bad`.** The engine is called before the first
+    poll has put the speed in the cache.
 
 ## What is not here
 

@@ -205,7 +205,7 @@ anolis_apply_warnings(anolis_state)
 FetchContent_Declare(
     fluxgraph
     GIT_REPOSITORY https://github.com/anolishq/fluxgraph.git
-    GIT_TAG 3473a784187a2af720aadc2618fc1376018213e3
+    GIT_TAG c3ec3a5b1f08491a6402deefd537342b28a3fb73
     EXCLUDE_FROM_ALL
 )
 set(FLUXGRAPH_BUILD_V2 ON CACHE BOOL "" FORCE)

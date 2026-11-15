@@ -220,7 +220,8 @@ void DerivedProvider::call_once() {
                 written = engine_->write(input.config.name, fg::State::bad, now);
             } else {
                 const std::int64_t at =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count();
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count() +
+                    std::int64_t{config_.sample_skew_ms} * 1'000'000;
                 const fg::State state = state_of(cached->quality);
                 if (!fg::usable(state)) {
                     written = engine_->write(input.config.name, state, at);
