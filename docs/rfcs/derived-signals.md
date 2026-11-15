@@ -83,7 +83,7 @@ The findings that bear on a decision are cited under it below as "exercise".
 
 A second body of evidence is a spike: FluxGraph's version 2 core linked
 into the runtime, closing a speed loop on the simulator's motor through a
-behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, eighteen
+behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, twenty-three
 runs of one loop on one machine, and its README has each run and what it
 found. Its findings are cited below as "spike".
 
@@ -301,12 +301,12 @@ at load is a new convention here.
 
 This was O10, and is proposed on one spike of one placement. The engine
 is wrapped as an implementation of `IProviderHandle` in the runtime's own
-process. A thread of its own writes the graph's inputs from the state
-cache and calls the engine once a period. The graph's published outputs
+process. It is given the graph's inputs from the state cache, and a
+thread of its own calls the engine once a period. The graph's published outputs
 are the signals of one device of one more provider.
 
-Spike: this is cheap. 532 lines wrap the engine, 55 read its config and
-25 start it. The registry, the poll threads, HTTP, change events,
+Spike: this is cheap. 592 lines wrap the engine, 64 read its config, 32
+start it and 14 in the state cache hand it each read (O7). The registry, the poll threads, HTTP, change events,
 telemetry and health reached the outputs through the code they already
 have, with no change to any of them, which answers most of O8 by the
 ordinary route. A host slower than the graph's period was unremarkable:
@@ -324,9 +324,10 @@ What it costs, and what is not settled:
   and reads what the cache held before the stall. With an input's maximum
   age near its sample interval the engine refuses the old sample and
   waits. With a maximum age of 5 s a controller started again from a speed
-  3 s old and 750 rpm wrong. A layer that reads the cache has no way to
-  ask for a poll first; one that is handed each read as it returns would
-  not need to.
+  3 s old and 750 rpm wrong. Handing the layer each read as it returns
+  (O7) does not change this: the first call after a stall still runs
+  before any read has returned. What makes a stall safe is the maximum
+  age.
 - The computation shares a process with the stop logic.
 
 The other placement, in a provider, is not built. It keeps process
@@ -543,8 +544,11 @@ by construction, and a step of the wall clock does not reach the engine.
 - What it costs: a sample's time is late by as long as the read took,
   and a provider's own, more exact timestamp is not used. The provider's
   timestamp stays what telemetry and HTTP show.
-- The proposal is not built. The spike moved sample times and did not
-  step a clock.
+- Spike: built this way, with the state cache telling the layer of each
+  read as it returns, the loop did what it had on the provider's times
+  in each of five runs repeated, and every read reaches the engine and
+  not only the latest. It took 14 lines in the state cache. No run
+  stepped a clock.
 
 Two more things the spike measured:
 
