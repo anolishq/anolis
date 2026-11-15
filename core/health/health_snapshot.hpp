@@ -257,5 +257,18 @@ std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderR
                                                              const registry::DeviceRegistry &device_registry,
                                                              int polling_interval_ms);
 
+/**
+ * @brief The shortest `watchdog_timeout_ms` each provider's registered devices
+ *        report, keyed by provider id (#831).
+ *
+ * The runtime gives StateCache half of it as the longest gap that provider may
+ * go between polls: `polling.interval_ms` is the shortest gap, and a slow call
+ * or read can stretch it. Values are read as watchdog_timeouts_under_poll_margin
+ * reads them; a provider with no device reporting one is absent. One live
+ * GetHealth round-trip per available provider.
+ */
+std::map<std::string, int64_t> shortest_watchdog_timeouts(provider::ProviderRegistry &provider_registry,
+                                                          const registry::DeviceRegistry &device_registry);
+
 }  // namespace health
 }  // namespace anolis

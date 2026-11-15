@@ -123,6 +123,13 @@ private:
     void preflight_declared_calls() const;
 
     /**
+     * @brief Give StateCache each provider's read-gap limit: three quarters of
+     *        the shortest command watchdog timeout its devices report (#831).
+     *        At startup and after a provider restart.
+     */
+    void refresh_poll_gap_limits();
+
+    /**
      * @brief Devices a provider reports missing and the registry does not
      *        hold, with the provider's reason (anolishq/anolis#461).
      *

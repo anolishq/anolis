@@ -19,7 +19,7 @@
  * CallRouter for why the hook exemption is load-bearing rather than a
  * convenience.
  *
- * Threading: written from the polling thread, read from the automation thread.
+ * Threading: written from the polling threads, read from the automation thread.
  * All access is under `mutex_`.
  */
 

@@ -13,6 +13,7 @@
 #include <chrono>
 #include <format>
 #include <future>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -286,7 +287,20 @@ bool Runtime::init_providers(std::string &error) {
          health::watchdog_timeouts_under_poll_margin(provider_registry_, *registry_, config_.polling.interval_ms)) {
         LOG_WARN("[Runtime] " << line);
     }
+    refresh_poll_gap_limits();
     return true;
+}
+
+void Runtime::refresh_poll_gap_limits() {
+    // While it runs, what a watchdog sees is the gap between two reads of its
+    // device, which a slow call or read stretches past the interval (#831).
+    // Three quarters of the timeout leaves #599's margin quiet: a 5000 ms
+    // board polled every 2500 ms warns from 3750 ms.
+    std::map<std::string, std::chrono::milliseconds> gap_limits;
+    for (const auto &[provider_id, timeout_ms] : health::shortest_watchdog_timeouts(provider_registry_, *registry_)) {
+        gap_limits.emplace(provider_id, std::chrono::milliseconds(timeout_ms * 3 / 4));
+    }
+    state_cache_->set_poll_gap_limits(std::move(gap_limits));
 }
 
 control::AbsentDevices Runtime::devices_reported_missing() const {
@@ -1443,6 +1457,8 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // invalidates the boot-time preflight. Re-run it against what is actually
     // registered now, for the same reason the hookless gate is re-checked below.
     preflight_declared_calls();
+    // Its devices' watchdog timeouts may have changed with its config (#831).
+    refresh_poll_gap_limits();
 
 #if ANOLIS_ENABLE_AUTOMATION
     // #233: a restarted provider can publish an inventory with new actuating

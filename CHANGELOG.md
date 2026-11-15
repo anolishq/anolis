@@ -13,8 +13,28 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **A warning when a device goes too long between reads.** Polling is what
+  feeds a device's command watchdog, and `polling.interval_ms` is only the
+  shortest gap between two reads. At startup and after a provider restart, the
+  runtime takes the shortest `watchdog_timeout_ms` each provider's devices
+  report. From then on it logs "provider/device went N ms between successful
+  reads, over M ms" when two successful polls of a device are more than three
+  quarters of that apart, at most once every 30 s per provider. A failed read
+  ends the measurement. At #599's margin, a 5000 ms watchdog polled every
+  2500 ms, it warns from 3750 ms. (#831)
+
 ### Fixed
 
+- **A slow call on one provider no longer delays another's polls.** One thread
+  polled every provider in turn, and a provider takes one request at a time, so
+  a provider busy with a slow call held up the reads of every provider polled
+  after it. On the reference rig, the ezo compensation calls at run start
+  stretched a poll to 4.7 s, and both DCMT command watchdogs (5000 ms) tripped.
+  Each provider is now polled on its own thread and schedule. The overrun
+  warning names the provider: "Poll of provider X took longer than interval".
+  (#831)
 - **A tree's parameter reads no longer fill the log.** `GetParameter` logged
   every successful read at INFO, and a `ReactiveSequence` re-ticks it every
   engine tick. On the reference rig, 960 of the 975 runtime log lines in 80 s
