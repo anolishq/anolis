@@ -698,3 +698,21 @@ TEST_F(WatchdogMarginTest, NoClaimIsSilent) {
     ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
     EXPECT_TRUE(health::watchdog_timeouts_under_poll_margin(*provider_registry, *registry, 2500).empty());
 }
+
+// shortest_watchdog_timeouts (#831): the shortest timeout per provider, read
+// as the margin check reads it, for the poll gap limit.
+TEST_F(WatchdogMarginTest, ShortestTimeoutPerProvider) {
+    ReportWatchdogTimeouts({{"drive", "10000"}, {"sensor", "5000"}});
+    EXPECT_EQ(health::shortest_watchdog_timeouts(*provider_registry, *registry),
+              (std::map<std::string, int64_t>{{"sim0", 5000}}));
+}
+
+TEST_F(WatchdogMarginTest, ShortestTimeoutIgnoresNoClaim) {
+    ReportWatchdogTimeouts({{"drive", "0"}, {"sensor", "soon"}, {"ghost", "100"}});
+    EXPECT_TRUE(health::shortest_watchdog_timeouts(*provider_registry, *registry).empty());
+    ReportWatchdogTimeouts({{"drive", "0"}, {"sensor", "7000"}, {"ghost", "100"}});
+    EXPECT_EQ(health::shortest_watchdog_timeouts(*provider_registry, *registry),
+              (std::map<std::string, int64_t>{{"sim0", 7000}}));
+    ON_CALL(*mock_provider, get_health(_)).WillByDefault(Return(false));
+    EXPECT_TRUE(health::shortest_watchdog_timeouts(*provider_registry, *registry).empty());
+}

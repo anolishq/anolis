@@ -13,6 +13,26 @@ commit messages only.
 
 ## [Unreleased]
 
+### Added
+
+- **A warning when a provider goes too long between polls.** Polling is what
+  feeds a device's command watchdog, and `polling.interval_ms` is only the
+  shortest gap between two polls. At startup the runtime takes the shortest
+  `watchdog_timeout_ms` each provider's devices report, and from then on logs
+  "Provider X went N ms between polls, over M ms" when a provider's polls are
+  more than half that apart, at most once every 30 s per provider. (#831)
+
+### Fixed
+
+- **A slow call on one provider no longer delays another's polls.** One thread
+  polled every provider in turn, and a provider takes one request at a time, so
+  a provider busy with a slow call held up the reads of every provider polled
+  after it. On the reference rig, the ezo compensation calls at run start
+  stretched a poll to 4.7 s, and both DCMT command watchdogs (5000 ms) tripped.
+  Each provider is now polled on its own thread and schedule. The overrun
+  warning names the provider: "Poll of provider X took longer than interval".
+  (#831)
+
 ## [0.15.0] - 2026-11-13
 
 0.15.0 is a minor release because calls that used to be made can now be

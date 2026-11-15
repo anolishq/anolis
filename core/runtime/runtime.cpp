@@ -13,6 +13,7 @@
 #include <chrono>
 #include <format>
 #include <future>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -286,6 +287,14 @@ bool Runtime::init_providers(std::string &error) {
          health::watchdog_timeouts_under_poll_margin(provider_registry_, *registry_, config_.polling.interval_ms)) {
         LOG_WARN("[Runtime] " << line);
     }
+    // And while it runs: what a watchdog sees is the gap a provider actually
+    // goes between polls, which a slow call or read stretches past the
+    // interval (#831).
+    std::map<std::string, std::chrono::milliseconds> gap_limits;
+    for (const auto &[provider_id, timeout_ms] : health::shortest_watchdog_timeouts(provider_registry_, *registry_)) {
+        gap_limits.emplace(provider_id, std::chrono::milliseconds(timeout_ms / 2));
+    }
+    state_cache_->set_poll_gap_limits(std::move(gap_limits));
     return true;
 }
 

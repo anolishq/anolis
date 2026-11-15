@@ -11,7 +11,7 @@
  * - Overflow drops oldest events per-subscriber with warning log
  *
  * Thread safety:
- * - emit() is called from polling thread (StateCache)
+ * - emit() is called from StateCache's polling threads, one per provider
  * - subscribe()/unsubscribe() called from HTTP threads (SSE handlers)
  * - pop() called from subscriber threads (SSE handler loop, telemetry flush)
  *

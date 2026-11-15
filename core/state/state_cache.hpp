@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -201,15 +202,34 @@ public:
     void mark_provider_lost(const std::string &provider_id);
 
     /**
-     * @brief Start the background polling thread.
+     * @brief Start background polling: one thread per provider.
+     *
+     * Each provider is polled on its own `polling.interval_ms` schedule, so a
+     * slow call or read on one provider does not delay another's reads. A
+     * provider holds one request at a time, so a poll of a provider busy with a
+     * slow call waits for it; with one thread for all providers, every provider
+     * polled after it waited too, long enough to trip a device's command
+     * watchdog (#831). Providers are registered before polling starts and a
+     * restart keeps the id, so the set of threads is fixed here.
      *
      * Requires `initialize()` to have completed successfully. If polling is
      * already active, the call is ignored.
      */
     void start_polling(provider::ProviderRegistry &provider_registry);
 
-    /** @brief Stop the background polling thread and wait for it to exit. */
+    /** @brief Stop the background polling threads and wait for them to exit. */
     void stop_polling();
+
+    /**
+     * @brief Warn when a provider goes longer than its limit between two polls.
+     *
+     * The runtime sets half the shortest command watchdog timeout a provider's
+     * devices report (#831). Polling is what feeds those watchdogs (#599), and
+     * `polling.interval_ms` is only the shortest gap: a slow call or read on the
+     * provider stretches it. A provider with no entry is not checked. The
+     * warning is rate-limited per provider.
+     */
+    void set_poll_gap_limits(std::map<std::string, std::chrono::milliseconds> limits);
 
     /**
      * @brief Execute one best-effort poll pass immediately.
@@ -296,8 +316,11 @@ private:
     std::atomic<bool> polling_active_;
     std::atomic<bool> initialized_;
     std::atomic<bool> preinit_poll_warning_emitted_;
-    std::thread polling_thread_;
+    std::vector<std::thread> polling_threads_;
     std::chrono::milliseconds poll_interval_;
+    // Longest gap between two polls of a provider before a warning (#831).
+    // Guarded by `mutex_`.
+    std::map<std::string, std::chrono::milliseconds> poll_gap_limits_;
 
     struct ProviderOutageLogState {
         bool in_outage = false;
@@ -305,6 +328,11 @@ private:
         std::chrono::steady_clock::time_point last_log_time{};
     };
     std::unordered_map<std::string, ProviderOutageLogState> provider_outage_log_state_;
+
+    // Helper: One poll of one provider's devices, with its availability and
+    // outage logging. `configs` holds only that provider's poll targets.
+    void poll_provider(const std::string &provider_id, const std::vector<const PollConfig *> &configs,
+                       provider::ProviderRegistry &provider_registry);
 
     // Helper: Poll single device
     bool poll_device(const std::string &provider_id, const std::string &device_id,

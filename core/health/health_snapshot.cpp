@@ -410,5 +410,32 @@ std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderR
     return out;
 }
 
+std::map<std::string, int64_t> shortest_watchdog_timeouts(provider::ProviderRegistry &provider_registry,
+                                                          const registry::DeviceRegistry &device_registry) {
+    std::map<std::string, int64_t> out;
+    for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
+        adpp::GetHealthResponse reported;
+        if (!provider->is_available() || !provider->get_health(reported)) {
+            continue;
+        }
+        for (const auto &dh : reported.devices()) {
+            const auto found = dh.metrics().find("watchdog_timeout_ms");
+            int64_t timeout_ms = 0;
+            if (found == dh.metrics().end() || !telemetry::parse_metric_int(found->second, timeout_ms) ||
+                timeout_ms <= 0) {
+                continue;
+            }
+            if (!device_registry.get_device_copy(provider_id, dh.device_id()).has_value()) {
+                continue;
+            }
+            auto [it, inserted] = out.try_emplace(provider_id, timeout_ms);
+            if (!inserted) {
+                it->second = std::min(it->second, timeout_ms);
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace health
 }  // namespace anolis
