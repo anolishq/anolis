@@ -35,6 +35,12 @@ commit messages only.
   Each provider is now polled on its own thread and schedule. The overrun
   warning names the provider: "Poll of provider X took longer than interval".
   (#831)
+- **A tree's parameter reads no longer fill the log.** `GetParameter` logged
+  every successful read at INFO, and a `ReactiveSequence` re-ticks it every
+  engine tick. On the reference rig, 960 of the 975 runtime log lines in 80 s
+  of AUTO were the bioreactor tree's six reads, twice a second. A successful
+  read now logs at DEBUG, like `GetParameterBool` and `GetParameterInt64`,
+  which log nothing. A failed read still logs at ERROR. (#612)
 
 ## [0.15.0] - 2026-11-13
 
