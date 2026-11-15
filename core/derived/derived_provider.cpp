@@ -31,7 +31,7 @@ std::int64_t system_now_ns() {
 /// A scalar of a graph file. A quoted scalar is text; a plain one is a whole number, a number or a boolean where
 /// it reads as one, and text otherwise ("200ms", a formula).
 fg::Setting scalar_setting(const YAML::Node &node) {
-    const std::string text = node.Scalar();
+    const std::string &text = node.Scalar();
     if (node.Tag() == "!") {
         return fg::Setting::text(text);
     }
@@ -125,7 +125,12 @@ void set_timestamp(google::protobuf::Timestamp *timestamp, std::int64_t ns) {
 DerivedProvider::DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting)
     : config_(std::move(config)), state_cache_(state_cache), acting_(std::move(acting)) {}
 
-DerivedProvider::~DerivedProvider() { stop(); }
+DerivedProvider::~DerivedProvider() {
+    running_ = false;
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
 
 void DerivedProvider::set_error(std::string message) {
     std::lock_guard<std::mutex> lock(mutex_);
