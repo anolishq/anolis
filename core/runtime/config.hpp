@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../automation/parameter_types.hpp"
+#include "../derived/derived_config.hpp"
 #include "../provider/provider_config.hpp"
 
 namespace anolis {
@@ -273,6 +274,7 @@ struct RuntimeConfig {
     AutomationConfig automation;
     SafetyConfig safety;
     HealthConfig health;
+    derived::DerivedConfig derived;  // The derived-signals spike (RFC O10); off unless given
     // Canonical directory of the file load_config read; empty for a config
     // built in code. The persisted software-stop latch is keyed by it: a
     // project's variants share their config/ directory, and the latch belongs

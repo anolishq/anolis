@@ -653,7 +653,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
         // Unknown keys are warned about and ignored so config evolution can be
         // rolled out without breaking older runtimes immediately.
         const std::vector<std::string> valid_keys = {"runtime", "http",       "providers", "polling", "telemetry",
-                                                     "logging", "automation", "safety",    "health"};
+                                                     "logging", "automation", "safety",    "health",  "derived"};
         for (const auto &key_node : yaml) {
             std::string key = key_node.first.as<std::string>();
             bool known = false;
@@ -880,6 +880,55 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (yaml["polling"]["interval_ms"]) {
                 config.polling.interval_ms = yaml["polling"]["interval_ms"].as<int>();
+            }
+        }
+
+        // The derived-signals spike (RFC O10). A graph path is relative to the config file.
+        if (yaml["derived"]) {
+            if (!ensure_mapping(yaml["derived"], "derived", error)) {
+                return false;
+            }
+            const auto &derived = yaml["derived"];
+            warn_unknown_keys(derived, "derived", {"id", "graph", "call_interval_ms", "inputs"});
+            if (!derived["graph"]) {
+                error = "derived.graph is required";
+                return false;
+            }
+            config.derived.enabled = true;
+            if (derived["id"]) {
+                config.derived.id = derived["id"].as<std::string>();
+            }
+            std::filesystem::path graph = derived["graph"].as<std::string>();
+            if (graph.is_relative() && !config.config_dir.empty()) {
+                graph = std::filesystem::path(config.config_dir) / graph;
+            }
+            config.derived.graph_path = graph.string();
+            if (derived["call_interval_ms"]) {
+                config.derived.call_interval_ms = derived["call_interval_ms"].as<int>();
+            }
+            if (derived["inputs"]) {
+                if (!ensure_mapping(derived["inputs"], "derived.inputs", error)) {
+                    return false;
+                }
+                for (const auto &entry : derived["inputs"]) {
+                    derived::DerivedInputConfig input;
+                    input.name = entry.first.as<std::string>();
+                    const std::string path = "derived.inputs." + input.name;
+                    if (!ensure_mapping(entry.second, path, error)) {
+                        return false;
+                    }
+                    warn_unknown_keys(entry.second, path, {"device_handle", "signal_id", "constant"});
+                    if (entry.second["constant"]) {
+                        input.constant = entry.second["constant"].as<double>();
+                    } else if (entry.second["device_handle"] && entry.second["signal_id"]) {
+                        input.device_handle = entry.second["device_handle"].as<std::string>();
+                        input.signal_id = entry.second["signal_id"].as<std::string>();
+                    } else {
+                        error = path + " needs a constant, or a device_handle and a signal_id";
+                        return false;
+                    }
+                    config.derived.inputs.push_back(std::move(input));
+                }
             }
         }
 

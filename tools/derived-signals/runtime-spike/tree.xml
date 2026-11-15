@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <!--
+    The command path of P2: the graph calls nothing, and a tree hands its
+    output to the device. Nothing is sent while the output is not OK.
+  -->
+  <BehaviorTree ID="MotorSpeedLoop">
+    <Sequence>
+      <CheckQuality device_handle="derived0/graph" signal_id="duty" expected_quality="OK"/>
+      <ReadSignal device_handle="derived0/graph" signal_id="duty" value="{duty}" quality="{quality}"/>
+      <BuildArgsJson arg1_name="motor_index" arg1_type="int64" arg1_num="1"
+                     arg2_name="duty" arg2_type="double" arg2_num="{duty}" json="{args}"/>
+      <CallDevice device_handle="sim0/motorctl0" function_name="set_motor_duty" args="{args}"
+                  success="{ok}" error="{error}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

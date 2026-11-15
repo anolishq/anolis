@@ -26,6 +26,7 @@
 #include "automation/parameter_types.hpp"
 #endif
 #include "control/provider_value_bridge.hpp"
+#include "derived/derived_provider.hpp"
 #include "health/health_snapshot.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
@@ -238,6 +239,20 @@ bool Runtime::init_providers(std::string &error) {
         }
 
         provider_registry_.add_provider(provider_config.id, provider);
+    }
+
+    // The derived-signals spike (RFC O10): one more provider, in process and not supervised.
+    if (config_.derived.enabled) {
+        auto derived = std::make_shared<derived::DerivedProvider>(config_.derived, *state_cache_);
+        if (!derived->start()) {
+            error = "Failed to start derived signals '" + config_.derived.id + "': " + derived->last_error();
+            return false;
+        }
+        if (!registry_->discover_provider(config_.derived.id, *derived)) {
+            error = "Discovery failed for derived signals '" + config_.derived.id + "': " + registry_->last_error();
+            return false;
+        }
+        provider_registry_.add_provider(config_.derived.id, derived);
     }
 
     const auto all_devices = registry_->get_all_devices();
