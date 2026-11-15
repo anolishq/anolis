@@ -416,7 +416,11 @@ BT::NodeStatus GetParameterNode::tick() {
 
     setOutput("value", output_value);
 
-    LOG_INFO("[GetParameterNode] Read parameter '" << param_name.value() << "' = " << output_value);
+    // DEBUG, as GetParameterBool and GetParameterInt64 do not log at all: a
+    // ReactiveSequence re-ticks this every engine tick, and at INFO a tree's
+    // unchanged reads filled the journal (960 of 975 lines in 80 s of AUTO on
+    // the reference rig, #612).
+    LOG_DEBUG("[GetParameterNode] Read parameter '" << param_name.value() << "' = " << output_value);
 
     return BT::NodeStatus::SUCCESS;
 }
