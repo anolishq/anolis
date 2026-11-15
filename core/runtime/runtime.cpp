@@ -263,6 +263,13 @@ bool Runtime::init_providers(std::string &error) {
             return false;
         }
         provider_registry_.add_provider(config_.derived.id, derived);
+        if (config_.derived.sample_time_on_arrival) {
+            state_cache_->set_sample_sink([derived](const std::string &device_handle,
+                                                    const anolis::deviceprovider::v1::ReadSignalsResponse *response,
+                                                    std::chrono::steady_clock::time_point returned) {
+                derived->on_read(device_handle, response, returned);
+            });
+        }
     }
 
     const auto all_devices = registry_->get_all_devices();

@@ -44,9 +44,9 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone, which is how every figure here was made: the runs with
-`--rearm-at`, `--signal-fault-s` or `--call-latency-ms` against the
-commit pinned, those with `--call-ms`,
+clone, which is how every figure here was made: the runs on
+arrival times and those with `--rearm-at`, `--signal-fault-s` or
+`--call-latency-ms` against the commit pinned, those with `--call-ms`,
 `--skew-ms`, `--max-age` or `--graph-line` against the one before it,
 `c3ec3a5`, and the other six against the working tree that became that.
 
@@ -82,6 +82,20 @@ else was given:
 | `--max-age 5s --graph-line "act_for: 30"` | 5.4 s | 1389, 1771 rpm (+18%) |
 | `--max-age 5s --graph motor-pid-no-commands.yaml` | 5.4 s | 1389, 1893 rpm (+26%) |
 | `--max-age 5s --graph-line "max_catch_up: 3"` | 6.7 s | 1165, 1500 rpm |
+
+Every run above took a sample's time from the provider, which is
+`--sample-time provider` now. The default is `arrival`: the state cache
+tells the spike of each read as it returns, the sample's time is that
+moment on the runtime's monotonic clock, and the engine is called on
+that clock. With `--graph motor-pid-follow.yaml` and samples on arrival:
+
+| Flags | Within 5% for good from | Lowest and highest after the disturbance |
+| --- | --- | --- |
+| none more | 3.2 s | n/a |
+| `--call-ms 250` | 3.4 s | n/a |
+| `--stall-s 3 --at 1` | 4.9 s | 1373, 1500 rpm |
+| `--stall-s 3 --at 1 --max-age 5s` | 6.6 s | 1191, 1500 rpm |
+| `--unreachable-s 3 --at 8 --rearm-at 14 --seconds 26` | 17.2 s | 28, 1500 rpm |
 
 ## What it found
 
@@ -162,10 +176,21 @@ else was given:
     tree waits for each call, so it commands at 3 Hz and not 10, and the
     provider answers one request at a time, so the poll of the motor
     waits behind the call too.
-11. **Not tested: a clock that steps.** The calls and the sample times
-   are both the wall clock (O7). A step of it would reach the engine,
-   which refuses a call earlier than the last; the spike then rebases.
-   `--skew-ms` moves the sample times and not the clock.
+11. **Samples stamped as their reads return work, and do not cure the
+    stall.** With the sample's time taken on the runtime's monotonic
+    clock as its read returns, the loop did what it did on the
+    provider's times in every run repeated, and a provider's clock is
+    no longer read at all: 14 lines in the state cache and about 100 in
+    the spike. Every read reaches the engine and not only the latest. It
+    did not change finding 4: the first call after a stall still runs
+    before any read has returned, on the sample from before it, and
+    with a maximum age of 5 s the speed still dipped, to 1191 rpm. What
+    makes a stall safe is the maximum age.
+    **Not tested: a clock that steps.** On the provider's times a step
+    of the wall clock reaches the engine, which refuses a call earlier
+    than the last, and the spike then rebases. On arrival times it
+    cannot. `--skew-ms` moves the provider's sample times and not a
+    clock, and no run stepped one.
 12. **The first output is `bad`.** The engine is called before the first
     poll has put the speed in the cache.
 

@@ -200,43 +200,84 @@ void DerivedProvider::run() {
     }
 }
 
+fg::Status DerivedProvider::write(const Input &input, fg::State state, double number, std::int64_t at) {
+    if (!fg::usable(state)) {
+        return engine_->write(input.config.name, state, at);
+    }
+    if (input.boolean) {
+        return engine_->write(input.config.name, state, number != 0.0, at);
+    }
+    return engine_->write(input.config.name, state, number, at);
+}
+
+void DerivedProvider::on_read(const std::string &device_handle, const adpp::ReadSignalsResponse *response,
+                              std::chrono::steady_clock::time_point returned) {
+    const std::int64_t at = std::chrono::duration_cast<std::chrono::nanoseconds>(returned.time_since_epoch()).count();
+    std::lock_guard<std::mutex> lock(waiting_mutex_);
+    for (std::size_t i = 0; i < inputs_.size(); ++i) {
+        const auto &config = inputs_[i].config;
+        if (config.device_handle != device_handle) {
+            continue;
+        }
+        if (response == nullptr) {
+            waiting_.push_back({i, fg::State::bad, 0.0, at});
+            continue;
+        }
+        for (const auto &value : response->values()) {
+            if (value.signal_id() == config.signal_id) {
+                waiting_.push_back({i, state_of(value.quality()), as_double(value.value()), at});
+            }
+        }
+    }
+}
+
 void DerivedProvider::call_once() {
-    // O7: one clock for every sample time and every call. The cache's times are each provider's wall clock, so
-    // the calls are on the wall clock too, and a step of it reaches the engine.
-    const std::int64_t now = system_now_ns();
+    // O7: one clock for every sample time and every call. On arrival, it is the runtime's monotonic clock, and a
+    // sample's time is when its read returned. Otherwise the cache's times are each provider's wall clock, the
+    // calls are on the wall clock too, and a step of it reaches the engine.
+    const bool on_arrival = config_.sample_time_on_arrival;
+    const std::int64_t now =
+        on_arrival
+            ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                  .count()
+            : system_now_ns();
     Counts counts;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         counts = counts_;
     }
+    const auto count = [&counts](const fg::Status &written, const Input &input) {
+        if (!written) {
+            counts.refused_writes += 1;
+            LOG_WARN("[Derived] write to " << input.config.name << " refused: " << written.error().message);
+        }
+    };
 
+    if (on_arrival) {
+        std::vector<Waiting> waiting;
+        {
+            std::lock_guard<std::mutex> lock(waiting_mutex_);
+            waiting.swap(waiting_);
+        }
+        for (const auto &sample : waiting) {
+            count(write(inputs_[sample.input], sample.state, sample.number, sample.at), inputs_[sample.input]);
+        }
+    }
     for (const auto &input : inputs_) {
-        fg::Status written;
         if (input.config.constant) {
-            written = engine_->write(input.config.name, fg::State::good, *input.config.constant, now);
+            count(engine_->write(input.config.name, fg::State::good, *input.config.constant, now), input);
         } else if (!input.config.not_acting_on.empty()) {
-            written = engine_->write(input.config.name, fg::State::good, !acting_(input.config.not_acting_on), now);
-        } else {
+            count(engine_->write(input.config.name, fg::State::good, !acting_(input.config.not_acting_on), now), input);
+        } else if (!on_arrival) {
             const auto cached = state_cache_.get_signal_value(input.config.device_handle, input.config.signal_id);
             if (!cached) {
-                written = engine_->write(input.config.name, fg::State::bad, now);
+                count(engine_->write(input.config.name, fg::State::bad, now), input);
             } else {
                 const std::int64_t at =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count() +
                     std::int64_t{config_.sample_skew_ms} * 1'000'000;
-                const fg::State state = state_of(cached->quality);
-                if (!fg::usable(state)) {
-                    written = engine_->write(input.config.name, state, at);
-                } else if (input.boolean) {
-                    written = engine_->write(input.config.name, state, as_double(cached->value) != 0.0, at);
-                } else {
-                    written = engine_->write(input.config.name, state, as_double(cached->value), at);
-                }
+                count(write(input, state_of(cached->quality), as_double(cached->value), at), input);
             }
-        }
-        if (!written) {
-            counts.refused_writes += 1;
-            LOG_WARN("[Derived] write to " << input.config.name << " refused: " << written.error().message);
         }
     }
 
@@ -266,7 +307,7 @@ void DerivedProvider::call_once() {
         for (std::size_t i = 0; i < outputs.size(); ++i) {
             published_[i].value = outputs[i].value;
         }
-        published_at_ns_ = now;
+        published_at_ns_ = system_now_ns();
     }
 }
 

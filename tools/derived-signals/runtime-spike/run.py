@@ -77,6 +77,7 @@ derived:
   id: derived0
   graph: {graph}
   call_interval_ms: {call_ms}
+  sample_time: {sample_time}
   sample_skew_ms: {skew_ms}
   inputs:
     setpoint: {{constant: {setpoint}}}
@@ -128,6 +129,7 @@ def main():
     parser.add_argument("--graph", type=Path, default=HERE / "motor-pid.yaml")
     parser.add_argument("--max-age", default="1s", help="of the speed and of the applied duty")
     parser.add_argument("--graph-line", default="", help="one more top-level line for the graph, as max_catch_up: 3")
+    parser.add_argument("--sample-time", choices=["arrival", "provider"], default="arrival")
     parser.add_argument("--skew-ms", type=int, default=0, help="added to every sample time the graph is given")
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--dump", action="store_true", help="print one /v0/state answer and stop")
@@ -147,6 +149,7 @@ def main():
             poll_ms=args.poll_ms,
             call_ms=args.call_ms,
             skew_ms=args.skew_ms,
+            sample_time=args.sample_time,
             idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
             tree=HERE / "tree.xml",
             graph=out / "graph.yaml",
@@ -254,7 +257,8 @@ def main():
     print(
         f"{args.graph.name}: poll {args.poll_ms} ms, call {args.call_ms or 'period'} ms, stall {args.stall_s} s, "
         f"unreachable {args.unreachable_s} s, speed FAULT {args.signal_fault_s} s, "
-        f"call latency {args.call_latency_ms} ms, at {args.at} s, max_age {args.max_age}, skew {args.skew_ms} ms, "
+        f"call latency {args.call_latency_ms} ms, at {args.at} s, max_age {args.max_age}, "
+        f"sample time {args.sample_time}, skew {args.skew_ms} ms, "
         f"{args.graph_line or 'no line more'}, "
         f"{len(rows)} samples"
     )

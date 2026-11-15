@@ -538,7 +538,11 @@ bool StateCache::poll_device(const std::string &provider_id, const std::string &
     // impeller restarting on its own.
     anolis::deviceprovider::v1::ReadSignalsResponse response;
     anolis::deviceprovider::v1::Status_Code failure_status = anolis::deviceprovider::v1::Status_Code_CODE_OK;
-    if (!provider.read_signals(device_id, signal_ids, response, failure_status)) {
+    const bool read_ok = provider.read_signals(device_id, signal_ids, response, failure_status);
+    if (sample_sink_) {
+        sample_sink_(device_handle, read_ok ? &response : nullptr, std::chrono::steady_clock::now());
+    }
+    if (!read_ok) {
         // On a stop, the providers are signalled together with the runtime
         // (systemd's default KillMode=control-group) and exit under this loop.
         // A failed read then is the shutdown, not a device fault: it is not

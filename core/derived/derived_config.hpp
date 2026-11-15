@@ -25,10 +25,11 @@ struct DerivedInputConfig {
 
 struct DerivedConfig {
     bool enabled = false;
-    std::string id = "derived0";  // The provider id the outputs appear under
-    std::string graph_path;       // A graph file in the shape of section 9 of FluxGraph's version 2 proposal
-    int call_interval_ms = 0;     // How often the engine is called; 0 is the graph's period
-    int sample_skew_ms = 0;       // Added to every sample time: a provider whose clock is that far from the runtime's
+    std::string id = "derived0";         // The provider id the outputs appear under
+    std::string graph_path;              // A graph file in the shape of section 9 of FluxGraph's version 2 proposal
+    int call_interval_ms = 0;            // How often the engine is called; 0 is the graph's period
+    bool sample_time_on_arrival = true;  // O7: a sample's time is when its read returned, on the monotonic clock
+    int sample_skew_ms = 0;  // Added to every sample time: a provider whose clock is that far from the runtime's
     std::vector<DerivedInputConfig> inputs;
 };
 

@@ -10,6 +10,8 @@
  */
 
 #include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -60,6 +62,10 @@ public:
     }
     const std::string &provider_id() const override { return config_.id; }
 
+    /// A read of a device has returned (StateCache::SampleSink). Its samples wait for the next call.
+    void on_read(const std::string &device_handle, const anolis::deviceprovider::v1::ReadSignalsResponse *response,
+                 std::chrono::steady_clock::time_point returned);
+
     static constexpr const char *kDeviceId = "graph";
 
 private:
@@ -82,7 +88,16 @@ private:
         double thrown = 0;          // writes the engine threw away
     };
 
+    /// A sample that waits for the engine's thread: which input, and what is written to it.
+    struct Waiting {
+        std::size_t input = 0;
+        fluxgraph::v2::State state = fluxgraph::v2::State::bad;
+        double number = 0.0;
+        std::int64_t at = 0;
+    };
+
     void run();
+    fluxgraph::v2::Status write(const Input &input, fluxgraph::v2::State state, double number, std::int64_t at);
     void call_once();
     void set_error(std::string message);
 
@@ -95,6 +110,9 @@ private:
 
     std::thread thread_;
     std::atomic<bool> running_{false};
+
+    std::mutex waiting_mutex_;
+    std::vector<Waiting> waiting_;  // in the order the reads returned
 
     mutable std::mutex mutex_;  // guards what follows
     std::vector<Published> published_;

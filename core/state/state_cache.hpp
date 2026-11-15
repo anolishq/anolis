@@ -169,6 +169,14 @@ public:
                            anolis::deviceprovider::v1::Status_Code last_status, std::uint64_t edge_seq)>;
     void set_device_reachability_sink(DeviceReachabilitySink sink);
 
+    /// Derived-signals spike (RFC O7): told of every read of a device as it returns, with the time it returned
+    /// on the monotonic clock. `response` is null where the read failed. Called on the reading thread, outside
+    /// the cache's lock. Set before polling starts.
+    using SampleSink = std::function<void(const std::string &device_handle,
+                                          const anolis::deviceprovider::v1::ReadSignalsResponse *response,
+                                          std::chrono::steady_clock::time_point returned)>;
+    void set_sample_sink(SampleSink sink) { sample_sink_ = std::move(sink); }
+
     /**
      * @brief Build poll configuration and empty device snapshots from the registry.
      *
@@ -275,6 +283,7 @@ private:
     // Event emitter for change notifications
     std::shared_ptr<events::EventEmitter> event_emitter_;
     DeviceReachabilitySink device_reachability_sink_;
+    SampleSink sample_sink_;
 
     mutable std::mutex mutex_;
 
