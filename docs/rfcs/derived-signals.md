@@ -482,19 +482,27 @@ the filter tuning. Today they are in the runbook. `automation.parameters`
 is the only place for a number, it is the operator's, and it exists only
 when automation is enabled.
 
-Question: where does a constant found on the bench live, can an operator
-change it, and may a derived signal read an operator parameter at all? The
-spike names constants in a map at the top of the block file and also reads
-two operator parameters.
+Decided: a constant is a setting of a block in the graph file, or an
+input the config gives as a constant, as the spike's setpoint is. It is
+changed by editing a file and starting the runtime again. A derived
+signal does not read an operator parameter in the first version: those
+exist only with automation enabled and are not kept across a restart.
+Reading one as a live input can be added later without changing this.
 
 ### O5. State across a restart
 
 The mechanism moved to the engine: section 8 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) gives every block a
 way to save and restore its state.
 
-What stays here: which state the runtime saves, where it keeps it, and which
-events reset it. A running total wants to survive a runtime restart and to
-reset when a run starts. A window or a median wants neither. Parameters set
+Decided: the first version saves nothing. Every start of the runtime
+is a start of the graph from nothing, and the documentation says so. A
+running total that has to survive a restart is not served until saving
+is added, and the engine's save and restore are there for that.
+
+What is left for then: which state the runtime saves, where it keeps
+it, which events reset it, and what a changed graph does with an old
+file. A running total wants to survive a runtime restart and to reset
+when a run starts. A window or a median wants neither. Parameters set
 over HTTP are already not persisted ([automation.md](../automation.md),
 "Runtime Parameters").
 
@@ -639,8 +647,15 @@ P1 reuses the triple. Still open:
 
 - How a derived signal gets a registry entry, against the invariant that the
   registry changes only on provider restart.
-- How the provider id is reserved, and what happens to a config that already
-  uses it.
+- Decided: no provider id is reserved. The config names the id the
+  derived signals appear under, `derived0` unless given, and a config
+  in which that is also a provider's id is refused when it is loaded.
+  No config that loads today stops loading, and a second graph later
+  needs no new rule. Whether a signal is derived is for its registry
+  entry to say, and not its name. No config in the project's own
+  repositories uses an id beginning `derived`
+  (a search of their YAML, JSON and Markdown for `id: derived` and
+  `provider_id: derived`); a config held elsewhere was not seen.
 - What the middle segment means when there is no device. The exercise
   invented `heater`, `ph` and `probes`.
 - What the surfaces that list providers show. `GET /v0/providers/health` and
@@ -655,10 +670,12 @@ the version bump each needs under [dependencies.md](../dependencies.md).
 
 ### O9. Where the definition lives
 
-In the runtime config beside `automation`, in a file of its own that the
-config names (as it names the behavior tree), or in the machine profile.
-This decides how P5's load-time refusal is implemented, so it comes before
-P5 is accepted.
+Decided: in a file of its own, in the engine's format, that the runtime
+config names, as it names the behavior tree. The engine's compiler then
+refuses a bad definition when it is loaded, which is P5's refusal, and
+the engine's conformance vectors are of the same format a machine runs.
+The runtime's config says only which file, how often it is called and
+where each input comes from. Spike: built so.
 
 ### O10. Where the layer runs
 
