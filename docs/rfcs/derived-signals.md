@@ -70,14 +70,17 @@ cases, the method and the limits. In short:
 
 - The reference detectors trip at the same tick, for the same reason, as
   `heater_guard.py` on six synthetic traces.
-- Replayed over one overnight heater run, hourly relay duty is within 1.1
-  points of the figures worked out on the rig at the time. Those came from
+- Replayed over one overnight heater run, hourly relay duty is within 1.0
+  point of the figures worked out on the rig at the time, at the one
+  decimal `results.txt` gives them to (case 6). Those came from
   another script over the same telemetry, so this is two calculations
   agreeing, not a measurement.
 - Replayed over one pH calibration, the steady detector turned true before
-  both calibration calls in the window: 14 minutes before the first and 104
-  seconds before the second. A tighter threshold would have missed the
-  second.
+  the reading stepped at each of the two calibrations in the window:
+  about 14 minutes before the first and under 2 minutes before the
+  second (`results.txt`, case 5: steady at 10:09:42 and 11:37:40, moving
+  again at 10:24:12 and 11:39:27). A tighter threshold would have missed
+  the second.
 - The steady-state relation gives 24.9 °C for the liquid against about 25 °C
   on a thermometer the next morning. Its coefficient was fitted on runs that
   include this one, so this checks the arithmetic, not the model.
@@ -194,7 +197,9 @@ Decided: FluxGraph, with its core reworked as version 2. FluxGraph becomes
 the signal-graph engine for the simulator and for this layer, so one model
 can be a simulator's plant and an estimator's predictor.
 
-The fit was measured first. On a branch of FluxGraph, with nothing in the
+The fit was measured first. On a branch of FluxGraph that is not
+published (`spike/signal-blocks`; its `spike/FRICTION.md` has each
+figure here), with nothing in the
 library changed, the ten block types of O3 were written as FluxGraph models
 and run against test vectors from `tools/derived-signals/vectors.py`. Every
 output matches at every tick, by state and by value, including 28,900
