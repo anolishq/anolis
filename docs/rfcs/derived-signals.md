@@ -242,6 +242,35 @@ the motor. Two things follow from the layer not being the caller.
   the device-loss latch. With it, the same run rose from rest and did not
   pass its setpoint. So the layer needs the mode and the latch as inputs,
   which no signal carries today.
+- **And when the device's provider is lost.** A provider that dies is
+  silent to the layer: the polls pause, no read returns, and the graph
+  goes on giving its command as `OK` from the last sample until that is
+  past its maximum age. With the simulator killed, the tree's third
+  failed call took the runtime to `FAULT` in seven runs of eight. In the
+  eighth the restart came first: the runtime stayed in `AUTO`, the new
+  process had its motor at rest, the controller still held the integral
+  of a loop at 1500 rpm, and the speed went 10% over. With a restart
+  after 50 ms that happened in four runs of four. The input above is
+  now true as well while the device's provider cannot be reached, and
+  from then until a read of the device has returned. With that the
+  controller followed the motor's report through the restart and the
+  speed did not pass its setpoint, in four runs of four. So the layer
+  needs a third thing from the runtime: whether a provider can be
+  reached.
+- **A command is acted on only when it is `OK`.** Decided. A value the
+  graph gives as `uncertain` is for a person, a detector or a record to
+  read, and is not sent to an actuator. A tree gates a command on `OK`,
+  as the spike's does; one that sends a doubted value says so node by
+  node, as it can today. Spike: a controller whose measurement rode
+  through 1.5 s of a speed it could not read gave an `uncertain` duty.
+  Sent, the duty went to its limit and the speed 62% over. Not sent, the
+  motor kept its last duty, and the controller, which cannot know its
+  command was not sent, wound up: 13% over. With no ride-through the
+  duty was `bad`, the controller waited, and nothing overshot. A
+  ride-through on the measurement of a loop is therefore a hazard, and
+  the catalogue's documentation has to say so. Telling the controller
+  the duty the motor reports took the overshoot away and made the step
+  take 7.7 s where it takes 3.2 s, in the one setting tried.
 - **How long a command stands is its caller's to bound.** With the speed
   reading `FAULT` for 3 s the graph had no duty to give, the tree sent
   nothing, and the motor ran on at its last duty with nothing controlling
@@ -400,14 +429,18 @@ Proposed, on the spike:
   other loses that. It is a change to ADPP and to two published
   enumerations, and is proposed here and not made.
 
-Spike: no run made a value `STALE` or `uncertain`. The simulator never
-reports the first, and the runtime judges age when a value is read and
-does not write `STALE` into the cache, so the engine's own maximum age
-was the only judge of an old sample.
+Decided: a command is acted on only when it is `OK` (P2), and a derived
+signal is not a stop chain's status (O6), so the stop chain never reads
+an `uncertain` value.
+
+Spike: a graph's `uncertain` output was published as `STALE`, and the
+tree, gating on `OK`, did not send it (P2). No run made an input
+`STALE`. The simulator never reports one, and the runtime judges age
+when a value is read and does not write `STALE` into the cache, so the
+engine's own maximum age was the only judge of an old sample.
 
 Still to settle: a table of every producer and consumer of quality in the
-runtime, the protocol, the exporter and the workbench, and what the stop
-chain does with `uncertain`.
+runtime, the protocol, the exporter and the workbench.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
 
@@ -473,7 +506,9 @@ not run in `MANUAL`, where the heater stays on.
 
 Two things are already clear:
 
-- **A derived signal must not be a stop chain's status.** The stop chain
+- **A derived signal must not be a stop chain's status.** Decided: a
+  stop chain whose status names a derived signal is refused when the
+  config is loaded. The stop chain
   observes a stop that has already happened. When its status reads in force
   or unknown, the runtime holds the latch and sends no safe-state calls
   (`core/control/safe_state.cpp`). A derived over-temperature trip named
@@ -486,14 +521,16 @@ Two things are already clear:
   `FAULT` by itself. A derived trip would add one, and it needs a stated
   direction of failure: what happens when the trip is not good.
 
-Question: is acting on a derived signal in scope at all, and if so what
-invokes the software stop, in which modes, and what does a trip that is not
-good do? `heater_guard.py` also stops on a failed HTTP read, which nothing
-inside the runtime can observe.
+Decided: the runtime acting on a derived trip by itself, in every mode,
+is not in this RFC. It is a new cause of an autonomous stop and gets an
+RFC of its own, with its own account of what a trip that is not good
+does. Here a derived signal is read by the tree, an operator, telemetry
+and HTTP, and the tree acts on it in `AUTO` as it acts on any signal.
+`heater_guard.py` stays until that RFC lands: it stops in `MANUAL`, and
+on a failed HTTP read, which nothing inside the runtime can observe.
 
-O0's boundary rule answers part of this: protection that has to hold in
-every mode belongs in the device. What is left to decide is whether
-anything other than the tree may act on a derived signal.
+O0's boundary rule stands beside this: protection that has to hold in
+every mode belongs in the device.
 
 ### O7. Time
 
@@ -547,8 +584,17 @@ by construction, and a step of the wall clock does not reach the engine.
 - Spike: built this way, with the state cache telling the layer of each
   read as it returns, the loop did what it had on the provider's times
   in each of five runs repeated, and every read reaches the engine and
-  not only the latest. It took 14 lines in the state cache. No run
-  stepped a clock.
+  not only the latest. It took 14 lines in the state cache.
+- Spike, on the provider's times, with a step added to the times the
+  layer reads: the calls and the sample times stepped together by 30 s,
+  as one machine's wall clock stepping, did not move the loop. Forward
+  the engine saw a gap of 300 ticks; back it refused one call, was
+  rebased, and gave no output for one poll. The sample times stepped
+  alone by 2 s, as a provider's clock stepping by itself, stopped the
+  loop for good, either way: every sample from then on was thrown away
+  or too old, the output was `bad`, the runtime stayed in `AUTO`, and
+  the motor ran on at its last duty. On arrival times there is no such
+  clock to step. No real clock was stepped.
 
 Two more things the spike measured:
 
@@ -641,6 +687,8 @@ what belongs there.
 - Any change to ADPP. O1 proposes one, a fifth quality; this RFC does not
   make it.
 - Workbench surfaces.
+- The runtime stopping the machine on a derived trip by itself (O6). It
+  gets its own RFC.
 
 ## How this proceeds
 
@@ -658,8 +706,8 @@ what belongs there.
    is). A model is linear and stepped exactly, and one too
    fast for the graph's period is refused, which bears on O7's question
    of what the period should be. An estimator's `good` means that none of
-   its own tests has failed, not that it is right: what the stop chain
-   does with one (O6) has to allow for a sensor that is biased or stuck,
+   its own tests has failed, not that it is right: whatever acts
+   on one (O6) has to allow for a sensor that is biased or stuck,
    which no test of its sees. The whole text has since been read cold
    and amended for it, and its host contract is checked on every short
    sequence of writes and calls. Three things in that bear on a host here
