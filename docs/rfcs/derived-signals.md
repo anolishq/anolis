@@ -83,7 +83,7 @@ The findings that bear on a decision are cited under it below as "exercise".
 
 A second body of evidence is a spike: FluxGraph's version 2 core linked
 into the runtime, closing a speed loop on the simulator's motor through a
-behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, twenty-three
+behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, twenty-nine
 runs of one loop on one machine, and its README has each run and what it
 found. Its findings are cited below as "spike".
 
@@ -650,8 +650,8 @@ what belongs there.
    time. Time and the host interface, how doubt passes through a block's
    memory, what a gap does to each block, how models are stepped, and the
    estimator are written. It keeps a list of what is known to be wrong
-   as it stands: at this writing an estimator that flags itself under
-   ordinary timing, a derivative of a low-pass, an input true for one
+   as it stands: at this writing a derivative of a low-pass, an input
+   true for one
    call that a fast host can miss, that a value does not say why it is
    not good, and that an output has no lifetime (P2 says whose that
    is). A model is linear and stepped exactly, and one too
@@ -675,8 +675,20 @@ what belongs there.
    stall, the graph that listed no command overshot by 26% and the one
    that did, not at all. A controller's derivative and a window's slope
    are over the times the samples carry. A total that has missed more
-   than it may keeps its value, as `uncertain`. And a controller takes
-   `follow` (P2).
+   than it may keeps its value, as `uncertain`. A controller takes
+   `follow` (P2). And an estimator works between samples: its state
+   stands where its last measurement was, each measurement is met at its
+   own sample time, and one older than the state is passed by and
+   counted. Spike: an estimator of the motor's speed, with the engine
+   called 30% slower and faster than its period, was not OK in 66 and 38
+   of some 370 samples under the rule as it was and in 32 and 0 under
+   the amended one. It asks of a host what O7 proposes: a sample time
+   that is when the sample was taken, on the clock the engine is called
+   on. The simulator steps its motor ten times a second, so a read
+   between two steps is up to 100 ms older than the time it returned,
+   and nothing the runtime has says so: a provider that knows when its
+   sample was taken has no way to tell the runtime on the runtime's
+   clock.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
 4. O10 is proposed as P6 on one spike. It is reviewed independently before
