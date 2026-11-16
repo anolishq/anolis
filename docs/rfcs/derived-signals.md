@@ -534,8 +534,8 @@ Questions, the first three answered below as far as they are:
 
 Proposed, on the spike:
 
-- Going in: `OK` is `good`, `STALE` is `uncertain`, `FAULT` is `bad`,
-  `UNKNOWN` is `not_ready`, and a value the cache does not hold is `bad`.
+- Going in: `OK` is `good`, `STALE` and `FAULT` are `bad`, `UNKNOWN` is
+  `not_ready`, and a value the cache does not hold is `bad`.
 - Coming out: the same backwards, with a value of 0 where the engine
   has none, since the protocol cannot say "no value".
 
@@ -551,20 +551,27 @@ that is new at every tick, and learns to pass over the word. Good,
 uncertain and bad are the words of OPC UA and of fieldbuses, and a
 historian that has only "stale" cannot give them back.
 
-A going-in mapping with no run behind it is wrong as it stands: a value
-its provider calls `STALE` is written as `uncertain`, usable, with the
-time its read returned, so a controller or an estimator takes as a new
-measurement what the provider said was too old (O7).
+Going in, `STALE` was first written as `uncertain`: a value its provider
+had called too old, usable, with the time its read returned, which a
+controller or an estimator takes for a new measurement. Spike, one run
+each, of a speed that read `STALE` for 3 s during a step. Written as
+`bad`, the controller waited and the speed did not pass its setpoint.
+Written as `uncertain`, 4% over. Left unwritten, so that the input's
+maximum age judges, the controller ran for a second on the last
+sample, its duty `OK` and sent, and the speed went 76% over. So it is
+`bad`: the provider says the value is too old and the runtime does not
+know how old. The simulator gives no `STALE`; the run renamed a
+`FAULT`, and the value beside it was the true speed.
 
 A command is acted on only when it is `OK`, by default (P2). A derived
 signal is not a stop chain's status (O6), so the stop chain never reads
 an `uncertain` value.
 
 Spike: a graph's `uncertain` output was published as `STALE`, and the
-tree, gating on `OK`, did not send it (P2). No run made an input
-`STALE`. The simulator never reports one, and the runtime judges age
-when a value is read and does not write `STALE` into the cache, so the
-engine's own maximum age was the only judge of an old sample.
+tree, gating on `OK`, did not send it (P2). The runtime judges age when
+a value is read and does not write `STALE` into the cache, so but for
+what a provider itself calls `STALE` the engine's own maximum age is
+the only judge of an old sample.
 
 #### Who makes a quality, and who reads one
 
@@ -825,8 +832,10 @@ What a time of arrival gets wrong, none of it run:
   gives the same value at every poll, and each has a new time of
   arrival. The maximum age never fires. The provider's own timestamp
   was the evidence, and it is not read.
-- **A value its provider calls `STALE`** goes in as `uncertain` with a
-  new time (O1).
+- **A maximum age is how long a graph runs blind.** With samples that
+  stop and say nothing, the last one stands until its age runs out:
+  the run above that went 76% over (O1), and a provider that dies
+  (P2). An age of 1 s is ten samples of the spike's loop.
 - **A suspend.** The monotonic clock on Linux does not run while the
   machine is suspended. After a resume the sample from before it is as
   young as it was, no gap is reported, and a controller goes on from a
@@ -850,8 +859,8 @@ What a time of arrival gets wrong, none of it run:
 Open, and what would settle each: whether the provider's timestamp is
 kept beside the time of arrival, to find a sample that has not moved,
 which needs no change to ADPP; a clock that counts a suspend, or a
-rebase on resume; a run of a `STALE` input; a run of a graph of two
-providers; and distributions of read latency and of skew between
+rebase on resume; a run of an input that is truly old and called
+`STALE`; a run of a graph of two providers; and distributions of read latency and of skew between
 devices, measured on the rig.
 
 Two more things the spike measured:
