@@ -253,7 +253,11 @@ bool Runtime::init_providers(std::string &error) {
             return false;
 #endif
         };
-        auto derived = std::make_shared<derived::DerivedProvider>(config_.derived, *state_cache_, acting);
+        auto available = [this](const std::string &device_handle) {
+            const auto provider = provider_registry_.get_provider(device_handle.substr(0, device_handle.find('/')));
+            return provider && provider->is_available();
+        };
+        auto derived = std::make_shared<derived::DerivedProvider>(config_.derived, *state_cache_, acting, available);
         if (!derived->start()) {
             error = "Failed to start derived signals '" + config_.derived.id + "': " + derived->last_error();
             return false;

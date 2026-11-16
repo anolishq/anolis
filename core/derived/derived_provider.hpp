@@ -34,7 +34,9 @@ public:
     /// `acting`: whether the runtime's automation is acting on a device, by its handle.
     using Acting = std::function<bool(const std::string &)>;
 
-    DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting);
+    /// Whether the provider of a device ("provider/device") can be reached.
+    using Available = std::function<bool(const std::string &)>;
+    DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting, Available available);
     ~DerivedProvider() override;
 
     DerivedProvider(const DerivedProvider &) = delete;
@@ -72,6 +74,7 @@ private:
     struct Input {
         DerivedInputConfig config;
         bool boolean = false;
+        bool lost = false;  // of not_acting_on: its provider was down, and no read of the device has returned since
     };
     struct Published {
         std::string name;
@@ -104,6 +107,7 @@ private:
     DerivedConfig config_;
     const state::StateCache &state_cache_;
     Acting acting_;
+    Available available_;
     std::unique_ptr<fluxgraph::v2::Engine> engine_;
     std::vector<Input> inputs_;
     std::int64_t interval_ns_ = 0;
@@ -113,7 +117,8 @@ private:
     std::atomic<bool> running_{false};
 
     std::mutex waiting_mutex_;
-    std::vector<Waiting> waiting_;  // in the order the reads returned
+    std::vector<Waiting> waiting_;       // in the order the reads returned
+    std::vector<std::string> returned_;  // the devices a read has returned from since the last call
 
     mutable std::mutex mutex_;  // guards what follows
     std::vector<Published> published_;

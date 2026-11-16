@@ -122,8 +122,12 @@ void set_timestamp(google::protobuf::Timestamp *timestamp, std::int64_t ns) {
 
 }  // namespace
 
-DerivedProvider::DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting)
-    : config_(std::move(config)), state_cache_(state_cache), acting_(std::move(acting)) {}
+DerivedProvider::DerivedProvider(DerivedConfig config, const state::StateCache &state_cache, Acting acting,
+                                 Available available)
+    : config_(std::move(config)),
+      state_cache_(state_cache),
+      acting_(std::move(acting)),
+      available_(std::move(available)) {}
 
 DerivedProvider::~DerivedProvider() {
     running_ = false;
@@ -220,6 +224,9 @@ void DerivedProvider::on_read(const std::string &device_handle, const adpp::Read
                               std::chrono::steady_clock::time_point returned) {
     const std::int64_t at = std::chrono::duration_cast<std::chrono::nanoseconds>(returned.time_since_epoch()).count();
     std::lock_guard<std::mutex> lock(waiting_mutex_);
+    if (response != nullptr) {
+        returned_.push_back(device_handle);
+    }
     for (std::size_t i = 0; i < inputs_.size(); ++i) {
         const auto &config = inputs_[i].config;
         if (config.device_handle != device_handle) {
@@ -263,21 +270,33 @@ void DerivedProvider::call_once() {
         }
     };
 
+    std::vector<std::string> returned;
     if (on_arrival) {
         std::vector<Waiting> waiting;
         {
             std::lock_guard<std::mutex> lock(waiting_mutex_);
             waiting.swap(waiting_);
+            returned.swap(returned_);
         }
         for (const auto &sample : waiting) {
             count(write(inputs_[sample.input], sample.state, sample.number, sample.at), inputs_[sample.input]);
         }
     }
-    for (const auto &input : inputs_) {
+    for (auto &input : inputs_) {
+        if (config_.idle_on_provider_loss && !input.config.not_acting_on.empty()) {
+            if (!available_(input.config.not_acting_on)) {
+                input.lost = true;
+            } else if (!on_arrival ||
+                       std::find(returned.begin(), returned.end(), input.config.not_acting_on) != returned.end()) {
+                input.lost = false;
+            }
+        }
         if (input.config.constant) {
             count(engine_->write(input.config.name, fg::State::good, *input.config.constant, now), input);
         } else if (!input.config.not_acting_on.empty()) {
-            count(engine_->write(input.config.name, fg::State::good, !acting_(input.config.not_acting_on), now), input);
+            count(engine_->write(input.config.name, fg::State::good, input.lost || !acting_(input.config.not_acting_on),
+                                 now),
+                  input);
         } else if (!on_arrival) {
             const auto cached = state_cache_.get_signal_value(input.config.device_handle, input.config.signal_id);
             if (!cached) {

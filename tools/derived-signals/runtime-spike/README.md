@@ -131,6 +131,12 @@ within 0.3 s, and the new process has its motor at rest.
 | `--kill-provider --at 8`, seven runs | FAULT 0.31 to 0.35 s after, on the tree's third failed call | 0 rpm, and stays there |
 | `--kill-provider --at 8 --rearm-at 14 --seconds 26`, the run where the restart came before the third call | stayed in AUTO | from rest to 1650 rpm (+10%), within 5% from 10.6 s |
 | the same with the default graph, which has no `follow` | FAULT at 8.31 s, AUTO again at 14 s | from rest to 1621 rpm (+8%) at the re-arm |
+| `--kill-provider --backoff-ms 50 --at 8 --seconds 16 --not-idle-on-loss`, four runs | stayed in AUTO in each | from rest to 1650 rpm (+10%) in each, within 5% from 10.5 or 10.6 s |
+| `--kill-provider --backoff-ms 50 --at 8 --seconds 16`, four runs | stayed in AUTO in each | from rest to 1500 rpm and not past it, within 5% from 11.6 or 11.7 s |
+
+The first three rows were run before `idle` followed the provider's
+loss, which is what `--not-idle-on-loss` leaves out; the tables above
+it are not run again.
 
 `motor-pid-ride.yaml` takes the speed through a low-pass that rides
 through 2 s, so that with the speed reading FAULT for 1.5 s during the
@@ -279,7 +285,16 @@ itself. Each with `--sample-time provider --at 8`:
     speed to 1650 rpm, 10% over. `follow` is driven by what the runtime
     knows, AUTO and the device-loss latch, and neither moved. Which of
     the two happens is a race between the restart's backoff, 200 ms
-    here, and three ticks of the tree.
+    here, and three ticks of the tree. With a backoff of 50 ms the
+    runtime stayed in AUTO in every run, and went 10% over in every
+    one. The spike's `idle` is now true as well while the device's
+    provider is down, and from then until a read of the device has
+    returned. With that, in four runs of four, the controller followed
+    the motor's own report through the restart, started again from the
+    duty of 0 the new process reported, and the speed rose to 1500 rpm
+    and did not pass it. It is about 40 lines in the spike, and one more
+    thing the layer is told by the runtime: whether a provider can be
+    reached.
 16. **A doubted command is worse sent than not, and not sending it is
     not free.** With `ride_through` on the measurement the controller
     ran for 1.5 s on a speed that was no longer true. Sent, as

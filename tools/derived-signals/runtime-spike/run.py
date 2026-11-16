@@ -56,7 +56,7 @@ providers:
     restart_policy:
       enabled: true
       max_attempts: 3
-      backoff_ms: [200, 500, 1000]
+      backoff_ms: [{backoff_ms}, 500, 1000]
 polling:
   interval_ms: {poll_ms}
 telemetry:
@@ -91,6 +91,7 @@ derived:
   clock_step_ms: {clock_step_ms}
   sample_step_ms: {sample_step_ms}
   step_after_s: {step_after_s}
+  idle_on_provider_loss: {idle_on_loss}
   inputs:
     setpoint: {{constant: {setpoint}}}
     speed: {{device_handle: sim0/motorctl0, signal_id: motor1_speed}}
@@ -145,6 +146,8 @@ def main():
     parser.add_argument("--without", default="", help="text to take out of the graph, as ', late_z: est_late'")
     parser.add_argument("--skew-ms", type=int, default=0, help="added to every sample time the graph is given")
     parser.add_argument("--kill-provider", action="store_true", help="kill the simulator, --at seconds in")
+    parser.add_argument("--backoff-ms", type=int, default=200, help="before the first restart of the simulator")
+    parser.add_argument("--not-idle-on-loss", action="store_true", help="`idle` does not follow the provider's loss")
     parser.add_argument("--tree", type=Path, default=HERE / "tree.xml")
     parser.add_argument("--clock-step-ms", type=int, default=0)
     parser.add_argument("--sample-step-ms", type=int, default=0)
@@ -169,6 +172,8 @@ def main():
             clock_step_ms=args.clock_step_ms,
             sample_step_ms=args.sample_step_ms,
             step_after_s=args.at,
+            backoff_ms=args.backoff_ms,
+            idle_on_loss="false" if args.not_idle_on_loss else "true",
             sample_time=args.sample_time,
             idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
             tree=args.tree.resolve(),
@@ -295,7 +300,8 @@ def main():
         f"call latency {args.call_latency_ms} ms, at {args.at} s, max_age {args.max_age}, "
         f"sample time {args.sample_time}, skew {args.skew_ms} ms, "
         f"{args.graph_line or 'no line more'}, "
-        f"{'provider killed, ' if args.kill_provider else ''}"
+        f"{f'provider killed, backoff {args.backoff_ms} ms, ' if args.kill_provider else ''}"
+        f"{'idle not on loss, ' if args.not_idle_on_loss else ''}"
         f"clock step {args.clock_step_ms} ms, sample step {args.sample_step_ms} ms, tree {args.tree.name}, "
         f"{len(rows)} samples"
     )

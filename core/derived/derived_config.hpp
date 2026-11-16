@@ -34,6 +34,10 @@ struct DerivedConfig {
     // is added to the wall clock the calls and the cache's sample times are on (the runtime's and a provider's
     // on one machine), and sample_step_ms to the sample times alone (a provider's clock by itself). Neither
     // touches samples timed on arrival.
+    // An input given by not_acting_on is true as well while that device's provider is down, and from then until
+    // a read of the device has returned: a restart the runtime stays in AUTO through leaves the plant new and
+    // the graph as it was.
+    bool idle_on_provider_loss = true;
     int clock_step_ms = 0;
     int sample_step_ms = 0;
     double step_after_s = 0.0;
