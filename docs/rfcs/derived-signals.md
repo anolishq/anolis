@@ -197,9 +197,9 @@ Decided: FluxGraph, with its core reworked as version 2. FluxGraph becomes
 the signal-graph engine for the simulator and for this layer, so one model
 can be a simulator's plant and an estimator's predictor.
 
-The fit was measured first. On a branch of FluxGraph that is not
-published (`spike/signal-blocks`; its `spike/FRICTION.md` has each
-figure here), with nothing in the
+The fit was measured first. On a branch of FluxGraph
+([`spike/signal-blocks`](https://github.com/anolishq/fluxgraph/tree/spike/signal-blocks);
+its `spike/FRICTION.md` has each figure here), with nothing in the
 library changed, the ten block types of O3 were written as FluxGraph models
 and run against test vectors from `tools/derived-signals/vectors.py`. Every
 output matches at every tick, by state and by value, including 28,900
