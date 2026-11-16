@@ -38,6 +38,12 @@ struct DerivedConfig {
     // a read of the device has returned: a restart the runtime stays in AUTO through leaves the plant new and
     // the graph as it was.
     bool idle_on_provider_loss = true;
+    // The calling thread stops calling the engine this long after the start, and does nothing else: a graph
+    // that hangs, which no run can make of a real one. 0 is never.
+    double hang_after_s = 0.0;
+    // An output is given as FAULT once the last call that ran a tick is older than this many call intervals: a
+    // reader's own check that the graph is alive. 0 is no check.
+    int alive_within_calls = 3;
     int clock_step_ms = 0;
     int sample_step_ms = 0;
     double step_after_s = 0.0;

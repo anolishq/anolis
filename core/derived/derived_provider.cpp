@@ -202,7 +202,20 @@ bool DerivedProvider::stop() {
 void DerivedProvider::run() {
     auto next = std::chrono::steady_clock::now();
     while (running_) {
-        call_once();
+        const bool hung =
+            config_.hang_after_s > 0.0 &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count() >= config_.hang_after_s;
+        if (hung) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        try {
+            call_once();
+        } catch (const std::exception &e) {
+            // The graph is done for: its outputs age out, and the runtime goes on.
+            LOG_ERROR("[Derived] " << config_.id << ": the engine's thread stops: " << e.what());
+            return;
+        }
         next += std::chrono::nanoseconds(interval_ns_);
         // A call that overran is not made up for: the engine catches up by its own rule.
         next = std::max(next, std::chrono::steady_clock::now());
@@ -337,6 +350,7 @@ void DerivedProvider::call_once() {
             published_[i].value = outputs[i].value;
         }
         published_at_ns_ = system_now_ns();
+        ticked_ = std::chrono::steady_clock::now();
     }
 }
 
@@ -403,6 +417,10 @@ bool DerivedProvider::read_signals(const std::string &device_id, const std::vect
 
     std::lock_guard<std::mutex> lock(mutex_);
     const std::int64_t at = published_at_ns_ != 0 ? published_at_ns_ : system_now_ns();
+    // Judged on the reader's thread: a graph whose own thread has stopped cannot say so.
+    const bool dead = config_.alive_within_calls > 0 && published_at_ns_ != 0 &&
+                      std::chrono::steady_clock::now() - ticked_ >
+                          std::chrono::nanoseconds(interval_ns_ * config_.alive_within_calls);
     for (const auto &published : published_) {
         if (!wanted(published.name)) {
             continue;
@@ -410,7 +428,7 @@ bool DerivedProvider::read_signals(const std::string &device_id, const std::vect
         auto *out = response.add_values();
         out->set_signal_id(published.name);
         // A value that is not usable has no value (rule 3.2); the protocol has no way to say so but quality.
-        const bool usable = published.value.is_usable();
+        const bool usable = !dead && published.value.is_usable();
         if (published.value.type == fg::Type::boolean) {
             out->mutable_value()->set_type(adpp::VALUE_TYPE_BOOL);
             out->mutable_value()->set_bool_value(usable && published.value.boolean);
@@ -418,7 +436,7 @@ bool DerivedProvider::read_signals(const std::string &device_id, const std::vect
             out->mutable_value()->set_type(adpp::VALUE_TYPE_DOUBLE);
             out->mutable_value()->set_double_value(usable ? published.value.number : 0.0);
         }
-        out->set_quality(quality_of(published.value.state));
+        out->set_quality(dead ? adpp::SignalValue_Quality_QUALITY_FAULT : quality_of(published.value.state));
         set_timestamp(out->mutable_timestamp(), at);
     }
     const double counts[] = {counts_.calls,         counts_.ticks,          counts_.most_ticks, counts_.gaps,

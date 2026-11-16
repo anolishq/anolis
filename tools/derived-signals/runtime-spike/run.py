@@ -92,6 +92,8 @@ derived:
   sample_step_ms: {sample_step_ms}
   step_after_s: {step_after_s}
   idle_on_provider_loss: {idle_on_loss}
+  hang_after_s: {hang_after_s}
+  alive_within_calls: {alive_within}
   inputs:
     setpoint: {{constant: {setpoint}}}
     speed: {{device_handle: sim0/motorctl0, signal_id: motor1_speed}}
@@ -148,6 +150,8 @@ def main():
     parser.add_argument("--kill-provider", action="store_true", help="kill the simulator, --at seconds in")
     parser.add_argument("--backoff-ms", type=int, default=200, help="before the first restart of the simulator")
     parser.add_argument("--not-idle-on-loss", action="store_true", help="`idle` does not follow the provider's loss")
+    parser.add_argument("--hang", action="store_true", help="the engine's thread stops calling, --at seconds in")
+    parser.add_argument("--alive-within", type=int, default=3, help="calls; 0 is no check that the graph is alive")
     parser.add_argument("--tree", type=Path, default=HERE / "tree.xml")
     parser.add_argument("--clock-step-ms", type=int, default=0)
     parser.add_argument("--sample-step-ms", type=int, default=0)
@@ -174,6 +178,8 @@ def main():
             step_after_s=args.at,
             backoff_ms=args.backoff_ms,
             idle_on_loss="false" if args.not_idle_on_loss else "true",
+            hang_after_s=args.at if args.hang else 0,
+            alive_within=args.alive_within,
             sample_time=args.sample_time,
             idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
             tree=args.tree.resolve(),
@@ -291,7 +297,7 @@ def main():
             break
         settled = t
     disturbed = args.stall_s or args.unreachable_s or args.signal_fault_s or args.call_latency_ms
-    disturbed = disturbed or args.kill_provider or args.clock_step_ms or args.sample_step_ms
+    disturbed = disturbed or args.kill_provider or args.clock_step_ms or args.sample_step_ms or args.hang
     before = [v for t, v in speeds if t < args.at] if disturbed else [v for _, v in speeds]
     tail = [v for t, v in speeds if t >= args.seconds - 3.0]
     print(
@@ -302,6 +308,7 @@ def main():
         f"{args.graph_line or 'no line more'}, "
         f"{f'provider killed, backoff {args.backoff_ms} ms, ' if args.kill_provider else ''}"
         f"{'idle not on loss, ' if args.not_idle_on_loss else ''}"
+        f"{f'engine hangs, alive within {args.alive_within} calls, ' if args.hang else ''}"
         f"clock step {args.clock_step_ms} ms, sample step {args.sample_step_ms} ms, tree {args.tree.name}, "
         f"{len(rows)} samples"
     )

@@ -164,6 +164,15 @@ itself. Each with `--sample-time provider --at 8`:
 | `--sample-step-ms 2000` | threw every sample away, 242 by the end | `duty` FAULT from 0.84 s after and for good; the motor kept its last duty |
 | `--sample-step-ms -2000` | threw 38 away, and then every sample was past its maximum age | the same |
 
+`--hang` stops the engine's thread from calling it, 1 s into the step,
+and nothing else: the runtime, the polls and the tree go on. Each with
+`--hang --at 1 --seconds 12`:
+
+| Also | The duty read | Calls the tree made | The motor |
+| --- | --- | --- | --- |
+| `--alive-within 0`, no check | 0.449, `OK`, to the end | 122, all of the one duty | at that duty, 1348 rpm |
+| nothing: an output is `FAULT` once no call has run a tick for 3 call intervals | `FAULT` from 0.14 s after | 11, none after | at that duty, 1348 rpm |
+
 ## What it found
 
 1. **The cost of this placement is small.** About 520 lines in
@@ -323,6 +332,21 @@ itself. Each with `--sample-time provider --at 8`:
     step back of 300 ms, inside the maximum age, cost 4 samples. No
     real clock was stepped: the spike adds the step to the times it
     reads. On arrival times there is nothing to step.
+
+18. **A graph that hangs has to be found out by whoever reads it.**
+    With the engine's thread stopped and no check, the spike went on
+    answering every read with the last duty, as `OK`: the tree sent it
+    122 times, the runtime stayed in AUTO and health read well. A
+    provider in a process of its own that hung would fail its reads and
+    be latched as lost; in process there is no read to fail. The spike
+    now judges, on the reader's thread, how long ago a call last ran a
+    tick, and gives every output as `FAULT` past three call intervals:
+    the duty read `FAULT` 0.14 s after the hang and the tree made no
+    call after it. The engine's thread also catches what the engine
+    throws and stops, so that the outputs age out and the runtime goes
+    on; no run threw. Either way the motor ran on at its last duty,
+    which is finding 9: stopping the command is not bounding it. One
+    run each.
 
 ## What is not here
 

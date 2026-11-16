@@ -889,9 +889,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 return false;
             }
             const auto &derived = yaml["derived"];
-            warn_unknown_keys(derived, "derived",
-                              {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "clock_step_ms",
-                               "sample_step_ms", "step_after_s", "idle_on_provider_loss", "inputs"});
+            warn_unknown_keys(
+                derived, "derived",
+                {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "clock_step_ms", "sample_step_ms",
+                 "step_after_s", "idle_on_provider_loss", "hang_after_s", "alive_within_calls", "inputs"});
             if (!derived["graph"]) {
                 error = "derived.graph is required";
                 return false;
@@ -921,6 +922,12 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (derived["idle_on_provider_loss"]) {
                 config.derived.idle_on_provider_loss = derived["idle_on_provider_loss"].as<bool>();
+            }
+            if (derived["hang_after_s"]) {
+                config.derived.hang_after_s = derived["hang_after_s"].as<double>();
+            }
+            if (derived["alive_within_calls"]) {
+                config.derived.alive_within_calls = derived["alive_within_calls"].as<int>();
             }
             if (derived["clock_step_ms"]) {
                 config.derived.clock_step_ms = derived["clock_step_ms"].as<int>();

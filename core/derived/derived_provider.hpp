@@ -122,7 +122,8 @@ private:
 
     mutable std::mutex mutex_;  // guards what follows
     std::vector<Published> published_;
-    std::int64_t published_at_ns_ = 0;  // the time of the last tick run, on the system clock
+    std::int64_t published_at_ns_ = 0;              // the time of the last tick run, on the system clock
+    std::chrono::steady_clock::time_point ticked_;  // when the last call that ran a tick returned
     Counts counts_;
     std::string error_;
 };
