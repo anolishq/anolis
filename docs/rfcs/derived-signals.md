@@ -420,14 +420,13 @@ Proposed, on the spike:
 
 - Going in: `OK` is `good`, `STALE` is `uncertain`, `FAULT` is `bad`,
   `UNKNOWN` is `not_ready`, and a value the cache does not hold is `bad`.
-- Coming out, for now: the same backwards, so `uncertain` is published as
-  `STALE`, with a value of 0 where the engine has none, since the
-  protocol cannot say "no value". A consumer that gates on `OK` then does
-  not act on an `uncertain` value, as the spike's tree would not.
-- Later: a fifth quality for `uncertain`. `STALE` says a value is old and
-  `uncertain` that it is usable and doubtful, and publishing one as the
-  other loses that. It is a change to ADPP and to two published
-  enumerations, and is proposed here and not made.
+- Coming out: the same backwards, with a value of 0 where the engine
+  has none, since the protocol cannot say "no value".
+
+Decided: `uncertain` is published as `STALE`, and stays so. There is no
+fifth quality. An earlier revision proposed one for later; the table
+below is why it is withdrawn. A graph that has to tell an old value
+from a doubtful one publishes that as a signal of its own.
 
 Decided: a command is acted on only when it is `OK` (P2), and a derived
 signal is not a stop chain's status (O6), so the stop chain never reads
@@ -439,8 +438,74 @@ tree, gating on `OK`, did not send it (P2). No run made an input
 when a value is read and does not write `STALE` into the cache, so the
 engine's own maximum age was the only judge of an old sample.
 
-Still to settle: a table of every producer and consumer of quality in the
-runtime, the protocol, the exporter and the workbench.
+#### Who makes a quality, and who reads one
+
+Read from the code of the runtime, the protocol, both SDKs, the
+providers, the exporter, the workbench and the operator UI. Nothing was
+run for it.
+
+There are three vocabularies. ADPP has `OK`, `STALE`, `FAULT` and
+`UNKNOWN`, and `UNSPECIFIED` for a provider that set none. HTTP, the
+event stream and telemetry have `OK`, `STALE`, `UNAVAILABLE` and
+`FAULT`. The tree's nodes have `OK`, `STALE`, `FAULT`, `UNKNOWN` and
+`UNSPECIFIED`, and no `UNAVAILABLE`, though their port descriptions say
+otherwise.
+
+Made by:
+
+| Where | Which | When |
+| --- | --- | --- |
+| A provider, through an SDK | `OK` unless it says otherwise | The C++ SDK's `quality_from` gives `UNKNOWN` with no sample yet, `FAULT` after a failed read, `STALE` past the signal's `stale_after_ms`. The Python SDK turns an `OK` reading `STALE` on the same test |
+| A provider, by itself | `FAULT`, `UNKNOWN` | An open thermocouple; a sensor before its first measurement |
+| The state cache, at a write | whatever arrived | Kept as it is, a number it does not know among them. Nothing is mapped and nothing is refused |
+| The state cache, as time passes | none | Age is judged by whoever reads, each with its own limit. An old value that arrived `OK` is still published `OK`, with its age beside it, and no event says it aged |
+| The state cache, on a provider lost | none | The signals keep their last quality, or are cleared on a failed read; the device is marked unavailable beside them |
+
+Read by:
+
+| Where | With `STALE` | With a value it does not know |
+| --- | --- | --- |
+| HTTP, a signal (`core/http/json.cpp`) | `STALE` | `UNAVAILABLE` |
+| HTTP, a device's own quality | the worst of its signals, by the number of the ADPP enum | a larger number wins: the device reads `UNAVAILABLE`, over a `FAULT` |
+| Event stream and telemetry rows (`core/state/state_cache.cpp`) | `STALE` | `UNAVAILABLE` |
+| Tree, `ReadSignal` | gives the value, and `STALE` beside it | gives the value, and `UNSPECIFIED` |
+| Tree, `CheckQuality` | fails unless `STALE` is what it expects | fails; and a name it does not know, given as what to expect, matches only a signal whose provider set no quality |
+| Stop chain status (`core/control/stop_chain.cpp`) | not known: only `OK` is judged | not known |
+| Stop chain, "does the device still answer" | does not answer | answers |
+| Device health (`core/health/health_snapshot.cpp`) | the device is `STALE` | healthy, unless old |
+| Exporter | passed through as text | passed through |
+| Grafana device-health counts | counted | in none of the four counts |
+| Workbench: a reading | noted "stale" | shown as good |
+| Workbench: start requirements, sparkline | not met; a gap | not met; a gap |
+| Operator UI: a signal's badge | `STALE` | `UNKNOWN` |
+| Operator UI: a device's card | stale | ok |
+
+The set of four names is closed in two published schemas, each
+vendored by a consumer under a lock: the HTTP API's
+(`schemas/http/runtime-http.openapi.v0.yaml`, three places) and the
+telemetry row's (`schemas/telemetry/telemetry-timeseries.schema.v1.json`),
+whose baseline counts a change to it as breaking. A row may carry
+fields the schema does not name.
+
+So a fifth quality is the dear way to say `uncertain`. It is one
+number in ADPP, a minor change there, and then both SDKs, five mappings
+in the runtime, the device's worst-of, which ranks by the enum's
+number, two closed schemas with their fixtures and baselines, two
+vendored copies, both user interfaces and the dashboards. Where one of
+those is missed the value is shown as unavailable or as good, which are
+the two things `uncertain` is not. Published as `STALE`, an `uncertain`
+value is already left alone by everything that asks for `OK`, which is
+what P2 now requires of a command, and shown as doubtful by everything
+that shows quality. What it loses is the difference between old and
+doubtful, and a graph can publish that itself, as one more signal.
+
+Three things follow for a derived signal whatever is decided. A
+`not_ready` output, published `UNKNOWN`, makes its device read
+`UNAVAILABLE` over HTTP while any output is filling. One `uncertain`
+or `bad` output makes the device `STALE` or `FAULT` in health, since
+all of a graph's outputs are one device; `health.excluded_signals` is
+there for an output that should not count. And a tree cannot gate on
+`UNAVAILABLE` at all.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
 
@@ -665,8 +730,68 @@ P1 reuses the triple. Still open:
 - Whether a derived number that changes a little on every evaluation floods
   events and telemetry, which are written on any change of value.
 
-Settled by: a list of every schema, endpoint and loop that changes, with
-the version bump each needs under [dependencies.md](../dependencies.md).
+#### What the layer touches
+
+Read from the code and the documents; nothing was run for it. The rule
+that decides a bump is [dependencies.md](../dependencies.md): before
+1.0, "a change that makes an existing config, install or client behave
+differently (a changed default, a refused request, a new failure) is
+breaking and bumps MINOR", and "Anything else bumps PATCH, new features
+and fields included".
+
+Has to change, all of it within that second sentence so long as the
+layer exists only where a config has a `derived:` section:
+
+| What | Today | Needs |
+| --- | --- | --- |
+| The config loader (`core/runtime/config.cpp`) | An unknown top-level key is warned of and ignored, so an older runtime given `derived:` runs with no derived signals and says little | The section read; the id refused where it is a provider's; the upgrade notes naming the first runtime that reads it |
+| The runtime config schema, its baseline and fixtures | The root allows any key, so `derived:` passes unchecked there and in the workbench, which validates against a vendored copy | The section in the schema; a valid fixture and one refused for the id; the workbench's lock moved to that release |
+| Provider startup (`core/runtime/runtime.cpp`) | Walks the configured providers | One step more, after them; the handle is not given to the supervisor |
+| Key invariants 2 and 5 ([architecture.md](../architecture.md)) and every place a provider is called a process | "Registry changes only on provider restart"; "Providers are isolated processes" | Rewording. The handle is discovered once and never restarted, which keeps the first. The second is not true of it: a fault in a graph is a fault in the runtime |
+| A source provider restarted with other devices | The registry entry of the provider is replaced whole | The graph's inputs checked again against it, as declared calls are |
+| Stop chain config | Any cached boolean that is `OK` may be a stop chain's status | The refusal O6 decides |
+| The poll plan | A signal with no poll hint is not polled, and is in no state answer | Every output given a hint near the call rate. Spike: done so |
+
+Needs nothing, with the reason:
+
+- **ADPP.** The handle fills the protocol's messages in process and
+  nothing new is on the wire.
+- **The telemetry row schema and the exporter.** The four tags are as
+  they were. A deployment that allows providers by name leaves the
+  derived id out until it is named.
+- **The machine profile.** Its validator compares its providers with
+  the configured ones, which the derived id is not among. A reading or
+  a requirement may already name any `provider/device/signal`.
+- **Ownership, the actuation gates and the safe state.** Each goes by
+  a device's functions or its claim tag, and the device has neither.
+  A call to it finds no such function.
+- **The provider health endpoint and its telemetry.** They go by
+  registered handles, so the layer is listed, as running, with no
+  supervision. Its uptime reads 0, which is the one value that
+  misleads. A new lifecycle state for it would change a closed
+  enumeration and is not proposed.
+- **The supervision loop.** It walks the configured providers and
+  passes the handle by, so the handle must never report itself
+  unavailable or fail a read: a failed read is taken for a lost device
+  and latches it.
+
+Costs that are not contracts:
+
+- **Every change of a value is an event and a telemetry row.** The
+  cache compares doubles bit for bit and has no deadband. An output
+  that moves in its last place at every call writes a row at every
+  poll that follows one: 864,000 a day at 100 ms, for one signal. So
+  an output that is published needs a deadband in the graph, which the
+  catalogue has, and the documentation has to say so. A deadband in
+  the cache would change every existing signal.
+- **A signal named `estop`** on the derived device would be read as
+  its e-stop by a stop chain that lists the device. Refused with the
+  rest of O6.
+- **One device for all outputs** makes the device as bad as its worst
+  output, in health and over HTTP (O1).
+
+Not found: a rule for when the HTTP API's own version changes, and any
+reserved provider, device or signal id.
 
 ### O9. Where the definition lives
 
@@ -701,8 +826,7 @@ what belongs there.
 - Any particular estimator or model. Transfer functions, filters and
   estimators are what the layer is for; which ones ship first is the
   catalogue's question (O3).
-- Any change to ADPP. O1 proposes one, a fifth quality; this RFC does not
-  make it.
+- Any change to ADPP. O1 proposed one, a fifth quality, and withdrew it.
 - Workbench surfaces.
 - The runtime stopping the machine on a derived trip by itself (O6). It
   gets its own RFC.
