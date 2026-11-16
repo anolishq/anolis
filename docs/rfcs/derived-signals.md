@@ -1,12 +1,17 @@
 # RFC: derived signals
 
-Status: draft, fourth revision. Nothing is implemented. Two decisions are
-made (O0: build it, as a capability of the platform; O11: FluxGraph,
-reworked, is the engine); nothing else is accepted.
-This is a register of decisions: a few proposed, most open, each open one
-with what would settle it. The first revision was reviewed independently;
-[the review](derived-signals-review.md) lists what it found and what
-changed.
+Status: draft, fifth revision. Nothing is implemented, and the RFC is
+not accepted. This is a register of decisions. Each is marked as one of
+three things. **Decided** is a choice that has been made: to build the
+layer (O0), the engine (O11), what the first version is for (below),
+who bounds a command (P2), where a definition lives (O9), that no
+provider id is reserved (O8), and what a derived signal may not be used
+for (O6). **Proposed** is a claim about how the layer should behave,
+with the evidence it has beside it, which is often thin. **Open** has
+what would settle it. The first revision and the fourth were each
+reviewed independently; [the review](derived-signals-review.md) lists
+what the first found, and what the second found is worked into this
+text.
 
 ## The problem
 
@@ -20,8 +25,9 @@ as part of the platform (see Prior art). Here it is missing.
 A signal today is what a provider reads from a device. Nothing between the
 state cache and its consumers computes one value from another:
 
-- The behavior tree's own nodes read a signal, read a parameter, call a
-  device, build call arguments, compare a boolean and schedule pulses
+- The behavior tree's own nodes read a signal, check its quality, read a
+  parameter, call a device, build call arguments, compare a boolean,
+  schedule pulses and pass a value on when it changes
   (`core/automation/bt_runtime.cpp`). None does arithmetic on a reading,
   smooths it or keeps a window of it. The tree runs only in `AUTO`.
 - Telemetry records device signals, health, and mode and parameter changes
@@ -83,11 +89,45 @@ The findings that bear on a decision are cited under it below as "exercise".
 
 A second body of evidence is a spike: FluxGraph's version 2 core linked
 into the runtime, closing a speed loop on the simulator's motor through a
-behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, twenty-nine
-runs of one loop on one machine, and its README has each run and what it
-found. Its findings are cited below as "spike".
+behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, and its README has
+each run and what it found. Its findings are cited below as "spike".
+
+What the spike is not. Every run is of one loop on one simulated motor:
+a first-order plant with no noise, no dead time and no load, stepped ten
+times a second and watched over HTTP every 50 ms. The longest run is
+26 s. Most findings are one run, and the text says where there were
+more. The runs were made against several commits of the engine, which
+the README names. A stall is the whole runtime stopped, and a hang is
+the engine's thread alone stopped; no run stopped the polls or the tree
+alone. A clock that steps is an offset added to the times the spike
+reads. Nothing ran in `MANUAL`, with automation off, with telemetry on,
+or with two devices. No hardware was used.
 
 ## Decided
+
+### What the first version is for
+
+Decided, after the second review: the first version publishes derived
+signals for a person, telemetry, HTTP and the tree's decisions to read.
+It does not close a loop. A graph's output handed to an actuator, as
+the spike hands a duty to a motor, is a second stage, and is not
+accepted with this RFC.
+
+The spike's loop stays in this text as the evidence for that stage and
+for what it needs first:
+
+1. **A lifetime and a fail action for every command**, held by the
+   runtime (P2).
+2. **A check that the graph is alive**, made by whoever reads it (P6).
+   Built in the spike.
+3. **One read of a value and its quality together**, and no plausible
+   number where there is no value (P4).
+4. **A way to give a controller its setpoint and its tuning** while the
+   runtime runs (O4).
+5. **The graph told whether its command was delivered**, and not only
+   whether the runtime means to deliver it (P2).
+6. **A loop on hardware**, with noise, dead time and a sensor fault
+   that does not recover, holding its bound.
 
 ### O0. Whether a new layer is needed
 
@@ -192,7 +232,8 @@ contradicts it.
 ### P1. A derived value is a signal
 
 It has the identity every signal has, `provider_id/device_id/signal_id`, and
-a unit and a quality. Reusing the triple under a reserved provider id leaves
+a unit and a quality. Reusing the triple under a provider id of the
+layer's own (O8) leaves
 two closed contracts as they are: the telemetry tag set
 (`schemas/telemetry/telemetry-timeseries.schema.v1.json`) and the
 machine-profile signal pattern.
@@ -210,8 +251,9 @@ It is not free, which the first revision said it was:
 - Nothing reserves a provider id today. `providers[].id` accepts any
   non-empty string.
 
-So a derived signal needs a registry entry that no provider published, or
-the handlers and the cache have to change. O8 owns that.
+So a derived signal needs a registry entry that no provider process
+published, or the handlers and the cache have to change. P6 proposes
+the first: the layer is discovered as a provider is, once, at startup.
 
 Prior art agrees on the direction: an EPICS calc record, an Ignition
 expression tag and a Home Assistant helper entity are each peers of measured
@@ -226,9 +268,11 @@ A derived signal can be the reason a call is made. It does not make one.
 This moves a question; it does not answer it. Something else has to act on a
 derived trip when the tree is not running. O6 owns that.
 
-Spike: it holds for a control loop. The graph gave a duty as a signal, and
-a tree of four stock nodes read it, built the call's arguments and called
-the motor. Two things follow from the layer not being the caller.
+Spike: it can be done for a control loop, which is the second stage and
+not the first version. The graph gave a duty as a signal, and a tree of
+four stock nodes read it, built the call's arguments and called the
+motor. What follows from the layer not being the caller is the rest of
+this section.
 
 - **The layer is told when nothing acts on its output.** With the motor's
   reads failing, the device-loss latch took the runtime to `FAULT` and the
@@ -257,28 +301,60 @@ the motor. Two things follow from the layer not being the caller.
   speed did not pass its setpoint, in four runs of four. So the layer
   needs a third thing from the runtime: whether a provider can be
   reached.
-- **A command is acted on only when it is `OK`.** Decided. A value the
-  graph gives as `uncertain` is for a person, a detector or a record to
-  read, and is not sent to an actuator. A tree gates a command on `OK`,
-  as the spike's does; one that sends a doubted value says so node by
-  node, as it can today. Spike: a controller whose measurement rode
-  through 1.5 s of a speed it could not read gave an `uncertain` duty.
-  Sent, the duty went to its limit and the speed 62% over. Not sent, the
-  motor kept its last duty, and the controller, which cannot know its
-  command was not sent, wound up: 13% over. With no ride-through the
-  duty was `bad`, the controller waited, and nothing overshot. A
-  ride-through on the measurement of a loop is therefore a hazard, and
-  the catalogue's documentation has to say so. Telling the controller
-  the duty the motor reports took the overshoot away and made the step
-  take 7.7 s where it takes 3.2 s, in the one setting tried.
-- **How long a command stands is its caller's to bound.** With the speed
-  reading `FAULT` for 3 s the graph had no duty to give, the tree sent
-  nothing, and the motor ran on at its last duty with nothing controlling
-  it. That is the right thing for the layer to do and the wrong thing to
-  leave unbounded. The bound is the tree's: a tree that has had no `OK`
-  command for a stated time sends a safe value or faults. A provider's
-  watchdog, where it has one, is behind that. The engine gives an output
-  no lifetime, and this RFC asks it for none.
+- **A command is acted on only when it is `OK`.** Proposed, as the
+  default of the fail action above and not as the only behaviour. A
+  value the graph gives as `uncertain` is for a person, a detector or a
+  record to read, and is not sent to an actuator unless its command
+  says so. Not sending is holding the last command, which is the safe
+  way for some actuators and the dangerous way for others, a coolant
+  valve that is shut among them; that is why it is the command's to
+  declare. Nothing enforces it today: a tree of stock nodes can send a
+  `STALE` value, and the spike has one that does. Spike, three single
+  runs on one plant with one length of fault: a controller whose
+  measurement rode through 1.5 s of a speed it could not read gave an
+  `uncertain` duty. Sent, the duty went to its limit and the speed 62%
+  over. Not sent, the motor kept its last duty, and the controller,
+  which cannot know its command was not sent, wound up: 13% over.
+  Telling the controller the duty the motor reports took the overshoot
+  away and made the step take 7.7 s where it takes 3.2 s, in the one
+  setting tried. In another run, of another graph with no ride-through
+  and a fault of 3 s, the duty was `bad`, the controller waited, and
+  nothing overshot. A ride-through on the measurement of a loop looks
+  like a hazard, and the catalogue's documentation should say so.
+- **"Nothing is acting" is a guess, and the graph should be told the
+  fact.** The input above is worked out from the mode, the latch and
+  whether the provider can be reached. The runtime thinks it is acting,
+  and is not, when the tree is in another branch or a check before the
+  call fails; when calls are failing and the third has not yet failed;
+  when the tree waits behind a slow call to another device; when the
+  device overrides the command itself, a drive in fault or a limit in
+  firmware; when an operator calls the device in `AUTO`; when a
+  restart fits between two calls of the engine; and when a call is
+  clamped and still answers success. It thinks it is not acting, and
+  something is, in `MANUAL` when a script reads the output and calls
+  the device, and when automation is off. Proposed for the second
+  stage: the call path records, for each command, whether its last
+  value was delivered and when, and the graph is given that. A device
+  that overrides its command needs its own report of what it applied,
+  which is the device's to give.
+- **How long a command stands is the runtime's to bound.** Decided,
+  for the second stage. With the speed reading `FAULT` for 3 s the graph
+  had no duty to give, the tree sent nothing, and the motor ran on at
+  its last duty with nothing controlling it. With a sensor that does
+  not come back that is a heater at its last duty until somebody
+  notices, in `AUTO`, with nothing raised. An earlier revision gave the
+  bound to the tree. The tree cannot hold it: it has no node that
+  counts time without a good value and none that asks for `FAULT`, the
+  spike's tree had no bound in any run, and each author would have to
+  remember it. Nor is a provider's watchdog behind it: the polls go on
+  while the tree is silent, and a device's watchdog counts a read as a
+  frame. So each output a graph gives to an actuator declares, in the
+  config, how long it may go without a good value and what happens
+  then: the last value held for that long, then a stated safe value
+  sent through the call router, then `FAULT`; and the runtime raises an
+  event when it does. A config that routes an output to a function
+  that actuates and declares none is refused. The engine gives an
+  output no lifetime, and this RFC asks it for none.
 
 ### P3. Evaluation is periodic, in dependency order
 
@@ -299,8 +375,26 @@ says what to do instead. The opposite defaults are the documented regrets
 elsewhere: EPICS links that do not propagate severity unless asked, and Home
 Assistant templates that turn `unavailable` into 0.
 
-"Good" is not yet defined, and O1 has to define it. This holds only inside
-the layer: `ReadSignal` gives the tree a number whatever its quality.
+Inside the layer "good" is the engine's `good` (O1). The rule holds only
+inside the layer, and at the layer's way out it is broken twice.
+
+- **A value there is none of leaves as a number.** The protocol cannot
+  say "no value", so the spike publishes 0, or `false`, with a quality
+  that is not `OK`. A consumer that reads the value and not the quality
+  has a plausible number: a duty of 0, a valve shut, a trip that reads
+  "not tripped", a 0 in the historian's average.
+- **The tree checks and reads in two steps.** `CheckQuality` and
+  `ReadSignal` each read the cache, and a poll can land between them:
+  the check passes on the old value and the read gives the new one,
+  whatever its quality. `ReadSignal` gives a number whatever the
+  quality, and neither node looks at how old the value is.
+
+Proposed: one tree node that reads a value, its quality and its age
+from one snapshot and fails unless the quality is `OK` and the age
+within a stated bound; and a derived boolean that stands for a trip
+declares which way it reads when it is not good. What a number with no
+value is published as is open: not-a-number says it best and is not
+valid JSON, and the last value with its quality is plausible too.
 
 ### P5. Declarations are blocks with declared inputs
 
@@ -323,8 +417,8 @@ most of why it failed two cases. What it does show:
 
 A typed block matches how a behavior-tree node's ports are declared. It does
 not match how the runtime reads its own config, which is parsed by hand and
-warns on an unknown key (`core/runtime/config.cpp`). Refusing a definition
-at load is a new convention here.
+warns on an unknown key (`core/runtime/config.cpp`), though it refuses a
+bad value. Refusing an unknown key or setting at load is new here.
 
 ### P6. The layer runs in the runtime, behind the provider interface
 
@@ -334,13 +428,16 @@ process. It is given the graph's inputs from the state cache, and a
 thread of its own calls the engine once a period. The graph's published outputs
 are the signals of one device of one more provider.
 
-Spike: this is cheap. 592 lines wrap the engine, 64 read its config, 32
-start it and 14 in the state cache hand it each read (O7). The registry, the poll threads, HTTP, change events,
-telemetry and health reached the outputs through the code they already
-have, with no change to any of them, which answers most of O8 by the
-ordinary route. A host slower than the graph's period was unremarkable:
-called every 250 ms against a period of 100 ms the loop settled within
-0.3 s of when it does called on the period.
+Spike: this is cheap to build, which is not the same as safe to run. At
+`b03e050`, `git diff --numstat origin/main...spike/derived-signals-runtime
+-- core` gives 663 lines added under `core/derived/`, 86 in the config
+loader, 36 at startup and 14 in the state cache, which hand the layer
+each read (O7). The registry, HTTP, change events and health reached
+the outputs through the code they already have. Telemetry was off in
+every run. A host slower than the graph's period was unremarkable in
+two runs, on a plant whose time constant is eight periods: called
+every 250 ms against a period of 100 ms the loop settled within 0.3 s
+of when it does called on the period.
 
 What it costs, and what is not settled:
 
@@ -357,7 +454,26 @@ What it costs, and what is not settled:
   (O7) does not change this: the first call after a stall still runs
   before any read has returned. What makes a stall safe is the maximum
   age.
-- The computation shares a process with the stop logic.
+- **The computation shares a process with the stop logic**, and a
+  graph is the least proven code on the machine. Three things that
+  needs, of which the spike has two.
+  - A graph that hangs. Spike: with the engine's thread stopped, every
+    read of the layer went on giving the last duty as `OK`; the tree
+    sent it 122 times, the runtime stayed in `AUTO` and health read
+    well. A provider in a process of its own that hung would fail its
+    reads and be latched as lost. In process nothing fails, so whoever
+    answers a read has to judge it: the spike now gives every output as
+    `FAULT` once no call has run a tick for three call intervals, and
+    in the same run the duty read `FAULT` 0.14 s after the hang and the
+    tree made no call after it. One run each.
+  - A graph that throws. An exception on the engine's thread ended the
+    runtime, the software stop and the latch with it. The spike now
+    catches it and stops that thread, and the outputs age out as above.
+    No run threw.
+  - A graph that runs long. After a stall one call may run 100 ticks,
+    on a thread with no budget, in the process that serves the software
+    stop. Not measured: there is no figure here for how long a tick
+    takes, or for how late one runs.
 
 The other placement, in a provider, is not built. It keeps process
 isolation and any language through an SDK, and needs a way to receive
@@ -393,28 +509,23 @@ What exists:
   recognise `UNAVAILABLE` (`core/automation/bt_nodes.cpp`).
 - "Not good" has at least four shapes in the cache: a quality that is not
   `OK`; no value at all; a value that is old; and a value whose provider is
-  down. In the last case the cache keeps the old value with its old quality
-  and marks the provider unavailable separately
-  (`core/state/state_cache.cpp`).
+  down. In the last case the cache marks the provider unavailable
+  separately, and keeps the old values with their old quality or, after
+  a read that failed, clears them (`core/state/state_cache.cpp`).
 
-Questions:
+Questions, the first three answered below as far as they are:
 
 - Going in: which of those four shapes the runtime writes to the engine as
-  `bad`, which as `not_ready`, and whether any is `uncertain`. An old value
-  need not be decided here: the engine judges age itself, from the sample
-  time and the input's maximum age (O7).
-- Coming out: do the engine's four states map onto the existing four names,
-  or do `uncertain` and `not_ready` need their own, which would be a
-  breaking change to two published enumerations. `STALE` and `uncertain`
-  are not the same thing: one says a value is old, the other that it is
-  usable and doubtful.
-- What a consumer does with `uncertain`. The stop chain and the tree act on
-  quality, so each has to say whether an `uncertain` trip is acted on, and
-  whether a `good` one is acted on without reading its counters. The
-  proposal lists, in its section 7.11, each value it calls `good` that
-  rests on something a block no longer remembers.
-- How a value that came from a fallback is told apart from one that was
-  computed. In the engine it is `uncertain`.
+  `bad`, which as `not_ready`, and whether any is `uncertain`.
+- Coming out: do the engine's four states map onto the existing four
+  names. `STALE` and `uncertain` are not the same thing: one says a
+  value is old, the other that it is usable and doubtful.
+- What a consumer does with `uncertain`.
+- Still open: whether a `good` value is acted on without reading its
+  counters. The proposal lists, in its section 7.11, each value it calls
+  `good` that rests on something a block no longer remembers. And how a
+  value that came from a fallback is told apart from one that was
+  computed: in the engine both are `uncertain`.
 
 Proposed, on the spike:
 
@@ -423,12 +534,24 @@ Proposed, on the spike:
 - Coming out: the same backwards, with a value of 0 where the engine
   has none, since the protocol cannot say "no value".
 
-Decided: `uncertain` is published as `STALE`, and stays so. There is no
-fifth quality. An earlier revision proposed one for later; the table
+Proposed: `uncertain` is published as `STALE`. There is no fifth
+quality: an earlier revision proposed one for later, and the table
 below is why it is withdrawn. A graph that has to tell an old value
-from a doubtful one publishes that as a signal of its own.
+from a doubtful one publishes that as a signal of its own. This rests
+on reading code and on no run: no graph with an `uncertain` output has
+been taken through HTTP, health, the workbench and the stop chain's
+view of its device to see what each shows, and that is what would
+settle it. What it costs is known. An operator sees "stale" on a value
+that is new at every tick, and learns to pass over the word. Good,
+uncertain and bad are the words of OPC UA and of fieldbuses, and a
+historian that has only "stale" cannot give them back.
 
-Decided: a command is acted on only when it is `OK` (P2), and a derived
+A going-in mapping with no run behind it is wrong as it stands: a value
+its provider calls `STALE` is written as `uncertain`, usable, with the
+time its read returned, so a controller or an estimator takes as a new
+measurement what the provider said was too old (O7).
+
+A command is acted on only when it is `OK`, by default (P2). A derived
 signal is not a stop chain's status (O6), so the stop chain never reads
 an `uncertain` value.
 
@@ -448,8 +571,8 @@ There are three vocabularies. ADPP has `OK`, `STALE`, `FAULT` and
 `UNKNOWN`, and `UNSPECIFIED` for a provider that set none. HTTP, the
 event stream and telemetry have `OK`, `STALE`, `UNAVAILABLE` and
 `FAULT`. The tree's nodes have `OK`, `STALE`, `FAULT`, `UNKNOWN` and
-`UNSPECIFIED`, and no `UNAVAILABLE`, though their port descriptions say
-otherwise.
+`UNSPECIFIED`, and no `UNAVAILABLE`, though `ReadSignal`'s port
+description says otherwise.
 
 Made by:
 
@@ -466,7 +589,7 @@ Read by:
 | Where | With `STALE` | With a value it does not know |
 | --- | --- | --- |
 | HTTP, a signal (`core/http/json.cpp`) | `STALE` | `UNAVAILABLE` |
-| HTTP, a device's own quality | the worst of its signals, by the number of the ADPP enum | a larger number wins: the device reads `UNAVAILABLE`, over a `FAULT` |
+| HTTP, a device's own quality | the worst of its signals, by the number of the ADPP enum | a number above the enum's wins: the device reads `UNAVAILABLE`, over a `FAULT`. A signal with none set loses to `OK` |
 | Event stream and telemetry rows (`core/state/state_cache.cpp`) | `STALE` | `UNAVAILABLE` |
 | Tree, `ReadSignal` | gives the value, and `STALE` beside it | gives the value, and `UNSPECIFIED` |
 | Tree, `CheckQuality` | fails unless `STALE` is what it expects | fails; and a name it does not know, given as what to expect, matches only a signal whose provider set no quality |
@@ -484,8 +607,9 @@ The set of four names is closed in two published schemas, each
 vendored by a consumer under a lock: the HTTP API's
 (`schemas/http/runtime-http.openapi.v0.yaml`, three places) and the
 telemetry row's (`schemas/telemetry/telemetry-timeseries.schema.v1.json`),
-whose baseline counts a change to it as breaking. A row may carry
-fields the schema does not name.
+whose baseline says its qualities "are limited to" the four and that
+"changing key semantics is breaking". A row may carry fields the schema
+does not name.
 
 So a fifth quality is the dear way to say `uncertain`. It is one
 number in ADPP, a minor change there, and then both SDKs, five mappings
@@ -499,13 +623,14 @@ what P2 now requires of a command, and shown as doubtful by everything
 that shows quality. What it loses is the difference between old and
 doubtful, and a graph can publish that itself, as one more signal.
 
-Three things follow for a derived signal whatever is decided. A
+Three things follow for a derived signal whichever mapping stands. A
 `not_ready` output, published `UNKNOWN`, makes its device read
-`UNAVAILABLE` over HTTP while any output is filling. One `uncertain`
-or `bad` output makes the device `STALE` or `FAULT` in health, since
-all of a graph's outputs are one device; `health.excluded_signals` is
-there for an output that should not count. And a tree cannot gate on
-`UNAVAILABLE` at all.
+`UNAVAILABLE` over HTTP, and `STALE` in health, while any output is
+filling. One `uncertain` or `bad` output makes the device `STALE` or
+`FAULT` in health, since all of a graph's outputs are one device;
+`health.excluded_signals` is there for an output that should not count.
+Whether a graph's outputs should be one device at all is open with it.
+And a tree cannot gate on `UNAVAILABLE` at all.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
 
@@ -547,22 +672,38 @@ the filter tuning. Today they are in the runbook. `automation.parameters`
 is the only place for a number, it is the operator's, and it exists only
 when automation is enabled.
 
-Decided: a constant is a setting of a block in the graph file, or an
-input the config gives as a constant, as the spike's setpoint is. It is
-changed by editing a file and starting the runtime again. A derived
-signal does not read an operator parameter in the first version: those
-exist only with automation enabled and are not kept across a restart.
-Reading one as a live input can be added later without changing this.
+Proposed, for the first version, on no run: a constant is a setting of
+a block in the graph file, or an input the config gives as a constant,
+as the spike's setpoint is. It is changed by editing a file and
+starting the runtime again. A derived signal does not read an operator
+parameter: those exist only with automation enabled and are not kept
+across a restart.
+
+That is enough for a detector's threshold or a sensor's bias and not
+for a controller. A loop whose setpoint and gains change only by a
+restart is a process dropped to its safe state at every step of
+commissioning, since a start drives the outputs safe, and people will
+route round it. A setpoint and a tuning that can be written while the
+runtime runs, taken up without a bump, are a condition of the second
+stage.
 
 ### O5. State across a restart
 
 The mechanism moved to the engine: section 8 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) gives every block a
 way to save and restore its state.
 
-Decided: the first version saves nothing. Every start of the runtime
-is a start of the graph from nothing, and the documentation says so. A
-running total that has to survive a restart is not served until saving
-is added, and the engine's save and restore are there for that.
+Proposed, on no run: the first version saves nothing. Every start of
+the runtime is a start of the graph from nothing. A running total that
+has to survive a restart is not served until saving is added, and the
+engine's save and restore are there for that.
+
+Saying so in the documentation is not enough. A latch, a total or a
+timer loads and reads `good` after a restart that wiped what it held: a
+latched over-temperature clears itself, and a dose total reads zero.
+Open: whether a block whose memory has no end is refused until saving
+exists, or gives `uncertain` from a start until something says its
+history is whole. The engine's counters (`elapsed`, `gaps`) already say
+how long a block has been going, for a consumer that reads them.
 
 What is left for then: which state the runtime saves, where it keeps
 it, which events reset it, and what a changed graph does with an old
@@ -584,7 +725,7 @@ Two things are already clear:
   config is loaded. The stop chain
   observes a stop that has already happened. When its status reads in force
   or unknown, the runtime holds the latch and sends no safe-state calls
-  (`core/control/safe_state.cpp`). A derived over-temperature trip named
+  (`core/runtime/runtime.cpp`, `core/control/stop_chain.cpp`). A derived over-temperature trip named
   there would latch the machine and leave the heater on, and one that is not
   ready at startup would hold on every boot. Nothing forbids it today: the
   stop chain accepts any cached boolean with quality `OK`
@@ -597,7 +738,9 @@ Two things are already clear:
 Decided: the runtime acting on a derived trip by itself, in every mode,
 is not in this RFC. It is a new cause of an autonomous stop and gets an
 RFC of its own, with its own account of what a trip that is not good
-does. Here a derived signal is read by the tree, an operator, telemetry
+does. So the need this began with, a trip that works in `MANUAL`, is
+not met by the first version, and that is said here and not left to be
+found. Here a derived signal is read by the tree, an operator, telemetry
 and HTTP, and the tree acts on it in `AUTO` as it acts on any signal.
 `heater_guard.py` stays until that RFC lands: it stops in `MANUAL`, and
 on a failed HTTP read, which nothing inside the runtime can observe.
@@ -607,8 +750,7 @@ every mode belongs in the device.
 
 ### O7. Time
 
-The engine's side is written, as the first amendment to [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) (sections 6,
-7.2 and 8). A graph has one fixed period. The host passes the time to each
+The engine's side is written, in sections 6, 7.2 and 8 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182). A graph has one fixed period. The host passes the time to each
 call, as whole nanoseconds, and the engine runs every tick that is due.
 Every write carries the time its sample was taken; the write with the
 latest time stands, and is not good past the input's maximum age. A call
@@ -632,8 +774,8 @@ What the engine asks of its host, and what the runtime does today:
   call is a gap and not an hour of catch-up, **and how long the graph was
   away** where the runtime knows. Told, a restored total has the downtime
   in what it missed. Not told, the engine takes the gap as longer than
-  anything it counts, and a total with a limit on what it may miss is
-  `bad` until it is reset.
+  anything it counts, and a total with a limit on what it may miss keeps
+  its value and is `uncertain` until it is reset.
 
 What stays here is how the runtime meets that: which clock it uses, when it
 ticks the graph, what sample time it gives each cached value, and what the
@@ -643,6 +785,8 @@ Proposed, on the spike: **a sample's time is the time the runtime's read
 of it returned, on the runtime's monotonic clock**, and the engine is
 called on that clock. Every sample time and every call are then one clock
 by construction, and a step of the wall clock does not reach the engine.
+It is proposed ahead of the measurement this section says would settle
+it, and it has faults of its own, listed after the spike's runs.
 
 - Spike: the spike used the provider's timestamps, and a provider whose
   clock is not the runtime's stopped the loop. With every sample stamped
@@ -669,6 +813,42 @@ by construction, and a step of the wall clock does not reach the engine.
   the motor ran on at its last duty. On arrival times there is no such
   clock to step. No real clock was stepped.
 
+What a time of arrival gets wrong, none of it run:
+
+- **A reading that has stopped changing.** A provider whose sensor
+  thread has died, or a device that answers with its last conversion,
+  gives the same value at every poll, and each has a new time of
+  arrival. The maximum age never fires. The provider's own timestamp
+  was the evidence, and it is not read.
+- **A value its provider calls `STALE`** goes in as `uncertain` with a
+  new time (O1).
+- **A suspend.** The monotonic clock on Linux does not run while the
+  machine is suspended. After a resume the sample from before it is as
+  young as it was, no gap is reported, and a controller goes on from a
+  measurement that may be an hour old. The spike's stall stops the
+  process, during which that clock runs, and could not show this.
+- **Latency is taken for time.** A time of arrival is the sample's time
+  and the transport's and the wait behind a call. A derivative and an
+  estimator take their step from sample times, so jitter in the read is
+  noise in both.
+- **A graph of two devices.** The engine asks that the inputs of one
+  scan have one time. Each provider is polled on a thread of its own
+  and each device is stamped as its own read returns, so there is no
+  scan. The need O0 says only this layer serves, a value of two
+  providers' signals, has no run.
+- **The sample rate follows the commands.** A loop that commands reads
+  its device at the tree's rate. When the tree stops sending, the rate
+  falls to the poll interval, 500 ms unless given, against a maximum
+  age of 1 s in the spike: two samples of margin when the loop is
+  trying to come back.
+
+Open, and what would settle each: whether the provider's timestamp is
+kept beside the time of arrival, to find a sample that has not moved,
+which needs no change to ADPP; a clock that counts a suspend, or a
+rebase on resume; a run of a `STALE` input; a run of a graph of two
+providers; and distributions of read latency and of skew between
+devices, measured on the rig.
+
 Two more things the spike measured:
 
 - The poll interval is not a loop's sample rate. The call router polls a
@@ -680,8 +860,9 @@ Two more things the spike measured:
   provider answers one request at a time, so the poll of the motor waits
   behind the call.
 
-- Polling is one thread reading devices one after another, and a successful
-  call re-reads its device from the caller's thread
+- Polling is one thread for each provider, reading its devices one
+  after another (one thread in all, when this was first written), and a
+  successful call re-reads its device from the caller's thread
   (`core/control/call_router.cpp`). There is no moment at which the cache is
   one consistent snapshot.
 - A derived statistic cannot be better than the poll. Exercise: a relay with
@@ -710,8 +891,6 @@ Settled by: measuring input age and cross-device skew on recorded data.
 
 P1 reuses the triple. Still open:
 
-- How a derived signal gets a registry entry, against the invariant that the
-  registry changes only on provider restart.
 - Decided: no provider id is reserved. The config names the id the
   derived signals appear under, `derived0` unless given, and a config
   in which that is also a provider's id is refused when it is loaded.
@@ -723,12 +902,11 @@ P1 reuses the triple. Still open:
   `provider_id: derived`); a config held elsewhere was not seen.
 - What the middle segment means when there is no device. The exercise
   invented `heater`, `ph` and `probes`.
-- What the surfaces that list providers show. `GET /v0/providers/health` and
-  the health telemetry enumerate provider processes
-  (`core/health/health_snapshot.cpp`); the poll loop reports a device whose
-  provider is missing as unavailable.
-- Whether a derived number that changes a little on every evaluation floods
-  events and telemetry, which are written on any change of value.
+- Whether a graph's outputs are one device or several (O1).
+
+Answered below, from reading the code: how a derived signal gets a
+registry entry, what the surfaces that list providers show, and whether
+a number that changes at every call floods events and telemetry.
 
 #### What the layer touches
 
@@ -771,9 +949,10 @@ Needs nothing, with the reason:
   misleads. A new lifecycle state for it would change a closed
   enumeration and is not proposed.
 - **The supervision loop.** It walks the configured providers and
-  passes the handle by, so the handle must never report itself
-  unavailable or fail a read: a failed read is taken for a lost device
-  and latches it.
+  passes the handle by, so nothing restarts it and nothing notices that
+  it has stopped. A read it failed would be taken for a lost device and
+  latch it, which helps nobody. So it answers every read, and says that
+  its graph has stopped by the quality of each output (P6).
 
 Costs that are not contracts:
 
@@ -805,9 +984,62 @@ where each input comes from. Spike: built so.
 ### O10. Where the layer runs
 
 Proposed as P6: in the runtime, behind the provider interface. One of the
-two spikes this asked for is built, and the other, in a provider, is not.
-What is open is under P6: supervision of a handle that is not a process,
-and how the layer is handed each read so that it does not race the poll.
+two spikes this asked for is built, and the other, in a provider, is not;
+keeping changes to ADPP out of scope is part of why, since that
+placement needs one. One spike is taken as enough for signals that are
+read. It is not taken as enough for commands. What is open is under
+P6: what a graph may cost the process it shares, and the race with the
+poll after a stall, which handing the layer each read did not remove.
+
+## What is missing
+
+What a reviewer of a control system asks for first, and is not here.
+
+**What each failure does.** For a derived signal that is only read, in
+the first version:
+
+| The output is | A reader sees | Who notices | Bounded by |
+| --- | --- | --- | --- |
+| `bad` | `FAULT`, and a value of 0 or `false` | Health, for the device as a whole | Nothing: it stands until the input comes back |
+| `uncertain` | `STALE`, with a value | Health; a consumer that asks for `OK` | Nothing |
+| `not_ready` | `UNAVAILABLE`, and a value of 0 or `false` | The same | The window or the filter filling |
+| late: the graph called late | The last value, with its quality, for as long | Nobody, short of three call intervals | The check that the graph is alive (P6) |
+| stopped: the graph hung or threw | `FAULT` after three call intervals | Health | The same |
+| wrong, and `good` | `OK` | Nobody | Nothing. An estimator's `good` says its own tests passed |
+| absent: no `derived:` section read, on an older runtime | No such signal | A consumer that names it | Nothing: a warning in the log |
+
+For an output handed to an actuator, in the second stage, the last
+column is the lifetime and the fail action P2 decides, and until those
+exist the answer in every row is that the actuator keeps its last
+command.
+
+**Raising it.** In two findings of the spike a loop stopped for good,
+in `AUTO`, with the motor at its last duty, and the only trace was a
+count. Nothing here says what event, alarm or change of mode follows an
+output that has not been `OK` for a stated time. P2 requires one for a
+command; a signal that is read has none.
+
+**Which graph ran.** Nothing in telemetry or in the runtime's status
+names the graph file a value came from, by hash or by version, so a
+recorded run cannot be tied to its definition.
+
+**Starting.** The first output is not usable: the engine is called
+before the first poll. Nothing says whether `AUTO` may be entered
+before a graph is ready.
+
+**Timing.** No figure for how long a tick takes, how late one runs, or
+how old an input is when it is used, on Linux or on Windows.
+
+**Hardware.** Every figure of the spike is from a simulator (Evidence).
+
+**Modes of a loop.** Manual, automatic and cascade for each loop, an
+operator's output in manual, a setpoint that ramps: none is here, and
+each belongs to the second stage.
+
+**A class of machine.** What the layer may and may not be used on, in
+the terms of [safety.md](../safety.md). The layer is not a safety
+function. A control function whose failure moves an actuator still
+starts events, and the table above is the beginning of saying which.
 
 ## Rejected
 
@@ -833,7 +1065,7 @@ what belongs there.
 
 ## How this proceeds
 
-1. O0 and O11 are decided.
+1. O0 and O11 are decided, and the choices the status line names.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
    conformance vectors are written there. Its third revision was amended
    a section at a time, thirteen times, and its fourth has those
@@ -858,7 +1090,7 @@ what belongs there.
    catalogue now has a rate limit and a PID. With an input it cannot use
    a PID gives no value, so what an actuator gets then is this runtime's
    to say (O6), and it winds up behind a limit unless it is told what
-   was applied. Four amendments since bear on a host. A graph lists the
+   was applied. Five amendments since bear on a host. A graph lists the
    outputs its host hands to an actuator, and a controller that feeds
    one acts once a call and not once for every tick a late call catches
    up: in the spike, with samples that stayed usable through a 3 s
@@ -881,8 +1113,10 @@ what belongs there.
    clock.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
-4. O10 is proposed as P6 on one spike. It is reviewed independently before
-   it is decided.
+4. O10 is proposed as P6 on one spike. The fourth revision was reviewed
+   independently, by a reading for control and safety and by a check of
+   each claim against its source; this revision is the answer to both.
+   What they asked for and is not done is under "What is missing".
 5. Accepted, the RFC becomes an epic with increments.
 
 ## Prior art
