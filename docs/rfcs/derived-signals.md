@@ -646,8 +646,9 @@ what belongs there.
 
 1. O0 and O11 are decided.
 2. The engine's semantics are argued in FluxGraph's proposal, and its
-   conformance vectors are written there. It is amended a section at a
-   time. Time and the host interface, how doubt passes through a block's
+   conformance vectors are written there. Its third revision was amended
+   a section at a time, thirteen times, and its fourth has those
+   amendments worked into its text. Time and the host interface, how doubt passes through a block's
    memory, what a gap does to each block, how models are stepped, and the
    estimator are written. It keeps a list of what is known to be wrong
    as it stands: at this writing a derivative of a low-pass, an input
