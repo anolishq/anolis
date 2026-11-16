@@ -1,0 +1,37 @@
+# The speed loop with an estimator of the motor's speed beside it: the
+# simulator's own model, 3000 rpm at a duty of 1 with a time constant of
+# 0.8 s, fed the duty the motor reports and the speed it measures. The
+# simulator's speed has no noise, so `r` is small and what the estimator
+# refuses is timing.
+# The speed loop told when nothing acts on it: `idle` is true while the
+# runtime is not in AUTO or holds the motor in its device-loss latch, and
+# the controller then follows the duty the motor reports.
+# A speed loop on the simulator's motor, in the shape of section 9 of
+# FluxGraph's version 2 proposal. The plant is first order, 3000 rpm at a
+# duty of 1 with a time constant of 0.8 s; the gains are for that and for
+# about 0.3 s of delay round the loop.
+period: 100ms
+commands: [duty]
+inputs:
+  setpoint: {max_age: none}
+  speed: {max_age: 1s}
+  applied: {max_age: 1s}
+  idle: {type: boolean, max_age: 1s}
+blocks:
+  - id: c
+    type: pid
+    in: {setpoint: setpoint, measurement: speed, track: applied, follow: idle}
+    settings: {kp: 0.00044, ki: 0.00055, min: 0, max: 1}
+    out: {y: duty, integral: integral, limited: limited}
+  - id: k
+    type: estimator
+    in: {u: applied, z: speed}
+    settings:
+      model: {type: first_order_process, tau: 800ms, gain: 3000}
+      q: {y: 100}
+      p0: {y: 10000}
+      measure: {z: {of: y, r: 1}}
+      gate: 3
+      max_refused: 5
+      consistency: {over: 20, limit: 2}
+    out: {y: est, sigma_y: est_sigma, nis_z: est_nis, refused_z: est_refused, late_z: est_late}

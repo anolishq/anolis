@@ -27,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 SETPOINT = 1500.0
 # Functions of chaos_control in anolis-provider-sim
 FN_SIGNAL_FAULT, FN_CALL_LATENCY, FN_UNREACHABLE = 2, 3, 6
+ESTIMATOR = ["est", "est_sigma", "est_nis", "est_refused", "est_late"]  # of motor-estimator.yaml
 COUNTS = [
     "host_calls",
     "host_ticks",
@@ -130,6 +131,7 @@ def main():
     parser.add_argument("--max-age", default="1s", help="of the speed and of the applied duty")
     parser.add_argument("--graph-line", default="", help="one more top-level line for the graph, as max_catch_up: 3")
     parser.add_argument("--sample-time", choices=["arrival", "provider"], default="arrival")
+    parser.add_argument("--without", default="", help="text to take out of the graph, as ', late_z: est_late'")
     parser.add_argument("--skew-ms", type=int, default=0, help="added to every sample time the graph is given")
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--dump", action="store_true", help="print one /v0/state answer and stop")
@@ -157,7 +159,9 @@ def main():
         )
     )
     (out / "graph.yaml").write_text(
-        args.graph.read_text().replace("max_age: 1s", f"max_age: {args.max_age}") + args.graph_line + "\n"
+        args.graph.read_text().replace(args.without or "\0", "").replace("max_age: 1s", f"max_age: {args.max_age}")
+        + args.graph_line
+        + "\n"
     )
     log = open(out / "runtime.log", "w")
     runtime = subprocess.Popen(
@@ -231,6 +235,8 @@ def main():
                 + [graph["integral"][0], graph["limited"][0]]
                 + [graph[name][0] for name in COUNTS]
             )
+            est = {name: got.get(("derived0", "graph", name), (None, None)) for name in ESTIMATOR}
+            rows[-1] += [est["est"][0], est["est"][1]] + [est[name][0] for name in ESTIMATOR[1:]]
             time.sleep(0.05)
     finally:
         runtime.send_signal(signal.SIGINT)
@@ -241,6 +247,7 @@ def main():
         log.close()
 
     header = ["t", "speed", "applied", "duty", "duty_quality", "integral", "limited"] + COUNTS
+    header += ["est", "est_quality"] + ESTIMATOR[1:]
     with open(out / "samples.csv", "w", newline="") as f:
         csv.writer(f).writerows([header] + rows)
 
@@ -278,6 +285,15 @@ def main():
             f"({100 * (max(after) / SETPOINT - 1):+.1f}%)"
         )
     print(f"  mean over the last 3 s: {sum(tail) / len(tail):.1f} rpm")
+    base = 7 + len(COUNTS)
+    if any(r[base] is not None for r in rows):
+        seen = [r for r in rows if r[base] is not None and r[0] >= 1.0]
+        doubted = sum(r[base + 1] != "OK" for r in seen)
+        apart = [abs(r[base] - r[1]) for r in seen if isinstance(r[1], (int, float))]
+        print(
+            f"  the estimator, from 1 s: not OK in {doubted} of {len(seen)} samples, refused {rows[-1][base + 4]}, "
+            f"late {rows[-1][base + 5]}, furthest from the speed {max(apart):.1f} rpm"
+        )
     qualities = sorted({str(r[4]) for r in rows})
     print(f"  qualities of duty seen: {qualities}")
     print("  " + ", ".join(f"{name} {rows[-1][7 + i]}" for i, name in enumerate(COUNTS)))

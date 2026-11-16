@@ -45,9 +45,10 @@ python3 tools/derived-signals/runtime-spike/run.py \
 
 The build pins FluxGraph's spike branch by commit.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
-clone, which is how every figure here was made: the runs on
-arrival times and those with `--rearm-at`, `--signal-fault-s` or
-`--call-latency-ms` against the commit pinned, those with `--call-ms`,
+clone, which is how every figure here was made: the runs of
+the estimator against the commits named with them, those on arrival
+times and with `--rearm-at`, `--signal-fault-s` or `--call-latency-ms`
+against `10fff0f`, those with `--call-ms`,
 `--skew-ms`, `--max-age` or `--graph-line` against the one before it,
 `c3ec3a5`, and the other six against the working tree that became that.
 
@@ -97,6 +98,22 @@ that clock. With `--graph motor-pid-follow.yaml` and samples on arrival:
 | `--stall-s 3 --at 1` | 4.9 s | 1373, 1500 rpm |
 | `--stall-s 3 --at 1 --max-age 5s` | 6.6 s | 1191, 1500 rpm |
 | `--unreachable-s 3 --at 8 --rearm-at 14 --seconds 26` | 17.2 s | 28, 1500 rpm |
+
+`motor-estimator.yaml` adds an estimator of the motor's speed: the
+simulator's own model, fed the duty the motor reports and the speed it
+measures. One run each of 20 s, with the engine before and after its
+thirteenth amendment (FluxGraph at `2fda562` and at `ea5ede7`); the
+first three take `--without ", late_z: est_late"`, an output the
+earlier engine has not got.
+
+| Flags | Estimator not OK, of about 370 samples from 1 s | Measurements refused | Furthest from the speed |
+| --- | --- | --- | --- |
+| before, none more | 0 | 0 | 94 rpm |
+| before, `--call-ms 130` | 66 | 11 | 178 rpm |
+| before, `--call-ms 70` | 38 | 4 | 124 rpm |
+| after, none more | 0 | 0 | 18 rpm |
+| after, `--call-ms 130` | 32 | 7 | 155 rpm |
+| after, `--call-ms 70` | 0 | 1 | 63 rpm |
 
 ## What it found
 
@@ -192,7 +209,18 @@ that clock. With `--graph motor-pid-follow.yaml` and samples on arrival:
     than the last, and the spike then rebases. On arrival times it
     cannot. `--skew-ms` moves the provider's sample times and not a
     clock, and no run stepped one.
-12. **The first output is `bad`.** The engine is called before the first
+12. **An estimator that works between samples doubts itself less on a
+    host off the period, and not never.** With the engine called 30%
+    slower or faster than its period, the estimator of the motor's speed
+    was not OK in 66 and 38 of some 370 samples under the rule as it
+    was, and in 32 and 0 under the amended one; called on the period it
+    was OK throughout under both, and 18 rpm from the speed at most
+    where it had been 94. These are single runs. What is left on the
+    slow host is not all the estimator's: the simulator steps its motor
+    ten times a second, so a speed read between two steps is up to
+    100 ms older than the time its read returned, and no time the
+    runtime has says so.
+13. **The first output is `bad`.** The engine is called before the first
     poll has put the speed in the cache.
 
 ## What is not here
