@@ -107,6 +107,7 @@ private:
     std::unique_ptr<fluxgraph::v2::Engine> engine_;
     std::vector<Input> inputs_;
     std::int64_t interval_ns_ = 0;
+    std::chrono::steady_clock::time_point started_;
 
     std::thread thread_;
     std::atomic<bool> running_{false};

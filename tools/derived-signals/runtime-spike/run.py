@@ -8,12 +8,16 @@
 It writes a runtime config into --out, starts the runtime, goes to AUTO, samples /v0/state every 50 ms into
 samples.csv, and prints what the loop did. --stall-s stops the runtime process for that long, --at seconds in;
 --unreachable-s has the simulator fail the motor's reads for that long, --at seconds in. --graph names another
-graph file with the same inputs and outputs; one that has `follow: idle` is given `idle`.
+graph file with the same inputs and outputs; one that has `follow: idle` is given `idle`. --kill-provider kills
+the simulator, --at seconds in, and the runtime restarts it. --clock-step-ms and --sample-step-ms step the clock
+the spike reads, --at seconds in: the first the calls and the sample times together, the second the sample times
+alone; they mean something with --sample-time provider only.
 """
 
 import argparse
 import csv
 import json
+import os
 import signal
 import socket
 import subprocess
@@ -49,6 +53,10 @@ providers:
   - id: sim0
     command: {provider}
     args: ["--config", "{sim_config}"]
+    restart_policy:
+      enabled: true
+      max_attempts: 3
+      backoff_ms: [200, 500, 1000]
 polling:
   interval_ms: {poll_ms}
 telemetry:
@@ -80,6 +88,9 @@ derived:
   call_interval_ms: {call_ms}
   sample_time: {sample_time}
   sample_skew_ms: {skew_ms}
+  clock_step_ms: {clock_step_ms}
+  sample_step_ms: {sample_step_ms}
+  step_after_s: {step_after_s}
   inputs:
     setpoint: {{constant: {setpoint}}}
     speed: {{device_handle: sim0/motorctl0, signal_id: motor1_speed}}
@@ -133,6 +144,10 @@ def main():
     parser.add_argument("--sample-time", choices=["arrival", "provider"], default="arrival")
     parser.add_argument("--without", default="", help="text to take out of the graph, as ', late_z: est_late'")
     parser.add_argument("--skew-ms", type=int, default=0, help="added to every sample time the graph is given")
+    parser.add_argument("--kill-provider", action="store_true", help="kill the simulator, --at seconds in")
+    parser.add_argument("--tree", type=Path, default=HERE / "tree.xml")
+    parser.add_argument("--clock-step-ms", type=int, default=0)
+    parser.add_argument("--sample-step-ms", type=int, default=0)
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--dump", action="store_true", help="print one /v0/state answer and stop")
     args = parser.parse_args()
@@ -151,9 +166,12 @@ def main():
             poll_ms=args.poll_ms,
             call_ms=args.call_ms,
             skew_ms=args.skew_ms,
+            clock_step_ms=args.clock_step_ms,
+            sample_step_ms=args.sample_step_ms,
+            step_after_s=args.at,
             sample_time=args.sample_time,
             idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
-            tree=HERE / "tree.xml",
+            tree=args.tree.resolve(),
             graph=out / "graph.yaml",
             setpoint=SETPOINT,
         )
@@ -185,7 +203,7 @@ def main():
         http(base, "/v0/mode", {"mode": "AUTO"})
         start = time.monotonic()
 
-        rows, stalled, rearmed = [], False, False
+        rows, stalled, rearmed, modes = [], False, False, []
         while (t := time.monotonic() - start) < args.seconds:
             if args.stall_s and not stalled and t >= args.at:
                 runtime.send_signal(signal.SIGSTOP)
@@ -214,12 +232,21 @@ def main():
                 except urllib.error.HTTPError as e:
                     sys.exit(f"the fault could not be injected: {e.code} {e.read().decode()}")
                 stalled = True
+            if args.kill_provider and not stalled and t >= args.at:
+                children = Path(f"/proc/{runtime.pid}/task/{runtime.pid}/children").read_text().split()
+                if len(children) != 1:
+                    sys.exit(f"the runtime has {len(children)} children, and one was looked for")
+                os.kill(int(children[0]), signal.SIGKILL)
+                stalled = True
             if args.rearm_at and not rearmed and t >= args.rearm_at:
                 http(base, "/v0/mode", {"mode": "MANUAL"})
                 http(base, "/v0/mode", {"mode": "AUTO"})
                 rearmed = True
             try:
                 got = signals(http(base, "/v0/state"))
+                mode = http(base, "/v0/mode").get("mode")
+                if not modes or modes[-1][1] != mode:
+                    modes.append((round(t, 2), mode))
             except OSError:
                 time.sleep(0.05)
                 continue
@@ -259,6 +286,7 @@ def main():
             break
         settled = t
     disturbed = args.stall_s or args.unreachable_s or args.signal_fault_s or args.call_latency_ms
+    disturbed = disturbed or args.kill_provider or args.clock_step_ms or args.sample_step_ms
     before = [v for t, v in speeds if t < args.at] if disturbed else [v for _, v in speeds]
     tail = [v for t, v in speeds if t >= args.seconds - 3.0]
     print(
@@ -267,6 +295,8 @@ def main():
         f"call latency {args.call_latency_ms} ms, at {args.at} s, max_age {args.max_age}, "
         f"sample time {args.sample_time}, skew {args.skew_ms} ms, "
         f"{args.graph_line or 'no line more'}, "
+        f"{'provider killed, ' if args.kill_provider else ''}"
+        f"clock step {args.clock_step_ms} ms, sample step {args.sample_step_ms} ms, tree {args.tree.name}, "
         f"{len(rows)} samples"
     )
     print(f"  first within 5% of {SETPOINT:g} rpm at {within} s; within 5% from {settled} s to the end")
@@ -296,6 +326,13 @@ def main():
         )
     qualities = sorted({str(r[4]) for r in rows})
     print(f"  qualities of duty seen: {qualities}")
+    runs, last = [], None
+    for r in rows:  # when the duty's quality changed
+        if str(r[4]) != last:
+            last = str(r[4])
+            runs.append(f"{last} from {r[0]:g} s")
+    print("  " + ", ".join(runs[:12]))
+    print("  modes: " + ", ".join(f"{mode} from {t} s" for t, mode in modes))
     print("  " + ", ".join(f"{name} {rows[-1][7 + i]}" for i, name in enumerate(COUNTS)))
 
 

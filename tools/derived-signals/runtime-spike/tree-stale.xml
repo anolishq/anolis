@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <!--
+    As tree.xml, but a duty that is STALE is sent too: the graph's
+    `uncertain`, a value it gives and does not vouch for.
+  -->
+  <BehaviorTree ID="MotorSpeedLoop">
+    <Sequence>
+      <Fallback>
+        <CheckQuality device_handle="derived0/graph" signal_id="duty" expected_quality="OK"/>
+        <CheckQuality device_handle="derived0/graph" signal_id="duty" expected_quality="STALE"/>
+      </Fallback>
+      <ReadSignal device_handle="derived0/graph" signal_id="duty" value="{duty}" quality="{quality}"/>
+      <BuildArgsJson arg1_name="motor_index" arg1_type="int64" arg1_num="1"
+                     arg2_name="duty" arg2_type="double" arg2_num="{duty}" json="{args}"/>
+      <CallDevice device_handle="sim0/motorctl0" function_name="set_motor_duty" args="{args}"
+                  success="{ok}" error="{error}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

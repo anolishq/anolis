@@ -181,6 +181,7 @@ bool DerivedProvider::start() {
                           << engine_->period() / 1'000'000 << " ms, called every " << interval_ns_ / 1'000'000
                           << " ms, " << inputs_.size() << " inputs, " << published_.size() << " outputs");
 
+    started_ = std::chrono::steady_clock::now();
     running_ = true;
     thread_ = std::thread([this]() { run(); });
     return true;
@@ -241,11 +242,15 @@ void DerivedProvider::call_once() {
     // sample's time is when its read returned. Otherwise the cache's times are each provider's wall clock, the
     // calls are on the wall clock too, and a step of it reaches the engine.
     const bool on_arrival = config_.sample_time_on_arrival;
+    const bool stepped =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count() >= config_.step_after_s;
+    const std::int64_t clock_step = stepped ? std::int64_t{config_.clock_step_ms} * 1'000'000 : 0;
+    const std::int64_t sample_step = clock_step + (stepped ? std::int64_t{config_.sample_step_ms} * 1'000'000 : 0);
     const std::int64_t now =
         on_arrival
             ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
                   .count()
-            : system_now_ns();
+            : system_now_ns() + clock_step;
     Counts counts;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -280,7 +285,7 @@ void DerivedProvider::call_once() {
             } else {
                 const std::int64_t at =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count() +
-                    std::int64_t{config_.sample_skew_ms} * 1'000'000;
+                    std::int64_t{config_.sample_skew_ms} * 1'000'000 + sample_step;
                 count(write(input, state_of(cached->quality), as_double(cached->value), at), input);
             }
         }

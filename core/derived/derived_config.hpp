@@ -30,6 +30,13 @@ struct DerivedConfig {
     int call_interval_ms = 0;            // How often the engine is called; 0 is the graph's period
     bool sample_time_on_arrival = true;  // O7: a sample's time is when its read returned, on the monotonic clock
     int sample_skew_ms = 0;  // Added to every sample time: a provider whose clock is that far from the runtime's
+    // A clock that steps, which no run can make of a real one: from step_after_s after the start, clock_step_ms
+    // is added to the wall clock the calls and the cache's sample times are on (the runtime's and a provider's
+    // on one machine), and sample_step_ms to the sample times alone (a provider's clock by itself). Neither
+    // touches samples timed on arrival.
+    int clock_step_ms = 0;
+    int sample_step_ms = 0;
+    double step_after_s = 0.0;
     std::vector<DerivedInputConfig> inputs;
 };
 

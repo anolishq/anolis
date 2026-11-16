@@ -890,7 +890,8 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             const auto &derived = yaml["derived"];
             warn_unknown_keys(derived, "derived",
-                              {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "inputs"});
+                              {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "clock_step_ms",
+                               "sample_step_ms", "step_after_s", "inputs"});
             if (!derived["graph"]) {
                 error = "derived.graph is required";
                 return false;
@@ -917,6 +918,15 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (derived["sample_skew_ms"]) {
                 config.derived.sample_skew_ms = derived["sample_skew_ms"].as<int>();
+            }
+            if (derived["clock_step_ms"]) {
+                config.derived.clock_step_ms = derived["clock_step_ms"].as<int>();
+            }
+            if (derived["sample_step_ms"]) {
+                config.derived.sample_step_ms = derived["sample_step_ms"].as<int>();
+            }
+            if (derived["step_after_s"]) {
+                config.derived.step_after_s = derived["step_after_s"].as<double>();
             }
             if (derived["inputs"]) {
                 if (!ensure_mapping(derived["inputs"], "derived.inputs", error)) {

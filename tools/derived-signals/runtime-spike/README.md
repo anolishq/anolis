@@ -51,6 +51,8 @@ times and with `--rearm-at`, `--signal-fault-s` or `--call-latency-ms`
 against `10fff0f`, those with `--call-ms`,
 `--skew-ms`, `--max-age` or `--graph-line` against the one before it,
 `c3ec3a5`, and the other six against the working tree that became that.
+The runs under "A restart, a doubted command and a clock that steps"
+are against `c794977`.
 
 ## What it did
 
@@ -114,6 +116,47 @@ earlier engine has not got.
 | after, none more | 0 | 0 | 18 rpm |
 | after, `--call-ms 130` | 32 | 7 | 155 rpm |
 | after, `--call-ms 70` | 0 | 1 | 63 rpm |
+
+### A restart, a doubted command and a clock that steps
+
+All with `--graph motor-pid-follow.yaml` but where another graph is
+named, and samples timed on arrival but where `--sample-time provider`
+is given.
+
+`--kill-provider` kills the simulator 8 s in. The runtime restarts it
+within 0.3 s, and the new process has its motor at rest.
+
+| Flags | What the runtime did | Speed after it |
+| --- | --- | --- |
+| `--kill-provider --at 8`, seven runs | FAULT 0.31 to 0.35 s after, on the tree's third failed call | 0 rpm, and stays there |
+| `--kill-provider --at 8 --rearm-at 14 --seconds 26`, the run where the restart came before the third call | stayed in AUTO | from rest to 1650 rpm (+10%), within 5% from 10.6 s |
+| the same with the default graph, which has no `follow` | FAULT at 8.31 s, AUTO again at 14 s | from rest to 1621 rpm (+8%) at the re-arm |
+
+`motor-pid-ride.yaml` takes the speed through a low-pass that rides
+through 2 s, so that with the speed reading FAULT for 1.5 s during the
+step the controller runs on the last speed it had and its `duty` is
+`uncertain`, STALE to the runtime. Each with
+`--signal-fault-s 1.5 --at 1 --seconds 12`:
+
+| Also | The duty while STALE | Highest speed | Within 5% for good from |
+| --- | --- | --- | --- |
+| nothing | not sent | 1701 rpm (+13%) | 4.6 s |
+| `--tree tree-stale.xml`, which sends a STALE duty too | sent | 2429 rpm (+62%) | 4.5 s |
+| `--graph motor-pid-ride-applied.yaml`: the PID's `applied` wired to the duty the motor reports, `applied_within: 0.02` | not sent | 1499 rpm | 7.7 s |
+
+`--clock-step-ms` and `--sample-step-ms` move the clock the spike
+reads, 8 s in, with the loop at 1500 rpm: the first the calls and the
+sample times together, as the wall clock of one machine stepping; the
+second the sample times alone, as a provider's clock stepping by
+itself. Each with `--sample-time provider --at 8`:
+
+| Flags | What the engine did | The loop |
+| --- | --- | --- |
+| `--clock-step-ms 30000` | one gap of 300 ticks | 1500 rpm throughout |
+| `--clock-step-ms -30000` | refused one call; rebased; a gap of no known length; 4 writes thrown away; `duty` not ready for one poll | 1500 rpm throughout |
+| `--sample-step-ms -300` | threw 4 writes away | 1500 rpm throughout |
+| `--sample-step-ms 2000` | threw every sample away, 242 by the end | `duty` FAULT from 0.84 s after and for good; the motor kept its last duty |
+| `--sample-step-ms -2000` | threw 38 away, and then every sample was past its maximum age | the same |
 
 ## What it found
 
@@ -204,11 +247,7 @@ earlier engine has not got.
     before any read has returned, on the sample from before it, and
     with a maximum age of 5 s the speed still dipped, to 1191 rpm. What
     makes a stall safe is the maximum age.
-    **Not tested: a clock that steps.** On the provider's times a step
-    of the wall clock reaches the engine, which refuses a call earlier
-    than the last, and the spike then rebases. On arrival times it
-    cannot. `--skew-ms` moves the provider's sample times and not a
-    clock, and no run stepped one.
+    A clock that steps is finding 16.
 12. **An estimator that works between samples doubts itself less on a
     host off the period, and not never.** With the engine called 30%
     slower or faster than its period, the estimator of the motor's speed
@@ -223,8 +262,55 @@ earlier engine has not got.
 13. **The first output is `bad`.** The engine is called before the first
     poll has put the speed in the cache.
 
+14. **A provider that dies is silent to a graph fed on arrival.** While
+    the simulator was down the state cache paused its polls, so no read
+    returned and the spike was told nothing: the graph went on giving
+    `duty` as OK from the last speed it had, for the 0.3 s the restart
+    took. Its only notice would have been the input's maximum age, 1 s.
+    What stopped the loop was the tree: three calls failed in a row and
+    the runtime went to FAULT, in seven runs of eight. The safe-state
+    call failed too, the provider being gone.
+15. **A restart the runtime rides through resets the plant and not the
+    controller.** In the eighth run the restart finished between the
+    second failed call and the third, the runtime stayed in AUTO, and
+    the new simulator had its motor at rest. The graph still held the
+    integral of a loop at 1500 rpm, 0.50, and nothing told it to
+    follow: the runtime was acting. The duty went to its limit and the
+    speed to 1650 rpm, 10% over. `follow` is driven by what the runtime
+    knows, AUTO and the device-loss latch, and neither moved. Which of
+    the two happens is a race between the restart's backoff, 200 ms
+    here, and three ticks of the tree.
+16. **A doubted command is worse sent than not, and not sending it is
+    not free.** With `ride_through` on the measurement the controller
+    ran for 1.5 s on a speed that was no longer true. Sent, as
+    `tree-stale.xml` does, the duty went to its limit and the speed to
+    2429 rpm, 62% over. Not sent, the motor kept its last duty, as in
+    finding 9, and the controller, which cannot know its command was
+    not sent, wound up against a motor that was not listening: 13% over
+    when the speed came back. Without `ride_through` (finding 9) the
+    `duty` was `bad`, the controller waited, and there was no overshoot.
+    Wiring the duty the motor reports to the PID's `applied` took the
+    overshoot away and cost the step: with `applied_within: 0.02` the
+    loop took 7.7 s to settle where it takes 3.2 s, the reported duty
+    being a tick behind the one given. These are single runs. The graph
+    needs to know that its command was not sent, and P2 gives it no way
+    but the device's own report.
+17. **A step of the one clock is taken in stride; a provider's clock
+    stepping by itself stops the loop for good.** With the calls and
+    the sample times stepped together by 30 s the engine saw a gap of
+    300 ticks going forward and, going back, refused one call, was
+    rebased, and gave no `duty` for one poll; the speed did not move
+    off 1500 rpm in either. With the sample times alone stepped by 2 s,
+    either way, every sample from then on was thrown away or too old,
+    `duty` was `bad` from 0.84 s after, the tree sent nothing, the
+    runtime stayed in AUTO, and the motor ran on at its last duty: what
+    finding 2 has from the start, arrived at in the middle of a run. A
+    step back of 300 ms, inside the maximum age, cost 4 samples. No
+    real clock was stepped: the spike adds the step to the times it
+    reads. On arrival times there is nothing to step.
+
 ## What is not here
 
-A provider restart, a second device, telemetry, a tree that is not in
+A second device, telemetry, a tree that is not in
 AUTO at the start, a graph changed while the runtime runs, a build with
 automation off, tests. The other placement, in a provider, is not built.

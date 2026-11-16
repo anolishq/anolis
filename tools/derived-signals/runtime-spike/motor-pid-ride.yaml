@@ -1,0 +1,20 @@
+# The speed loop told when nothing acts on it, with the speed taken
+# through a low-pass that rides through 2 s of a speed it cannot use: the
+# controller then runs on the last speed it had, and says `uncertain`.
+period: 100ms
+commands: [duty]
+inputs:
+  setpoint: {max_age: none}
+  speed: {max_age: 1s}
+  applied: {max_age: 1s}
+  idle: {type: boolean, max_age: 1s}
+blocks:
+  - id: f
+    type: lowpass
+    in: {x: speed}
+    settings: {tau: 20ms, ride_through: 2s}
+  - id: c
+    type: pid
+    in: {setpoint: setpoint, measurement: f.y, track: applied, follow: idle}
+    settings: {kp: 0.00044, ki: 0.00055, min: 0, max: 1}
+    out: {y: duty, integral: integral, limited: limited}
