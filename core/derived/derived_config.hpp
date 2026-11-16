@@ -38,6 +38,13 @@ struct DerivedConfig {
     // a read of the device has returned: a restart the runtime stays in AUTO through leaves the plant new and
     // the graph as it was.
     bool idle_on_provider_loss = true;
+    // What a reading its provider gives as STALE is written as. "bad": there is no value now, since the provider
+    // says the one it has is too old and the runtime does not know how old. "uncertain": the value, as new, as
+    // the spike first did. "skip": nothing, and the input's own maximum age judges what stands.
+    std::string stale_input = "bad";
+    // Every FAULT the motor's provider gives is taken as STALE: the simulator can be made to give the one and
+    // not the other.
+    bool fault_reads_stale = false;
     // The calling thread stops calling the engine this long after the start, and does nothing else: a graph
     // that hangs, which no run can make of a real one. 0 is never.
     double hang_after_s = 0.0;

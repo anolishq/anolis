@@ -21,7 +21,7 @@ namespace fg = fluxgraph::v2;
 
 // The names the calling thread's counts are published under.
 constexpr const char *kCountNames[] = {"host_calls",         "host_ticks",          "host_most_ticks", "host_gaps",
-                                       "host_refused_calls", "host_refused_writes", "host_thrown"};
+                                       "host_refused_calls", "host_refused_writes", "host_thrown",     "host_stale"};
 
 std::int64_t system_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch())
@@ -250,9 +250,22 @@ void DerivedProvider::on_read(const std::string &device_handle, const adpp::Read
             continue;
         }
         for (const auto &value : response->values()) {
-            if (value.signal_id() == config.signal_id) {
-                waiting_.push_back({i, state_of(value.quality()), as_double(value.value()), at});
+            if (value.signal_id() != config.signal_id) {
+                continue;
             }
+            auto quality = value.quality();
+            if (config_.fault_reads_stale && quality == adpp::SignalValue_Quality_QUALITY_FAULT) {
+                quality = adpp::SignalValue_Quality_QUALITY_STALE;
+            }
+            fg::State state = state_of(quality);
+            if (quality == adpp::SignalValue_Quality_QUALITY_STALE) {
+                stale_ += 1;
+                if (config_.stale_input == "skip") {
+                    continue;
+                }
+                state = config_.stale_input == "bad" ? fg::State::bad : fg::State::uncertain;
+            }
+            waiting_.push_back({i, state, as_double(value.value()), at});
         }
     }
 }
@@ -318,7 +331,15 @@ void DerivedProvider::call_once() {
                 const std::int64_t at =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count() +
                     std::int64_t{config_.sample_skew_ms} * 1'000'000 + sample_step;
-                count(write(input, state_of(cached->quality), as_double(cached->value), at), input);
+                fg::State state = state_of(cached->quality);
+                const bool stale = cached->quality == adpp::SignalValue_Quality_QUALITY_STALE;
+                if (stale) {
+                    stale_ += 1;
+                    state = config_.stale_input == "bad" ? fg::State::bad : fg::State::uncertain;
+                }
+                if (!stale || config_.stale_input != "skip") {
+                    count(write(input, state, as_double(cached->value), at), input);
+                }
             }
         }
     }
@@ -342,6 +363,7 @@ void DerivedProvider::call_once() {
         }
     }
 
+    counts.stale = static_cast<double>(stale_.load());
     std::lock_guard<std::mutex> lock(mutex_);
     counts_ = counts;
     if (report && report->ran > 0) {
@@ -440,7 +462,7 @@ bool DerivedProvider::read_signals(const std::string &device_id, const std::vect
         set_timestamp(out->mutable_timestamp(), at);
     }
     const double counts[] = {counts_.calls,         counts_.ticks,          counts_.most_ticks, counts_.gaps,
-                             counts_.refused_calls, counts_.refused_writes, counts_.thrown};
+                             counts_.refused_calls, counts_.refused_writes, counts_.thrown,     counts_.stale};
     for (std::size_t i = 0; i < std::size(kCountNames); ++i) {
         if (!wanted(kCountNames[i])) {
             continue;

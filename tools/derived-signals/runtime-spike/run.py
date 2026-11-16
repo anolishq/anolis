@@ -40,6 +40,7 @@ COUNTS = [
     "host_refused_calls",
     "host_refused_writes",
     "host_thrown",
+    "host_stale",
 ]
 
 CONFIG = """
@@ -93,6 +94,8 @@ derived:
   step_after_s: {step_after_s}
   idle_on_provider_loss: {idle_on_loss}
   hang_after_s: {hang_after_s}
+  stale_input: {stale_input}
+  fault_reads_stale: {fault_stale}
   alive_within_calls: {alive_within}
   inputs:
     setpoint: {{constant: {setpoint}}}
@@ -150,6 +153,8 @@ def main():
     parser.add_argument("--kill-provider", action="store_true", help="kill the simulator, --at seconds in")
     parser.add_argument("--backoff-ms", type=int, default=200, help="before the first restart of the simulator")
     parser.add_argument("--not-idle-on-loss", action="store_true", help="`idle` does not follow the provider's loss")
+    parser.add_argument("--fault-reads-stale", action="store_true", help="with --signal-fault-s: STALE, not FAULT")
+    parser.add_argument("--stale-input", choices=["bad", "uncertain", "skip"], default="bad")
     parser.add_argument("--hang", action="store_true", help="the engine's thread stops calling, --at seconds in")
     parser.add_argument("--alive-within", type=int, default=3, help="calls; 0 is no check that the graph is alive")
     parser.add_argument("--tree", type=Path, default=HERE / "tree.xml")
@@ -179,6 +184,8 @@ def main():
             backoff_ms=args.backoff_ms,
             idle_on_loss="false" if args.not_idle_on_loss else "true",
             hang_after_s=args.at if args.hang else 0,
+            stale_input=args.stale_input,
+            fault_stale="true" if args.fault_reads_stale else "false",
             alive_within=args.alive_within,
             sample_time=args.sample_time,
             idle="    idle: {not_acting_on: sim0/motorctl0}\n" if "follow: idle" in args.graph.read_text() else "",
@@ -309,6 +316,8 @@ def main():
         f"{f'provider killed, backoff {args.backoff_ms} ms, ' if args.kill_provider else ''}"
         f"{'idle not on loss, ' if args.not_idle_on_loss else ''}"
         f"{f'engine hangs, alive within {args.alive_within} calls, ' if args.hang else ''}"
+        f"{'the fault reads STALE, ' if args.fault_reads_stale else ''}"
+        f"{f'STALE written as {args.stale_input}, ' if args.fault_reads_stale else ''}"
         f"clock step {args.clock_step_ms} ms, sample step {args.sample_step_ms} ms, tree {args.tree.name}, "
         f"{len(rows)} samples"
     )

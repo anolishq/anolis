@@ -89,6 +89,7 @@ private:
         double refused_calls = 0;   // calls the engine refused; each is followed by a rebase
         double refused_writes = 0;  // writes the engine refused
         double thrown = 0;          // writes the engine threw away
+        double stale = 0;           // readings given as STALE
     };
 
     /// A sample that waits for the engine's thread: which input, and what is written to it.
@@ -117,8 +118,9 @@ private:
     std::atomic<bool> running_{false};
 
     std::mutex waiting_mutex_;
-    std::vector<Waiting> waiting_;       // in the order the reads returned
-    std::vector<std::string> returned_;  // the devices a read has returned from since the last call
+    std::vector<Waiting> waiting_;         // in the order the reads returned
+    std::vector<std::string> returned_;    // the devices a read has returned from since the last call
+    std::atomic<std::uint64_t> stale_{0};  // readings given as STALE
 
     mutable std::mutex mutex_;  // guards what follows
     std::vector<Published> published_;

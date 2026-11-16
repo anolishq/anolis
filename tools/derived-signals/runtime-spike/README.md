@@ -173,6 +173,17 @@ and nothing else: the runtime, the polls and the tree go on. Each with
 | `--alive-within 0`, no check | 0.449, `OK`, to the end | 122, all of the one duty | at that duty, 1348 rpm |
 | nothing: an output is `FAULT` once no call has run a tick for 3 call intervals | `FAULT` from 0.14 s after | 11, none after | at that duty, 1348 rpm |
 
+A speed that reads STALE for 3 s, 1 s into the step. The simulator
+gives no STALE, so `--fault-reads-stale` has the spike take the FAULT it
+can be made to give as one. Each with
+`--signal-fault-s 3 --at 1 --fault-reads-stale --seconds 12`:
+
+| `--stale-input` | What the graph is given | The duty | Highest speed | Within 5% for good from |
+| --- | --- | --- | --- | --- |
+| `bad`, the default | no value | `FAULT` from 0.24 s after, for the 3 s | 1500 rpm | 4.2 s |
+| `uncertain` | the value, as new and doubtful | `STALE` for the 3 s, and not sent | 1562 rpm (+4%) | 4.4 s |
+| `skip` | nothing; the last sample stands until its maximum age | `OK` for 1.1 s more, and sent; then `FAULT` | 2636 rpm (+76%) | 7.1 s |
+
 ## What it found
 
 1. **The cost of this placement is small.** About 520 lines in
@@ -230,7 +241,8 @@ and nothing else: the runtime, the polls and the tree go on. Each with
    ran 2 and 3 ticks in a call and the loop settled within 0.3 s of when
    it does called on the period.
 8. **Quality had to be mapped both ways, and the mapping decides what the
-   tree sends.** In: OK is `good`, STALE `uncertain`, FAULT `bad`, UNKNOWN
+   tree sends.** In: OK is `good`, STALE `uncertain` (`bad`, since
+   finding 19), FAULT `bad`, UNKNOWN
    `not_ready`, and a value the cache does not hold is `bad`. Out: the
    same backwards, with a value of 0 where the engine has none, since the
    protocol cannot say "no value". The tree gates on OK, so an
@@ -347,6 +359,21 @@ and nothing else: the runtime, the polls and the tree go on. Each with
     on; no run threw. Either way the motor ran on at its last duty,
     which is finding 9: stopping the command is not bounding it. One
     run each.
+
+19. **A reading its provider calls STALE is no value, and saying
+    nothing is the worst of three.** The spike first wrote one as
+    `uncertain` with the time its read returned: a value its provider
+    had called too old, given to the graph as new. Leaving it out, so
+    that the input's maximum age judges, sounds more careful and is
+    not: for the second the old sample stayed within its age the
+    controller ran on a speed of 557 rpm that was no longer true, its
+    duty read `OK` and was sent, and the speed went to 2636 rpm, 76%
+    over. Written as `bad`, the duty was `bad` at the next tick, the
+    controller waited, and the speed did not pass its setpoint. So
+    `bad` is the default. It is the same lesson as finding 4: a maximum
+    age is how long a loop runs blind, and 1 s is ten samples of this
+    one. One run each, and the STALE is a FAULT renamed: the value
+    beside it was the true speed, where a real one would be old.
 
 ## What is not here
 

@@ -889,10 +889,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 return false;
             }
             const auto &derived = yaml["derived"];
-            warn_unknown_keys(
-                derived, "derived",
-                {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "clock_step_ms", "sample_step_ms",
-                 "step_after_s", "idle_on_provider_loss", "hang_after_s", "alive_within_calls", "inputs"});
+            warn_unknown_keys(derived, "derived",
+                              {"id", "graph", "call_interval_ms", "sample_time", "sample_skew_ms", "clock_step_ms",
+                               "sample_step_ms", "step_after_s", "idle_on_provider_loss", "hang_after_s",
+                               "alive_within_calls", "stale_input", "fault_reads_stale", "inputs"});
             if (!derived["graph"]) {
                 error = "derived.graph is required";
                 return false;
@@ -922,6 +922,17 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             }
             if (derived["idle_on_provider_loss"]) {
                 config.derived.idle_on_provider_loss = derived["idle_on_provider_loss"].as<bool>();
+            }
+            if (derived["stale_input"]) {
+                config.derived.stale_input = derived["stale_input"].as<std::string>();
+                if (config.derived.stale_input != "bad" && config.derived.stale_input != "uncertain" &&
+                    config.derived.stale_input != "skip") {
+                    error = "derived.stale_input is bad, uncertain or skip";
+                    return false;
+                }
+            }
+            if (derived["fault_reads_stale"]) {
+                config.derived.fault_reads_stale = derived["fault_reads_stale"].as<bool>();
             }
             if (derived["hang_after_s"]) {
                 config.derived.hang_after_s = derived["hang_after_s"].as<double>();
