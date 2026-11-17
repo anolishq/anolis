@@ -50,3 +50,6 @@ examples:
   - file: tests/contracts/telemetry-health-timeseries/examples/invalid/08-empty-identity-string.json
     expect: invalid
     note: identity strings are omitted rather than written empty, same rule as type_version
+  - file: tests/contracts/telemetry-health-timeseries/examples/invalid/09-negative-watchdog-status-age.json
+    expect: invalid
+    note: watchdog_status_age_ms is an age in milliseconds, so it is non-negative

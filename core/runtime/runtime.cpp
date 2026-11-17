@@ -13,6 +13,7 @@
 #include <chrono>
 #include <format>
 #include <future>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -269,17 +270,37 @@ bool Runtime::init_providers(std::string &error) {
     // The firmware command watchdog is what stops a device when the runtime or
     // its provider is lost (#297). Keyed on the SDK-reserved watchdog_armed
     // metric; a device that does not report it makes no claim and stays quiet.
-    for (const auto &handle : health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_)) {
+    const auto watchdogs = health::actuating_devices_with_watchdog_disarmed(provider_registry_, *registry_);
+    for (const auto &handle : watchdogs.disarmed) {
         LOG_WARN("[Runtime] preflight: " << handle
                                          << " has ACTUATE functions and reports watchdog_armed=false; its firmware "
                                             "watchdog will not stop it if the runtime or its provider is lost");
+    }
+    // A cached reading older than the bound says nothing about the watchdog now (#732).
+    for (const auto &entry : watchdogs.too_old) {
+        LOG_INFO("[Runtime] preflight: " << entry << " has ACTUATE functions, but its watchdog reading is older than "
+                                         << health::kWatchdogReadingMaxAgeMs
+                                         << " ms or its age is unreadable; whether it is armed was not checked");
     }
     // Polling feeds those watchdogs once the runtime runs (#599).
     for (const auto &line :
          health::watchdog_timeouts_under_poll_margin(provider_registry_, *registry_, config_.polling.interval_ms)) {
         LOG_WARN("[Runtime] " << line);
     }
+    refresh_poll_gap_limits();
     return true;
+}
+
+void Runtime::refresh_poll_gap_limits() {
+    // While it runs, what a watchdog sees is the gap between two reads of its
+    // device, which a slow call or read stretches past the interval (#831).
+    // Three quarters of the timeout leaves #599's margin quiet: a 5000 ms
+    // board polled every 2500 ms warns from 3750 ms.
+    std::map<std::string, std::chrono::milliseconds> gap_limits;
+    for (const auto &[provider_id, timeout_ms] : health::shortest_watchdog_timeouts(provider_registry_, *registry_)) {
+        gap_limits.emplace(provider_id, std::chrono::milliseconds(timeout_ms * 3 / 4));
+    }
+    state_cache_->set_poll_gap_limits(std::move(gap_limits));
 }
 
 control::AbsentDevices Runtime::devices_reported_missing() const {
@@ -1420,7 +1441,10 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
 
     // Rebuild the cache poll plan before swapping the live provider handle so
     // subsequent reads and post-call refreshes observe the replacement device
-    // inventory immediately after publication.
+    // inventory immediately after publication. The provider was lost, so its
+    // devices are unavailable first, even when no poll has seen the loss yet: a
+    // device the new inventory drops is then latched (#801).
+    state_cache_->mark_provider_lost(provider_id);
     state_cache_->rebuild_poll_configs(provider_id);
 
     // Swap registry entry only after replacement provider startup + discovery succeeds.
@@ -1433,6 +1457,8 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // invalidates the boot-time preflight. Re-run it against what is actually
     // registered now, for the same reason the hookless gate is re-checked below.
     preflight_declared_calls();
+    // Its devices' watchdog timeouts may have changed with its config (#831).
+    refresh_poll_gap_limits();
 
 #if ANOLIS_ENABLE_AUTOMATION
     // #233: a restarted provider can publish an inventory with new actuating

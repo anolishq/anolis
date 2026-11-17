@@ -238,6 +238,10 @@
               "type": "integer",
               "minimum": 0
             },
+            "watchdog_status_age_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
             "sample_success_count": {
               "type": "integer",
               "minimum": 0

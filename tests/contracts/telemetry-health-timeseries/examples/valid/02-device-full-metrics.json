@@ -16,6 +16,7 @@
     "watchdog_armed": true,
     "watchdog_timeout_ms": 5000,
     "watchdog_tripped": false,
-    "watchdog_trip_count": 2
+    "watchdog_trip_count": 2,
+    "watchdog_status_age_ms": 1500
   }
 }

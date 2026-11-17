@@ -13,8 +13,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <format>
+#include <optional>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 #include "events/event_emitter.hpp"
 #include "logging/logger.hpp"
@@ -198,11 +201,26 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
     // report it again: no poll reads it, so no `available: true` can follow a
     // loss already sent for it. Say it is gone, under the lock like the
     // availability edges (#402).
+    //
+    // A device dropped while unavailable is a transport loss (#801). Provider
+    // loss reports no edge (#301) on the promise that the first in-band read
+    // after the restart will, but a device the restarted provider no longer
+    // lists is never read again: on a dark bus it is the board, not just its
+    // provider, that is gone. An outage already reported as a transport loss
+    // needs no second edge (#764).
+    std::vector<std::pair<std::string, std::uint64_t>> dropped_losses;
+    const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto &[handle, prior] : carried) {
+        for (auto [handle, prior] : carried) {
             if (device_states_.find(handle) == device_states_.end()) {
                 emit_device_removed(provider_id, handle.substr(provider_id.size() + 1));
+                if (!shutting_down && device_reachability_sink_ && !prior.provider_available &&
+                    !(prior.loss_reported && prior.loss_was_transport)) {
+                    prior.loss_reported = true;
+                    prior.loss_was_transport = true;
+                    dropped_losses.emplace_back(handle, ++reachability_edge_seq_);
+                }
                 // Keep the loss on record, so the device's return is a return
                 // edge if it is registered again (#424).
                 if (prior.loss_reported) {
@@ -212,7 +230,30 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
         }
     }
 
+    // Outside the lock, as in poll_device (#285).
+    for (const auto &[handle, seq] : dropped_losses) {
+        device_reachability_sink_(handle, false, anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE, seq);
+    }
+
     LOG_INFO("[StateCache] Rebuilt poll configs for " << new_device_count << " devices from provider " << provider_id);
+}
+
+void StateCache::mark_provider_lost(const std::string &provider_id) {
+    // What poll_once does when it finds the provider unavailable: the devices go
+    // unavailable, with a device_availability event, and the sink is not told.
+    const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::string prefix = provider_id + "/";
+    for (auto &[handle, state] : device_states_) {
+        if (handle.rfind(prefix, 0) != 0) {
+            continue;
+        }
+        state.provider_available = false;
+        if (!shutting_down && !state.unavailable_emitted) {
+            state.unavailable_emitted = true;
+            emit_device_availability(provider_id, handle.substr(prefix.size()), false);
+        }
+    }
 }
 
 void StateCache::start_polling(provider::ProviderRegistry &provider_registry) {
@@ -226,35 +267,76 @@ void StateCache::start_polling(provider::ProviderRegistry &provider_registry) {
         return;
     }
 
-    polling_active_ = true;
-    LOG_INFO("[StateCache] Polling thread starting");
-
-    polling_thread_ = std::thread([this, &provider_registry]() {
-        while (polling_active_) {
-            auto poll_start = std::chrono::steady_clock::now();
-
-            poll_once(provider_registry);
-
-            // Sleep until next poll interval
-            auto poll_duration = std::chrono::steady_clock::now() - poll_start;
-            auto sleep_time = poll_interval_ - std::chrono::duration_cast<std::chrono::milliseconds>(poll_duration);
-
-            if (sleep_time.count() > 0) {
-                std::this_thread::sleep_for(sleep_time);
-            } else {
-                LOG_WARN("[StateCache] Poll took longer than interval ("
-                         << std::chrono::duration_cast<std::chrono::milliseconds>(poll_duration).count() << "ms)");
+    // Every provider the registry holds, and any a poll target names that it
+    // does not hold, which poll_provider then reports as not found.
+    std::vector<std::string> provider_ids = provider_registry.get_provider_ids();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto &config : poll_configs_) {
+            if (std::find(provider_ids.begin(), provider_ids.end(), config.provider_id) == provider_ids.end()) {
+                provider_ids.push_back(config.provider_id);
             }
         }
-        LOG_INFO("[StateCache] Polling thread exited");
-    });
+    }
+
+    polling_active_ = true;
+    LOG_INFO("[StateCache] Polling starting: one thread for each of " << provider_ids.size() << " provider(s)");
+
+    polling_threads_.reserve(provider_ids.size());
+    for (const auto &provider_id : provider_ids) {
+        polling_threads_.emplace_back([this, provider_id, &provider_registry]() {
+            while (polling_active_) {
+                const auto poll_start = std::chrono::steady_clock::now();
+
+                // This provider's targets, copied to keep the lock short. A
+                // rebuild after a restart changes them between polls.
+                std::vector<PollConfig> configs_copy;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    for (const auto &config : poll_configs_) {
+                        if (config.provider_id == provider_id) {
+                            configs_copy.push_back(config);
+                        }
+                    }
+                }
+                // A provider with no poll targets is not polled, as before.
+                if (!configs_copy.empty()) {
+                    std::vector<const PollConfig *> configs;
+                    configs.reserve(configs_copy.size());
+                    for (const auto &config : configs_copy) {
+                        configs.push_back(&config);
+                    }
+                    poll_provider(provider_id, configs, provider_registry);
+                }
+
+                const auto poll_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - poll_start);
+                const auto sleep_time = poll_interval_ - poll_duration;
+                if (sleep_time.count() > 0) {
+                    std::this_thread::sleep_for(sleep_time);
+                } else {
+                    LOG_WARN("[StateCache] Poll of provider " << provider_id << " took longer than interval ("
+                                                              << poll_duration.count() << "ms)");
+                }
+            }
+            LOG_INFO("[StateCache] Polling thread for provider " << provider_id << " exited");
+        });
+    }
 }
 
 void StateCache::stop_polling() {
     polling_active_ = false;
-    if (polling_thread_.joinable()) {
-        polling_thread_.join();
+    for (auto &thread : polling_threads_) {
+        if (thread.joinable()) {
+            thread.join();
+        }
     }
+    polling_threads_.clear();
+}
+
+void StateCache::set_poll_gap_limits(std::map<std::string, std::chrono::milliseconds> limits) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    poll_gap_limits_ = std::move(limits);
 }
 
 void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
@@ -281,99 +363,136 @@ void StateCache::poll_once(provider::ProviderRegistry &provider_registry) {
         configs_by_provider[config.provider_id].push_back(&config);
     }
 
-    for (const auto &provider_entry : configs_by_provider) {
-        const auto &provider_id = provider_entry.first;
-        const auto &provider_configs = provider_entry.second;
+    for (const auto &[provider_id, configs] : configs_by_provider) {
+        poll_provider(provider_id, configs, provider_registry);
+    }
+}
 
-        auto mark_provider_devices_unavailable = [&]() {
-            // Providers exiting under a stop are the shutdown, not a loss (#350).
-            const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                for (const auto *cfg : provider_configs) {
-                    const std::string handle = cfg->provider_id + "/" + cfg->device_id;
-                    auto state_it = device_states_.find(handle);
-                    if (state_it != device_states_.end()) {
-                        state_it->second.provider_available = false;
-                        if (!shutting_down && !state_it->second.unavailable_emitted) {
-                            state_it->second.unavailable_emitted = true;
-                            emit_device_availability(cfg->provider_id, cfg->device_id, false);
-                        }
+void StateCache::poll_provider(const std::string &provider_id, const std::vector<const PollConfig *> &configs,
+                               provider::ProviderRegistry &provider_registry) {
+    auto mark_provider_devices_unavailable = [&]() {
+        // Providers exiting under a stop are the shutdown, not a loss (#350).
+        const bool shutting_down = runtime::SignalHandler::is_shutdown_requested();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto *cfg : configs) {
+                const std::string handle = cfg->provider_id + "/" + cfg->device_id;
+                auto state_it = device_states_.find(handle);
+                if (state_it != device_states_.end()) {
+                    state_it->second.provider_available = false;
+                    if (!shutting_down && !state_it->second.unavailable_emitted) {
+                        state_it->second.unavailable_emitted = true;
+                        emit_device_availability(cfg->provider_id, cfg->device_id, false);
                     }
                 }
             }
-        };
+        }
+    };
 
-        auto track_outage_and_maybe_log = [&](bool provider_missing) {
-            const auto now = std::chrono::steady_clock::now();
-            bool should_log = false;
-            bool transitioned = false;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                auto &state = provider_outage_log_state_[provider_id];
-                transitioned = !state.in_outage || state.provider_missing != provider_missing;
-                const bool interval_elapsed = (state.last_log_time == std::chrono::steady_clock::time_point{}) ||
-                                              (now - state.last_log_time >= kOutageLogInterval);
+    auto track_outage_and_maybe_log = [&](bool provider_missing) {
+        const auto now = std::chrono::steady_clock::now();
+        bool should_log = false;
+        bool transitioned = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto &state = provider_outage_log_state_[provider_id];
+            transitioned = !state.in_outage || state.provider_missing != provider_missing;
+            const bool interval_elapsed = (state.last_log_time == std::chrono::steady_clock::time_point{}) ||
+                                          (now - state.last_log_time >= kOutageLogInterval);
 
-                if (transitioned || interval_elapsed) {
-                    should_log = true;
-                    state.last_log_time = now;
-                }
-
-                state.in_outage = true;
-                state.provider_missing = provider_missing;
+            if (transitioned || interval_elapsed) {
+                should_log = true;
+                state.last_log_time = now;
             }
 
-            if (!should_log) {
-                return;
-            }
-
-            const char *condition = provider_missing ? "not found" : "not available";
-            if (transitioned) {
-                LOG_WARN("[StateCache] Provider " << provider_id << " " << condition
-                                                  << "; polling paused for provider devices");
-            } else {
-                LOG_WARN("[StateCache] Provider " << provider_id << " still " << condition
-                                                  << " (rate-limited warning)");
-            }
-        };
-
-        auto clear_outage_and_maybe_log_recovery = [&]() {
-            bool recovered = false;
-            bool was_missing = false;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                auto it = provider_outage_log_state_.find(provider_id);
-                if (it != provider_outage_log_state_.end() && it->second.in_outage) {
-                    recovered = true;
-                    was_missing = it->second.provider_missing;
-                    provider_outage_log_state_.erase(it);
-                }
-            }
-            if (recovered) {
-                LOG_INFO("[StateCache] Provider " << provider_id << " recovered from "
-                                                  << (was_missing ? "missing" : "unavailable") << "; resuming polling");
-            }
-        };
-
-        auto provider = provider_registry.get_provider(provider_id);
-        if (!provider) {
-            track_outage_and_maybe_log(true);
-            mark_provider_devices_unavailable();
-            continue;
+            state.in_outage = true;
+            state.provider_missing = provider_missing;
         }
 
-        if (!provider->is_available()) {
-            track_outage_and_maybe_log(false);
-            mark_provider_devices_unavailable();
-            continue;
+        if (!should_log) {
+            return;
         }
 
-        clear_outage_and_maybe_log_recovery();
-
-        for (const auto *cfg : provider_configs) {
-            poll_device(cfg->provider_id, cfg->device_id, cfg->signal_ids, *provider);
+        const char *condition = provider_missing ? "not found" : "not available";
+        if (transitioned) {
+            LOG_WARN("[StateCache] Provider " << provider_id << " " << condition
+                                              << "; polling paused for provider devices");
+        } else {
+            LOG_WARN("[StateCache] Provider " << provider_id << " still " << condition << " (rate-limited warning)");
         }
+    };
+
+    auto clear_outage_and_maybe_log_recovery = [&]() {
+        bool recovered = false;
+        bool was_missing = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto it = provider_outage_log_state_.find(provider_id);
+            if (it != provider_outage_log_state_.end() && it->second.in_outage) {
+                recovered = true;
+                was_missing = it->second.provider_missing;
+                provider_outage_log_state_.erase(it);
+            }
+        }
+        if (recovered) {
+            LOG_INFO("[StateCache] Provider " << provider_id << " recovered from "
+                                              << (was_missing ? "missing" : "unavailable") << "; resuming polling");
+        }
+    };
+
+    auto provider = provider_registry.get_provider(provider_id);
+    if (!provider) {
+        track_outage_and_maybe_log(true);
+        mark_provider_devices_unavailable();
+        return;
+    }
+
+    if (!provider->is_available()) {
+        track_outage_and_maybe_log(false);
+        mark_provider_devices_unavailable();
+        return;
+    }
+
+    clear_outage_and_maybe_log_recovery();
+
+    for (const auto *cfg : configs) {
+        const bool read_ok = poll_device(cfg->provider_id, cfg->device_id, cfg->signal_ids, *provider);
+        note_read_gap(provider_id, cfg->provider_id + "/" + cfg->device_id, read_ok);
+    }
+}
+
+void StateCache::note_read_gap(const std::string &provider_id, const std::string &device_handle, bool read_ok) {
+    // What a device's command watchdog sees is the time between two frames to
+    // it, and a successful read is one. Measured per device, between two
+    // successful polls, so it includes a wait behind a slow call (#831). A
+    // failed read ends the measurement: a dark bus is not a slow poll, and the
+    // device-loss latch already covers it.
+    const auto now = std::chrono::steady_clock::now();
+    std::optional<std::string> warning;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!read_ok) {
+            last_good_read_.erase(device_handle);
+            return;
+        }
+        const auto previous = last_good_read_.find(device_handle);
+        const auto limit = poll_gap_limits_.find(provider_id);
+        if (previous != last_good_read_.end() && limit != poll_gap_limits_.end()) {
+            const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(now - previous->second);
+            auto &last_warning = last_gap_warning_[provider_id];
+            if (gap > limit->second &&
+                (last_warning == std::chrono::steady_clock::time_point{} || now - last_warning >= kOutageLogInterval)) {
+                last_warning = now;
+                warning = std::format(
+                    "[StateCache] {} went {} ms between successful reads, over {} ms, three quarters of the shortest "
+                    "command watchdog timeout {}'s devices report; a gap past the timeout trips that watchdog",
+                    device_handle, gap.count(), limit->second.count(), provider_id);
+            }
+        }
+        last_good_read_[device_handle] = now;
+    }
+    if (warning) {
+        LOG_WARN(*warning);
     }
 }
 

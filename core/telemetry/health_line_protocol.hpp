@@ -77,12 +77,13 @@ inline bool parse_metric_bool(const std::string &s, bool &out) {
 namespace health_keys {
 
 // Device-level integer counters (SDK metrics.md vocabulary).
-inline constexpr std::array<const char *, 9> device_int_keys = {
+inline constexpr std::array<const char *, 10> device_int_keys = {
     "io_ok",
     "io_failed",
     "io_retried_attempts",
     "watchdog_timeout_ms",
     "watchdog_trip_count",
+    "watchdog_status_age_ms",
     "sample_success_count",
     "sample_failure_count",
     "call_success_count",

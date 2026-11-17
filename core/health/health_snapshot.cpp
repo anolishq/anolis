@@ -340,9 +340,9 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
     return result;
 }
 
-std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
-                                                                  const registry::DeviceRegistry &device_registry) {
-    std::vector<std::string> out;
+WatchdogArmedPreflight actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                const registry::DeviceRegistry &device_registry) {
+    WatchdogArmedPreflight out;
     for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
         adpp::GetHealthResponse reported;
         if (!provider->is_available() || !provider->get_health(reported)) {
@@ -350,7 +350,7 @@ std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::Prov
         }
         for (const auto &dh : reported.devices()) {
             const auto armed = dh.metrics().find("watchdog_armed");
-            if (armed == dh.metrics().end() || armed->second != "false") {
+            if (armed == dh.metrics().end()) {
                 continue;  // absent means unknown, not disarmed
             }
             const auto device = device_registry.get_device_copy(provider_id, dh.device_id());
@@ -361,8 +361,19 @@ std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::Prov
             const bool actuates = std::any_of(functions.begin(), functions.end(), [](const auto &entry) {
                 return entry.second.category == adpp::FunctionPolicy_Category_CATEGORY_ACTUATE;
             });
-            if (actuates) {
-                out.push_back(provider_id + "/" + dh.device_id());
+            if (!actuates) {
+                continue;
+            }
+            const std::string handle = provider_id + "/" + dh.device_id();
+            const auto age = dh.metrics().find("watchdog_status_age_ms");
+            int64_t age_ms = 0;
+            if (age != dh.metrics().end() &&
+                (!telemetry::parse_metric_int(age->second, age_ms) || age_ms > kWatchdogReadingMaxAgeMs)) {
+                out.too_old.push_back(std::format("{} (watchdog_status_age_ms={})", handle, age->second));
+                continue;
+            }
+            if (armed->second == "false") {
+                out.disarmed.push_back(handle);
             }
         }
     }
@@ -394,6 +405,33 @@ std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderR
                 "can trip its watchdog and leave every SET refused; raise the device's watchdog timeout to at least "
                 "{} ms, or lower polling.interval_ms to at most {} ms",
                 provider_id, dh.device_id(), timeout_ms, polling_interval_ms, margin, timeout_ms / 2));
+        }
+    }
+    return out;
+}
+
+std::map<std::string, int64_t> shortest_watchdog_timeouts(provider::ProviderRegistry &provider_registry,
+                                                          const registry::DeviceRegistry &device_registry) {
+    std::map<std::string, int64_t> out;
+    for (const auto &[provider_id, provider] : provider_registry.get_all_providers()) {
+        adpp::GetHealthResponse reported;
+        if (!provider->is_available() || !provider->get_health(reported)) {
+            continue;
+        }
+        for (const auto &dh : reported.devices()) {
+            const auto found = dh.metrics().find("watchdog_timeout_ms");
+            int64_t timeout_ms = 0;
+            if (found == dh.metrics().end() || !telemetry::parse_metric_int(found->second, timeout_ms) ||
+                timeout_ms <= 0) {
+                continue;
+            }
+            if (!device_registry.get_device_copy(provider_id, dh.device_id()).has_value()) {
+                continue;
+            }
+            auto [it, inserted] = out.try_emplace(provider_id, timeout_ms);
+            if (!inserted) {
+                it->second = std::min(it->second, timeout_ms);
+            }
         }
     }
     return out;

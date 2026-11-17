@@ -13,6 +13,165 @@ commit messages only.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-15
+
+0.16.0 is a minor release because an existing config now polls differently
+(`docs/dependencies.md`: before 1.0, a change that makes an existing config
+behave differently bumps MINOR). Each provider is polled on its own thread and
+schedule, so a provider whose own poll fits `polling.interval_ms` is now read
+every interval, even while another provider is slow.
+
+Upgrade notes:
+
+- **Polls come at the configured interval, per provider.** Before, one poll
+  of every provider in turn ran as long as its slowest part, and every provider
+  waited for it. On the reference rig, at `polling.interval_ms` 2500, bread
+  and adafruit went from about 3.2 s between reads to 2.5 s: about 28 % more
+  reads and bus transactions. (#831)
+- **The overrun warning names the provider.** "Poll took longer than interval
+  (N ms)" is now "Poll of provider X took longer than interval (N ms)", logged
+  for each provider whose own poll overruns. A log filter on the old text
+  needs updating. (#831)
+- **A new warning, "provider/device went N ms between successful reads, over
+  M ms".** At most once every 30 s per provider. A device that warns is close
+  to tripping its command watchdog. (#831)
+- **Parameter reads leave the INFO log.** A successful `GetParameter` read
+  logs at DEBUG. A filter or count on "Read parameter" lines at INFO now finds
+  none. (#612)
+
+### Added
+
+- **A warning when a device goes too long between reads.** Polling is what
+  feeds a device's command watchdog, and `polling.interval_ms` is only the
+  shortest gap between two reads. At startup and after a provider restart, the
+  runtime takes the shortest `watchdog_timeout_ms` each provider's devices
+  report. From then on it logs "provider/device went N ms between successful
+  reads, over M ms" when two successful polls of a device are more than three
+  quarters of that apart, at most once every 30 s per provider. A failed read
+  ends the measurement. At #599's margin, a 5000 ms watchdog polled every
+  2500 ms, it warns from 3750 ms. (#831)
+
+### Fixed
+
+- **A slow call on one provider no longer delays another's polls.** One thread
+  polled every provider in turn, and a provider takes one request at a time, so
+  a provider busy with a slow call held up the reads of every provider polled
+  after it. On the reference rig, the ezo compensation calls at run start
+  stretched a poll to 4.7 s, and both DCMT command watchdogs (5000 ms) tripped.
+  Each provider is now polled on its own thread and schedule. The overrun
+  warning names the provider: "Poll of provider X took longer than interval".
+  (#831)
+- **A tree's parameter reads no longer fill the log.** `GetParameter` logged
+  every successful read at INFO, and a `ReactiveSequence` re-ticks it every
+  engine tick. On the reference rig, 960 of the 975 runtime log lines in 80 s
+  of AUTO were the bioreactor tree's six reads, twice a second. A successful
+  read now logs at DEBUG, like `GetParameterBool` and `GetParameterInt64`,
+  which log nothing. A failed read still logs at ERROR. (#612)
+
+## [0.15.0] - 2026-11-13
+
+0.15.0 is a minor release because calls that used to be made can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR): a
+device a provider restart drops is now latched, and the behavior tree's
+actuating calls to it are refused until it is read successfully and AUTO is
+re-entered.
+
+Upgrade notes:
+
+- **A device a provider restart drops is latched.** It appears in
+  `device_loss_latched`, every MANUAL -> AUTO logs that it stays latched, and
+  an actuating tree call to it is refused with "Device was unreachable and has
+  not been re-armed; once a read succeeds, re-enter AUTO to resume
+  automation". That
+  includes a device removed from the provider's own configuration: it stays
+  latched until it is registered again and reads successfully, or until the
+  runtime restarts. (#801)
+- **The startup watchdog check can skip a device.** An actuating device whose
+  provider reports a `watchdog_status_age_ms` over 30 s, or one that does not
+  parse, is not checked, and the runtime logs that at INFO instead of judging
+  `watchdog_armed`. Providers that send no age are checked as before. (#732)
+- **The health timeseries gains a field.** `anolis_device_health` carries
+  `watchdog_status_age_ms` as an integer when the provider reports it. The
+  `io-health` dashboard does not use it yet (#814).
+
+### Changed
+
+- **A cached watchdog reading is checked only while it is recent.** A
+  provider may now report the `watchdog_*` health keys from a cached reading,
+  with its age in `watchdog_status_age_ms`, and keep reporting its last good
+  reading after later reads fail (anolis-provider-sdk `docs/metrics.md`). The
+  startup check that warns about an actuating device whose `watchdog_armed` is
+  `false` skips a reading older than 30 s, or whose age does not parse, and logs
+  at INFO that it did not check that device's watchdog. A reading with no age
+  is checked as before. The health timeseries carries `watchdog_status_age_ms`
+  as an integer field. (#732)
+
+### Fixed
+
+- **A device a provider restart drops now latches.** Provider loss does not
+  latch its devices; the first failed read after the restart does. A device
+  the restarted provider no longer lists is never read again, so on a bus that
+  was still dark it was never latched. The runtime then stayed in AUTO with no
+  latch, and nothing would re-assert the device's safe state if it came back.
+  Such a device now takes a transport loss edge when it is dropped, and its
+  first successful read after it is registered again re-asserts its safe
+  state. The restart marks the provider's devices unavailable first, so this
+  holds even when the restart finishes before any poll has seen the provider
+  die. A device removed from the provider's configuration latches the same
+  way. It stays in `device_loss_latched` until it is registered again, reads
+  successfully and AUTO is re-entered, or until the runtime restarts. (#801)
+
+## [0.14.0] - 2026-11-10
+
+0.14.0 is a minor release because requests that used to succeed can now be
+refused (`docs/dependencies.md`: before 1.0, a new failure bumps MINOR). A
+refused mode change below is answered with HTTP 409 on `POST /v0/mode`. A
+refused hook call is logged.
+
+Upgrade notes:
+
+- **`MANUAL -> IDLE` can be refused while a transition out of AUTO finishes.**
+  "Refused: a transition out of AUTO is still running its after-hooks". The
+  refusal covers all of the runtime's work after a transition out of AUTO, so
+  it can happen even when no after-hooks are declared. It is seen only when
+  something else left AUTO, such as the runtime's own FAULT, an e-stop,
+  another client or an earlier request of the client's own that it stopped
+  waiting for. Retry once that transition's work is done. (#776)
+- **A recovery from FAULT can be refused.** "Refused: a FAULT was requested
+  during this recovery", when a FAULT is requested between the recovery's
+  request and its commit. In FAULT such a request changes nothing visible: it
+  comes from a FAULT on `POST /v0/mode`, an e-stop press, latched or not, a
+  change in a held stop chain's status, a tick exception or an inventory gate
+  refusal. A stop chain whose status keeps changing can keep refusing a slow
+  recovery. The machine stays in FAULT, unless another recovery committed
+  meanwhile; retry. (#774)
+- **A transition into AUTO, or `IDLE -> MANUAL`, can be refused at its
+  commit.** "Refused: a FAULT was requested during this transition", when a
+  FAULT is requested between the transition's request and its commit. If that
+  FAULT has not committed yet, the refusal is 0.13.0's "Refused: a transition
+  to FAULT is in progress" instead. When a FAULT commits entirely during the
+  before-hooks of `MANUAL -> AUTO` or `IDLE -> MANUAL`, the refusal used to read
+  "Concurrent mode change detected while processing transition callbacks" and
+  now gives the new reason. (#775)
+- **Hook calls of those transitions, and of a recovery from FAULT, can be
+  refused.** "Refused: a FAULT was requested during this transition", once a
+  FAULT has been requested since the transition was requested, before or after
+  its commit. A refused before-hook call means the transition is refused
+  too. With `fail_on_error: true`, the default, the 409 then reads
+  "Before-transition hook failed (`<from>` -> `<to>`): `<device>` `<function>` -
+  Refused: a FAULT was requested during this transition"; with `false`, it
+  gives the commit's reason, as in the two notes above. Hooks of a transition
+  that leaves AUTO or enters IDLE are never refused for this reason. (#775)
+- **`install.sh` refuses to build a bundle from a project that sets the
+  InfluxDB token.** `telemetry.influxdb.token` or the flat
+  `telemetry.influx_token`, unless it is `""`, and any other line that names
+  `influx_token`. This applies to `install.sh --project` as well as to
+  `--stage`. A bundle already built is not checked: `--local` installs it,
+  token included. Remove the key. `--with-observability` writes each device's
+  token as `INFLUXDB_TOKEN` into `/etc/anolis/runtime.env`; for an InfluxDB of
+  your own, add that line to the file after the install and run
+  `sudo systemctl restart anolis-runtime`. (#742)
+
 ### Fixed
 
 - **`install.sh` no longer ships a literal InfluxDB token in a bundle.** The
@@ -24,9 +183,8 @@ commit messages only.
   naming the file and never the token, unless it is the quoted empty string;
   a null value is refused too. A line that names `influx_token` anywhere, in a
   comment included, stops it as `auth_token` does. `install.sh --project`
-  builds a bundle too, so an install that used to succeed can now be refused,
-  and the release that carries this needs an upgrade note.
-  (#742)
+  builds a bundle too, so an install that used to succeed can now be refused.
+  See the upgrade note. (#742)
 - **A hook that moves toward actuation can no longer act after FAULT's hooks.**
   A before-hook of `MANUAL -> AUTO` already running when a FAULT started could
   actuate after FAULT's safe-state hooks: #763 refuses the transition at its
@@ -37,8 +195,7 @@ commit messages only.
   cannot enter AUTO with its before-hooks refused. Two refusals that used to
   read "Concurrent mode change detected" now give this reason instead. Hooks of
   a transition that leaves AUTO or enters IDLE are never refused for this
-  reason. This is a new refusal, so the release that carries it needs an
-  upgrade note. (#775)
+  reason. See the upgrade notes. (#775)
 - **A FAULT requested during a recovery from FAULT is no longer lost.** In FAULT,
   a request for FAULT returned at once, so one made while `FAULT -> MANUAL` ran
   its before-hooks did nothing, and the recovery then committed: the caller was
@@ -47,8 +204,7 @@ commit messages only.
   made since its own request, so the runtime stays in FAULT. That also covers a
   FAULT that commits from MANUAL after a second recovery commits, while the
   first is still running its before-hooks. Hooks the recovery already ran are not
-  undone. This is a new refusal, so the release that carries it needs an upgrade
-  note. (#774)
+  undone. See the upgrade note. (#774)
 - **An after-hook leaving AUTO can no longer be refused by an IDLE committed
   first.** An `after_transition` hook on `AUTO -> MANUAL` or `AUTO -> FAULT` runs
   after its transition commits. Another caller could commit `MANUAL -> IDLE` in
@@ -59,8 +215,7 @@ commit messages only.
   request and again at the commit. A client meets the refusal only when
   something else left AUTO, such as the runtime's own FAULT, an e-stop, another
   client or an earlier request it stopped waiting for. Once that work is done,
-  a retry is no longer refused for this reason. This is a new refusal, so the
-  release that carries it needs an upgrade note. (#776)
+  a retry is no longer refused for this reason. See the upgrade note. (#776)
 
 ## [0.13.0] - 2026-11-10
 

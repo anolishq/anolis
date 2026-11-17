@@ -1105,6 +1105,125 @@ TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileLatchedReturnsWithAReturnEdge)
     EXPECT_EQ(latch.release_reachable(), std::vector<std::string>{"sim0/dev1"});
 }
 
+// #801: a board that goes dark with its provider. Provider loss reports no
+// edge (#301), and the restarted provider, probing the still-dark bus, no
+// longer lists the device, so no later read can report one either. Dropped
+// from the inventory while unavailable, the device takes a transport loss
+// edge then: it latches, and its return after it is registered again is a
+// return edge that re-asserts safe state, as in #424.
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedByARestartWhileItsProviderWasLostLatches) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    std::vector<anolis::deviceprovider::v1::Status_Code> loss_codes;
+    state_cache->set_device_reachability_sink([&](const std::string &handle, bool reachable,
+                                                  anolis::deviceprovider::v1::Status_Code status,
+                                                  std::uint64_t edge_seq) {
+        if (!reachable) {
+            loss_codes.push_back(status);
+        }
+        runtime_sink(handle, reachable, status, edge_seq);
+    });
+
+    state_cache->poll_once(*provider_registry);  // 1. a good read
+    available = false;                           // 2. the provider dies
+    state_cache->poll_once(*provider_registry);
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "provider loss alone does not latch (#301)";
+
+    available = true;  // 3. the restarted provider lists no devices
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1") == nullptr);
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a device dropped while unavailable latches";
+    EXPECT_EQ(loss_codes, (std::vector<anolis::deviceprovider::v1::Status_Code>{
+                              anolis::deviceprovider::v1::Status_Code_CODE_UNAVAILABLE}));
+
+    RegisterMockDevice();  // 4. it returns under the same id
+    state_cache->rebuild_poll_configs("sim0");
+    state_cache->poll_once(*provider_registry);
+    state_cache->poll_once(*provider_registry);
+
+    EXPECT_EQ(reissues, 1) << "its first good read is a return edge, re-asserting safe state once";
+    EXPECT_EQ(loss_codes.size(), 1U) << "no second loss edge";
+    EXPECT_TRUE(latch.is_latched("sim0/dev1")) << "a return does not re-arm; only MANUAL -> AUTO does";
+}
+
+// #801: a restart can finish before the poll loop has seen its provider gone,
+// leaving the device's state "available". Runtime::restart_provider marks the
+// provider lost before the rebuild, as the poll loop would have, so the drop
+// still latches.
+TEST_F(StateCacheEdgeOrderTest, RestartFasterThanThePollLoopStillLatchesADroppedDevice) {
+    state_cache->set_device_reachability_sink(runtime_sink);
+    state_cache->poll_once(*provider_registry);  // a good read; no poll sees the provider die
+    ASSERT_TRUE(state_cache->get_device_state("sim0/dev1")->provider_available);
+
+    state_cache->mark_provider_lost("sim0");
+    ASSERT_FALSE(state_cache->get_device_state("sim0/dev1")->provider_available);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "provider loss alone does not latch (#301)";
+
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+}
+
+// #801: the loss recorded for a dropped device is a transport loss, so a device
+// that returns still dark is the same outage and reports no second loss edge
+// (#764).
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedThenReturnedStillDarkReportsNoSecondLoss) {
+    bool available = true;
+    EXPECT_CALL(*mock_provider, is_available()).WillRepeatedly(Invoke([&available] { return available; }));
+    int losses = 0;
+    state_cache->set_device_reachability_sink([&](const std::string &handle, bool reachable,
+                                                  anolis::deviceprovider::v1::Status_Code status,
+                                                  std::uint64_t edge_seq) {
+        losses += reachable ? 0 : 1;
+        runtime_sink(handle, reachable, status, edge_seq);
+    });
+
+    state_cache->poll_once(*provider_registry);
+    available = false;
+    state_cache->poll_once(*provider_registry);
+    available = true;
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    ASSERT_EQ(losses, 1);
+
+    RegisterMockDevice();
+    state_cache->rebuild_poll_configs("sim0");
+    std::ostringstream discarded;  // the failed read logs an ERROR line
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    t_fail_reads = true;
+    state_cache->poll_once(*provider_registry);
+    t_fail_reads = false;
+    std::cerr.rdbuf(old);
+
+    EXPECT_EQ(losses, 1) << "the same outage reported a second loss edge";
+    EXPECT_EQ(reissues, 0);
+}
+
+// #801: an in-band loss the latch ignores (INTERNAL: the device answered, but
+// badly) that ends with a restart dropping the device worsens to a transport
+// loss, as a later UNAVAILABLE read would (#764).
+TEST_F(StateCacheEdgeOrderTest, DeviceDroppedAfterANonTransportLossLatches) {
+    state_cache->set_device_reachability_sink(runtime_sink);
+    EXPECT_CALL(*mock_provider, read_signals("dev1", _, _, _))
+        .WillOnce(Invoke([](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                            anolis::deviceprovider::v1::Status_Code &status) {
+            status = anolis::deviceprovider::v1::Status_Code_CODE_INTERNAL;
+            return false;
+        }));
+
+    std::ostringstream discarded;  // the failed read logs an ERROR line
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    state_cache->poll_once(*provider_registry);
+    std::cerr.rdbuf(old);
+    ASSERT_FALSE(latch.is_latched("sim0/dev1")) << "INTERNAL does not latch";
+
+    registry->commit_provider_devices("sim0", {}, true);
+    state_cache->rebuild_poll_configs("sim0");
+    EXPECT_TRUE(latch.is_latched("sim0/dev1"));
+}
+
 // A device removed while reachable and registered again comes back as a new
 // device: no loss is on record, so its first read is not a return.
 TEST_F(StateCacheEdgeOrderTest, DeviceRemovedWhileReachableReturnsWithNoEdge) {
@@ -1201,4 +1320,154 @@ TEST_F(StateCacheEdgeOrderTest, EdgeNumbersFollowTheOrderEdgesWereDecided) {
         }
     }
     EXPECT_EQ(out_of_alternation, 0U) << "among " << edges.size() << " edges sorted by number";
+}
+
+// One provider busy past the poll interval must not hold up another's polls
+// (#831). With one polling thread for every provider, a provider waiting out a
+// slow call stretched the gap between two reads of every other provider to the
+// whole slow poll, long enough on a rig to trip a board's command watchdog.
+TEST(StateCachePollingTest, SlowProviderDoesNotDelayAnotherProvidersPolls) {
+    using Clock = std::chrono::steady_clock;
+    constexpr int kIntervalMs = 100;
+    constexpr auto kSlowRead = std::chrono::milliseconds(600);
+
+    registry::DeviceRegistry registry;
+    provider::ProviderRegistry providers;
+    auto add_provider = [&](const std::string &provider_id, const std::string &device_id) {
+        auto provider = std::make_shared<NiceMock<MockProviderHandle>>();
+        provider->_id = provider_id;
+        ON_CALL(*provider, provider_id()).WillByDefault(ReturnRef(provider->_id));
+        ON_CALL(*provider, is_available()).WillByDefault(Return(true));
+        ON_CALL(*provider, list_devices(_)).WillByDefault(Invoke([device_id](std::vector<Device> &devices) {
+            Device device;
+            device.set_device_id(device_id);
+            devices.push_back(device);
+            return true;
+        }));
+        ON_CALL(*provider, describe_device(device_id, _))
+            .WillByDefault(Invoke([device_id](const std::string &, DescribeDeviceResponse &response) {
+                response.mutable_device()->set_device_id(device_id);
+                auto *signal = response.mutable_capabilities()->add_signals();
+                signal->set_signal_id("v");
+                signal->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+                signal->set_poll_hint_hz(1.0);
+                return true;
+            }));
+        providers.add_provider(provider_id, provider);
+        registry.discover_provider(provider_id, *provider);
+        return provider;
+    };
+    auto slow = add_provider("slow0", "a");
+    auto fast = add_provider("fast0", "b");
+
+    ON_CALL(*slow, read_signals(_, _, _, _))
+        .WillByDefault(Invoke([kSlowRead](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                                          anolis::deviceprovider::v1::Status_Code &) {
+            std::this_thread::sleep_for(kSlowRead);
+            return true;
+        }));
+    std::mutex reads_mutex;
+    std::vector<Clock::time_point> fast_reads;
+    ON_CALL(*fast, read_signals(_, _, _, _))
+        .WillByDefault(Invoke([&](const std::string &, const std::vector<std::string> &, ReadSignalsResponse &,
+                                  anolis::deviceprovider::v1::Status_Code &) {
+            std::lock_guard<std::mutex> lock(reads_mutex);
+            fast_reads.push_back(Clock::now());
+            return true;
+        }));
+
+    state::StateCache cache(registry, kIntervalMs);
+    ASSERT_TRUE(cache.initialize());
+    std::ostringstream discarded;  // "took longer than interval" for slow0
+    std::streambuf *old = std::cerr.rdbuf(discarded.rdbuf());
+    cache.start_polling(providers);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    cache.stop_polling();
+    std::cerr.rdbuf(old);
+
+    std::lock_guard<std::mutex> lock(reads_mutex);
+    ASSERT_GE(fast_reads.size(), 2U);
+    EXPECT_GE(fast_reads.size(), 5U);
+    auto widest = Clock::duration::zero();
+    for (size_t i = 1; i < fast_reads.size(); ++i) {
+        widest = std::max(widest, fast_reads[i] - fast_reads[i - 1]);
+    }
+    // Three intervals of slack for a loaded CI host; the slow read is six.
+    EXPECT_LT(widest, std::chrono::milliseconds(3 * kIntervalMs))
+        << "widest gap between fast0's reads: " << std::chrono::duration_cast<std::chrono::milliseconds>(widest).count()
+        << " ms over " << fast_reads.size() << " reads";
+}
+
+// A device whose successful reads are further apart than its provider's gap
+// limit is named, with the gap, so the trip it risks is not a surprise (#831).
+// One under its limit, with no limit set, or whose reads fail in between (a
+// dark bus, not a slow poll) is not.
+TEST(StateCachePollingTest, WarnsWhenAProviderGoesPastItsPollGapLimit) {
+    constexpr int kIntervalMs = 50;
+
+    registry::DeviceRegistry registry;
+    provider::ProviderRegistry providers;
+    std::vector<std::shared_ptr<NiceMock<MockProviderHandle>>> keep;
+    auto add_provider = [&](const std::string &provider_id, std::chrono::milliseconds read_time) {
+        auto provider = std::make_shared<NiceMock<MockProviderHandle>>();
+        provider->_id = provider_id;
+        ON_CALL(*provider, provider_id()).WillByDefault(ReturnRef(provider->_id));
+        ON_CALL(*provider, is_available()).WillByDefault(Return(true));
+        ON_CALL(*provider, list_devices(_)).WillByDefault(Invoke([](std::vector<Device> &devices) {
+            Device device;
+            device.set_device_id("d");
+            devices.push_back(device);
+            return true;
+        }));
+        ON_CALL(*provider, describe_device("d", _))
+            .WillByDefault(Invoke([](const std::string &, DescribeDeviceResponse &response) {
+                response.mutable_device()->set_device_id("d");
+                auto *signal = response.mutable_capabilities()->add_signals();
+                signal->set_signal_id("v");
+                signal->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+                signal->set_poll_hint_hz(1.0);
+                return true;
+            }));
+        auto reads = std::make_shared<int>(0);
+        ON_CALL(*provider, read_signals(_, _, _, _))
+            .WillByDefault(Invoke([read_time, reads, provider_id](const std::string &, const std::vector<std::string> &,
+                                                                  ReadSignalsResponse &,
+                                                                  anolis::deviceprovider::v1::Status_Code &) {
+                std::this_thread::sleep_for(read_time);
+                // flaky0 fails every other read.
+                return provider_id != "flaky0" || (++*reads % 2) == 0;
+            }));
+        providers.add_provider(provider_id, provider);
+        registry.discover_provider(provider_id, *provider);
+        keep.push_back(provider);
+    };
+    add_provider("late0", std::chrono::milliseconds(250));
+    add_provider("ontime0", std::chrono::milliseconds(0));
+    add_provider("unlimited0", std::chrono::milliseconds(250));
+    add_provider("flaky0", std::chrono::milliseconds(100));
+
+    state::StateCache cache(registry, kIntervalMs);
+    ASSERT_TRUE(cache.initialize());
+    cache.set_poll_gap_limits({{"late0", std::chrono::milliseconds(150)},
+                               {"ontime0", std::chrono::milliseconds(150)},
+                               {"flaky0", std::chrono::milliseconds(150)}});
+    std::ostringstream captured;
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
+    cache.start_polling(providers);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    cache.stop_polling();
+    std::cerr.rdbuf(old);
+
+    const std::string log = captured.str();
+    EXPECT_NE(log.find("late0/d went "), std::string::npos) << log;
+    EXPECT_NE(log.find(" ms between successful reads, over 150 ms"), std::string::npos) << log;
+    EXPECT_EQ(log.find("ontime0/d went "), std::string::npos) << log;
+    EXPECT_EQ(log.find("unlimited0/d went "), std::string::npos) << log;
+    EXPECT_EQ(log.find("flaky0/d went "), std::string::npos) << log;
+    // Rate-limited: one warning for late0 in a second of polls.
+    size_t warnings = 0;
+    for (size_t at = log.find("late0/d went "); at != std::string::npos; at = log.find("late0/d went ", at + 1)) {
+        ++warnings;
+    }
+    EXPECT_EQ(warnings, 1U) << log;
 }

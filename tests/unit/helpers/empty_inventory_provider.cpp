@@ -34,7 +34,9 @@
 // and then stays alive for 10 s without reading: a provider whose read end is
 // gone, so the runtime's next write to it finds no reader (#549). With
 // `--sigpipe-to <path>` it writes "ignored" or "default" there, for the SIGPIPE
-// disposition it started with.
+// disposition it started with. With `--sensor-unless <path>` it lists sensor0,
+// whose polled bool `ok` reads true, unless that file exists when it starts, so
+// a restart can drop a device the runtime was polling (#801).
 
 #include <array>
 #include <chrono>
@@ -192,6 +194,7 @@ int main(int argc, char **argv) {
     bool close_stdin_after_hello = false;
     std::string close_stdin_when;
     std::string sigpipe_to;
+    bool sensor = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--exit-when" && i + 1 < argc) {
             exit_when = argv[i + 1];
@@ -228,6 +231,8 @@ int main(int argc, char **argv) {
             close_stdin_when = argv[i + 1];
         } else if (std::string(argv[i]) == "--sigpipe-to" && i + 1 < argc) {
             sigpipe_to = argv[i + 1];
+        } else if (std::string(argv[i]) == "--sensor-unless" && i + 1 < argc) {
+            sensor = !marker_present(argv[i + 1]);
         }
     }
 #ifndef _WIN32
@@ -309,6 +314,9 @@ int main(int argc, char **argv) {
             if (heater) {
                 list->add_devices()->set_device_id("heater0");
             }
+            if (sensor) {
+                list->add_devices()->set_device_id("sensor0");
+            }
             if (!stop_chain_dir.empty()) {
                 list->add_devices()->set_device_id("gpio0");
                 list->add_devices()->set_device_id("motor0");
@@ -377,6 +385,17 @@ int main(int argc, char **argv) {
                 pwm->set_type(adpp::VALUE_TYPE_INT64);
                 pwm->set_required(true);
             }
+        } else if (sensor && request.has_describe_device() && request.describe_device().device_id() == "sensor0") {
+            auto *describe = response.mutable_describe_device();
+            describe->mutable_device()->set_device_id("sensor0");
+            auto *signal = describe->mutable_capabilities()->add_signals();
+            signal->set_signal_id("ok");
+            signal->set_value_type(adpp::VALUE_TYPE_BOOL);
+            signal->set_poll_hint_hz(10.0);  // only hinted signals are polled
+        } else if (sensor && request.has_read_signals() && request.read_signals().device_id() == "sensor0") {
+            auto *read = response.mutable_read_signals();
+            read->set_device_id("sensor0");
+            set_bool_reading(read->add_values(), "ok", "1");
         } else if (!stop_chain_dir.empty() && request.has_read_signals()) {
             auto *read = response.mutable_read_signals();
             read->set_device_id(request.read_signals().device_id());

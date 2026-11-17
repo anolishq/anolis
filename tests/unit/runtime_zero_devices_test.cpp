@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "mocks/mock_provider_handle.hpp"
 #include "runtime/config.hpp"
@@ -184,6 +185,72 @@ TEST(RuntimeZeroDevicesTest, ARestartThatListsNoDevicesIsASuccessfulRestart) {
     EXPECT_TRUE(current->is_available());
     EXPECT_TRUE(runtime.get_registry().get_devices_for_provider("bread0").empty());
     EXPECT_FALSE(std::filesystem::exists(trigger)) << "the helper never saw the trigger";
+}
+
+// #801: a supervised restart that comes back without a device the runtime was
+// polling latches that device, even when no poll saw the provider die. The
+// restart takes well under the 2 s polling interval, so no poll falls between
+// the crash and the rebuild: the restart path itself has to mark the device
+// unavailable. (Shutdown waits out the poll thread's sleep, so the interval is
+// not made longer.)
+TEST(RuntimeZeroDevicesTest, ARestartThatDropsAPolledDeviceLatchesItWithoutAPoll) {
+    const auto dir = std::filesystem::path(::testing::TempDir());
+    const auto trigger = dir / "anolis-801-exit-now";
+    const auto drop = dir / "anolis-801-drop-sensor";
+    std::filesystem::remove(trigger);
+    std::filesystem::remove(drop);
+    std::string yaml = config_yaml("\"--exit-when\", \"" + trigger.generic_string() + "\", \"--sensor-unless\", \"" +
+                                   drop.generic_string() + "\"");
+    const std::string fast = "polling:\n  interval_ms: 200\n";
+    const auto at = yaml.find(fast);
+    ASSERT_NE(at, std::string::npos);
+    yaml.replace(at, fast.size(), "polling:\n  interval_ms: 2000\n");
+    const auto config = load(write_config("anolis-801-restart.yaml", yaml));
+    anolis::runtime::Runtime runtime(config);
+    std::string error;
+    ASSERT_TRUE(runtime.initialize(error)) << error;
+    ASSERT_EQ(runtime.get_registry().get_devices_for_provider("bread0").size(), 1U);
+    const auto first = runtime.get_provider_registry().get_provider("bread0");
+    ASSERT_NE(first, nullptr);
+
+    anolis::runtime::SignalHandler::install();
+    std::thread loop([&runtime] { runtime.run(); });
+    // run() polls at once. Crash the helper only after that poll has read
+    // sensor0, so it cannot instead find the helper dead and mark the device
+    // unavailable itself, which would latch it without the restart path.
+    const auto polled_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < polled_by) {
+        const auto state = runtime.get_state_cache().get_device_state("bread0/sensor0");
+        if (state != nullptr && state->signals.count("ok") != 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto polled = runtime.get_state_cache().get_device_state("bread0/sensor0");
+    const bool first_poll_read_sensor = polled != nullptr && polled->signals.count("ok") != 0;
+    std::ofstream(drop) << "drop";     // the restarted helper will not list sensor0
+    std::ofstream(trigger) << "exit";  // the helper removes it and exits
+
+    std::shared_ptr<anolis::provider::IProviderHandle> current;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        current = runtime.get_provider_registry().get_provider("bread0");
+        if (current != nullptr && current != first && current->is_available()) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    const auto latched = runtime.get_device_loss_latch().latched();
+    std::raise(SIGTERM);
+    loop.join();
+    runtime.shutdown();
+    anolis::runtime::SignalHandler::install();
+    std::filesystem::remove(drop);
+
+    ASSERT_TRUE(first_poll_read_sensor) << "the first poll never read sensor0";
+    ASSERT_NE(current, first) << "the provider was not replaced by a restart";
+    EXPECT_TRUE(runtime.get_registry().get_devices_for_provider("bread0").empty());
+    EXPECT_EQ(latched, std::vector<std::string>{"bread0/sensor0"});
 }
 
 // #563: a stop that leaves the old provider, or something it started,

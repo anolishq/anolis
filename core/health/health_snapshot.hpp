@@ -219,14 +219,26 @@ std::vector<ProviderHealthSnapshot> collect_providers_health(
  * is lost. A disarmed one on a device that can actuate is worth a startup
  * warning. Absence of the key is "unknown" by the SDK contract
  * (anolis-provider-sdk docs/metrics.md), so only the exact value "false"
- * counts. A provider reports the key only for a configured watchdog it read
- * live, so a watchdog that was never configured is silent here too. One
- * live GetHealth round-trip per available provider. Report-only.
+ * counts. A provider reports the key only for a configured watchdog it has
+ * read, so a watchdog that was never configured is silent here too.
  *
- * @return device handles, "provider/device".
+ * The reading may be cached: `watchdog_status_age_ms`, when present, is its
+ * age, and a provider keeps reporting its last good reading after later reads
+ * fail (#732). A reading older than kWatchdogReadingMaxAgeMs, or whose age does
+ * not parse, says nothing about the watchdog now. It is not checked, and an
+ * actuating device with one is listed in `too_old` instead. A reading with no
+ * age key is checked as before. One live GetHealth round-trip per available
+ * provider. Report-only.
  */
-std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
-                                                                  const registry::DeviceRegistry &device_registry);
+inline constexpr int64_t kWatchdogReadingMaxAgeMs = 30000;
+
+struct WatchdogArmedPreflight {
+    std::vector<std::string> disarmed;  ///< "provider/device"
+    std::vector<std::string> too_old;   ///< "provider/device (watchdog_status_age_ms=<value>)"
+};
+
+WatchdogArmedPreflight actuating_devices_with_watchdog_disarmed(provider::ProviderRegistry &provider_registry,
+                                                                const registry::DeviceRegistry &device_registry);
 
 /**
  * @brief Startup warnings for devices whose reported `watchdog_timeout_ms` is
@@ -244,6 +256,19 @@ std::vector<std::string> actuating_devices_with_watchdog_disarmed(provider::Prov
 std::vector<std::string> watchdog_timeouts_under_poll_margin(provider::ProviderRegistry &provider_registry,
                                                              const registry::DeviceRegistry &device_registry,
                                                              int polling_interval_ms);
+
+/**
+ * @brief The shortest `watchdog_timeout_ms` each provider's registered devices
+ *        report, keyed by provider id (#831).
+ *
+ * The runtime gives StateCache half of it as the longest gap that provider may
+ * go between polls: `polling.interval_ms` is the shortest gap, and a slow call
+ * or read can stretch it. Values are read as watchdog_timeouts_under_poll_margin
+ * reads them; a provider with no device reporting one is absent. One live
+ * GetHealth round-trip per available provider.
+ */
+std::map<std::string, int64_t> shortest_watchdog_timeouts(provider::ProviderRegistry &provider_registry,
+                                                          const registry::DeviceRegistry &device_registry);
 
 }  // namespace health
 }  // namespace anolis

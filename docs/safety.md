@@ -70,10 +70,15 @@ orientation, not a compliance claim about any one layer.
 At startup the runtime warns about each device that has ACTUATE functions
 and whose provider reports the SDK health metric `watchdog_armed` as
 `false`. A provider reports that key only when the device has a command
-watchdog that is configured and was read live; a device without one, a
-watchdog that was never configured, and a failed read all leave the key
-out, and the runtime says nothing about them. No warning is therefore not
-evidence that a watchdog is armed.
+watchdog that is configured and has been read; a device without one and a
+watchdog that was never configured leave the key out, and the runtime says
+nothing about them. The reading may be cached: a provider can report its last
+good reading after later reads fail, with `watchdog_status_age_ms` giving its
+age (anolis-provider-sdk `docs/metrics.md`). A reading older than 30 s, or
+whose age does not parse, is not checked: the runtime logs at INFO that it did
+not check that device's watchdog, whether the reading said armed or not. A
+reading with no age, from a provider that reads the status live, is checked as
+before. No warning is therefore not evidence that a watchdog is armed.
 
 Authority matters: every layer above can fail, so a stop is only as reliable as
 the lowest layer that can enforce it alone. The runtime is the weakest layer in
@@ -304,9 +309,13 @@ skipped device is not driven when it appears later.
 restart (a provider crash, then the runtime starting it again) runs nothing:
 the runtime does not run the safe state, and provider loss is not reported as
 device loss, so the device-loss latch does not engage and nothing is
-re-asserted when the devices come back. Outputs stay as the devices and the
-restarted provider leave them. anolis-provider-bread from 0.10.0 drives its
-outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
+re-asserted when the devices come back. The exception is a device the restarted
+provider no longer lists, as on a bus that is still dark: it latches when it is
+dropped (anolishq/anolis#801), and if it is registered again, its first
+successful read re-asserts its safe state. A device removed from the
+provider's configuration latches the same way across a restart. Outputs stay
+as the devices and the restarted provider leave them. anolis-provider-bread
+from 0.10.0 drives its outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
 open loop at PWM 0, RLHTs to setpoints 0, open loop and duty 0. So a supervised
 restart of bread turns those outputs off, unless its config sets
 `provider.outputs_on_startup: leave`; set that with `safety.on_startup: leave`
