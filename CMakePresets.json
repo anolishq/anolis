@@ -99,7 +99,8 @@
       "inherits": "ci-linux-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "ENABLE_CLANG_TIDY": "ON"
+        "ENABLE_CLANG_TIDY": "ON",
+        "ANOLIS_ENABLE_DERIVED": "ON"
       }
     },
     {
