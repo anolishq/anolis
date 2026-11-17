@@ -1,7 +1,10 @@
 # RFC: derived signals
 
-Status: draft, fifth revision. Nothing is implemented, and the RFC is
-not accepted. This is a register of decisions. Each is marked as one of
+Status: accepted for a first version, whose derived signals are read
+and not acted on. Fifth revision. Nothing is implemented but a spike
+that is not for merging. A second stage, in which a graph's output is
+handed to an actuator, is not accepted: its conditions are under "What
+the first version is for". This is a register of decisions. Each is marked as one of
 three things. **Decided** is a choice that has been made: to build the
 layer (O0), the engine (O11) and that a build may leave it out, what the
 first version is for (below), how a graph's outputs are published, what
@@ -1285,7 +1288,8 @@ what belongs there.
    independently, by a reading for control and safety and by a check of
    each claim against its source; this revision is the answer to both.
    What they asked for and is not done is under "What is missing".
-5. Accepted, the RFC becomes an epic with increments.
+5. It is accepted for the first version, which becomes an epic with
+   increments. The second stage comes back here first.
 
 ## Prior art
 
