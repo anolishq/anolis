@@ -281,6 +281,7 @@ graph over a chamber that a second engine simulates.
 - **The runtime's config says which device each output is a signal
   of.** A graph's outputs are not one device. The config groups them:
 
+  <!-- validate: none -->
   ```yaml
   derived:
     id: derived0
