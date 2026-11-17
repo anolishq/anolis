@@ -408,8 +408,75 @@ can be made to give as one. Each with
       3.15 s in three runs, not past its setpoint, 201 calls and 201
       ticks, no write refused.
 
+## Signals that are read: two providers, telemetry, a doubted output
+
+`monitor.py` runs what the RFC's first version is for: no tree, and
+nothing acted on. Two simulators, a graph over a noisy voltage of each
+(`monitor.yaml`), telemetry on, polled every 500 ms, for 60 s. At 20 s
+the first simulator's signal reads `FAULT` for 1.5 s, and at 35 s the
+second's for 5 s.
+
+```bash
+python3 tools/derived-signals/runtime-spike/monitor.py \
+  --runtime build/ci-linux-release/core/anolis-runtime \
+  --provider ../anolis-provider-sim/build/ci-linux-release/anolis-provider-sim \
+  --out <an empty directory>
+```
+
+Telemetry goes to a stand-in for InfluxDB inside the script, which
+answers each write and counts its rows. It is not InfluxDB: nothing is
+stored, and what is counted is what the runtime sends. One run of each
+of the two graphs.
+
+| Derived signal | What it is | Quality over HTTP | Rows in 60 s |
+| --- | --- | --- | --- |
+| `apart` | `a - b`, of two providers | `OK`; `FAULT` from 20.8 s to 22.3 s and from 35.8 s to 40.8 s | 5 |
+| `far` | whether that is over 0.05 | as `apart` | 5 |
+| `smooth` | a low-pass of `a`, riding through 2 s | `OK`; `STALE` from 20.8 s to 22.3 s | 117 |
+| `quiet` | `smooth` through a deadband of 0.01 | as `smooth` | 3 |
+| `mean` | the mean of `a` over 10 s, 80% of it needed | `UNAVAILABLE` until 7.8 s, then `OK` throughout | 103 |
+
+Each simulator's own signal wrote 119 rows. The device of the graph
+wrote 469 rows of the run's 1893.
+
+<!-- markdownlint-disable MD029 -- the findings keep one numbering -->
+21. **A signal of two providers is one more signal, and is `FAULT`
+    while either is.** `apart` came out, went `FAULT` 0.8 s after the
+    first simulator's signal did and again after the second's, and came
+    back with them. The window's `mean` did not move through the 1.5 s:
+    it needs 80% of its samples, and had them. The two simulators give
+    the same noise, so `apart` was the same number throughout, and this
+    says nothing of two signals that differ.
+
+22. **A derived signal that moves writes as many rows as what it is
+    made of, and the layer's own counts write more than its signals.**
+    Telemetry writes a row when a value changes at all. A low-pass of a
+    noisy signal changes at every tick: 117 rows against the signal's
+    119. Through a deadband of 0.01 it wrote 3. So a graph that
+    publishes a filtered signal doubles that signal's rows unless it
+    ends in a deadband, and what the deadband is has to be chosen for
+    each. Of the device's 469 rows, 233 were its signals; the other
+    236 were the spike's counts of its own calls and ticks, which
+    change at every call. A count like that is not a thing to publish as a signal
+    that telemetry follows.
+
+23. **A doubted output is `STALE` to everything that reads it, and one
+    signal colours its whole device.** With the signals of `a` alone
+    (`--one`), while the low-pass rode through, HTTP gave `smooth` and
+    `quiet` as `STALE`, and the health of the graph's device went from
+    `OK` to `STALE` with `stale_signal_count` 2 and back. Nothing a
+    reader has tells that `STALE` from a provider's, which is the RFC's
+    O1. With `apart` in the graph the same 1.5 s made the device
+    `FAULT`: the device is as bad as its worst signal, so a graph of
+    unrelated quantities reports one health for all of them. And a
+    window that needs 8 s of samples leaves its device `STALE` for the
+    first 8 s of every start.
+<!-- markdownlint-enable MD029 -->
+
 ## What is not here
 
-A second device, telemetry, a tree that is not in
+A second device of one provider in a loop, a tree that is not in
 AUTO at the start, a graph changed while the runtime runs, a build with
 automation off, tests. The other placement, in a provider, is not built.
+The workbench has not been looked at: what it shows of a derived signal
+that is `STALE` is not known.

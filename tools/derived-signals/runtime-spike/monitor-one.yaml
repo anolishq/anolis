@@ -1,0 +1,21 @@
+# The signals of monitor.yaml that are made of `a` alone: while `a` is away for a time the low-pass rides
+# through, nothing here is bad, and two of the three are doubted.
+period: 500ms
+inputs:
+  a: {max_age: 2s}
+blocks:
+  - id: f
+    type: lowpass
+    in: {x: a}
+    settings: {tau: 5s, settle: 5s, ride_through: 2s}
+    out: {y: smooth}
+  - id: q
+    type: deadband
+    in: {x: f.y}
+    settings: {step: 0.01}
+    out: {y: quiet}
+  - id: w
+    type: window
+    in: {x: a}
+    settings: {window: 10s, min_good: 0.8}
+    out: {mean: mean}
