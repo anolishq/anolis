@@ -3,8 +3,8 @@
 Status: draft, fifth revision. Nothing is implemented, and the RFC is
 not accepted. This is a register of decisions. Each is marked as one of
 three things. **Decided** is a choice that has been made: to build the
-layer (O0), the engine (O11), what the first version is for (below),
-who bounds a command (P2), where a definition lives (O9), that no
+layer (O0), the engine (O11) and that a build may leave it out, what the
+first version is for (below), who bounds a command (P2), where a definition lives (O9), that no
 provider id is reserved (O8), and what a derived signal may not be used
 for (O6). **Proposed** is a claim about how the layer should behave,
 with the evidence it has beside it, which is often thin. **Open** has
@@ -224,10 +224,40 @@ and write.
 
 **The design is now in two places.** What a value's state is, what a block
 does with a bad input, the block catalogue, saving and restoring state, and
-the sample clock are the engine's, and are argued in
-[FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182). This document keeps what is Anolis's: how a derived signal gets an
-identity, where the layer runs, where its definition and its constants
-live, and the safety boundary.
+the sample clock are the engine's, and are in
+[FluxGraph's version 2 semantics](https://github.com/anolishq/fluxgraph/blob/main/docs/semantics_spec_v2.md),
+which FluxGraph has accepted as what its 2.0 is built to. This document
+keeps what is Anolis's: how a derived signal gets an identity, where the
+layer runs, where its definition and its constants live, and the safety
+boundary.
+
+### The engine is a part a build may leave out
+
+Decided: the runtime does not depend on FluxGraph. A build has the layer
+or has not, by a CMake option, `ANOLIS_ENABLE_DERIVED`, as
+`ANOLIS_ENABLE_AUTOMATION` decides whether a build has behaviour trees.
+
+- **Without it nothing of FluxGraph is fetched, compiled or linked.** In
+  the spike (#835) FluxGraph is named in two places, the layer's own
+  directory, `core/derived/`, and the build file that links it. What the
+  layer needs of the rest of the runtime names no engine: the state cache
+  telling a listener of each read as it returns, and a provider that runs
+  in the runtime's process.
+- **A build without the layer refuses a config that asks for one**, at
+  startup, naming the option. The runtime warns of a top-level key it
+  does not know and goes on, and that will not do here: a reading or a
+  trip that someone believes is there, and is not, is the worst outcome
+  this layer has.
+- **A build says which it is**, where it says whether it has automation,
+  so that a client can show derived signals or not.
+- **The option is off unless given until the first version is released**,
+  and on from then, as automation's is. Until then a build as it is made
+  today fetches nothing new and behaves as it does today.
+
+FluxGraph does not know of Anolis either: nothing in its version 2 core
+names a host
+([its account of that](https://github.com/anolishq/fluxgraph/pull/211)).
+Each is something the other can be built without.
 
 ## Proposed
 
