@@ -473,6 +473,67 @@ wrote 469 rows of the run's 1893.
     first 8 s of every start.
 <!-- markdownlint-enable MD029 -->
 
+## Two engines: one simulates the hardware, one reads it
+
+`combined.py` runs FluxGraph in two places at once. The simulator steps
+a version 2 graph of a chamber's four thermal masses in its own
+process, at 100 ms: its branch
+[`spike/v2-in-process`](https://github.com/anolishq/anolis-provider-sim/tree/spike/v2-in-process),
+commit `301c0e3`, built with `-DENABLE_FLUXGRAPH_V2=ON`. The runtime
+polls it every 500 ms as it would hardware, and runs `combined.yaml`
+over four of its readings. At 2 s the chamber's controller, which is
+the simulator's own code and no graph, is set to hold 50 C.
+
+```bash
+python3 tools/derived-signals/runtime-spike/combined.py \
+  --runtime build/ci-linux-release/core/anolis-runtime \
+  --provider <the simulator built from that branch> \
+  --sim-config ../anolis-provider-sim/config/spike-v2/provider.yaml \
+  --out <an empty directory>
+```
+
+One run of 90 s, looked at over HTTP every 50 ms.
+
+| What | What the run gave |
+| --- | --- |
+| The top of the chamber reaches 48 C | at 21.5 s; by its equation, `22 + 60 (1 - exp(-0.03 t))` from the call, 21.0 s |
+| The top from 5 s after that | between 47.89 and 52.08 C, the controller's band being 48 to 52 |
+| The hotend and the material, with no heater of their own on | from 22.00 to 49.61 C and to 59.44 C |
+| `spread`, the top less the bottom | 151 values, each the difference of two readings seen |
+| `lift`, the hotend less the top | 175 values, each the difference of two readings seen |
+| `duty`, the heater's share of the last 20 s | at most 0.026 from the same share of what HTTP showed |
+| `settled`, within 3 of 50 for 10 s | first true 11.1 s after the top was last seen outside |
+| Every derived signal's quality | `UNAVAILABLE` before the first tick, then `OK` throughout |
+
+<!-- markdownlint-disable MD029 -- the findings keep one numbering -->
+24. **The two engines need nothing of each other.** Neither graph
+    names the other, and neither process was changed for the other:
+    the runtime is the build of finding 20, and the simulator's
+    engine hands its outputs to the code that held the server's. What
+    joins them is what joins the runtime to hardware, a provider's
+    readings. The derived graph cannot tell that its readings are
+    simulated, which is the point of simulating them.
+
+25. **An engine in a provider's process is that provider's alone.**
+    The simulator's `multi-provider-extrusion.yaml` is one graph that
+    two providers share through FluxGraph's server, so that the
+    chamber of one warms the hotend of the other. In process there is
+    an engine for each provider and nothing between them, and this run
+    has both as devices of one provider. A simulation that spans
+    providers needs the server, or one provider.
+
+26. **Each engine keeps its own time, and the slower one sees less.**
+    The simulator's graph ran a tick every 100 ms of its ticker and
+    was given no time by anyone; the derived graph was given the
+    arrival times of polls 500 ms apart, so of five ticks of the
+    chamber it saw one. Here that cost nothing that was measured: the
+    chamber moves about 1 C a second, and the top's 0.11 C under its
+    band and 0.08 C over are the simulator's controller acting on the
+    reading of the tick before, not the derived graph's doing. What a
+    period of 500 ms misses of something faster was not run, and
+    nothing in either engine says when a period is too slow.
+<!-- markdownlint-enable MD029 -->
+
 ## What is not here
 
 A second device of one provider in a loop, a tree that is not in

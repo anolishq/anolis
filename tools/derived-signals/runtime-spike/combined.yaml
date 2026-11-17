@@ -1,0 +1,49 @@
+# Signals of a simulated chamber, read and not acted on. The chamber is
+# simulated by an engine of its own in the simulator's process, and this
+# graph is told nothing of that: its inputs are readings, as from hardware.
+#
+#   top, bottom  the chamber's two thermocouples
+#   heater       the relay of the top heater, 1 while it is on
+#   hotend       the hotend's thermocouple, which the chamber warms
+#
+#   spread   how far apart the top and the bottom are
+#   smooth   a low-pass of the top
+#   duty     the share of the last 20 s the heater was on
+#   settled  whether the top has been within 3 of 50 for 10 s
+#   lift     how far the hotend is above the top
+period: 500ms
+inputs:
+  top: {max_age: 2s}
+  bottom: {max_age: 2s}
+  heater: {max_age: 2s}
+  hotend: {max_age: 2s}
+blocks:
+  - id: d
+    type: formula
+    in: {a: top, b: bottom}
+    settings: {expr: "a - b"}
+    out: {y: spread}
+  - id: f
+    type: lowpass
+    in: {x: top}
+    settings: {tau: 5s, settle: 5s, ride_through: 2s}
+    out: {y: smooth}
+  - id: w
+    type: window
+    in: {x: heater}
+    settings: {window: 20s, min_good: 0.8}
+    out: {mean: duty}
+  - id: n
+    type: formula
+    in: {a: top}
+    settings: {expr: "abs(a - 50) < 3"}
+  - id: h
+    type: held_for
+    in: {x: n.y}
+    settings: {time: 10s, on_bad: reset}
+    out: {y: settled}
+  - id: l
+    type: formula
+    in: {a: hotend, b: top}
+    settings: {expr: "a - b"}
+    out: {y: lift}
