@@ -1,0 +1,5 @@
+mock: true
+devices:
+  - id: env0
+    type: bme280
+    label: Environment sensor 0

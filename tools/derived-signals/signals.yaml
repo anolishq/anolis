@@ -1,0 +1,150 @@
+# The nine cases as a block file that engine.py can run.
+#
+# Strawman for RFC open decision O3. Nothing reads this file except
+# engine_check.py. It differs from style-c-blocks.yaml in three ways:
+#
+# - Ten block types, not seventeen: arithmetic, comparison and logic are all
+#   the `expr` block.
+# - A stateful block has to say what an input that is not good does to it
+#   (`on_bad`). Leaving it out is a load error.
+# - Numbers found on the bench are named under `constants` (RFC O4).
+#
+# An input is a device signal (provider/device/signal), another block's
+# output (block_id.port), { param: name }, { const: name } or a literal.
+
+period_ms: 2500
+
+constants:
+  liquid_bias_c: 1.2 # the liquid thermocouple reads this much high
+  loss_k: 1.1 # pad-to-liquid loss coefficient, from three overnight runs
+  heater_w: 35.4 # 12 V x 2.95 A, one reading, not metered
+
+blocks:
+  # case 1: pad temperature with single-sample glitches removed
+  - id: pad
+    type: median
+    in: { x: bread0/rlht0/t2_c }
+    params: { samples: 3 }
+    publish: { y: { signal: heater/pad_c, unit: "°C" } }
+
+  # case 2: liquid temperature corrected for bias; pad minus liquid
+  - id: liquid
+    type: expr
+    in: { t1: bread0/rlht0/t1_c, bias: { const: liquid_bias_c } }
+    params: { formula: t1 - bias }
+    publish: { y: { signal: heater/liquid_c, unit: "°C" } }
+  - id: gap
+    type: expr
+    in: { pad: pad.y, liquid: liquid.y }
+    params: { formula: pad - liquid }
+    publish: { y: { signal: heater/pad_liquid_gap_c, unit: "°C" } }
+
+  # case 3: the steady-state relation between pad, liquid and room
+  - id: liquid_steady
+    type: expr
+    in:
+      room: adafruit0/room0/temperature
+      pad: bread0/rlht0/setpoint1_c
+      k: { const: loss_k }
+    params: { formula: room + (pad - room) / (1 + k) }
+    publish: { y: { signal: heater/liquid_steady_c, unit: "°C" } }
+  - id: pad_suggested
+    type: expr
+    in:
+      room: adafruit0/room0/temperature
+      target: { param: liquid_target_c }
+      k: { const: loss_k }
+    params: { formula: target + k * (target - room) }
+    publish: { y: { signal: heater/pad_suggested_c, unit: "°C" } }
+
+  # case 4: the heater guard's detectors
+  - id: over_temp_pad
+    type: expr
+    in: { t2: bread0/rlht0/t2_c }
+    params: { formula: t2 > 70 }
+    publish: { y: { signal: heater/over_temp_pad } }
+  - id: over_temp_liquid
+    type: expr
+    in: { t1: bread0/rlht0/t1_c }
+    params: { formula: t1 > 45 }
+    publish: { y: { signal: heater/over_temp_liquid } }
+  - id: readings_good
+    type: all_good
+    in: { t1: bread0/rlht0/t1_c, t2: bread0/rlht0/t2_c }
+  - id: no_good_reading
+    type: since_true
+    in: { x: readings_good.y }
+    params: { longer_than_s: 120 }
+    publish: { y: { signal: heater/no_good_reading } }
+  - id: relay_seen
+    type: latch
+    in: { set: bread0/rlht0/relay1_on }
+  - id: pad_below_liquid
+    type: expr
+    in: { seen: relay_seen.y, t1: bread0/rlht0/t1_c, t2: bread0/rlht0/t2_c }
+    params: { formula: seen and t2 < t1 - 3 }
+  - id: pad_detached
+    type: held_for
+    in: { x: pad_below_liquid.y }
+    params: { seconds: 1800, on_bad: reset }
+    publish: { y: { signal: heater/pad_detached } }
+  - id: trip
+    type: expr
+    in: { a: over_temp_pad.y, b: over_temp_liquid.y, c: no_good_reading.y, d: pad_detached.y }
+    params: { formula: a or b or c or d }
+    publish: { y: { signal: heater/trip } }
+
+  # case 5: is the pH reading steady
+  - id: ph_window
+    type: window_stats
+    in: { x: ezo0/ph0/ph_value }
+    params: { window: 10m, on_bad: reset }
+  - id: ph_steady
+    type: expr
+    in: { slope: ph_window.slope_per_min, spread: ph_window.spread }
+    params: { formula: abs(slope) < 0.002 and spread < 0.02 }
+    publish: { y: { signal: ph/steady } }
+
+  # case 6: relay duty and heater power
+  - id: duty
+    type: window_stats
+    in: { x: bread0/rlht0/relay1_on }
+    params: { window: 10m, on_bad: skip }
+    publish: { mean: { signal: heater/duty_10m, unit: "1" } }
+  - id: power
+    type: expr
+    in: { duty: duty.mean, watts: { const: heater_w } }
+    params: { formula: duty * watts }
+    publish: { y: { signal: heater/power_w, unit: W } }
+
+  # case 7: probe compensation temperature
+  - id: liquid_5m
+    type: window_stats
+    in: { x: liquid.y }
+    params: { window: 5m, on_bad: skip }
+  - id: compensation
+    type: deadband
+    in: { x: liquid_5m.mean }
+    params: { step: 0.5 }
+    on_bad: { use: { param: compensation_temp_c } }
+    publish: { y: { signal: probes/compensation_c, unit: "°C" } }
+
+  # case 8: liquid temperature estimate (stress case; tuning is illustrative)
+  - id: liquid_estimate
+    type: kalman1
+    in: { z: liquid.y, steady: liquid_steady.y }
+    params: { tau_s: 12600, q: 1.0e-6, r: 0.0025 }
+    publish:
+      x: { signal: heater/liquid_estimate_c, unit: "°C" }
+      sigma: { signal: heater/liquid_estimate_sigma_c, unit: "°C" }
+
+  # case 9: heater energy (stress case; persist and reset_on are not implemented)
+  - id: relay_power
+    type: expr
+    in: { relay: bread0/rlht0/relay1_on, watts: { const: heater_w } }
+    params: { formula: "when(relay, watts, 0)" }
+  - id: energy
+    type: integrate
+    in: { x: relay_power.y }
+    params: { per: 1h, on_bad: skip, persist: true, reset_on: run_start }
+    publish: { y: { signal: heater/energy_wh, unit: Wh } }
