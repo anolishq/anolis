@@ -237,26 +237,30 @@ Decided: the runtime does not depend on FluxGraph. A build has the layer
 or has not, by a CMake option, `ANOLIS_ENABLE_DERIVED`, as
 `ANOLIS_ENABLE_AUTOMATION` decides whether a build has behaviour trees.
 
-- **Without it nothing of FluxGraph is fetched, compiled or linked.** In
-  the spike (#835) FluxGraph is named in two places, the layer's own
+- **Without it nothing of FluxGraph is fetched, compiled or linked.** The
+  spike (#835) is built so: without the option `nm` finds no symbol
+  naming FluxGraph in `anolis-runtime`, and with it 724. FluxGraph is
+  named in two places, the layer's own
   directory, `core/derived/`, and the build file that links it. What the
   layer needs of the rest of the runtime names no engine: the state cache
   telling a listener of each read as it returns, and a provider that runs
   in the runtime's process.
-- **A build without the layer refuses a config that asks for one**, at
-  startup, naming the option. The runtime warns of a top-level key it
+- **A build without the layer refuses a config that asks for one**, as
+  the config is loaded and before a provider is started, naming the
+  option. The runtime warns of a top-level key it
   does not know and goes on, and that will not do here: a reading or a
   trip that someone believes is there, and is not, is the worst outcome
   this layer has.
-- **A build says which it is**, where it says whether it has automation,
-  so that a client can show derived signals or not.
+- **A build should say which it is**, so that a client can show derived
+  signals or not. Open: nothing says today whether a build has
+  automation either, but its endpoints answering that it is not enabled.
 - **The option is off unless given until the first version is released**,
   and on from then, as automation's is. Until then a build as it is made
   today fetches nothing new and behaves as it does today.
 
 FluxGraph does not know of Anolis either: nothing in its version 2 core
 names a host
-([its account of that](https://github.com/anolishq/fluxgraph/pull/211)).
+([its account of that](https://github.com/anolishq/fluxgraph/blob/main/docs/hosts.md)).
 Each is something the other can be built without.
 
 ## Proposed
