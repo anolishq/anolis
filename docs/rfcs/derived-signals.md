@@ -4,7 +4,8 @@ Status: draft, fifth revision. Nothing is implemented, and the RFC is
 not accepted. This is a register of decisions. Each is marked as one of
 three things. **Decided** is a choice that has been made: to build the
 layer (O0), the engine (O11) and that a build may leave it out, what the
-first version is for (below), who bounds a command (P2), where a definition lives (O9), that no
+first version is for (below), how a graph's outputs are published, what
+stands for the first version of all that is proposed, who bounds a command (P2), where a definition lives (O9), that no
 provider id is reserved (O8), and what a derived signal may not be used
 for (O6). **Proposed** is a claim about how the layer should behave,
 with the evidence it has beside it, which is often thin. **Open** has
@@ -320,10 +321,60 @@ graph over a chamber that a second engine simulates.
   provider's `STALE`. That is the cost, and it is taken. Not seen: the
   workbench, and a stop chain's view of the device.
 
+### What stands for the first version
+
+Decided: for a first version whose signals are read and not acted on,
+what is under "Proposed" below stands as it is written, and four
+things that were open are closed. What any of it says of a command, a
+loop or a tree that acts is not decided by this, and waits for the
+second stage.
+
+- **P1, P3, P5 and P6**: a derived value is a signal; evaluation is
+  periodic and in dependency order; declarations are blocks; and the
+  layer runs in the runtime's process behind the provider interface.
+  One placement was built and that is taken as enough for signals
+  that are read (O10).
+- **P2**, as far as that the layer produces signals and calls
+  nothing.
+- **Quality, going in and coming out** (O1): `OK` is `good`, `STALE`
+  and `FAULT` are `bad`, `UNKNOWN` is `not_ready`, and the same
+  backwards, with `uncertain` as `STALE`.
+- **A sample's time is when the runtime's read of it returned** (O7).
+  It is decided ahead of the measurements O7 says would settle it:
+  latency and skew on the rig. Those are owed before the second stage,
+  and until then they bear on which period and which maximum ages a
+  machine's graph is given, and not on the rule.
+- **A constant is a setting in the graph file, or an input the config
+  gives as a constant** (O4), changed by editing a file and starting
+  again.
+- **An output with no value is published as the last value it had
+  when it was usable**, with the quality that says it is not, and as 0
+  or `false` only where it has had none (P4). The spike publishes 0
+  always, and a reader that passes over quality then has a duty of 0
+  or a difference of 0 that nothing measured. An old number that was
+  true is the smaller harm. Not run.
+- **Nothing is saved across a restart, and a block that would lose by
+  that what it cannot get back is refused** (O5): `latch`, `integrate`
+  and `pid`, whose integral is a running total. The refusal is the
+  runtime's, when the config is loaded, and names the block. A
+  hysteresis, a deadband, a timer and a rate limit also keep something
+  with no end, and are not refused: each finds its place again from
+  what it reads, and a timer that starts again errs by saying "not
+  yet". This costs the first version two of the exercise's nine cases
+  as `tools/derived-signals/signals.yaml` writes them: the heater
+  trip, one of whose three detectors uses a `latch` to know that the
+  relay has been on, and the energy total, which is a stress case. Taking the refusal away later stops
+  no config that loads. Not run.
+- **Nothing is raised when an output stays not `OK`.** The signal's
+  quality and its device's health are the notice, as for a provider's
+  signal. An event or an alarm with a time on it belongs with the
+  second stage, where a command needs one ("What is missing").
+
 ## Proposed
 
-These are the starting position. Each stands until an open decision
-contradicts it.
+These were the starting position. For the first version they are
+decided ("What stands for the first version"); for anything that acts
+they stand until an open decision contradicts them.
 
 ### P1. A derived value is a signal
 
@@ -488,9 +539,11 @@ inside the layer, and at the layer's way out it is broken twice.
 Proposed: one tree node that reads a value, its quality and its age
 from one snapshot and fails unless the quality is `OK` and the age
 within a stated bound; and a derived boolean that stands for a trip
-declares which way it reads when it is not good. What a number with no
-value is published as is open: not-a-number says it best and is not
-valid JSON, and the last value with its quality is plausible too.
+declares which way it reads when it is not good. Both are proposed
+still, and the node is the tree's. What a number with no value is
+published as is decided: the last usable value with its quality ("What
+stands for the first version"). Not-a-number says it best and is not
+valid JSON.
 
 ### P5. Declarations are blocks with declared inputs
 
@@ -518,7 +571,7 @@ bad value. Refusing an unknown key or setting at load is new here.
 
 ### P6. The layer runs in the runtime, behind the provider interface
 
-This was O10, and is proposed on one spike of one placement. The engine
+This was O10, and rests on one spike of one placement. The engine
 is wrapped as an implementation of `IProviderHandle` in the runtime's own
 process. It is given the graph's inputs from the state cache, and a
 thread of its own calls the engine once a period. The graph's published outputs
@@ -625,12 +678,14 @@ Questions, the first three answered below as far as they are:
   value that came from a fallback is told apart from one that was
   computed: in the engine both are `uncertain`.
 
-Proposed, on the spike:
+Decided for the first version, on the spike:
 
 - Going in: `OK` is `good`, `STALE` and `FAULT` are `bad`, `UNKNOWN` is
   `not_ready`, and a value the cache does not hold is `bad`.
-- Coming out: the same backwards, with a value of 0 where the engine
-  has none, since the protocol cannot say "no value".
+- Coming out: the same backwards. Where the engine has no value the
+  protocol still wants one: the last usable value, and 0 where there
+  has been none ("What stands for the first version"). The spike
+  gives 0 always.
 
 Decided ("How a graph's outputs are published"): `uncertain` is
 published as `STALE`. There is no fifth
@@ -778,7 +833,7 @@ the filter tuning. Today they are in the runbook. `automation.parameters`
 is the only place for a number, it is the operator's, and it exists only
 when automation is enabled.
 
-Proposed, for the first version, on no run: a constant is a setting of
+Decided for the first version, on no run: a constant is a setting of
 a block in the graph file, or an input the config gives as a constant,
 as the spike's setpoint is. It is changed by editing a file and
 starting the runtime again. A derived signal does not read an operator
@@ -798,7 +853,7 @@ stage.
 The mechanism moved to the engine: section 8 of [FluxGraph's version 2 proposal](https://github.com/anolishq/fluxgraph/pull/182) gives every block a
 way to save and restore its state.
 
-Proposed, on no run: the first version saves nothing. Every start of
+Decided, on no run: the first version saves nothing. Every start of
 the runtime is a start of the graph from nothing. A running total that
 has to survive a restart is not served until saving is added, and the
 engine's save and restore are there for that.
@@ -806,9 +861,10 @@ engine's save and restore are there for that.
 Saying so in the documentation is not enough. A latch, a total or a
 timer loads and reads `good` after a restart that wiped what it held: a
 latched over-temperature clears itself, and a dose total reads zero.
-Open: whether a block whose memory has no end is refused until saving
-exists, or gives `uncertain` from a start until something says its
-history is whole. The engine's counters (`elapsed`, `gaps`) already say
+Decided: `latch`, `integrate` and `pid` are refused until saving
+exists ("What stands for the first version"). Giving `uncertain` from
+a start until something says the history is whole was the other
+course, and is a rule of the engine's that it has not got. The engine's counters (`elapsed`, `gaps`) already say
 how long a block has been going, for a consumer that reads them.
 
 What is left for then: which state the runtime saves, where it keeps
@@ -887,11 +943,11 @@ What stays here is how the runtime meets that: which clock it uses, when it
 ticks the graph, what sample time it gives each cached value, and what the
 period and the maximum ages should be.
 
-Proposed, on the spike: **a sample's time is the time the runtime's read
+Decided for the first version, on the spike: **a sample's time is the time the runtime's read
 of it returned, on the runtime's monotonic clock**, and the engine is
 called on that clock. Every sample time and every call are then one clock
 by construction, and a step of the wall clock does not reach the engine.
-It is proposed ahead of the measurement this section says would settle
+It is decided ahead of the measurement this section says would settle
 it, and it has faults of its own, listed after the spike's runs.
 
 - Spike: the spike used the provider's timestamps, and a provider whose
@@ -1094,7 +1150,7 @@ where each input comes from. Spike: built so.
 
 ### O10. Where the layer runs
 
-Proposed as P6: in the runtime, behind the provider interface. One of the
+Decided for signals that are read, as P6: in the runtime, behind the provider interface. One of the
 two spikes this asked for is built, and the other, in a provider, is not;
 keeping changes to ADPP out of scope is part of why, since that
 placement needs one. One spike is taken as enough for signals that are
@@ -1111,9 +1167,9 @@ the first version:
 
 | The output is | A reader sees | Who notices | Bounded by |
 | --- | --- | --- | --- |
-| `bad` | `FAULT`, and a value of 0 or `false` | Health, for the device as a whole | Nothing: it stands until the input comes back |
+| `bad` | `FAULT`, and the last usable value, or 0 or `false` where there was none | Health, for the device as a whole | Nothing: it stands until the input comes back |
 | `uncertain` | `STALE`, with a value | Health; a consumer that asks for `OK` | Nothing |
-| `not_ready` | `UNAVAILABLE`, and a value of 0 or `false` | The same | The window or the filter filling |
+| `not_ready` | `UNAVAILABLE`, and the same | The same | The window or the filter filling |
 | late: the graph called late | The last value, with its quality, for as long | Nobody, short of three call intervals | The check that the graph is alive (P6) |
 | stopped: the graph hung or threw | `FAULT` after three call intervals | Health | The same |
 | wrong, and `good` | `OK` | Nobody | Nothing. An estimator's `good` says its own tests passed |
@@ -1128,7 +1184,8 @@ command.
 in `AUTO`, with the motor at its last duty, and the only trace was a
 count. Nothing here says what event, alarm or change of mode follows an
 output that has not been `OK` for a stated time. P2 requires one for a
-command; a signal that is read has none.
+command; a signal that is read has none, and for the first version
+that is decided: its quality and its device's health are the notice.
 
 **Which graph ran.** Nothing in telemetry or in the runtime's status
 names the graph file a value came from, by hash or by version, so a
@@ -1224,7 +1281,7 @@ what belongs there.
    clock.
 3. The remaining open decisions are worked one at a time, each by the method
    named under it, and each lands here as a change to this file.
-4. O10 is proposed as P6 on one spike. The fourth revision was reviewed
+4. O10 is decided as P6 for signals that are read, on one spike. The fourth revision was reviewed
    independently, by a reading for control and safety and by a check of
    each claim against its source; this revision is the answer to both.
    What they asked for and is not done is under "What is missing".
