@@ -1,14 +1,13 @@
 #include "derived/derived_provider.hpp"
 
-#include <yaml-cpp/yaml.h>
-
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
-#include <cstdlib>
 #include <format>
+#include <fstream>
+#include <sstream>
 #include <utility>
 
+#include "fluxgraph/v2/load.hpp"
 #include "logging/logger.hpp"
 
 namespace anolis {
@@ -26,50 +25,6 @@ constexpr const char *kCountNames[] = {"host_calls",         "host_ticks",      
 std::int64_t system_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch())
         .count();
-}
-
-/// A scalar of a graph file. A quoted scalar is text; a plain one is a whole number, a number or a boolean where
-/// it reads as one, and text otherwise ("200ms", a formula).
-fg::Setting scalar_setting(const YAML::Node &node) {
-    const std::string &text = node.Scalar();
-    if (node.Tag() == "!") {
-        return fg::Setting::text(text);
-    }
-    if (text == "true" || text == "false") {
-        return fg::Setting::boolean(text == "true");
-    }
-    if (!text.empty()) {
-        char *end = nullptr;
-        errno = 0;
-        const long long whole = std::strtoll(text.c_str(), &end, 10);
-        if (errno == 0 && end == text.c_str() + text.size()) {
-            return fg::Setting::whole(whole);
-        }
-        errno = 0;
-        const double number = std::strtod(text.c_str(), &end);
-        if (errno == 0 && end == text.c_str() + text.size()) {
-            return fg::Setting::number(number);
-        }
-    }
-    return fg::Setting::text(text);
-}
-
-fg::Setting to_setting(const YAML::Node &node) {
-    if (node.IsMap()) {
-        fg::Setting map = fg::Setting::map();
-        for (const auto &entry : node) {
-            map.set(entry.first.as<std::string>(), to_setting(entry.second));
-        }
-        return map;
-    }
-    if (node.IsSequence()) {
-        fg::Setting list = fg::Setting::list();
-        for (const auto &item : node) {
-            list.add(to_setting(item));
-        }
-        return list;
-    }
-    return scalar_setting(node);
 }
 
 /// O1, going in. A value the cache does not hold is written `bad`.
@@ -147,13 +102,20 @@ std::string DerivedProvider::last_error() const {
 }
 
 bool DerivedProvider::start() {
-    fg::Setting graph;
-    try {
-        graph = to_setting(YAML::LoadFile(config_.graph_path));
-    } catch (const YAML::Exception &e) {
-        set_error(std::format("graph file '{}': {}", config_.graph_path, e.what()));
+    // The file is read by FluxGraph's own loader: what a value of it is, is not this layer's to decide.
+    std::ifstream file(config_.graph_path);
+    if (!file) {
+        set_error(std::format("graph file '{}' cannot be opened", config_.graph_path));
         return false;
     }
+    std::ostringstream text;
+    text << file.rdbuf();
+    auto loaded = fg::load_yaml(text.str());
+    if (!loaded) {
+        set_error(std::format("graph file '{}': {}", config_.graph_path, loaded.error().message));
+        return false;
+    }
+    const fg::Setting &graph = loaded.value();
     auto compiled = fg::Engine::compile(graph);
     if (!compiled) {
         set_error(std::format("graph file '{}' refused: {}", config_.graph_path, compiled.error().message));
@@ -165,7 +127,14 @@ bool DerivedProvider::start() {
 
     const fg::Setting *declared = graph.find("inputs");
     for (const auto &input : config_.inputs) {
-        Input one{input, false};
+        Input one{input, false, {}, false};
+        // Looked up once: a name the graph has no input of is refused here, and not at every write.
+        auto handle = engine_->input(input.name);
+        if (!handle) {
+            set_error(std::format("derived input '{}': {}", input.name, handle.error().message));
+            return false;
+        }
+        one.handle = handle.value();
         if (declared != nullptr && declared->is(fg::Setting::Kind::map)) {
             const fg::Setting *spec = declared->find(input.name);
             const fg::Setting *type =
@@ -225,12 +194,12 @@ void DerivedProvider::run() {
 
 fg::Status DerivedProvider::write(const Input &input, fg::State state, double number, std::int64_t at) {
     if (!fg::usable(state)) {
-        return engine_->write(input.config.name, state, at);
+        return engine_->write(input.handle, state, at);
     }
     if (input.boolean) {
-        return engine_->write(input.config.name, state, number != 0.0, at);
+        return engine_->write(input.handle, state, number != 0.0, at);
     }
-    return engine_->write(input.config.name, state, number, at);
+    return engine_->write(input.handle, state, number, at);
 }
 
 void DerivedProvider::on_read(const std::string &device_handle, const adpp::ReadSignalsResponse *response,
@@ -318,15 +287,15 @@ void DerivedProvider::call_once() {
             }
         }
         if (input.config.constant) {
-            count(engine_->write(input.config.name, fg::State::good, *input.config.constant, now), input);
+            count(engine_->write(input.handle, fg::State::good, *input.config.constant, now), input);
         } else if (!input.config.not_acting_on.empty()) {
-            count(engine_->write(input.config.name, fg::State::good, input.lost || !acting_(input.config.not_acting_on),
-                                 now),
-                  input);
+            count(
+                engine_->write(input.handle, fg::State::good, input.lost || !acting_(input.config.not_acting_on), now),
+                input);
         } else if (!on_arrival) {
             const auto cached = state_cache_.get_signal_value(input.config.device_handle, input.config.signal_id);
             if (!cached) {
-                count(engine_->write(input.config.name, fg::State::bad, now), input);
+                count(engine_->write(input.handle, fg::State::bad, now), input);
             } else {
                 const std::int64_t at =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(cached->timestamp.time_since_epoch()).count() +

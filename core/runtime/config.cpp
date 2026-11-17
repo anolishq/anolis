@@ -27,6 +27,7 @@
 
 #include "../automation/parameter_manager.hpp"
 #include "../logging/logger.hpp"
+#include "anolis_build_config.hpp"
 
 namespace anolis {
 namespace runtime {
@@ -885,6 +886,14 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
 
         // The derived-signals spike (RFC O10). A graph path is relative to the config file.
         if (yaml["derived"]) {
+#if !ANOLIS_ENABLE_DERIVED
+            // Not run without them, where automation's absence is a warning: someone would believe in a reading
+            // that is not there.
+            error =
+                "The config has a 'derived' section, and this build has no derived signals: build with "
+                "-DANOLIS_ENABLE_DERIVED=ON";
+            return false;
+#else
             if (!ensure_mapping(yaml["derived"], "derived", error)) {
                 return false;
             }
@@ -975,6 +984,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     config.derived.inputs.push_back(std::move(input));
                 }
             }
+#endif
         }
 
         // Load health config (#220): device-liveness staleness thresholds.

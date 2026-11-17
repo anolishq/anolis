@@ -313,6 +313,13 @@ jobs:
             configure_preset: ci-linux-release-no-automation
             test_preset: ci-linux-release-no-automation
             triplet: x64-linux-static
+          # The derived-signals spike is off unless a build asks for it: these
+          # two lanes ask, and every other lane builds without FluxGraph.
+          - lane: Linux Release (Core, derived signals)
+            os: ubuntu-24.04
+            configure_preset: ci-linux-release-derived
+            test_preset: ci-linux-release-derived
+            triplet: x64-linux-static
           - lane: Linux ARM64 Release (Core, strict)
             os: ubuntu-24.04-arm
             configure_preset: ci-linux-arm64-release-strict
@@ -328,6 +335,11 @@ jobs:
             os: windows-2025
             configure_preset: ci-windows-release-no-automation
             test_preset: ci-windows-release-no-automation
+            triplet: x64-windows
+          - lane: Windows Release (Core, derived signals)
+            os: windows-2025
+            configure_preset: ci-windows-release-derived
+            test_preset: ci-windows-release-derived
             triplet: x64-windows
 
     steps:

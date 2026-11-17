@@ -124,10 +124,24 @@
       }
     },
     {
+      "name": "ci-linux-release-derived",
+      "inherits": "ci-linux-release-strict",
+      "cacheVariables": {
+        "ANOLIS_ENABLE_DERIVED": "ON"
+      }
+    },
+    {
       "name": "ci-windows-release-strict",
       "inherits": "ci-windows-release",
       "cacheVariables": {
         "ANOLIS_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "ci-windows-release-derived",
+      "inherits": "ci-windows-release-strict",
+      "cacheVariables": {
+        "ANOLIS_ENABLE_DERIVED": "ON"
       }
     },
     {
@@ -215,6 +229,10 @@
       "configurePreset": "ci-linux-release-no-automation"
     },
     {
+      "name": "ci-linux-release-derived",
+      "configurePreset": "ci-linux-release-derived"
+    },
+    {
       "name": "ci-linux-arm64-release",
       "configurePreset": "ci-linux-arm64-release"
     },
@@ -234,6 +252,11 @@
     {
       "name": "ci-windows-release-no-automation",
       "configurePreset": "ci-windows-release-no-automation",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci-windows-release-derived",
+      "configurePreset": "ci-windows-release-derived",
       "configuration": "Release"
     },
     {
@@ -316,6 +339,13 @@
       }
     },
     {
+      "name": "ci-linux-release-derived",
+      "configurePreset": "ci-linux-release-derived",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
       "name": "ci-linux-arm64-release",
       "configurePreset": "ci-linux-arm64-release",
       "output": {
@@ -340,6 +370,14 @@
     {
       "name": "ci-windows-release-no-automation",
       "configurePreset": "ci-windows-release-no-automation",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-windows-release-derived",
+      "configurePreset": "ci-windows-release-derived",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true

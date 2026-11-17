@@ -26,7 +26,9 @@
 #include "automation/parameter_types.hpp"
 #endif
 #include "control/provider_value_bridge.hpp"
+#if ANOLIS_ENABLE_DERIVED
 #include "derived/derived_provider.hpp"
+#endif
 #include "health/health_snapshot.hpp"
 #include "logging/logger.hpp"
 #include "ownership_validation.hpp"
@@ -242,6 +244,8 @@ bool Runtime::init_providers(std::string &error) {
     }
 
     // The derived-signals spike (RFC O10): one more provider, in process and not supervised.
+    // A build without the layer never has it enabled here: the config loader refuses a 'derived' section.
+#if ANOLIS_ENABLE_DERIVED
     if (config_.derived.enabled) {
         // Acting: in AUTO, and the device not held by the device-loss latch.
         auto acting = [this](const std::string &device_handle) {
@@ -275,6 +279,7 @@ bool Runtime::init_providers(std::string &error) {
             });
         }
     }
+#endif
 
     const auto all_devices = registry_->get_all_devices();
     std::string ownership_error;

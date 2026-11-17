@@ -43,7 +43,12 @@ python3 tools/derived-signals/runtime-spike/run.py \
   --out <an empty directory>
 ```
 
-The build pins FluxGraph's spike branch by commit.
+The spike is in a build that asks for it, `-DANOLIS_ENABLE_DERIVED=ON`,
+and in no other (finding 20). The presets `ci-linux-release-derived` and
+`ci-windows-release-derived` ask.
+
+The build pins FluxGraph by commit, `f0282af` of its `main`, which has
+the version 2 core that this was first built against on a spike branch.
 `-DFETCHCONTENT_SOURCE_DIR_FLUXGRAPH=<clone>` builds against a local
 clone, which is how every figure here was made: the runs of
 the estimator against the commits named with them, those on arrival
@@ -52,7 +57,7 @@ against `10fff0f`, those with `--call-ms`,
 `--skew-ms`, `--max-age` or `--graph-line` against the one before it,
 `c3ec3a5`, and the other six against the working tree that became that.
 The runs under "A restart, a doubted command and a clock that steps"
-are against `c794977`.
+are against `c794977`, and those of finding 20 against `f0282af`.
 
 ## What it did
 
@@ -374,6 +379,34 @@ can be made to give as one. Each with
     age is how long a loop runs blind, and 1 s is ten samples of this
     one. One run each, and the STALE is a FAULT renamed: the value
     beside it was the true speed, where a real one would be old.
+
+20. **The runtime need not depend on the engine.** The layer is now
+    behind a CMake option, `ANOLIS_ENABLE_DERIVED`, off unless given, as
+    `ANOLIS_ENABLE_AUTOMATION` decides whether a build has behaviour
+    trees. FluxGraph was named in two places, the layer's directory and
+    the build file, so this was the build's to arrange and one block of
+    startup to guard.
+    - Built without it, the configure log does not hold the word
+      `fluxgraph`, and `nm -C` on `anolis-runtime` finds no symbol that
+      names it. Built with it, 724 do, and the binary is 640 kB larger
+      of 18.5 MB.
+    - A build without it refuses a config with a `derived` section as
+      the config is loaded, before a provider is started: "this build
+      has no derived signals: build with -DANOLIS_ENABLE_DERIVED=ON",
+      and exit 1. Automation's absence is a warning and the runtime
+      goes on; here that would leave someone believing in a reading
+      that is not there.
+    - The 894 unit tests pass in both builds, each with warnings as
+      errors.
+    - The graph file is read by FluxGraph's own YAML loader now, where
+      the spike had a reading of its own, the third in this work, and
+      each input is looked up once for a handle: a config that names an
+      input the graph has not got is refused at startup, where it was a
+      count of refused writes.
+    - On the build with it, pinned to FluxGraph's `main`, the default
+      run is as it was: within 5% of 1500 rpm between 3.11 s and
+      3.15 s in three runs, not past its setpoint, 201 calls and 201
+      ticks, no write refused.
 
 ## What is not here
 

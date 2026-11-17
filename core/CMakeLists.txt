@@ -199,36 +199,43 @@ target_link_libraries(anolis_state PUBLIC
 anolis_apply_warnings(anolis_state)
 
 # Derived-signals spike (docs/rfcs/derived-signals.md, O10): FluxGraph's
-# version 2 core behind the provider interface, in process. Throwaway. The
-# core is a proposal on a branch, so it is pinned by commit;
+# version 2 core behind the provider interface, in process. Throwaway.
+#
+# A build has it or has not: with ANOLIS_ENABLE_DERIVED off nothing of
+# FluxGraph is fetched, compiled or linked. FluxGraph is pinned by commit,
+# having no release with its version 2 core in it;
 # FETCHCONTENT_SOURCE_DIR_FLUXGRAPH names a local clone instead.
-FetchContent_Declare(
-    fluxgraph
-    GIT_REPOSITORY https://github.com/anolishq/fluxgraph.git
-    GIT_TAG c794977506dca992c68045c1475f9a18ef039d7e
-    EXCLUDE_FROM_ALL
-)
-set(FLUXGRAPH_BUILD_V2 ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(fluxgraph)
+if(ANOLIS_ENABLE_DERIVED)
+    FetchContent_Declare(
+        fluxgraph
+        GIT_REPOSITORY https://github.com/anolishq/fluxgraph.git
+        GIT_TAG f0282af1179c47d6d3153ebdf61f19ef8dd35fa0
+        EXCLUDE_FROM_ALL
+    )
+    set(FLUXGRAPH_BUILD_V2 ON CACHE BOOL "" FORCE)
+    set(FLUXGRAPH_YAML_ENABLED ON CACHE BOOL "" FORCE)  # its loader of a graph file
+    set(FLUXGRAPH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(fluxgraph)
 
-add_library(anolis_derived STATIC
-    derived/derived_provider.cpp
-)
+    add_library(anolis_derived STATIC
+        derived/derived_provider.cpp
+    )
 
-target_include_directories(anolis_derived PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+    target_include_directories(anolis_derived PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 
-target_link_libraries(anolis_derived PUBLIC
-    anolis_proto
-    anolis_provider
-    anolis_state
-    anolis_logging
-    fluxgraph_v2
-    yaml-cpp::yaml-cpp
-    protobuf::libprotobuf
-)
-anolis_apply_warnings(anolis_derived)
+    target_link_libraries(anolis_derived PUBLIC
+        anolis_proto
+        anolis_provider
+        anolis_state
+        anolis_logging
+        fluxgraph_v2
+        fluxgraph_v2_yaml
+        protobuf::libprotobuf
+    )
+    anolis_apply_warnings(anolis_derived)
+endif()
 
 # Health snapshot library: the shared provider/device health view consumed by
 # both /v0/providers/health and the InfluxDB health ingestion (#203).
@@ -368,12 +375,14 @@ target_link_libraries(anolis_runtime PUBLIC
     anolis_telemetry
     anolis_health
     anolis_automation_support
-    anolis_derived
     yaml-cpp::yaml-cpp
     protobuf::libprotobuf
 )
 if(ANOLIS_ENABLE_AUTOMATION)
     target_link_libraries(anolis_runtime PUBLIC anolis_automation)
+endif()
+if(ANOLIS_ENABLE_DERIVED)
+    target_link_libraries(anolis_runtime PUBLIC anolis_derived)
 endif()
 anolis_apply_warnings(anolis_runtime)
 

@@ -74,6 +74,7 @@ private:
     struct Input {
         DerivedInputConfig config;
         bool boolean = false;
+        fluxgraph::v2::InputHandle handle;  // the graph's input of that name
         bool lost = false;  // of not_acting_on: its provider was down, and no read of the device has returned since
     };
     struct Published {
