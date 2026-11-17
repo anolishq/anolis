@@ -95,16 +95,20 @@ into the runtime, closing a speed loop on the simulator's motor through a
 behavior tree ([#835](https://github.com/anolishq/anolis/pull/835)). It is throwaway code, and its README has
 each run and what it found. Its findings are cited below as "spike".
 
-What the spike is not. Every run is of one loop on one simulated motor:
+What the spike is not. But for three runs of signals that are read and
+not acted on, which "How a graph's outputs are published" and the
+README's last two sections give, every run is of one loop on one
+simulated motor:
 a first-order plant with no noise, no dead time and no load, stepped ten
-times a second and watched over HTTP every 50 ms. The longest run is
-26 s. Most findings are one run, and the text says where there were
+times a second and watched over HTTP every 50 ms. The longest of those
+is 26 s. Most findings are one run, and the text says where there were
 more. The runs were made against several commits of the engine, which
 the README names. A stall is the whole runtime stopped, and a hang is
 the engine's thread alone stopped; no run stopped the polls or the tree
 alone. A clock that steps is an offset added to the times the spike
-reads. Nothing ran in `MANUAL`, with automation off, with telemetry on,
-or with two devices. No hardware was used.
+reads. Nothing ran in `MANUAL` or with automation off. Telemetry was on in
+two runs, and went to a stand-in that counts rows and stores nothing.
+No hardware was used.
 
 ## Decided
 
@@ -262,6 +266,59 @@ FluxGraph does not know of Anolis either: nothing in its version 2 core
 names a host
 ([its account of that](https://github.com/anolishq/fluxgraph/blob/main/docs/hosts.md)).
 Each is something the other can be built without.
+
+### How a graph's outputs are published
+
+Decided, on three runs of signals that are read and not acted on
+(spike, findings 21 to 26): two simulators with a graph over a signal
+of each and telemetry on, the same with the signals of one alone, and a
+graph over a chamber that a second engine simulates.
+
+- **The runtime's config says which device each output is a signal
+  of.** A graph's outputs are not one device. The config groups them:
+
+  ```yaml
+  derived:
+    id: derived0
+    graph: chamber.yaml
+    devices:
+      chamber: [spread, smooth, settled]
+      heater: [duty]
+  ```
+
+  An output of the graph that is in no device is refused when the
+  config is loaded, and so is one in two, and a name the graph has no
+  output of. The graph's file names no device: what a device is, is
+  the runtime's to say, and the engine knows of no host. Spike, as one
+  device: one output that was `FAULT` for 1.5 s made the device
+  `FAULT`, the device being as bad as its worst signal, and a window
+  that needs 8 s of samples left the device `STALE` for the first 8 s
+  of the run. Not run: the grouping itself, which the spike has not
+  got.
+- **The layer's own counts are not signals.** How many calls it has
+  made, how many ticks ran, how many writes were refused: these go to
+  the log, and to the metrics the provider health answer already
+  carries for each provider, a map of text to text that its schema
+  leaves open. Spike: published as signals, they wrote 236 of the
+  derived device's 469 telemetry rows in 60 s, more than its five
+  derived signals did. As metrics they write no row, and no graph or
+  tree can be given one as an input.
+- **How often a number is published is the graph's to limit**, with a
+  `deadband` block before the output. The layer publishes what the
+  graph gave and holds nothing back, so that what is published is what
+  the engine's rules say it is and is saved with the rest of the
+  graph's state. Spike: a low-pass of a noisy signal wrote 117 rows
+  against its source's 119, and 3 through a deadband of 0.01. A graph
+  without one costs rows and is not wrong. The documentation has to
+  say so where it says how to publish an output.
+- **`uncertain` is published as `STALE`**, and there is no fifth
+  quality (O1 has the table of what one would touch). A graph that has
+  to tell an old value from a doubted one publishes that as a signal of
+  its own. Spike: while a low-pass rode through 1.5 s without its
+  input, HTTP gave its output as `STALE` and the health of its device
+  went to `STALE` and back, and nothing a reader had told that from a
+  provider's `STALE`. That is the cost, and it is taken. Not seen: the
+  workbench, and a stop chain's view of the device.
 
 ## Proposed
 
@@ -465,15 +522,17 @@ This was O10, and is proposed on one spike of one placement. The engine
 is wrapped as an implementation of `IProviderHandle` in the runtime's own
 process. It is given the graph's inputs from the state cache, and a
 thread of its own calls the engine once a period. The graph's published outputs
-are the signals of one device of one more provider.
+are signals of one more provider, in the devices the config puts them
+in ("How a graph's outputs are published"); in the spike they are all
+of one device.
 
 Spike: this is cheap to build, which is not the same as safe to run. At
 `b03e050`, `git diff --numstat origin/main...spike/derived-signals-runtime
 -- core` gives 663 lines added under `core/derived/`, 86 in the config
 loader, 36 at startup and 14 in the state cache, which hand the layer
 each read (O7). The registry, HTTP, change events and health reached
-the outputs through the code they already have. Telemetry was off in
-every run. A host slower than the graph's period was unremarkable in
+the outputs through the code they already have, and so did telemetry
+in the two runs that had it on. A host slower than the graph's period was unremarkable in
 two runs, on a plant whose time constant is eight periods: called
 every 250 ms against a period of 100 ms the loop settled within 0.3 s
 of when it does called on the period.
@@ -573,14 +632,14 @@ Proposed, on the spike:
 - Coming out: the same backwards, with a value of 0 where the engine
   has none, since the protocol cannot say "no value".
 
-Proposed: `uncertain` is published as `STALE`. There is no fifth
+Decided ("How a graph's outputs are published"): `uncertain` is
+published as `STALE`. There is no fifth
 quality: an earlier revision proposed one for later, and the table
 below is why it is withdrawn. A graph that has to tell an old value
-from a doubtful one publishes that as a signal of its own. This rests
-on reading code and on no run: no graph with an `uncertain` output has
-been taken through HTTP, health, the workbench and the stop chain's
-view of its device to see what each shows, and that is what would
-settle it. What it costs is known. An operator sees "stale" on a value
+from a doubtful one publishes that as a signal of its own. A graph with
+an `uncertain` output has been taken through HTTP and health in one
+run, and not through the workbench or the stop chain's view of its
+device. What it costs is known. An operator sees "stale" on a value
 that is new at every tick, and learns to pass over the word. Good,
 uncertain and bad are the words of OPC UA and of fieldbuses, and a
 historian that has only "stale" cannot give them back.
@@ -672,10 +731,11 @@ doubtful, and a graph can publish that itself, as one more signal.
 Three things follow for a derived signal whichever mapping stands. A
 `not_ready` output, published `UNKNOWN`, makes its device read
 `UNAVAILABLE` over HTTP, and `STALE` in health, while any output is
-filling. One `uncertain` or `bad` output makes the device `STALE` or
-`FAULT` in health, since all of a graph's outputs are one device;
-`health.excluded_signals` is there for an output that should not count.
-Whether a graph's outputs should be one device at all is open with it.
+filling. One `uncertain` or `bad` output makes its device `STALE` or
+`FAULT` in health, and every output that shares the device with it;
+which outputs do is for the config to say ("How a graph's outputs are
+published"), and `health.excluded_signals` is there for an output that
+should not count.
 And a tree cannot gate on `UNAVAILABLE` at all.
 
 ### O2. Bad input inside a stateful block, and three-valued booleans
@@ -949,8 +1009,10 @@ P1 reuses the triple. Still open:
   (a search of their YAML, JSON and Markdown for `id: derived` and
   `provider_id: derived`); a config held elsewhere was not seen.
 - What the middle segment means when there is no device. The exercise
-  invented `heater`, `ph` and `probes`.
-- Whether a graph's outputs are one device or several (O1).
+  invented `heater`, `ph` and `probes`. Decided so far: it is a name the
+  config gives to a group of outputs ("How a graph's outputs are
+  published"). Whether such a group may be named for a real device of
+  another provider, and what that would claim, is open.
 
 Answered below, from reading the code: how a derived signal gets a
 registry entry, what the surfaces that list providers show, and whether
@@ -1009,13 +1071,14 @@ Costs that are not contracts:
   that moves in its last place at every call writes a row at every
   poll that follows one: 864,000 a day at 100 ms, for one signal. So
   an output that is published needs a deadband in the graph, which the
-  catalogue has, and the documentation has to say so. A deadband in
+  catalogue has, and the documentation has to say so: decided ("How a
+  graph's outputs are published"). A deadband in
   the cache would change every existing signal.
 - **A signal named `estop`** on the derived device would be read as
   its e-stop by a stop chain that lists the device. Refused with the
   rest of O6.
-- **One device for all outputs** makes the device as bad as its worst
-  output, in health and over HTTP (O1).
+- **Outputs that share a device** make it as bad as the worst of
+  them, in health and over HTTP, which is why the config groups them.
 
 Not found: a rule for when the HTTP API's own version changes, and any
 reserved provider, device or signal id.
