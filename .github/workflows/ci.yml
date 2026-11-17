@@ -545,7 +545,9 @@ jobs:
       contents: read
     uses: anolishq/.github/.github/workflows/clang-tidy-diff.yml@721e8a07128cd274efe6a17e0a51c0a9b1caf6b9 # clang-tidy-diff
     with:
-      configure-preset: ci-linux-release
+      # A build that has the derived-signals spike, so that its file is in the
+      # compile database and its FluxGraph headers are found.
+      configure-preset: ci-linux-release-derived
       blocking: true
 
   tla:
