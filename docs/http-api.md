@@ -19,9 +19,10 @@ Use this file for operational semantics and practical examples.
 1. Base URL default: `http://127.0.0.1:8080`
 2. JSON content type: `application/json`
 3. API prefix: `/v0`
-4. Authentication: bearer token, off by default (`http.auth_enabled`). With it
-   on, every request needs `Authorization: Bearer <token>`, including one from
-   this host unless `http.auth_exempt_loopback` is set. The one exception is a
+4. Authentication: bearer token, off by default (`http.auth_enabled`), but
+   `install.sh` turns it on unless the project config sets `auth_enabled`
+   itself. With it on, every request needs `Authorization: Bearer <token>`,
+   including one from this host unless `http.auth_exempt_loopback` is set. The one exception is a
    CORS preflight from an allowed origin (item 6). The check runs before
    routing, so it covers every endpoint and the `/v0/events` stream. Without a
    valid token the reply is `401` with
