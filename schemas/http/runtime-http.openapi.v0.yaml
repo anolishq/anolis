@@ -130,7 +130,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
-        "412":
+        "409":
           description: A run is already open
           content:
             application/json:
