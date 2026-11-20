@@ -116,7 +116,9 @@ void HttpServer::handle_post_run_close(const httplib::Request &req, httplib::Res
         }
         if (body.contains("close_reason") && body["close_reason"].is_string()) {
             auto parsed = runs::close_reason_from_string(body["close_reason"].get<std::string>());
-            if (!parsed) {
+            // abandoned is the runtime's own restart-recovery reason, never a
+            // client's; the parser keeps it for loading persisted runs (#555).
+            if (!parsed || *parsed == runs::CloseReason::Abandoned) {
                 send_json(
                     res, StatusCode::INVALID_ARGUMENT,
                     make_error_response(StatusCode::INVALID_ARGUMENT,

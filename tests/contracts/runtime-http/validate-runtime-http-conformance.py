@@ -16,6 +16,7 @@ import importlib.util
 import json
 import socket
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,8 @@ REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/v0/providers/health"),
     ("get", "/v0/telemetry/status"),
     ("get", "/v0/runs"),
+    ("post", "/v0/runs"),
+    ("post", "/v0/runs/{run_id}/close"),
     ("post", "/v0/runs/{run_id}/events"),
     ("get", "/v0/runs/{run_id}/events"),
     ("get", "/v0/devices"),
@@ -315,6 +318,52 @@ def _resolve_response_schema(
     return _expand_refs(schema, openapi_doc)
 
 
+# The SSE event types the OpenAPI GET /v0/events description documents.
+SSE_EVENT_TYPES = frozenset(
+    {
+        "state_update",
+        "quality_change",
+        "device_availability",
+        "device_removed",
+        "mode_change",
+        "parameter_change",
+        "automation_fault",
+        "automation_call_failed",
+        "stop_chain_change",
+        "stop_chain_mismatch",
+    }
+)
+
+
+def _read_sse_frame(resp: Any, *, deadline_s: float) -> tuple[str, dict[str, str]] | None:
+    """Read the first complete SSE frame from a streaming response.
+
+    Returns the frame's raw text and its fields (``data`` lines joined with
+    newlines), or None when no frame completes before the deadline. Comment
+    lines (``:`` keep-alives) are skipped.
+    """
+    deadline = time.monotonic() + deadline_s
+    raw: list[str] = []
+    fields: dict[str, str] = {}
+    for line in resp.iter_lines(decode_unicode=True):
+        if time.monotonic() > deadline:
+            return None
+        if line is None:
+            continue
+        if line == "":
+            if fields:
+                return "\n".join(raw) + "\n\n", fields
+            raw.clear()
+            continue
+        if line.startswith(":"):
+            continue
+        raw.append(line)
+        key, _, value = line.partition(":")
+        value = value[1:] if value.startswith(" ") else value
+        fields[key] = f"{fields[key]}\n{value}" if key == "data" and key in fields else value
+    return None
+
+
 def _validate_json_instance(schema: Any, payload: Any) -> list[str]:
     validator_cls = jsonschema.validators.validator_for(schema)
     validator = validator_cls(schema)
@@ -440,6 +489,9 @@ def main() -> int:
     failures: list[Failure] = []
     checks_run = 0
     checks_passed = 0
+    # (method, path_template) of every operation a check exercised, so the
+    # coverage guard can name a required operation no check reaches (#585).
+    exercised: set[tuple[str, str]] = set()
 
     def run_json_check(
         *,
@@ -452,6 +504,7 @@ def main() -> int:
     ) -> None:
         nonlocal checks_run, checks_passed
         checks_run += 1
+        exercised.add((method.lower(), path_template))
         try:
             op = _resolve_operation(openapi_doc, method, path_template)
             resp = _invoke_json(method, f"{fixture.base_url}{actual_path}", json_body=json_body)
@@ -555,6 +608,7 @@ def main() -> int:
         nonlocal checks_run, checks_passed
         checks_run += 1
         path_template = "/v0/events"
+        exercised.add(("get", path_template))
         try:
             op = _resolve_operation(openapi_doc, "get", path_template)
             resp = requests.get(
@@ -574,27 +628,30 @@ def main() -> int:
                             )
                         )
                         return
-                    schema = _resolve_response_schema(
-                        openapi_doc=openapi_doc,
-                        operation=op,
-                        status_code=resp.status_code,
-                        content_type="text/event-stream",
-                    )
-                    validation_errors = _validate_json_instance(schema, "")
-                    if validation_errors:
-                        failures.append(
-                            Failure(
-                                "schema",
-                                f"{name}: event-stream schema invalid: {validation_errors[0]}",
-                            )
-                        )
+                    # Read and check a frame the runtime actually sent (#579).
+                    received = _read_sse_frame(resp, deadline_s=10.0)
+                    if received is None:
+                        failures.append(Failure("response", f"{name}: no complete SSE frame within 10 s"))
+                        return
+                    frame, fields = received
+                    event_type = fields.get("event", "")
+                    if event_type not in SSE_EVENT_TYPES:
+                        failures.append(Failure("response", f"{name}: undocumented SSE event type {event_type!r}"))
+                        return
+                    try:
+                        data = json.loads(fields.get("data", ""))
+                    except ValueError as exc:
+                        failures.append(Failure("response", f"{name}: {event_type} data is not JSON: {exc}"))
+                        return
+                    if not isinstance(data, dict):
+                        failures.append(Failure("response", f"{name}: {event_type} data is not a JSON object"))
                         return
                     if capture_dir is not None:
                         body_file = _capture_body_file(
                             capture_dir,
                             name=name,
                             status_code=resp.status_code,
-                            payload="event: state_update\nid: 0\ndata: {}\n\n",
+                            payload=frame,
                             as_json=False,
                         )
                         captures.append(
@@ -649,29 +706,51 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"{name}: {exc}"))
 
+    def check_run_response(name: str, method: str, path_template: str, resp: Any) -> bool:
+        """Count one check: a 200 whose body is a valid RunResponse (#580)."""
+        nonlocal checks_run, checks_passed
+        checks_run += 1
+        exercised.add((method, path_template))
+        if resp.status_code != 200:
+            failures.append(Failure("status", f"{name}: expected 200, got {resp.status_code}"))
+            return False
+        op = _resolve_operation(openapi_doc, method, path_template)
+        schema = _resolve_response_schema(
+            openapi_doc=openapi_doc, operation=op, status_code=resp.status_code, content_type="application/json"
+        )
+        errs = _validate_json_instance(schema, resp.json())
+        if errs:
+            failures.append(Failure("schema", f"{name}: {errs[0]}"))
+            return False
+        checks_passed += 1
+        return True
+
     def run_marker_lifecycle_check() -> None:
         """Open a run, append an operator marker, list its events, then close it —
-        exercising appendRunMarker + listRunEvents against their schemas live."""
+        checking openRun, appendRunMarker, listRunEvents and closeRun against
+        their schemas live."""
         nonlocal checks_run, checks_passed
+        # openRun, appendRunMarker, listRunEvents and closeRun: four checks.
         try:
             open_resp = _invoke_json("POST", f"{fixture.base_url}/v0/runs", json_body={"label": "conformance"})
+            opened = check_run_response("openRun", "post", "/v0/runs", open_resp)
         except Exception as exc:  # noqa: BLE001
-            checks_run += 2
-            failures.append(Failure("check", f"run_marker_lifecycle: open failed: {exc}"))
-            return
-        if open_resp.status_code != 200:
-            checks_run += 2
-            failures.append(Failure("status", f"run_marker_lifecycle: open returned {open_resp.status_code}"))
-            return
-        run_id = open_resp.json().get("run", {}).get("run_id")
+            checks_run += 1
+            exercised.add(("post", "/v0/runs"))
+            failures.append(Failure("check", f"openRun: {exc}"))
+            opened = False
+        run_id = open_resp.json().get("run", {}).get("run_id") if opened else None
         if not isinstance(run_id, str):
-            checks_run += 2
-            failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
+            checks_run += 3
+            if opened:
+                failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
+            failures.append(Failure("check", "run_marker_lifecycle: no run opened, so markers and close not checked"))
             return
 
         try:
             # appendRunMarker
             checks_run += 1
+            exercised.add(("post", "/v0/runs/{run_id}/events"))
             op = _resolve_operation(openapi_doc, "post", "/v0/runs/{run_id}/events")
             resp = _invoke_json(
                 "POST",
@@ -691,6 +770,7 @@ def main() -> int:
 
             # listRunEvents
             checks_run += 1
+            exercised.add(("get", "/v0/runs/{run_id}/events"))
             op2 = _resolve_operation(openapi_doc, "get", "/v0/runs/{run_id}/events")
             resp2 = _invoke_json("GET", f"{fixture.base_url}/v0/runs/{run_id}/events")
             schema2 = _resolve_response_schema(
@@ -706,14 +786,19 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"run_marker_lifecycle: {exc}"))
         finally:
+            # closeRun is checked, not just cleanup: a close that fails leaves
+            # the run open and every later openRun refused (#580).
             try:
-                _invoke_json(
+                close_resp = _invoke_json(
                     "POST",
                     f"{fixture.base_url}/v0/runs/{run_id}/close",
                     json_body={"close_reason": "operator_stop"},
                 )
-            except Exception:  # noqa: BLE001
-                pass
+                check_run_response("closeRun", "post", "/v0/runs/{run_id}/close", close_resp)
+            except Exception as exc:  # noqa: BLE001
+                checks_run += 1
+                exercised.add(("post", "/v0/runs/{run_id}/close"))
+                failures.append(Failure("check", f"closeRun: {exc}"))
 
     try:
         started = fixture.start(wait_for_ready=True, provider_id="sim0", min_device_count=1, startup_timeout=20.0)
@@ -842,15 +927,26 @@ def main() -> int:
     print(f"  base_url: http://127.0.0.1:{port}")
     print(f"  checks run: {checks_run}")
     print(f"  checks passed: {checks_passed}")
-    print(f"  required operations covered: {len(REQUIRED_OPERATIONS)}")
+    print(f"  required operations covered: {len(set(REQUIRED_OPERATIONS) & exercised)} of {len(REQUIRED_OPERATIONS)}")
     if capture_dir is not None:
         print(f"  capture_dir: {capture_dir}")
 
-    if checks_run < len(REQUIRED_OPERATIONS):
+    missing = [op for op in REQUIRED_OPERATIONS if op not in exercised]
+    if missing:
         failures.append(
             Failure(
                 "coverage",
-                f"internal error: executed {checks_run} checks, expected {len(REQUIRED_OPERATIONS)}",
+                "required operations no check exercised: "
+                + ", ".join(f"{method.upper()} {path}" for method, path in missing),
+            )
+        )
+    unlisted = sorted(exercised - set(REQUIRED_OPERATIONS))
+    if unlisted:
+        failures.append(
+            Failure(
+                "coverage",
+                "operations exercised but missing from REQUIRED_OPERATIONS: "
+                + ", ".join(f"{method.upper()} {path}" for method, path in unlisted),
             )
         )
 

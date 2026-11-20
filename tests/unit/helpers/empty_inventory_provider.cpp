@@ -25,7 +25,8 @@
 // `--slow-ready-when` every WaitReady waits n ms. `--list-delay-ms <n>` waits
 // n ms before answering ListDevices, under the same `--slow-ready-when` gate.
 // `--hello-delay-ms <n>` waits n ms before answering Hello, and
-// `--hint-to <path>` writes each WaitReady's max_wait_ms_hint there (#556).
+// `--hint-to <path>` writes each WaitReady's max_wait_ms_hint there (#556), and
+// `--hello-to <path>` writes the Hello's client_version there (#545).
 // With `--pid-dir <dir>` it creates an
 // empty file named for its process ID in <dir> when it starts, so a test can
 // tell its launches apart and watch each one.
@@ -183,6 +184,7 @@ int main(int argc, char **argv) {
     int hello_delay_ms = 0;
     int list_delay_ms = 0;
     std::string hint_to;
+    std::string hello_to;
     std::string pid_dir;
     bool mixed = false;
     bool allowed_values = false;
@@ -209,6 +211,8 @@ int main(int argc, char **argv) {
             list_delay_ms = std::stoi(argv[i + 1]);
         } else if (std::string(argv[i]) == "--hint-to" && i + 1 < argc) {
             hint_to = argv[i + 1];
+        } else if (std::string(argv[i]) == "--hello-to" && i + 1 < argc) {
+            hello_to = argv[i + 1];
         } else if (std::string(argv[i]) == "--pid-dir" && i + 1 < argc) {
             pid_dir = argv[i + 1];
         } else if (std::string(argv[i]) == "--mixed") {
@@ -284,6 +288,9 @@ int main(int argc, char **argv) {
         response.set_request_id(request.request_id());
         response.mutable_status()->set_code(adpp::Status_Code_CODE_OK);
         if (request.has_hello()) {
+            if (!hello_to.empty()) {
+                std::ofstream(hello_to) << request.hello().client_version();
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(hello_delay_ms));
             auto *hello = response.mutable_hello();
             hello->set_protocol_version("v1");
