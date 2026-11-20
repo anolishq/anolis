@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -117,4 +118,42 @@ TEST(DeviceRegistryTest, AFunctionThatRequiresALeaseIsWarnedAboutAtDiscovery) {
     ASSERT_TRUE(ok) << registry.last_error();
     EXPECT_THAT(captured.str(), HasSubstr("sim0/dev0/take_over declares requires_lease"));
     EXPECT_THAT(captured.str(), HasSubstr("[WARN]"));
+}
+
+// #558: handles are unique. A provider that lists a device_id twice gets the
+// first copy registered once, and committing a provider again without replace
+// does not leave two entries for one handle.
+namespace {
+
+std::set<std::string> handles_of(const std::vector<registry::RegisteredDevice> &devices) {
+    std::set<std::string> handles;
+    for (const auto &device : devices) {
+        handles.insert(device.get_handle());
+    }
+    return handles;
+}
+
+}  // namespace
+
+TEST(DeviceRegistryTest, ADeviceListedTwiceIsRegisteredOnce) {
+    registry::DeviceRegistry registry;
+    auto bread = provider_listing("bread0", {"dcmt0", "dcmt0", "rlht0"});
+    ASSERT_TRUE(registry.discover_provider("bread0", *bread)) << registry.last_error();
+
+    const auto devices = registry.get_all_devices();
+    EXPECT_EQ(devices.size(), 2u);
+    EXPECT_EQ(handles_of(devices).size(), devices.size());
+    EXPECT_EQ(registry.device_count(), 2u);
+}
+
+TEST(DeviceRegistryTest, CommittingAProviderAgainWithoutReplaceLeavesOneEntryPerHandle) {
+    registry::DeviceRegistry registry;
+    auto bread = provider_listing("bread0", {"dcmt0", "rlht0"});
+    ASSERT_TRUE(registry.discover_provider("bread0", *bread)) << registry.last_error();
+    ASSERT_TRUE(registry.discover_provider("bread0", *bread, false)) << registry.last_error();
+
+    const auto devices = registry.get_all_devices();
+    EXPECT_EQ(devices.size(), 2u);
+    EXPECT_EQ(handles_of(devices).size(), devices.size());
+    EXPECT_EQ(registry.device_count(), 2u);
 }
