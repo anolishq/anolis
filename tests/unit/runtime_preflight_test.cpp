@@ -168,6 +168,83 @@ TEST(RuntimePreflightTest, ZeroCoversAnOutputWhoseSetpointCannotDispatch) {
     EXPECT_TRUE(startup.failed_actions.empty());
 }
 
+namespace {
+
+// The helper always reports dcmt0 UNREACHABLE and leaves it out of its
+// inventory: a device its provider says is missing. dcmt3 is listed and OK.
+std::string absent_hooks_yaml(bool with_present_hook) {
+    std::string yaml = std::string(R"(
+runtime: {}
+http:
+  enabled: false
+providers:
+  - id: bread0
+    command: ")") + kHelperPath +
+                       R"("
+    args: ["--allowed-values"]
+    timeout_ms: 2000
+    hello_timeout_ms: 2000
+    ready_timeout_ms: 5000
+polling:
+  interval_ms: 200
+telemetry:
+  enabled: false
+safety:
+  safe_state:
+    hooks:
+      - device_handle: bread0/dcmt0
+        function_name: set_mode
+        args:
+          mode: open_loop
+)";
+    if (with_present_hook) {
+        yaml += R"(      - device_handle: bread0/dcmt3
+        function_name: set_mode
+        args:
+          mode: closed_speed
+)";
+    }
+    return yaml;
+}
+
+}  // namespace
+
+// #465: with every declared call absent there is no rest to call dispatchable.
+TEST(RuntimePreflightTest, EveryCallAbsentDoesNotClaimTheRestAreDispatchable) {
+    anolis::runtime::Runtime runtime(load("anolis-465-all-absent.yaml", absent_hooks_yaml(false)));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("preflight: 1 of 1 declared call(s) target devices absent at startup"), std::string::npos)
+        << log;
+    EXPECT_EQ(log.find("the rest are dispatchable"), std::string::npos) << log;
+}
+
+TEST(RuntimePreflightTest, SomeCallsAbsentSaysTheRestAreDispatchable) {
+    anolis::runtime::Runtime runtime(load("anolis-465-some-absent.yaml", absent_hooks_yaml(true)));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_NE(log.find("preflight: 1 of 2 declared call(s) target devices absent at startup; the rest are "
+                       "dispatchable against the current inventory"),
+              std::string::npos)
+        << log;
+}
+
+// With nothing declared there is nothing absent to warn about.
+TEST(RuntimePreflightTest, NoDeclaredCallsWarnsOfNoAbsentDevices) {
+    std::string yaml = absent_hooks_yaml(false);
+    yaml = yaml.substr(0, yaml.find("safety:"));
+    anolis::runtime::Runtime runtime(load("anolis-465-none-declared.yaml", yaml));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+
+    EXPECT_EQ(log.find("target devices absent at startup"), std::string::npos) << log;
+}
+
 TEST(RuntimePreflightTest, PassesAHookValueInsideTheProvidersAllowedValues) {
     anolis::runtime::Runtime runtime(load("anolis-467-inside.yaml", config_yaml("closed_speed")));
     std::string error;
