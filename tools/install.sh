@@ -189,8 +189,9 @@ Common:
                          variant must still be inert.
   --keep-hostname        Keep this host's name. By default an arm64 host with
                          a device-tree serial is renamed anolis-<last 8 of
-                         serial>; with this flag the printed URL, mDNS and
-                         telemetry host tags use the existing name.
+                         serial>; with this flag the printed URL and mDNS use
+                         the existing name. Telemetry is tagged by runtime.name,
+                         not the hostname.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
   --dry-run              Print what would happen without doing it
@@ -2054,7 +2055,7 @@ phase_hostname() {
 # Point 127.0.1.1 at the new hostname. Renaming the host without this leaves the
 # machine unable to resolve its own name — Pi OS ships `127.0.1.1 raspberrypi`,
 # so every sudo pays a resolver timeout and warns, and anything that resolves its
-# own hostname (mDNS advertisement of <host>.local, telemetry host tags) breaks.
+# own hostname (mDNS advertisement of <host>.local, local name lookups) breaks.
 # Idempotent: rewrites the existing 127.0.1.1 line if there is one, else appends.
 _update_etc_hosts() {
     local new_hostname="$1"
