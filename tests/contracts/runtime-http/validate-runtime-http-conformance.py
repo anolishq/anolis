@@ -440,6 +440,9 @@ def main() -> int:
     failures: list[Failure] = []
     checks_run = 0
     checks_passed = 0
+    # (method, path_template) of every operation a check exercised, so the
+    # coverage guard can name a required operation no check reaches (#585).
+    exercised: set[tuple[str, str]] = set()
 
     def run_json_check(
         *,
@@ -452,6 +455,7 @@ def main() -> int:
     ) -> None:
         nonlocal checks_run, checks_passed
         checks_run += 1
+        exercised.add((method.lower(), path_template))
         try:
             op = _resolve_operation(openapi_doc, method, path_template)
             resp = _invoke_json(method, f"{fixture.base_url}{actual_path}", json_body=json_body)
@@ -555,6 +559,7 @@ def main() -> int:
         nonlocal checks_run, checks_passed
         checks_run += 1
         path_template = "/v0/events"
+        exercised.add(("get", path_template))
         try:
             op = _resolve_operation(openapi_doc, "get", path_template)
             resp = requests.get(
@@ -672,6 +677,7 @@ def main() -> int:
         try:
             # appendRunMarker
             checks_run += 1
+            exercised.add(("post", "/v0/runs/{run_id}/events"))
             op = _resolve_operation(openapi_doc, "post", "/v0/runs/{run_id}/events")
             resp = _invoke_json(
                 "POST",
@@ -691,6 +697,7 @@ def main() -> int:
 
             # listRunEvents
             checks_run += 1
+            exercised.add(("get", "/v0/runs/{run_id}/events"))
             op2 = _resolve_operation(openapi_doc, "get", "/v0/runs/{run_id}/events")
             resp2 = _invoke_json("GET", f"{fixture.base_url}/v0/runs/{run_id}/events")
             schema2 = _resolve_response_schema(
@@ -842,15 +849,26 @@ def main() -> int:
     print(f"  base_url: http://127.0.0.1:{port}")
     print(f"  checks run: {checks_run}")
     print(f"  checks passed: {checks_passed}")
-    print(f"  required operations covered: {len(REQUIRED_OPERATIONS)}")
+    print(f"  required operations covered: {len(set(REQUIRED_OPERATIONS) & exercised)} of {len(REQUIRED_OPERATIONS)}")
     if capture_dir is not None:
         print(f"  capture_dir: {capture_dir}")
 
-    if checks_run < len(REQUIRED_OPERATIONS):
+    missing = [op for op in REQUIRED_OPERATIONS if op not in exercised]
+    if missing:
         failures.append(
             Failure(
                 "coverage",
-                f"internal error: executed {checks_run} checks, expected {len(REQUIRED_OPERATIONS)}",
+                "required operations no check exercised: "
+                + ", ".join(f"{method.upper()} {path}" for method, path in missing),
+            )
+        )
+    unlisted = sorted(exercised - set(REQUIRED_OPERATIONS))
+    if unlisted:
+        failures.append(
+            Failure(
+                "coverage",
+                "operations exercised but missing from REQUIRED_OPERATIONS: "
+                + ", ".join(f"{method.upper()} {path}" for method, path in unlisted),
             )
         )
 
