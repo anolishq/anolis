@@ -57,9 +57,16 @@ The other telemetry keys, such as batching and the health interval, are in
 - `anolis_device_health` and `anolis_provider_health`: periodic health
   snapshots, every `telemetry.health_interval_ms` (15 s by default; 0 turns
   them off).
+- `mode_change`: a row each time the runtime mode changes, with
+  `previous_mode` and `new_mode`.
+- `parameter_change`: a row each time a parameter is set to a new value, tagged
+  `parameter_name`, with `old_value` and `new_value` as strings.
 
-The record formats are fixed by the
-[telemetry contracts](contracts/README.md).
+The formats of the first three are fixed by the
+[telemetry contracts](contracts/README.md). `mode_change` and
+`parameter_change` are outside them: the
+[signal baseline](contracts/telemetry-timeseries-baseline.md#scope) lists both
+as out of scope.
 
 ## Dashboards
 

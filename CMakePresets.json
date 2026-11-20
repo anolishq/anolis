@@ -95,14 +95,6 @@
       }
     },
     {
-      "name": "ci-linux-clang-tidy",
-      "inherits": "ci-linux-release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "ENABLE_CLANG_TIDY": "ON"
-      }
-    },
-    {
       "name": "ci-windows-release",
       "inherits": "base-windows-msvc",
       "cacheVariables": {
@@ -221,10 +213,6 @@
     {
       "name": "ci-linux-arm64-release-strict",
       "configurePreset": "ci-linux-arm64-release-strict"
-    },
-    {
-      "name": "ci-linux-clang-tidy",
-      "configurePreset": "ci-linux-clang-tidy"
     },
     {
       "name": "ci-windows-release",
