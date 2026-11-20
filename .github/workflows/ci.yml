@@ -505,16 +505,12 @@ jobs:
         run: cmake --build --preset ci-linux-compat --parallel
 
       - name: Validate runtime HTTP contract (live conformance smoke)
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci-linux-compat/vcpkg_installed/x64-linux/lib
         run: |
           uv run python tests/contracts/runtime-http/validate-runtime-http-conformance.py \
             --runtime-bin build/ci-linux-compat/core/anolis-runtime \
             --provider-bin "${{ steps.provider.outputs.exe }}"
 
       - name: Run CTest compatibility entrypoint (Python)
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci-linux-compat/vcpkg_installed/x64-linux/lib
         run: ctest --preset ci-linux-compat -L integration
 
   version-sync:
