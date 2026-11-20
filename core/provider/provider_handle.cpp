@@ -14,6 +14,7 @@
 #include <iostream>
 #include <thread>
 
+#include "anolis_build_config.hpp"
 #include "logging/logger.hpp"
 
 namespace anolis {
@@ -134,7 +135,7 @@ bool ProviderHandle::hello_within(anolis::deviceprovider::v1::HelloResponse &res
     auto *hello_req = request.mutable_hello();
     hello_req->set_protocol_version("v1");
     hello_req->set_client_name("anolis-runtime");
-    hello_req->set_client_version("0.1.0");
+    hello_req->set_client_version(ANOLIS_VERSION);
 
     anolis::deviceprovider::v1::Response resp;
     anolis::deviceprovider::v1::Status_Code status;
