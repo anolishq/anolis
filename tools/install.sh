@@ -1437,6 +1437,10 @@ phase_telemetry_export() {
     # Online-only in v1: the venv is populated from PyPI. Offline (bundled
     # wheels) is tracked separately (anolishq/anolis#100). On the offline
     # --local path with no PyPI reachability, skip rather than fail the install.
+    if [[ -n "${LOCAL_PATH}" ]] && ! command -v curl &>/dev/null; then
+        log_warn "telemetry-export: curl not found, so PyPI could not be checked — skipped"
+        return 0
+    fi
     if [[ -n "${LOCAL_PATH}" ]] \
         && ! curl -fsS --connect-timeout 3 https://pypi.org/simple/ &>/dev/null; then
         log_warn "telemetry-export: needs network (online install) — skipped; offline support is anolishq/anolis#100"
@@ -1946,6 +1950,10 @@ phase_observability() {
 
     if ! command -v apt-get &>/dev/null || ! command -v systemctl &>/dev/null; then
         log_warn "observability: apt/systemd not available — skipped"
+        return 0
+    fi
+    if ! command -v curl &>/dev/null; then
+        log_warn "observability: curl not found — skipped"
         return 0
     fi
     if ! curl -fsS --connect-timeout 3 https://repos.influxdata.com/influxdata-archive.key &>/dev/null \
@@ -2864,7 +2872,7 @@ phase_health() {
     if ! command -v curl >/dev/null 2>&1; then
         log_warn "health: not checked: curl not found"
         log_info "  Not verified: runtime status, run registry, startup safe state and provider liveness."
-        log_info "  Install curl (sudo apt install curl) for the install to check them."
+        log_info "  Install curl (sudo apt install curl) for these checks to run."
         HEALTH_NOT_CHECKED=1
         [[ ${RUNTIME_RESTART_FAILED} -eq 0 ]] || HEALTH_FAILED=1
         return
