@@ -47,10 +47,19 @@ TEST(ParameterTypesTest, TypeMatchValidation) {
 }
 
 TEST(ParameterTypesTest, ValueToStringUsesCanonicalEncoding) {
-    EXPECT_EQ("3.140000", parameter_value_to_string(ParameterValue{3.14}));
+    EXPECT_EQ("3.14", parameter_value_to_string(ParameterValue{3.14}));
     EXPECT_EQ("17", parameter_value_to_string(ParameterValue{int64_t{17}}));
     EXPECT_EQ("true", parameter_value_to_string(ParameterValue{true}));
     EXPECT_EQ("manual", parameter_value_to_string(ParameterValue{std::string{"manual"}}));
+}
+
+// #756: a double prints in its shortest round-trip form, so different values
+// never print the same (std::to_string gave 0.000000 for both 1e-8 and 2e-8).
+TEST(ParameterTypesTest, ValueToStringPrintsADoubleSoDifferentValuesDiffer) {
+    EXPECT_EQ("1e-08", parameter_value_to_string(ParameterValue{1e-8}));
+    EXPECT_EQ("2e-08", parameter_value_to_string(ParameterValue{2e-8}));
+    EXPECT_EQ("-1e+300", parameter_value_to_string(ParameterValue{-1e300}));
+    EXPECT_EQ("25", parameter_value_to_string(ParameterValue{25.0}));
 }
 
 TEST(ParameterTypesTest, BridgeConvertsParameterValueToTypedValue) {
