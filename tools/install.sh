@@ -198,7 +198,8 @@ Common:
                          not the hostname.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
-  --dry-run              Print what would happen without doing it
+  --dry-run              Print what would happen without doing it (not with
+                         --stage, which only downloads and writes the bundle)
   --prefix <path>        Override install prefix (default: /opt/anolis).
                          Stage-time decision: a staged bundle bakes its prefix,
                          so --local refuses a differing --prefix (re-stage instead).
@@ -253,6 +254,11 @@ parse_args() {
     done
     if [[ ${GRAFANA_NETWORK} -eq 1 && ${WITH_OBSERVABILITY} -eq 0 ]]; then
         log_warn "--with-grafana-network has no effect without --with-observability"
+    fi
+    # A stage has nothing to preview: it downloads release assets and writes
+    # the bundle, and do_stage reads no DRY_RUN (#532).
+    if [[ -n "${STAGE_DIR}" && ${DRY_RUN} -eq 1 ]]; then
+        die "--dry-run cannot be combined with --stage: a stage only downloads release assets and writes the bundle"
     fi
 }
 
@@ -1254,21 +1260,20 @@ _manifest_prefix() {
 }
 
 _manifest_telemetry_export_pin() {
-    # components.optional.telemetry_export.version — the first "version" line after
-    # the "telemetry_export" key WITHIN the "optional" block (so a provider that
-    # happens to be named telemetry_export cannot spoof the pin). Portable awk
-    # (no gawk 3-arg match); relies on the writer's key order (optional last).
-    awk '
-        /"optional"/ { in_opt = 1 }
-        in_opt && /"telemetry_export"/ { seen = 1 }
-        seen && /"version":/ {
-            line = $0
-            sub(/^.*"version": *"/, "", line)
-            sub(/".*$/, "", line)
-            print line
-            exit
-        }
-    ' "$1" 2>/dev/null
+    # components.optional.telemetry_export.version, read as JSON, so no
+    # provider name and no key order can stand in for it (#538). python3 is
+    # already needed here: telemetry-export installs into a python3 venv.
+    # Prints nothing when there is no pin or the manifest cannot be read.
+    python3 -I -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        v = json.load(f)["components"]["optional"]["telemetry_export"]["version"]
+except Exception:
+    sys.exit(0)
+if isinstance(v, str):
+    print(v)
+' "$1" 2>/dev/null
 }
 
 # =============================================================================
@@ -3964,9 +3969,13 @@ do_stage() {
     # file that does not exist on the target machine.
     ( cd "${abs_out}" && sha256sum "${bundle}.tar.gz" > "${bundle}.tar.gz.sha256" )
 
-    log_ok "stage: ${abs_out}/${bundle}.tar.gz"
-    log_info "Verify with:          cd '${abs_out}' && sha256sum -c ${bundle}.tar.gz.sha256"
-    log_info "Install offline with: sudo ./install.sh --local ${abs_out}/${bundle}.tar.gz"
+    log_ok "stage: wrote ${bundle}.tar.gz and ${bundle}.tar.gz.sha256 to ${abs_out}"
+    # Commands for the target, run from the directory the two files are carried
+    # into: no staging path, and the bundle's own install.sh (#533).
+    log_info "Carry both files to the target, then run there:"
+    log_info "  sha256sum -c ${bundle}.tar.gz.sha256"
+    log_info "  tar xzf ${bundle}.tar.gz"
+    log_info "  sudo ${bundle}/install.sh --local ${bundle}.tar.gz"
 }
 
 # =============================================================================
