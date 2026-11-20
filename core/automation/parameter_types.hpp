@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -93,7 +94,9 @@ inline bool parameter_value_matches_type(ParameterType type, const ParameterValu
  */
 inline std::string parameter_value_to_string(const ParameterValue &value) {
     if (std::holds_alternative<double>(value)) {
-        return std::to_string(std::get<double>(value));
+        // Shortest round-trip form, as validation errors use, so different values
+        // never print the same (std::to_string's %f gave 0.000000 for 1e-8; #756).
+        return std::format("{}", std::get<double>(value));
     }
     if (std::holds_alternative<int64_t>(value)) {
         return std::to_string(std::get<int64_t>(value));
