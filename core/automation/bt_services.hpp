@@ -22,7 +22,9 @@ struct BTServiceContext {
     state::StateCache* state_cache = nullptr;
     control::CallRouter* call_router = nullptr;
     provider::ProviderRegistry* provider_registry = nullptr;
-    ParameterManager* parameter_manager = nullptr;
+    /// Read-only: `ParameterManager::set` journals synchronously, which the
+    /// tick thread must not do (#425).
+    const ParameterManager* parameter_manager = nullptr;
     /// Told each device call's outcome as `(device_handle, function, success,
     /// error)`. A non-empty return is a fault: the call has failed too often in
     /// a row, and the node throws it so the engine-fault path enters FAULT (#678).
