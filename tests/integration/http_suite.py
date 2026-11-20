@@ -258,7 +258,9 @@ class HttpGatewayTester:
 
         # A second open is rejected (at most one open run per runtime).
         second = self.http_post("/v0/runs", {})
-        assert second["status_code"] != 200, f"second open should be rejected, got: {second}"
+        assert second["status_code"] == 409, f"second open should be rejected with 409, got: {second}"
+        second_code = second["body"].get("status", {}).get("code")
+        assert second_code == "FAILED_PRECONDITION", f"second open should be FAILED_PRECONDITION, got: {second}"
 
         # Get by id.
         got = self.http_get(f"/v0/runs/{run_id}")
