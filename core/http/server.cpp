@@ -480,6 +480,12 @@ void HttpServer::setup_routes() {
     LOG_INFO("[HTTP]   GET  /v0/automation/status");
     LOG_INFO("[HTTP]   GET  /v0/providers/health");
     LOG_INFO("[HTTP]   GET  /v0/telemetry/status");
+    LOG_INFO("[HTTP]   POST /v0/runs");
+    LOG_INFO("[HTTP]   GET  /v0/runs");
+    LOG_INFO("[HTTP]   GET  /v0/runs/{run_id}");
+    LOG_INFO("[HTTP]   POST /v0/runs/{run_id}/close");
+    LOG_INFO("[HTTP]   POST /v0/runs/{run_id}/events");
+    LOG_INFO("[HTTP]   GET  /v0/runs/{run_id}/events");
     LOG_INFO("[HTTP]   GET  /v0/events (SSE)");
 }
 
