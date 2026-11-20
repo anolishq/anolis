@@ -42,6 +42,8 @@ REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/v0/providers/health"),
     ("get", "/v0/telemetry/status"),
     ("get", "/v0/runs"),
+    ("post", "/v0/runs"),
+    ("post", "/v0/runs/{run_id}/close"),
     ("post", "/v0/runs/{run_id}/events"),
     ("get", "/v0/runs/{run_id}/events"),
     ("get", "/v0/devices"),
@@ -654,24 +656,45 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"{name}: {exc}"))
 
+    def check_run_response(name: str, method: str, path_template: str, resp: Any) -> bool:
+        """Count one check: a 200 whose body is a valid RunResponse (#580)."""
+        nonlocal checks_run, checks_passed
+        checks_run += 1
+        exercised.add((method, path_template))
+        if resp.status_code != 200:
+            failures.append(Failure("status", f"{name}: expected 200, got {resp.status_code}"))
+            return False
+        op = _resolve_operation(openapi_doc, method, path_template)
+        schema = _resolve_response_schema(
+            openapi_doc=openapi_doc, operation=op, status_code=resp.status_code, content_type="application/json"
+        )
+        errs = _validate_json_instance(schema, resp.json())
+        if errs:
+            failures.append(Failure("schema", f"{name}: {errs[0]}"))
+            return False
+        checks_passed += 1
+        return True
+
     def run_marker_lifecycle_check() -> None:
         """Open a run, append an operator marker, list its events, then close it —
-        exercising appendRunMarker + listRunEvents against their schemas live."""
+        checking openRun, appendRunMarker, listRunEvents and closeRun against
+        their schemas live."""
         nonlocal checks_run, checks_passed
+        # openRun, appendRunMarker, listRunEvents and closeRun: four checks.
         try:
             open_resp = _invoke_json("POST", f"{fixture.base_url}/v0/runs", json_body={"label": "conformance"})
+            opened = check_run_response("openRun", "post", "/v0/runs", open_resp)
         except Exception as exc:  # noqa: BLE001
-            checks_run += 2
-            failures.append(Failure("check", f"run_marker_lifecycle: open failed: {exc}"))
-            return
-        if open_resp.status_code != 200:
-            checks_run += 2
-            failures.append(Failure("status", f"run_marker_lifecycle: open returned {open_resp.status_code}"))
-            return
-        run_id = open_resp.json().get("run", {}).get("run_id")
+            checks_run += 1
+            exercised.add(("post", "/v0/runs"))
+            failures.append(Failure("check", f"openRun: {exc}"))
+            opened = False
+        run_id = open_resp.json().get("run", {}).get("run_id") if opened else None
         if not isinstance(run_id, str):
-            checks_run += 2
-            failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
+            checks_run += 3
+            if opened:
+                failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
+            failures.append(Failure("check", "run_marker_lifecycle: no run opened, so markers and close not checked"))
             return
 
         try:
@@ -713,14 +736,19 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures.append(Failure("check", f"run_marker_lifecycle: {exc}"))
         finally:
+            # closeRun is checked, not just cleanup: a close that fails leaves
+            # the run open and every later openRun refused (#580).
             try:
-                _invoke_json(
+                close_resp = _invoke_json(
                     "POST",
                     f"{fixture.base_url}/v0/runs/{run_id}/close",
                     json_body={"close_reason": "operator_stop"},
                 )
-            except Exception:  # noqa: BLE001
-                pass
+                check_run_response("closeRun", "post", "/v0/runs/{run_id}/close", close_resp)
+            except Exception as exc:  # noqa: BLE001
+                checks_run += 1
+                exercised.add(("post", "/v0/runs/{run_id}/close"))
+                failures.append(Failure("check", f"closeRun: {exc}"))
 
     try:
         started = fixture.start(wait_for_ready=True, provider_id="sim0", min_device_count=1, startup_timeout=20.0)
