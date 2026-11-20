@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "automation/parameter_manager.hpp"
 #include "automation/parameter_value_bridge.hpp"
 
 namespace anolis {
@@ -84,6 +85,22 @@ TEST(ParameterTypesTest, BytesTypedValueIsNotAStringParameter) {
     std::string error;
     EXPECT_FALSE(parameter_value_from_typed_value(bytes, &error).has_value());
     EXPECT_NE(std::string::npos, error.find("Unsupported"));
+}
+
+// #755: set() holds an int64 to its bounds exactly. 2^53 + 1 and 2^53 are one
+// double apart from nothing: as doubles they compare equal.
+TEST(ParameterTypesTest, Int64BoundsAreComparedExactly) {
+    const ParameterDef def{"big",        ParameterType::INT64, ParameterValue{int64_t{0}},
+                           std::nullopt, 9007199254740992.0,   std::nullopt};
+    std::string error;
+    EXPECT_TRUE(def.validate(ParameterValue{int64_t{9007199254740992}}, error)) << error;
+    EXPECT_FALSE(def.validate(ParameterValue{int64_t{9007199254740993}}, error));
+    EXPECT_EQ(error, "Value 9007199254740993 exceeds maximum 9007199254740992");
+
+    const ParameterDef low{"low",        ParameterType::INT64, ParameterValue{int64_t{0}}, -9007199254740992.0,
+                           std::nullopt, std::nullopt};
+    EXPECT_TRUE(low.validate(ParameterValue{int64_t{-9007199254740992}}, error)) << error;
+    EXPECT_FALSE(low.validate(ParameterValue{int64_t{-9007199254740993}}, error));
 }
 
 }  // namespace

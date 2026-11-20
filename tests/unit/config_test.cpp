@@ -1268,6 +1268,18 @@ TEST_F(ConfigTest, AutomationParameterDefaultMustSatisfyItsConstraints) {
         // 2^53 + 1 has no double; an int64 prints as the integer it is.
         {"    - { name: big, type: int64, default: 9007199254740993, max: 0 }\n",
          "Parameter 'big' default value invalid: Value 9007199254740993 exceeds maximum 0"},
+        // #755: an int64 is compared with its bounds exactly, not as a double,
+        // above 2^53 too.
+        {"    - { name: big_max, type: int64, default: 9007199254740993, max: 9007199254740992 }\n",
+         "Parameter 'big_max' default value invalid: Value 9007199254740993 exceeds maximum 9007199254740992"},
+        // #755: NaN is no default and no bound.
+        {"    - { name: nan_default, type: double, default: .nan, min: 0.0, max: 10.0 }\n",
+         "Parameter 'nan_default' default value is NaN"},
+        {"    - { name: nan_min, type: double, default: 1.0, min: .nan }\n", "Parameter 'nan_min' min is NaN"},
+        {"    - { name: nan_max, type: double, default: 1.0, max: .nan }\n", "Parameter 'nan_max' max is NaN"},
+        // #755: an int64 bound a double cannot hold is refused, not rounded.
+        {"    - { name: odd_max, type: int64, default: 0, max: 9007199254740993 }\n",
+         "Parameter 'odd_max' max 9007199254740993 cannot be held exactly as a bound"},
         {"    - { name: inverted, type: double, default: 5.0, min: 10.0, max: 0.0 }\n",
          "Parameter 'inverted' has invalid constraints: min > max"},
         {"    - { name: mode_sel, type: string, default: turbo, allowed_values: [eco, normal] }\n",
