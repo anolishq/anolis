@@ -70,6 +70,18 @@ TEST(HttpAuth, ConstantTimeEquals) {
     EXPECT_TRUE(constant_time_equals("", ""));
 }
 
+// #522: a prefix of the token and the token with more appended are both
+// refused, now that a length mismatch is folded into the loop, not returned
+// early.
+TEST(HttpAuth, ConstantTimeEqualsRefusesAPrefixOrAnExtension) {
+    const std::string token = "0123456789abcdef";
+    EXPECT_FALSE(constant_time_equals("0123456789abcde", token));
+    EXPECT_FALSE(constant_time_equals("0123456789abcdef0", token));
+    EXPECT_FALSE(constant_time_equals("", token));
+    EXPECT_FALSE(constant_time_equals(token, ""));
+    EXPECT_TRUE(constant_time_equals(token, token));
+}
+
 // ---- bind-safety gate in validate_config --------------------------------
 
 namespace {
