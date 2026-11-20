@@ -10,12 +10,12 @@ bool is_loopback(const std::string &remote_addr) {
 }
 
 bool constant_time_equals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) {
-        return false;
-    }
-    unsigned char diff = 0;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+    // Walk b's length whatever a's is, and fold a length mismatch into diff,
+    // so the time depends on b (the expected token) only (#522).
+    std::size_t diff = a.size() ^ b.size();
+    for (std::size_t i = 0; i < b.size(); ++i) {
+        const unsigned char ai = i < a.size() ? static_cast<unsigned char>(a[i]) : 0;
+        diff |= ai ^ static_cast<unsigned char>(b[i]);
     }
     return diff == 0;
 }
