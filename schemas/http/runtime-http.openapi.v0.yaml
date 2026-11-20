@@ -130,7 +130,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
-        "412":
+        "409":
           description: A run is already open
           content:
             application/json:
@@ -1888,6 +1888,11 @@ components:
         device_id:
           type: string
         health:
+          description: >-
+            The runtime's view of the device, from its own polls. Always
+            UNKNOWN when registered is false: the runtime does not poll a
+            device its registry does not carry. The provider's view is in
+            reported.state.
           type: string
           enum: [OK, WARNING, STALE, FAULT, UNAVAILABLE, UNKNOWN]
         last_poll_ms:
