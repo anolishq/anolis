@@ -212,8 +212,9 @@ private:
     // Thread safety: shared_mutex allows concurrent reads, exclusive writes
     mutable std::shared_mutex mutex_;
 
-    // Helper: Build capability maps from protobuf (not thread-safe, called under lock)
-    bool build_capabilities(const anolis::deviceprovider::v1::Device &proto_device,
+    // Helper: build capability maps from protobuf. It cannot fail and touches no
+    // member state, so the lock-free inspect phase calls it without mutex_ (#553).
+    void build_capabilities(const anolis::deviceprovider::v1::Device &proto_device,
                             const anolis::deviceprovider::v1::CapabilitySet &proto_caps, DeviceCapabilitySet &caps);
 };
 
