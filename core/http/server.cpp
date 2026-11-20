@@ -340,6 +340,11 @@ bool HttpServer::start(std::string &error) {
         server_->listen_after_bind();
         LOG_INFO("[HTTP] Server thread exiting");
     });
+    // httplib's stop() does nothing until the listen loop is running, and the
+    // thread would then accept forever, so a stop() soon after this returned
+    // hung on join(). Wait for the loop before returning
+    // (yhirose/cpp-httplib#1645; anolishq/anolis#870).
+    server_->wait_until_ready();
 
     LOG_INFO("[HTTP] Server listening on " << config_.bind << ":" << port_);
     return true;
@@ -480,6 +485,12 @@ void HttpServer::setup_routes() {
     LOG_INFO("[HTTP]   GET  /v0/automation/status");
     LOG_INFO("[HTTP]   GET  /v0/providers/health");
     LOG_INFO("[HTTP]   GET  /v0/telemetry/status");
+    LOG_INFO("[HTTP]   POST /v0/runs");
+    LOG_INFO("[HTTP]   GET  /v0/runs");
+    LOG_INFO("[HTTP]   GET  /v0/runs/{run_id}");
+    LOG_INFO("[HTTP]   POST /v0/runs/{run_id}/close");
+    LOG_INFO("[HTTP]   POST /v0/runs/{run_id}/events");
+    LOG_INFO("[HTTP]   GET  /v0/runs/{run_id}/events");
     LOG_INFO("[HTTP]   GET  /v0/events (SSE)");
 }
 
