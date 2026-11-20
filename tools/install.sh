@@ -3954,9 +3954,13 @@ do_stage() {
     # file that does not exist on the target machine.
     ( cd "${abs_out}" && sha256sum "${bundle}.tar.gz" > "${bundle}.tar.gz.sha256" )
 
-    log_ok "stage: ${abs_out}/${bundle}.tar.gz"
-    log_info "Verify with:          cd '${abs_out}' && sha256sum -c ${bundle}.tar.gz.sha256"
-    log_info "Install offline with: sudo ./install.sh --local ${abs_out}/${bundle}.tar.gz"
+    log_ok "stage: wrote ${bundle}.tar.gz and ${bundle}.tar.gz.sha256 to ${abs_out}"
+    # Commands for the target, run from the directory the two files are carried
+    # into: no staging path, and the bundle's own install.sh (#533).
+    log_info "Carry both files to the target, then run there:"
+    log_info "  sha256sum -c ${bundle}.tar.gz.sha256"
+    log_info "  tar xzf ${bundle}.tar.gz"
+    log_info "  sudo ${bundle}/install.sh --local ${bundle}.tar.gz"
 }
 
 # =============================================================================
