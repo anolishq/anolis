@@ -194,7 +194,8 @@ Common:
                          not the hostname.
   --uninstall            Remove anolis installation
   --rollback             Restore previous binaries from <prefix>/.prev and restart
-  --dry-run              Print what would happen without doing it
+  --dry-run              Print what would happen without doing it (not with
+                         --stage, which only downloads and writes the bundle)
   --prefix <path>        Override install prefix (default: /opt/anolis).
                          Stage-time decision: a staged bundle bakes its prefix,
                          so --local refuses a differing --prefix (re-stage instead).
@@ -249,6 +250,11 @@ parse_args() {
     done
     if [[ ${GRAFANA_NETWORK} -eq 1 && ${WITH_OBSERVABILITY} -eq 0 ]]; then
         log_warn "--with-grafana-network has no effect without --with-observability"
+    fi
+    # A stage has nothing to preview: it downloads release assets and writes
+    # the bundle, and do_stage reads no DRY_RUN (#532).
+    if [[ -n "${STAGE_DIR}" && ${DRY_RUN} -eq 1 ]]; then
+        die "--dry-run cannot be combined with --stage: a stage only downloads release assets and writes the bundle"
     fi
 }
 
