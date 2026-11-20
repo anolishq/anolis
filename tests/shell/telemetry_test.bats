@@ -165,6 +165,48 @@ JSON
     [ "${output}" = "0.9.9" ]
 }
 
+# #538: providers named "optional" and then "telemetry_export" fooled the old
+# line scan, with or without a real pin, and so did a manifest that put
+# components.optional before components.providers.
+_mk_spoof_manifest() {
+    mkdir -p "$1"
+    {
+        printf '{\n  "schema_version": 1,\n  "components": {\n'
+        printf '    "providers": {\n'
+        printf '      "optional": {"version": "0.1.0"},\n'
+        printf '      "telemetry_export": {"version": "9.9.9"}\n'
+        if [[ -n "$2" ]]; then
+            printf '    },\n    "optional": {"telemetry_export": {"version": "%s"}}\n' "$2"
+        else
+            printf '    }\n'
+        fi
+        printf '  }\n}\n'
+    } > "$1/manifest.json"
+}
+
+@test "538: providers named optional and telemetry_export, no pin: no pin is read" {
+    _mk_spoof_manifest "${BATS_TEST_TMPDIR}/b" ""
+    run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
+    [ "${status}" -eq 0 ]
+    [ -z "${output}" ]
+}
+
+@test "538: providers named optional and telemetry_export, with a pin: the pin is read" {
+    _mk_spoof_manifest "${BATS_TEST_TMPDIR}/b" "0.4.2"
+    run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
+    [ "${output}" = "0.4.2" ]
+}
+
+@test "538: the pin is read whatever order the components come in" {
+    mkdir -p "${BATS_TEST_TMPDIR}/b"
+    cat > "${BATS_TEST_TMPDIR}/b/manifest.json" <<'JSON'
+{"components": {"optional": {"telemetry_export": {"version": "0.4.2"}},
+ "providers": {"telemetry_export": {"version": "9.9.9"}}}}
+JSON
+    run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"
+    [ "${output}" = "0.4.2" ]
+}
+
 @test "#223 _manifest_telemetry_export_pin does not misread provider versions" {
     _mk_tex_manifest "${BATS_TEST_TMPDIR}/b" ""  # providers present, no optional
     run _manifest_telemetry_export_pin "${BATS_TEST_TMPDIR}/b/manifest.json"

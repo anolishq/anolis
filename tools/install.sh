@@ -1254,21 +1254,20 @@ _manifest_prefix() {
 }
 
 _manifest_telemetry_export_pin() {
-    # components.optional.telemetry_export.version — the first "version" line after
-    # the "telemetry_export" key WITHIN the "optional" block (so a provider that
-    # happens to be named telemetry_export cannot spoof the pin). Portable awk
-    # (no gawk 3-arg match); relies on the writer's key order (optional last).
-    awk '
-        /"optional"/ { in_opt = 1 }
-        in_opt && /"telemetry_export"/ { seen = 1 }
-        seen && /"version":/ {
-            line = $0
-            sub(/^.*"version": *"/, "", line)
-            sub(/".*$/, "", line)
-            print line
-            exit
-        }
-    ' "$1" 2>/dev/null
+    # components.optional.telemetry_export.version, read as JSON, so no
+    # provider name and no key order can stand in for it (#538). python3 is
+    # already needed here: telemetry-export installs into a python3 venv.
+    # Prints nothing when there is no pin or the manifest cannot be read.
+    python3 -I -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        v = json.load(f)["components"]["optional"]["telemetry_export"]["version"]
+except Exception:
+    sys.exit(0)
+if isinstance(v, str):
+    print(v)
+' "$1" 2>/dev/null
 }
 
 # =============================================================================
