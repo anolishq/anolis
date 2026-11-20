@@ -254,9 +254,37 @@ jobs:
           cp "${FIXTURE_MANIFEST_PATH}" schema-staging/tests/contracts/telemetry-timeseries/examples/
           cp "${HEALTH_FIXTURE_MANIFEST_PATH}" schema-staging/tests/contracts/telemetry-health-timeseries/examples/
           cp "${VALIDATOR_PATH}" schema-staging/tests/contracts/telemetry-timeseries/
+          # The fixtures the two manifests name, so the bundled validator can
+          # run from an extracted bundle (#595).
+          for contract in telemetry-timeseries telemetry-health-timeseries; do
+            cp -r "tests/contracts/${contract}/examples/valid" "tests/contracts/${contract}/examples/invalid" \
+              "schema-staging/tests/contracts/${contract}/examples/"
+          done
 
           tar -czf "${SCHEMA_ARTIFACT}" -C schema-staging .
           echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Verify telemetry schema artifact
+        # Run the bundled validator from the extracted bundle, against both of
+        # its manifests, so a fixture missing from the bundle fails the release.
+        run: |
+          VERIFY_DIR=$(mktemp -d)
+          tar -xzf "${{ steps.schema_package.outputs.artifact }}" -C "${VERIFY_DIR}"
+          uv run python "${VERIFY_DIR}/tests/contracts/telemetry-timeseries/validate-telemetry-timeseries.py" \
+            --repo-root "${VERIFY_DIR}"
+          uv run python "${VERIFY_DIR}/tests/contracts/telemetry-timeseries/validate-telemetry-timeseries.py" \
+            --repo-root "${VERIFY_DIR}" \
+            --manifest tests/contracts/telemetry-health-timeseries/examples/manifest.yaml
 
       - name: Generate schema manifest
         run: |
@@ -351,21 +379,30 @@ jobs:
           mkdir -p mp-staging/schemas/machine
           mkdir -p mp-staging/schemas/runtime
           mkdir -p mp-staging/docs/contracts
-          mkdir -p mp-staging/tests/contracts/machine-profile/valid
-          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/schema
-          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/references
+          mkdir -p mp-staging/tests/contracts/machine-profile
 
           cp "${SCHEMA_PATH}" mp-staging/schemas/machine/
           cp "${RUNTIME_SCHEMA_PATH}" mp-staging/schemas/runtime/
           cp "${BASELINE_PATH}" mp-staging/docs/contracts/
           cp "${FIXTURE_MANIFEST_PATH}" mp-staging/tests/contracts/machine-profile/
           cp "${VALIDATOR_PATH}" mp-staging/tests/contracts/machine-profile/
-          cp tests/contracts/machine-profile/valid/*.yaml mp-staging/tests/contracts/machine-profile/valid/
-          cp tests/contracts/machine-profile/invalid/schema/*.yaml mp-staging/tests/contracts/machine-profile/invalid/schema/
-          cp tests/contracts/machine-profile/invalid/references/*.yaml mp-staging/tests/contracts/machine-profile/invalid/references/
+          # Every fixture file, not only *.yaml: the valid fixtures reference
+          # sibling runtime, provider and behavior files the validator checks
+          # exist, and invalid/references points at them (#593).
+          cp -r tests/contracts/machine-profile/valid tests/contracts/machine-profile/invalid \
+            mp-staging/tests/contracts/machine-profile/
 
           tar -czf "${SCHEMA_ARTIFACT}" -C mp-staging .
           echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify machine-profile schema artifact
+        # Run the bundled validator from the extracted bundle, so a fixture or
+        # referenced file missing from the bundle fails the release (#593).
+        run: |
+          VERIFY_DIR=$(mktemp -d)
+          tar -xzf "${{ steps.mp_schema_package.outputs.artifact }}" -C "${VERIFY_DIR}"
+          uv run python "${VERIFY_DIR}/tests/contracts/machine-profile/validate-machine-profiles.py" \
+            --repo-root "${VERIFY_DIR}"
 
       - name: Generate machine-profile schema manifest
         run: |

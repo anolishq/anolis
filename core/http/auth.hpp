@@ -8,8 +8,9 @@ namespace anolis::http {
 /// True if @p remote_addr is a loopback address (127.x / ::1).
 bool is_loopback(const std::string &remote_addr);
 
-/// Length- and content-constant string comparison (avoids leaking the token via
-/// early-exit timing). Returns false for differing lengths.
+/// Constant-time string comparison: the time depends on b's length only, never
+/// on a's or on where they differ, so pass the expected token as b. Returns
+/// false for differing lengths.
 bool constant_time_equals(std::string_view a, std::string_view b);
 
 /// Decide whether an incoming request is authorized.
