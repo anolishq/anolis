@@ -52,7 +52,10 @@
 
 ### State Cache (core/state/)
 
-- Poll default signals from all devices (500ms interval)
+- Poll every signal its provider gave a poll hint (`poll_hint_hz` above 0),
+  every `polling.interval_ms` (500 ms by default). These are not ADPP's
+  default signals, the set a ReadSignals with no `signal_ids` returns; the
+  runtime always names the signals it reads.
 - Track timestamps and staleness
 - Expose read-only snapshot API
 - Thread-safe via shared_ptr copies

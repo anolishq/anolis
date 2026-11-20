@@ -298,6 +298,46 @@ protected:
 
 // #393: a configured port of 0 binds a port the OS assigns, and get_port()
 // reports that port rather than the configured 0.
+// #561: the startup route log lists every run-registry route the server
+// registers, not only the older ones.
+TEST(HttpServerRoutesLogTest, ListsTheRunRegistryRoutes) {
+    registry::DeviceRegistry registry;
+    state::StateCache state_cache(registry, 100);
+    control::CallRouter call_router(registry, state_cache);
+    provider::ProviderRegistry provider_registry;
+    runtime::HttpConfig http_config;
+    http_config.enabled = true;
+    http_config.bind = "127.0.0.1";
+    http_config.port = 0;
+    HttpServer server(http_config, 100, HttpServerDependencies(registry, state_cache, call_router, provider_registry));
+
+    std::ostringstream captured;
+    std::streambuf* old_buf = std::cerr.rdbuf(captured.rdbuf());
+    std::string error;
+    const bool started = server.start(error);
+    std::cerr.rdbuf(old_buf);
+    ASSERT_TRUE(started) << error;
+    // stop() before the listen thread is up never returns (it joins a listen
+    // that starts after the stop), so wait until the server answers.
+    httplib::Client client("127.0.0.1", server.get_port());
+    bool answered = false;
+    for (int i = 0; i < 100 && !answered; ++i) {
+        answered = static_cast<bool>(client.Get("/v0/devices"));
+        if (!answered) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+    ASSERT_TRUE(answered) << "server never answered";
+    server.stop();
+
+    const std::string log = captured.str();
+    for (const char* route :
+         {"POST /v0/runs\n", "GET  /v0/runs\n", "GET  /v0/runs/{run_id}\n", "POST /v0/runs/{run_id}/close",
+          "POST /v0/runs/{run_id}/events", "GET  /v0/runs/{run_id}/events"}) {
+        EXPECT_NE(log.find(route), std::string::npos) << "missing route: " << route << "\n" << log;
+    }
+}
+
 TEST_F(HttpHandlersTest, PortZeroReportsTheAssignedPort) {
     EXPECT_GT(server->get_port(), 0);
     auto res = client->Get("/v0/devices");
@@ -927,6 +967,23 @@ TEST_F(HttpHandlersTest, GetRuntimeStatus) {
     EXPECT_FALSE(provider.contains("supervision"));
 
     EXPECT_EQ(1, json["device_count"]);
+}
+
+// #870: stop() right after start() returns. start() waits for the listen
+// loop, so a stop() that follows it is not lost; before, it did nothing and
+// stop() then waited on the listen thread forever (a hang, so a timeout).
+TEST_F(HttpHandlersTest, StopRightAfterStartReturns) {
+    for (int i = 0; i < 20; ++i) {
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        HttpServer quick(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(quick.start(error)) << error;
+        quick.stop();
+    }
 }
 
 TEST_F(HttpHandlersTest, GetRuntimeStatusCarriesTheStopChainWithItsExpectations) {

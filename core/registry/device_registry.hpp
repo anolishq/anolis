@@ -29,7 +29,7 @@ struct SignalSpec {
     anolis::deviceprovider::v1::ValueType type;
     bool readable;
     bool writable;
-    bool is_default;              // Included in the default periodic poll plan
+    bool is_polled;               // Polled every interval: the provider gave a poll hint
     uint32_t stale_after_ms = 0;  // Provider-declared freshness bound; 0 = unset => inherit liveness bound (#220)
     double poll_hint_hz = 0.0;    // Provider's advisory poll rate; 0 = unset. Reported, never honoured (#269)
 };
@@ -138,7 +138,9 @@ public:
      * @brief Publish a previously discovered provider inventory.
      *
      * When `replace_existing` is true, all existing devices for the provider
-     * are removed before the new inventory is installed and reindexed.
+     * are removed before the new inventory is installed and reindexed. When it
+     * is false, a device whose handle is already published replaces that
+     * entry, so no handle is ever held twice.
      *
      * @param provider_id Configured provider identifier
      * @param discovered_devices Provider-local inventory to publish

@@ -9,6 +9,8 @@
 #include <string>
 #include <thread>
 
+#include "anolis_build_config.hpp"
+
 namespace {
 
 const char *kHelloMismatchProviderPath = PROVIDER_HELLO_MISMATCH_HELPER_PATH;
@@ -170,6 +172,20 @@ int wait_ready_hint(bool budgeted) {
 }
 
 }  // namespace
+
+// #545: the Hello names the runtime's own version, not a literal.
+TEST(ProviderHandleTest, HelloSendsTheRuntimeVersionAsClientVersion) {
+    const auto hello_file = std::filesystem::path(::testing::TempDir()) / "anolis-545-hello";
+    std::filesystem::remove(hello_file);
+    anolis::provider::ProviderHandle handle("hello", kEmptyInventoryProviderPath, {"--hello-to", hello_file.string()},
+                                            1000, 3000, 5000, 500);
+    ASSERT_TRUE(handle.start()) << handle.last_error();
+    handle.stop();
+    std::string client_version;
+    std::ifstream(hello_file) >> client_version;
+    std::filesystem::remove(hello_file);
+    EXPECT_EQ(client_version, ANOLIS_VERSION);
+}
 
 TEST(ProviderHandleTest, WaitReadyHintIsTheReadyTimeoutWithoutABudget) { EXPECT_EQ(wait_ready_hint(false), 5000); }
 

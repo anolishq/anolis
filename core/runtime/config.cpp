@@ -878,6 +878,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["polling"], "polling", error)) {
                 return false;
             }
+            warn_unknown_keys(yaml["polling"], "polling", {"interval_ms"});
             if (yaml["polling"]["interval_ms"]) {
                 config.polling.interval_ms = yaml["polling"]["interval_ms"].as<int>();
             }
@@ -1071,6 +1072,7 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
             if (!ensure_mapping(yaml["logging"], "logging", error)) {
                 return false;
             }
+            warn_unknown_keys(yaml["logging"], "logging", {"level"});
             if (yaml["logging"]["level"]) {
                 config.logging.level = yaml["logging"]["level"].as<std::string>();
             }

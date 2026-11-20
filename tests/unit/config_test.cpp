@@ -2165,3 +2165,48 @@ TEST_F(ConfigTest, StopChainRejectsMalformedEntries) {
         EXPECT_NE(error.find(cases[i].second), std::string::npos) << error;
     }
 }
+
+// ===== Unknown keys under polling and logging (#546) =====
+
+TEST_F(ConfigTest, UnknownKeysUnderPollingAndLoggingAreWarnedAbout) {
+    const auto path = create_config_file("unknown_polling_logging.yaml", R"(
+http:
+  enabled: false
+providers:
+  - id: sim
+    command: /path/to/provider
+polling:
+  interval_ms: 500
+  interval: 50
+logging:
+  level: info
+  lvl: debug
+)");
+    RuntimeConfig config;
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(load_capturing_log(path, config, error, log)) << error;
+    EXPECT_NE(log.find("Unknown key 'polling.interval'"), std::string::npos) << log;
+    EXPECT_NE(log.find("Unknown key 'logging.lvl'"), std::string::npos) << log;
+}
+
+TEST_F(ConfigTest, KnownKeysUnderPollingAndLoggingLoadWithoutWarning) {
+    const auto path = create_config_file("known_polling_logging.yaml", R"(
+http:
+  enabled: false
+providers:
+  - id: sim
+    command: /path/to/provider
+polling:
+  interval_ms: 250
+logging:
+  level: debug
+)");
+    RuntimeConfig config;
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(load_capturing_log(path, config, error, log)) << error;
+    EXPECT_EQ(log.find("Unknown key"), std::string::npos) << log;
+    EXPECT_EQ(config.polling.interval_ms, 250);
+    EXPECT_EQ(config.logging.level, "debug");
+}

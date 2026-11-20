@@ -287,6 +287,14 @@ class HttpGatewayTester:
         bad = self.http_post(f"/v0/runs/{run_id}/events", {"payload": {}})
         assert bad["status_code"] == 400, f"typeless marker should be 400: {bad}"
 
+        # "abandoned" is the runtime's own restart-recovery reason; a client may
+        # not close a run with it, and the run stays open (#555).
+        abandoned = self.http_post(f"/v0/runs/{run_id}/close", {"close_reason": "abandoned"})
+        assert abandoned["status_code"] == 400, f"close with abandoned should be 400: {abandoned}"
+        assert abandoned["body"].get("status", {}).get("code") == "INVALID_ARGUMENT", abandoned
+        still_open = self.http_get(f"/v0/runs/{run_id}")
+        assert still_open["body"]["run"]["state"] == "open", still_open
+
         # Close it (idempotently).
         closed = self.http_post(f"/v0/runs/{run_id}/close", {"close_reason": "completed"})
         assert closed["status_code"] == 200, f"close failed: {closed}"
