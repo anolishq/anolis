@@ -199,4 +199,9 @@ Typical safe defaults:
 3. Thermal outputs: disabled.
 4. Pressure/vacuum/high-voltage outputs: disabled or safe vent state per hardware policy.
 
-This contract is mandatory for hardware deployments.
+This contract is mandatory for hardware deployments. The one exception is a
+documented opt-out a provider offers for a machine whose process must survive
+a provider restart, such as anolis-provider-bread's
+`provider.outputs_on_startup: leave`. A provider without one makes its outputs
+safe on every start, including a supervised restart; [Safety](safety.md)
+lists which providers do.
