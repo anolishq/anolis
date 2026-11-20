@@ -53,6 +53,27 @@ TEST(HttpAuth, EmptyExpectedTokenNeverAuthorizesNetwork) {
     EXPECT_TRUE(authorize(true, true, "", "127.0.0.1", ""));
 }
 
+// #523: the auth scheme is case-insensitive (RFC 7235 2.1), and one or more
+// spaces may separate it from the token. The token is still compared exactly.
+TEST(HttpAuth, BearerSchemeIsCaseInsensitive) {
+    EXPECT_TRUE(authorize(true, false, "secret", "10.0.0.5", "bearer secret"));
+    EXPECT_TRUE(authorize(true, false, "secret", "10.0.0.5", "BEARER secret"));
+    EXPECT_TRUE(authorize(true, false, "secret", "10.0.0.5", "bEaReR secret"));
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "bearer wrong"));
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "BEARER Secret"));
+}
+
+TEST(HttpAuth, BearerSchemeAcceptsOneOrMoreSpacesBeforeTheToken) {
+    EXPECT_TRUE(authorize(true, false, "secret", "10.0.0.5", "Bearer  secret"));
+    EXPECT_TRUE(authorize(true, false, "secret", "10.0.0.5", "bearer   secret"));
+    // A scheme with no separator, or a separator with no token, is refused.
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "Bearersecret"));
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "Bearer   "));
+    // Other auth schemes are still refused.
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "Basic secret"));
+    EXPECT_FALSE(authorize(true, false, "secret", "10.0.0.5", "Bearerx secret"));
+}
+
 TEST(HttpAuth, IsLoopback) {
     EXPECT_TRUE(is_loopback("127.0.0.1"));
     EXPECT_TRUE(is_loopback("127.1.2.3"));
