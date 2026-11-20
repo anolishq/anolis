@@ -113,7 +113,8 @@ tools/install.sh --stage ./out --arch arm64 --project /path/to/bioreactor-v1
 ```
 
 That writes `anolis-<profile>-<version>-<arch>.tar.gz` and a `.sha256` beside it,
-and prints the two commands to run next. Carry both to the target, then:
+and prints the commands below for the target. Carry both files to the target,
+then, from the directory that holds them:
 
 ```bash
 sha256sum -c anolis-bioreactor-v1-0.1.41-arm64.tar.gz.sha256

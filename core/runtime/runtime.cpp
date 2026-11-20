@@ -473,6 +473,9 @@ void Runtime::preflight_declared_calls() const {
         LOG_ERROR("[Runtime] " << failed << " of " << checked
                                << " declared call(s) could not be dispatched against the device inventory as it "
                                   "stands now. None of them can be dispatched as declared.");
+    } else if (absent_calls > 0 && absent_calls == checked) {
+        LOG_WARN("[Runtime] preflight: " << absent_calls << " of " << checked
+                                         << " declared call(s) target devices absent at startup");
     } else if (absent_calls > 0) {
         LOG_WARN("[Runtime] preflight: " << absent_calls << " of " << checked
                                          << " declared call(s) target devices absent at startup; the rest are "
