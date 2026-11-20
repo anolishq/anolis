@@ -16,6 +16,7 @@ import importlib.util
 import json
 import socket
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -315,6 +316,52 @@ def _resolve_response_schema(
     return _expand_refs(schema, openapi_doc)
 
 
+# The SSE event types the OpenAPI GET /v0/events description documents.
+SSE_EVENT_TYPES = frozenset(
+    {
+        "state_update",
+        "quality_change",
+        "device_availability",
+        "device_removed",
+        "mode_change",
+        "parameter_change",
+        "automation_fault",
+        "automation_call_failed",
+        "stop_chain_change",
+        "stop_chain_mismatch",
+    }
+)
+
+
+def _read_sse_frame(resp: Any, *, deadline_s: float) -> tuple[str, dict[str, str]] | None:
+    """Read the first complete SSE frame from a streaming response.
+
+    Returns the frame's raw text and its fields (``data`` lines joined with
+    newlines), or None when no frame completes before the deadline. Comment
+    lines (``:`` keep-alives) are skipped.
+    """
+    deadline = time.monotonic() + deadline_s
+    raw: list[str] = []
+    fields: dict[str, str] = {}
+    for line in resp.iter_lines(decode_unicode=True):
+        if time.monotonic() > deadline:
+            return None
+        if line is None:
+            continue
+        if line == "":
+            if fields:
+                return "\n".join(raw) + "\n\n", fields
+            raw.clear()
+            continue
+        if line.startswith(":"):
+            continue
+        raw.append(line)
+        key, _, value = line.partition(":")
+        value = value[1:] if value.startswith(" ") else value
+        fields[key] = f"{fields[key]}\n{value}" if key == "data" and key in fields else value
+    return None
+
+
 def _validate_json_instance(schema: Any, payload: Any) -> list[str]:
     validator_cls = jsonschema.validators.validator_for(schema)
     validator = validator_cls(schema)
@@ -579,27 +626,30 @@ def main() -> int:
                             )
                         )
                         return
-                    schema = _resolve_response_schema(
-                        openapi_doc=openapi_doc,
-                        operation=op,
-                        status_code=resp.status_code,
-                        content_type="text/event-stream",
-                    )
-                    validation_errors = _validate_json_instance(schema, "")
-                    if validation_errors:
-                        failures.append(
-                            Failure(
-                                "schema",
-                                f"{name}: event-stream schema invalid: {validation_errors[0]}",
-                            )
-                        )
+                    # Read and check a frame the runtime actually sent (#579).
+                    received = _read_sse_frame(resp, deadline_s=10.0)
+                    if received is None:
+                        failures.append(Failure("response", f"{name}: no complete SSE frame within 10 s"))
+                        return
+                    frame, fields = received
+                    event_type = fields.get("event", "")
+                    if event_type not in SSE_EVENT_TYPES:
+                        failures.append(Failure("response", f"{name}: undocumented SSE event type {event_type!r}"))
+                        return
+                    try:
+                        data = json.loads(fields.get("data", ""))
+                    except ValueError as exc:
+                        failures.append(Failure("response", f"{name}: {event_type} data is not JSON: {exc}"))
+                        return
+                    if not isinstance(data, dict):
+                        failures.append(Failure("response", f"{name}: {event_type} data is not a JSON object"))
                         return
                     if capture_dir is not None:
                         body_file = _capture_body_file(
                             capture_dir,
                             name=name,
                             status_code=resp.status_code,
-                            payload="event: state_update\nid: 0\ndata: {}\n\n",
+                            payload=frame,
                             as_json=False,
                         )
                         captures.append(
