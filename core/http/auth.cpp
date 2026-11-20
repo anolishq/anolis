@@ -1,5 +1,6 @@
 #include "http/auth.hpp"
 
+#include <cctype>
 #include <cstddef>
 
 namespace anolis::http {
@@ -32,13 +33,24 @@ bool authorize(bool auth_enabled, bool exempt_loopback, const std::string &expec
     if (expected_token.empty()) {
         return false;
     }
-    constexpr std::string_view kPrefix = "Bearer ";
-    if (authorization_header.size() <= kPrefix.size() ||
-        authorization_header.compare(0, kPrefix.size(), kPrefix) != 0) {
+    // The scheme is case-insensitive and one or more spaces separate it from
+    // the token (RFC 7235 2.1, RFC 6750 2.1); the token is compared exactly (#523).
+    constexpr std::string_view kScheme = "bearer";
+    std::string_view presented(authorization_header);
+    if (presented.size() <= kScheme.size()) {
         return false;
     }
-    std::string_view presented(authorization_header);
-    presented.remove_prefix(kPrefix.size());
+    for (std::size_t i = 0; i < kScheme.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(presented[i])) != kScheme[i]) {
+            return false;
+        }
+    }
+    presented.remove_prefix(kScheme.size());
+    const std::size_t token_start = presented.find_first_not_of(' ');
+    if (token_start == 0 || token_start == std::string_view::npos) {
+        return false;
+    }
+    presented.remove_prefix(token_start);
     return constant_time_equals(presented, expected_token);
 }
 

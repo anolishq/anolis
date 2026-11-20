@@ -22,7 +22,9 @@ Use this file for operational semantics and practical examples.
 4. Authentication: bearer token, off by default (`http.auth_enabled`), but
    `install.sh` turns it on unless the project config sets `auth_enabled`
    itself. With it on, every request needs `Authorization: Bearer <token>`,
-   including one from this host unless `http.auth_exempt_loopback` is set. The one exception is a
+   including one from this host unless `http.auth_exempt_loopback` is set. The
+   scheme matches in any case (`bearer`, `BEARER`) and may be followed by more
+   than one space; the token must match exactly. The one exception is a
    CORS preflight from an allowed origin (item 6). The check runs before
    routing, so it covers every endpoint and the `/v0/events` stream. Without a
    valid token the reply is `401` with
