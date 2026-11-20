@@ -379,21 +379,30 @@ jobs:
           mkdir -p mp-staging/schemas/machine
           mkdir -p mp-staging/schemas/runtime
           mkdir -p mp-staging/docs/contracts
-          mkdir -p mp-staging/tests/contracts/machine-profile/valid
-          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/schema
-          mkdir -p mp-staging/tests/contracts/machine-profile/invalid/references
+          mkdir -p mp-staging/tests/contracts/machine-profile
 
           cp "${SCHEMA_PATH}" mp-staging/schemas/machine/
           cp "${RUNTIME_SCHEMA_PATH}" mp-staging/schemas/runtime/
           cp "${BASELINE_PATH}" mp-staging/docs/contracts/
           cp "${FIXTURE_MANIFEST_PATH}" mp-staging/tests/contracts/machine-profile/
           cp "${VALIDATOR_PATH}" mp-staging/tests/contracts/machine-profile/
-          cp tests/contracts/machine-profile/valid/*.yaml mp-staging/tests/contracts/machine-profile/valid/
-          cp tests/contracts/machine-profile/invalid/schema/*.yaml mp-staging/tests/contracts/machine-profile/invalid/schema/
-          cp tests/contracts/machine-profile/invalid/references/*.yaml mp-staging/tests/contracts/machine-profile/invalid/references/
+          # Every fixture file, not only *.yaml: the valid fixtures reference
+          # sibling runtime, provider and behavior files the validator checks
+          # exist, and invalid/references points at them (#593).
+          cp -r tests/contracts/machine-profile/valid tests/contracts/machine-profile/invalid \
+            mp-staging/tests/contracts/machine-profile/
 
           tar -czf "${SCHEMA_ARTIFACT}" -C mp-staging .
           echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify machine-profile schema artifact
+        # Run the bundled validator from the extracted bundle, so a fixture or
+        # referenced file missing from the bundle fails the release (#593).
+        run: |
+          VERIFY_DIR=$(mktemp -d)
+          tar -xzf "${{ steps.mp_schema_package.outputs.artifact }}" -C "${VERIFY_DIR}"
+          uv run python "${VERIFY_DIR}/tests/contracts/machine-profile/validate-machine-profiles.py" \
+            --repo-root "${VERIFY_DIR}"
 
       - name: Generate machine-profile schema manifest
         run: |

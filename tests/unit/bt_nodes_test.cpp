@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -519,4 +520,12 @@ TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
                  {"request", "delay_s", "pulse_s", "max_queued", "active", "queued"});
     expect_ports(anolis::automation::EmitOnChangeOrIntervalNode::providedPorts(), {"key", "emit"});
     expect_ports(anolis::automation::BuildArgsJsonNode::providedPorts(), {"arg1_name", "json"});
+}
+
+// #425: a tree node reads parameters and never sets them. ParameterManager::set
+// journals synchronously, which the tick thread must not do, so the context
+// gives nodes a read-only view and a node that calls set does not compile.
+TEST(BTServiceContextTest, NodesGetAReadOnlyParameterManager) {
+    EXPECT_TRUE((std::is_same_v<decltype(anolis::automation::BTServiceContext::parameter_manager),
+                                const anolis::automation::ParameterManager*>));
 }

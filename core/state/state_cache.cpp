@@ -80,9 +80,9 @@ bool StateCache::initialize() {
         config.provider_id = device.provider_id;
         config.device_id = device.device_id;
 
-        // Collect default signals (is_default = true)
+        // Collect polled signals (is_polled = true)
         for (const auto &[signal_id, spec] : device.capabilities.signals_by_id) {
-            if (spec.is_default) {
+            if (spec.is_polled) {
                 config.signal_ids.push_back(signal_id);
             }
         }
@@ -158,9 +158,9 @@ void StateCache::rebuild_poll_configs(const std::string &provider_id) {
         config.provider_id = device.provider_id;
         config.device_id = device.device_id;
 
-        // Collect default signals (is_default = true)
+        // Collect polled signals (is_polled = true)
         for (const auto &[signal_id, spec] : device.capabilities.signals_by_id) {
-            if (spec.is_default) {
+            if (spec.is_polled) {
                 config.signal_ids.push_back(signal_id);
             }
         }
