@@ -283,6 +283,28 @@ health_without_curl() {
     [[ "${summary}" != *"Runtime did not come up"* ]]
 }
 
+# #744: with curl present, a failed restart was read only through the poll, so
+# anything answering on the port (the old runtime the failed restart left
+# running) passed the install. The restart now fails it on every path.
+@test "744: the restart failed but something answers on the port: the install still fails, saying why" {
+    health_with '{"version":"0.0.0"}'
+    PREFIX="${BATS_TEST_TMPDIR}/prefix"
+    _runtime_api_token() { :; }
+    HEALTH_NOT_CHECKED=0
+    RUNTIME_RESTART_FAILED=0
+    systemctl() { return 1; }
+    phase_start >/dev/null
+    unset -f systemctl
+    [ "${RUNTIME_RESTART_FAILED}" -eq 1 ]
+    phase_health >/dev/null
+    _install_failed
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
+    [[ "${summary}" != *"Anolis installation complete"* ]]
+    [[ "$(tail -1 <<< "${summary}")" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+}
+
 @test "536: control: the same PATH with a curl on it runs the health check" {
     health_without_curl
     cat > "${NO_CURL_PATH}/curl" <<'SH'
