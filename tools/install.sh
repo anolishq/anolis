@@ -24,6 +24,10 @@ readonly DEFAULT_PREFIX="/opt/anolis"
 readonly DEFAULT_PORT=8080
 readonly HEALTH_TIMEOUT=30
 readonly HEALTH_INTERVAL=2
+# Every request to the runtime gives up after these many seconds, so a port that
+# accepts a connection and never answers cannot hang the install (#745).
+readonly RUNTIME_CURL_CONNECT_TIMEOUT=2
+readonly RUNTIME_CURL_MAX_TIME=5
 readonly ANOLIS_USER="anolis"
 readonly SYSTEMD_DIR="/etc/systemd/system"
 # Telemetry-export secrets live here — OUTSIDE ${PREFIX}, so phase_directories'
@@ -1443,6 +1447,10 @@ phase_telemetry_export() {
     # Online-only in v1: the venv is populated from PyPI. Offline (bundled
     # wheels) is tracked separately (anolishq/anolis#100). On the offline
     # --local path with no PyPI reachability, skip rather than fail the install.
+    if [[ -n "${LOCAL_PATH}" ]] && ! command -v curl &>/dev/null; then
+        log_warn "telemetry-export: curl not found, so PyPI could not be checked — skipped"
+        return 0
+    fi
     if [[ -n "${LOCAL_PATH}" ]] \
         && ! curl -fsS --connect-timeout 3 https://pypi.org/simple/ &>/dev/null; then
         log_warn "telemetry-export: needs network (online install) — skipped; offline support is anolishq/anolis#100"
@@ -1952,6 +1960,10 @@ phase_observability() {
 
     if ! command -v apt-get &>/dev/null || ! command -v systemctl &>/dev/null; then
         log_warn "observability: apt/systemd not available — skipped"
+        return 0
+    fi
+    if ! command -v curl &>/dev/null; then
+        log_warn "observability: curl not found — skipped"
         return 0
     fi
     if ! curl -fsS --connect-timeout 3 https://repos.influxdata.com/influxdata-archive.key &>/dev/null \
@@ -2666,11 +2678,12 @@ _runtime_api_token() {
 _runtime_curl() {
     local token
     token=$(_runtime_api_token)
+    local bounds=(--connect-timeout "${RUNTIME_CURL_CONNECT_TIMEOUT}" --max-time "${RUNTIME_CURL_MAX_TIME}")
     if [[ -z "${token}" ]]; then
-        curl "$@"
+        curl "${bounds[@]}" "$@"
         return
     fi
-    curl -H @- "$@" <<< "Authorization: Bearer ${token}"
+    curl "${bounds[@]}" -H @- "$@" <<< "Authorization: Bearer ${token}"
 }
 
 # The run registry fails soft: if its data dir cannot be created the runtime
@@ -2851,7 +2864,9 @@ _report_startup_safe_state() {
 # A crash-looping runtime is a failed install, not a warning (#172), and so
 # is a safe state the config cannot plan on these devices (#616).
 _install_failed() {
-    [[ ${HEALTH_FAILED} -eq 1 || ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]
+    # A failed restart fails the install even when something answers on the
+    # port: that is not the runtime just installed (#744).
+    [[ ${HEALTH_FAILED} -eq 1 || ${RUNTIME_RESTART_FAILED} -eq 1 || ${SAFE_STATE_UNPLANNABLE} -eq 1 ]]
 }
 
 phase_health() {
@@ -2870,7 +2885,7 @@ phase_health() {
     if ! command -v curl >/dev/null 2>&1; then
         log_warn "health: not checked: curl not found"
         log_info "  Not verified: runtime status, run registry, startup safe state and provider liveness."
-        log_info "  Install curl (sudo apt install curl) for the install to check them."
+        log_info "  Install curl (sudo apt install curl) for these checks to run."
         HEALTH_NOT_CHECKED=1
         [[ ${RUNTIME_RESTART_FAILED} -eq 0 ]] || HEALTH_FAILED=1
         return
@@ -2882,6 +2897,7 @@ phase_health() {
     local elapsed=0
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
+        local poll_start=${SECONDS}
         if _runtime_curl -fsS "${url}" &>/dev/null; then
             local version
             version=$(_runtime_curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
@@ -2896,8 +2912,10 @@ phase_health() {
             _check_provider_liveness "${base}"
             return
         fi
+        # A poll that hung until curl gave up spent its own time too (#745).
+        local poll_took=$((SECONDS - poll_start))
         sleep ${HEALTH_INTERVAL}
-        elapsed=$((elapsed + HEALTH_INTERVAL))
+        elapsed=$((elapsed + HEALTH_INTERVAL + poll_took))
     done
 
     log_warn "health: runtime not responding after ${HEALTH_TIMEOUT}s"
@@ -2978,7 +2996,7 @@ phase_summary() {
         log_info "           This includes requests from the device itself, unless http.auth_exempt_loopback is true."
     fi
 
-    if [[ ${HEALTH_FAILED} -eq 1 && ${HEALTH_NOT_CHECKED} -eq 1 ]]; then
+    if [[ ${RUNTIME_RESTART_FAILED} -eq 1 ]]; then
         echo ""
         log_err "systemctl restart anolis-runtime failed — the install did NOT succeed."
     elif [[ ${HEALTH_FAILED} -eq 1 ]]; then
