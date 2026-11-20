@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "automation/parameter_manager.hpp"
 #include "automation/parameter_value_bridge.hpp"
 
 namespace anolis {
@@ -47,10 +48,19 @@ TEST(ParameterTypesTest, TypeMatchValidation) {
 }
 
 TEST(ParameterTypesTest, ValueToStringUsesCanonicalEncoding) {
-    EXPECT_EQ("3.140000", parameter_value_to_string(ParameterValue{3.14}));
+    EXPECT_EQ("3.14", parameter_value_to_string(ParameterValue{3.14}));
     EXPECT_EQ("17", parameter_value_to_string(ParameterValue{int64_t{17}}));
     EXPECT_EQ("true", parameter_value_to_string(ParameterValue{true}));
     EXPECT_EQ("manual", parameter_value_to_string(ParameterValue{std::string{"manual"}}));
+}
+
+// #756: a double prints in its shortest round-trip form, so different values
+// never print the same (std::to_string gave 0.000000 for both 1e-8 and 2e-8).
+TEST(ParameterTypesTest, ValueToStringPrintsADoubleSoDifferentValuesDiffer) {
+    EXPECT_EQ("1e-08", parameter_value_to_string(ParameterValue{1e-8}));
+    EXPECT_EQ("2e-08", parameter_value_to_string(ParameterValue{2e-8}));
+    EXPECT_EQ("-1e+300", parameter_value_to_string(ParameterValue{-1e300}));
+    EXPECT_EQ("25", parameter_value_to_string(ParameterValue{25.0}));
 }
 
 TEST(ParameterTypesTest, BridgeConvertsParameterValueToTypedValue) {
@@ -84,6 +94,22 @@ TEST(ParameterTypesTest, BytesTypedValueIsNotAStringParameter) {
     std::string error;
     EXPECT_FALSE(parameter_value_from_typed_value(bytes, &error).has_value());
     EXPECT_NE(std::string::npos, error.find("Unsupported"));
+}
+
+// #755: set() holds an int64 to its bounds exactly. 2^53 + 1 and 2^53 are one
+// double apart from nothing: as doubles they compare equal.
+TEST(ParameterTypesTest, Int64BoundsAreComparedExactly) {
+    const ParameterDef def{"big",        ParameterType::INT64, ParameterValue{int64_t{0}},
+                           std::nullopt, 9007199254740992.0,   std::nullopt};
+    std::string error;
+    EXPECT_TRUE(def.validate(ParameterValue{int64_t{9007199254740992}}, error)) << error;
+    EXPECT_FALSE(def.validate(ParameterValue{int64_t{9007199254740993}}, error));
+    EXPECT_EQ(error, "Value 9007199254740993 exceeds maximum 9007199254740992");
+
+    const ParameterDef low{"low",        ParameterType::INT64, ParameterValue{int64_t{0}}, -9007199254740992.0,
+                           std::nullopt, std::nullopt};
+    EXPECT_TRUE(low.validate(ParameterValue{int64_t{-9007199254740992}}, error)) << error;
+    EXPECT_FALSE(low.validate(ParameterValue{int64_t{-9007199254740993}}, error));
 }
 
 }  // namespace

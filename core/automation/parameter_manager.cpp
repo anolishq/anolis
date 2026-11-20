@@ -1,6 +1,8 @@
 #include "parameter_manager.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <format>
 #include <iostream>
 
@@ -8,6 +10,36 @@
 
 namespace anolis {
 namespace automation {
+
+namespace {
+
+// Exact comparisons of an int64 with a double bound (#755). Casting the int64
+// to double loses precision above 2^53, where neighbouring integers become one
+// double. For an integer v and a finite b: v < b is v < ceil(b), and v > b is
+// v > floor(b), and ceil/floor of b fit an int64 once b is inside its range.
+constexpr double kTwo63 = 9223372036854775808.0;
+
+bool int64_below(int64_t v, double b) {
+    if (b >= kTwo63) {
+        return true;
+    }
+    if (b < -kTwo63) {
+        return false;
+    }
+    return v < static_cast<int64_t>(std::ceil(b));
+}
+
+bool int64_above(int64_t v, double b) {
+    if (b < -kTwo63) {
+        return true;
+    }
+    if (b >= kTwo63) {
+        return false;
+    }
+    return v > static_cast<int64_t>(std::floor(b));
+}
+
+}  // namespace
 
 bool ParameterDef::validate(const ParameterValue &new_value, std::string &error) const {
     // Type must match the declared parameter type exactly.
@@ -31,12 +63,17 @@ bool ParameterDef::validate(const ParameterValue &new_value, std::string &error)
         const std::string shown = std::holds_alternative<int64_t>(new_value)
                                       ? std::format("{}", std::get<int64_t>(new_value))
                                       : std::format("{}", numeric_value);
-        if (min.has_value() && numeric_value < min.value()) {
+        const bool is_int = std::holds_alternative<int64_t>(new_value);
+        const bool below_min = min.has_value() && (is_int ? int64_below(std::get<int64_t>(new_value), min.value())
+                                                          : numeric_value < min.value());
+        const bool above_max = max.has_value() && (is_int ? int64_above(std::get<int64_t>(new_value), max.value())
+                                                          : numeric_value > max.value());
+        if (below_min) {
             error = std::format("Value {} is below minimum {}", shown, min.value());
             return false;
         }
 
-        if (max.has_value() && numeric_value > max.value()) {
+        if (above_max) {
             error = std::format("Value {} exceeds maximum {}", shown, max.value());
             return false;
         }
@@ -79,6 +116,20 @@ bool validate_parameter_definition(const std::string &name, ParameterType type, 
     const bool numeric_type = (type == ParameterType::DOUBLE || type == ParameterType::INT64);
     if (!numeric_type && (min.has_value() || max.has_value())) {
         error = std::format("Parameter '{}' min/max constraints require numeric type", name);
+        return false;
+    }
+    // Every comparison with NaN is false, so a NaN default passes any bound and
+    // a NaN bound turns its check off (#755).
+    if (std::holds_alternative<double>(default_value) && std::isnan(std::get<double>(default_value))) {
+        error = std::format("Parameter '{}' default value is NaN", name);
+        return false;
+    }
+    if (min.has_value() && std::isnan(min.value())) {
+        error = std::format("Parameter '{}' min is NaN", name);
+        return false;
+    }
+    if (max.has_value() && std::isnan(max.value())) {
+        error = std::format("Parameter '{}' max is NaN", name);
         return false;
     }
     if (min.has_value() && max.has_value() && min.value() > max.value()) {
