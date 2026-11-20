@@ -29,7 +29,7 @@ struct SignalSpec {
     anolis::deviceprovider::v1::ValueType type;
     bool readable;
     bool writable;
-    bool is_default;              // Included in the default periodic poll plan
+    bool is_polled;               // Polled every interval: the provider gave a poll hint
     uint32_t stale_after_ms = 0;  // Provider-declared freshness bound; 0 = unset => inherit liveness bound (#220)
     double poll_hint_hz = 0.0;    // Provider's advisory poll rate; 0 = unset. Reported, never honoured (#269)
 };

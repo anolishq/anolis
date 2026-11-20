@@ -1171,7 +1171,7 @@ void Runtime::warn_stop_chain_config() const {
     if (status_signal == device->capabilities.signals_by_id.end()) {
         LOG_WARN("[Runtime] stop_chain: " << device_handle << " has no signal " << signal_id
                                           << "; the stop status reads unknown");
-    } else if (!status_signal->second.is_default) {
+    } else if (!status_signal->second.is_polled) {
         LOG_WARN("[Runtime] stop_chain: " << signal
                                           << " has no poll hint, so it is never polled and the stop "
                                              "status reads unknown; its provider must set poll_hint_hz");
@@ -1202,14 +1202,14 @@ void Runtime::warn_unjudgeable_expectations() const {
         const auto &signals = device->capabilities.signals_by_id;
         if (expect == StopChainExpect::ReportsEstop) {
             const auto estop = signals.find("estop");
-            if (estop == signals.end() || !estop->second.is_default ||
+            if (estop == signals.end() || !estop->second.is_polled ||
                 estop->second.type != anolis::deviceprovider::v1::VALUE_TYPE_BOOL) {
                 LOG_WARN("[Runtime] stop_chain: " << handle
                                                   << " expects reports_estop but has no polled bool estop signal; "
                                                      "a mismatch is never raised for it");
             }
         } else if (std::none_of(signals.begin(), signals.end(),
-                                [](const auto &entry) { return entry.second.is_default; })) {
+                                [](const auto &entry) { return entry.second.is_polled; })) {
             LOG_WARN("[Runtime] stop_chain: " << handle
                                               << " expects power_loss but has no polled signal, so whether it "
                                                  "still answers cannot be seen; a mismatch is never raised for it");
