@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <string>
+#include <unordered_set>
 
 #include "logging/logger.hpp"
 
@@ -56,11 +58,18 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
 
     // Build devices outside lock (discovery is network I/O)
     discovered_devices.reserve(device_list.size());
+    // Handles are unique (#558): a device_id listed twice keeps its first copy.
+    std::unordered_set<std::string> seen_ids;
 
     // The registry only publishes devices that survive both ListDevices and an
     // individual DescribeDevice/capability parsing round-trip.
     for (const auto &device_brief : device_list) {
         const std::string &device_id = device_brief.device_id();
+        if (!seen_ids.insert(device_id).second) {
+            LOG_WARN("[Registry] Provider " << provider_id << " lists device " << device_id
+                                            << " more than once; registering the first copy only");
+            continue;
+        }
         LOG_INFO("[Registry] Describing device: " << device_id);
 
         anolis::deviceprovider::v1::DescribeDeviceResponse describe_response;
@@ -127,8 +136,17 @@ void DeviceRegistry::commit_provider_devices(const std::string &provider_id,
         devices_.erase(new_end, devices_.end());
     }
 
+    // A device whose handle is already published replaces that entry, so a
+    // handle is never held twice (#558).
     for (auto &device : discovered_devices) {
-        devices_.push_back(std::move(device));
+        const std::string handle = device.get_handle();
+        auto existing = std::find_if(devices_.begin(), devices_.end(),
+                                     [&handle](const RegisteredDevice &d) { return d.get_handle() == handle; });
+        if (existing != devices_.end()) {
+            *existing = std::move(device);
+        } else {
+            devices_.push_back(std::move(device));
+        }
     }
 
     handle_to_index_.clear();
