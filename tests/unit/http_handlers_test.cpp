@@ -929,6 +929,23 @@ TEST_F(HttpHandlersTest, GetRuntimeStatus) {
     EXPECT_EQ(1, json["device_count"]);
 }
 
+// #870: stop() right after start() returns. start() waits for the listen
+// loop, so a stop() that follows it is not lost; before, it did nothing and
+// stop() then waited on the listen thread forever (a hang, so a timeout).
+TEST_F(HttpHandlersTest, StopRightAfterStartReturns) {
+    for (int i = 0; i < 20; ++i) {
+        runtime::HttpConfig http_config;
+        http_config.enabled = true;
+        http_config.bind = "127.0.0.1";
+        http_config.port = 0;
+        HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+        HttpServer quick(http_config, 100, std::move(dependencies));
+        std::string error;
+        ASSERT_TRUE(quick.start(error)) << error;
+        quick.stop();
+    }
+}
+
 TEST_F(HttpHandlersTest, GetRuntimeStatusCarriesTheStopChainWithItsExpectations) {
     // #483/#484: a stop chain whose status signal is not registered reads
     // unknown; no device has been judged, so there are no mismatches.
