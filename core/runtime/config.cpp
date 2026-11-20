@@ -1261,6 +1261,25 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     if (param_node["max"]) {
                         param.max = param_node["max"].as<double>();
                     }
+                    // Bounds are held as double: an int64 bound a double cannot
+                    // hold exactly would be rounded, so it is refused (#755).
+                    if (param.type == automation::ParameterType::INT64) {
+                        for (const char *key : {"min", "max"}) {
+                            if (!param_node[key]) {
+                                continue;
+                            }
+                            int64_t as_int = 0;
+                            if (!YAML::convert<int64_t>::decode(param_node[key], as_int)) {
+                                continue;
+                            }
+                            const double as_double = static_cast<double>(as_int);
+                            if (as_double >= 9223372036854775808.0 || static_cast<int64_t>(as_double) != as_int) {
+                                error = "Parameter '" + param.name + "' " + key + " " + std::to_string(as_int) +
+                                        " cannot be held exactly as a bound";
+                                return false;
+                            }
+                        }
+                    }
 
                     // Parse allowed_values (string enums)
                     if (param_node["allowed_values"]) {
