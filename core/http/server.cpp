@@ -340,6 +340,11 @@ bool HttpServer::start(std::string &error) {
         server_->listen_after_bind();
         LOG_INFO("[HTTP] Server thread exiting");
     });
+    // httplib's stop() does nothing until the listen loop is running, and the
+    // thread would then accept forever, so a stop() soon after this returned
+    // hung on join(). Wait for the loop before returning
+    // (yhirose/cpp-httplib#1645; anolishq/anolis#870).
+    server_->wait_until_ready();
 
     LOG_INFO("[HTTP] Server listening on " << config_.bind << ":" << port_);
     return true;
