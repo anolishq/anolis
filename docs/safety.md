@@ -314,12 +314,20 @@ provider no longer lists, as on a bus that is still dark: it latches when it is
 dropped (anolishq/anolis#801), and if it is registered again, its first
 successful read re-asserts its safe state. A device removed from the
 provider's configuration latches the same way across a restart. Outputs stay
-as the devices and the restarted provider leave them. anolis-provider-bread
-from 0.10.0 drives its outputs safe each time it starts (anolishq/anolis-provider-bread#195): DCMTs to
-open loop at PWM 0, RLHTs to setpoints 0, open loop and duty 0. So a supervised
-restart of bread turns those outputs off, unless its config sets
-`provider.outputs_on_startup: leave`; set that with `safety.on_startup: leave`
-on a machine where a restart must not interrupt a running process.
+as the devices and the restarted provider leave them, and a provider that
+makes its outputs safe when it starts (see the
+[Safe Initialization Contract](providers.md#safe-initialization-contract))
+turns them off on every supervised restart:
+
+- anolis-provider-bread from 0.10.0 drives its outputs safe each time it
+  starts (anolishq/anolis-provider-bread#195): DCMTs to open loop at PWM 0,
+  RLHTs to setpoints 0, open loop and duty 0. Its config can opt out with
+  `provider.outputs_on_startup: leave`; set that with `safety.on_startup: leave`
+  on a machine where a restart must not interrupt a running process.
+- anolis-provider-adafruit brakes all four terminals of a Motor HAT when it
+  connects, and anolis-provider-sparkfun stops both channels of an SCMD when it
+  connects. Neither has an opt-out, so on these boards a supervised restart
+  stops the motors whatever `safety.on_startup` says.
 
 ## Standard Startup Sequence
 
