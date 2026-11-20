@@ -119,6 +119,11 @@ Notes:
    `Parameter system not enabled`: parameters are declared under
    `automation`. A `MANUAL` from `/v0/runtime/status` alone does not
    distinguish the two cases.
+3. In `GET /v0/providers/health`, a device's `health` is the runtime's own
+   view, from its polls of the device. A device the provider reports but the
+   registry does not carry (`registered: false`, such as one that failed its
+   startup probe) is never polled, so its `health` is always `UNKNOWN`. Its
+   provider's view is in `reported.state`, for example `STATE_UNREACHABLE`.
 
 ### Discovery and capabilities
 
