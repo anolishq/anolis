@@ -25,6 +25,11 @@ commit messages only.
   logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
   signal, such as the simulator's `control_mode`, got a plausible number and
   no error (#816).
+- `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
+  unknown quality. It knew only `UNKNOWN` and compared any other name
+  against an unspecified quality no reading has, so the node always failed.
+  A name that is not a quality now refuses the tree when it loads, rather
+  than never matching (#797).
 
 ## [0.16.0] - 2026-11-15
 
