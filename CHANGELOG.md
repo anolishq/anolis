@@ -35,6 +35,11 @@ commit messages only.
   answered `404 NOT_FOUND`, the same as an unknown run, so a client could
   drop a run that was still open. An unknown `run_id` is still 404, and
   `closeRun` in the OpenAPI declares the 500 (#554).
+- The runtime-config schema accepts unknown keys under `safety.stop_chain`,
+  its `status` and a `devices` mapping entry, as it does everywhere else and
+  as the loader does (it warns and ignores them). A config could pass
+  `anolis-runtime --check-config` and still fail schema validation. A contract
+  fixture now checks that the two agree (#550).
 
 ## [0.16.0] - 2026-11-15
 

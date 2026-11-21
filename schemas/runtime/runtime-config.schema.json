@@ -824,12 +824,12 @@
         },
         "stop_chain": {
           "type": "object",
-          "additionalProperties": false,
+          "additionalProperties": true,
           "description": "Observing the emergency stop (rfcs/stop-chain.md). The runtime only observes: it never drives the chain. While the status reads in force, or cannot be read, the software stop's latch holds, AUTO is refused, and the latch cannot be cleared. Absent means no stop is observed.",
           "properties": {
             "status": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": true,
               "required": [
                 "signal"
               ],
@@ -857,7 +857,7 @@
                   },
                   {
                     "type": "object",
-                    "additionalProperties": false,
+                    "additionalProperties": true,
                     "required": [
                       "handle"
                     ],
