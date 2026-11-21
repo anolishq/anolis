@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
+  unknown quality. It knew only `UNKNOWN` and compared any other name
+  against an unspecified quality no reading has, so the node always failed.
+  A name that is not a quality now refuses the tree when it loads, rather
+  than never matching (#797).
+
 ## [0.16.0] - 2026-11-15
 
 0.16.0 is a minor release because an existing config now polls differently

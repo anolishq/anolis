@@ -178,7 +178,11 @@ Core runtime nodes include:
 
 1. `CallDevice`
 2. `ReadSignal`
-3. `CheckQuality`
+3. `CheckQuality`: SUCCESS when a signal's quality is `expected_quality`
+   (default `OK`): one of `OK`, `STALE`, `FAULT` or `UNAVAILABLE`, the names
+   HTTP and events use (`UNKNOWN` is accepted for `UNAVAILABLE`). Any other
+   name refuses the tree when it loads, or fails the node when it comes from
+   the blackboard.
 4. `GetParameter`
 5. `GetParameterBool`
 6. `GetParameterInt64`
