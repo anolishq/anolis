@@ -15,6 +15,14 @@ commit messages only.
 
 ### Fixed
 
+- `CallDevice` no longer sends a call with no arguments when its `args` cannot
+  be read. An `args` that named a blackboard key nothing wrote, or JSON
+  written without the `json:` prefix (which reads as such a key), became an
+  empty argument set, so a function whose arguments are all optional ran with
+  its defaults and logged success. Such args now fail the node and count as a
+  failed call, as do args that are not JSON, so repeated failures reach FAULT.
+  Literal args that are not a JSON object refuse the tree when it loads
+  (#806).
 - A quoted hook argument in `safety.safe_state` or
   `automation.mode_transition_hooks` is a string, whatever its text. A quoted
   `"1"` or `"true"` used to reach the call as an int64 or a bool, so a
