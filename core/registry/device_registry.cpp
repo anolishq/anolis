@@ -11,13 +11,32 @@
 
 #include <algorithm>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "logging/logger.hpp"
 
 namespace anolis {
 namespace registry {
+
+namespace {
+
+// The first (function, arg) whose arg name repeats within that function.
+std::optional<std::pair<std::string, std::string>> first_duplicate_arg(const DeviceCapabilitySet &caps) {
+    for (const auto &[name, spec] : caps.functions_by_id) {
+        std::unordered_set<std::string> seen;
+        for (const auto &arg : spec.args) {
+            if (!seen.insert(arg.name()).second) {
+                return std::make_pair(spec.function_name, arg.name());
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace
 
 bool DeviceRegistry::discover_provider(const std::string &provider_id, anolis::provider::IProviderHandle &provider,
                                        bool replace_existing) {
@@ -85,6 +104,14 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
         reg_device.device_id = device_id;
 
         build_capabilities(describe_response.device(), describe_response.capabilities(), reg_device.capabilities);
+
+        // Two args with one name: capabilities would show only the last while a
+        // call is checked against every one, so refuse the device (#741).
+        if (const auto duplicate = first_duplicate_arg(reg_device.capabilities)) {
+            LOG_WARN("[Registry] Device " << device_id << " not registered: function '" << duplicate->first
+                                          << "' declares more than one argument named '" << duplicate->second << "'");
+            continue;
+        }
 
         // Log BEFORE the move
         std::string handle = reg_device.get_handle();

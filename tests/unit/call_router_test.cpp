@@ -353,7 +353,10 @@ TEST_F(CallRouterTest, ValidateCallAcceptsWhatExecuteCallWouldDispatch) {
 // is enforced, and each duplicate converts the value in declared order before
 // the last one's type and range are checked. A call that matches the shown arg
 // can still be refused.
-TEST_F(CallRouterTest, DuplicateArgumentNamesAreValidatedAgainstEveryDuplicateInTurn) {
+// #741: a function that declares two args with one name is refused at
+// registration, so capabilities never shows one arg while calls are checked
+// against another.
+TEST_F(CallRouterTest, ADeviceDeclaringTwoArgsWithOneNameIsNotRegistered) {
     EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
         Device dev;
         dev.set_device_id("dev1");
@@ -380,28 +383,14 @@ TEST_F(CallRouterTest, DuplicateArgumentNamesAreValidatedAgainstEveryDuplicateIn
         }));
     registry->discover_provider("sim0", *mock_provider);
 
+    EXPECT_FALSE(registry->get_device_copy("sim0", "dev1").has_value());
+
     std::string error;
-    control::CallRequest omitted;
-    omitted.device_handle = "sim0/dev1";
-    omitted.function_id = 1;
-    EXPECT_FALSE(router->validate_call(omitted, error)) << "the earlier duplicate's required is enforced";
-    EXPECT_THAT(error, HasSubstr("Missing required argument: x"));
-
-    // An int64 that matches the shown (last) arg is first converted to double
-    // by the earlier duplicate, and then fails the last one's type.
-    control::CallRequest as_int = omitted;
-    as_int.args["x"] = Int64Value(3);
-    EXPECT_FALSE(router->validate_call(as_int, error));
-    EXPECT_THAT(error, HasSubstr("Type mismatch: expected int64, got double"));
-
-    // A double satisfies the first duplicate and fails the last.
-    control::CallRequest as_double = omitted;
-    anolis::deviceprovider::v1::Value d;
-    d.set_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
-    d.set_double_value(3.0);
-    as_double.args["x"] = d;
-    EXPECT_FALSE(router->validate_call(as_double, error));
-    EXPECT_THAT(error, HasSubstr("Type mismatch: expected int64, got double"));
+    control::CallRequest call;
+    call.device_handle = "sim0/dev1";
+    call.function_id = 1;
+    call.args["x"] = Int64Value(3);
+    EXPECT_FALSE(router->validate_call(call, error));
 }
 
 TEST_F(CallRouterTest, ExecuteCallSuccess) {
