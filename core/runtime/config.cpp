@@ -122,6 +122,15 @@ bool parse_scalar_parameter_value(const YAML::Node &node, automation::ParameterV
 
     const std::string raw = node.as<std::string>();
 
+    // A quoted scalar (tag "!") or one tagged !!str is a string whatever its
+    // text, so a string argument can be "1" or "true". Only a plain scalar
+    // (tag "?") is typed by its text below (#637).
+    const std::string &tag = node.Tag();
+    if (tag == "!" || tag == "tag:yaml.org,2002:str") {
+        out = raw;
+        return true;
+    }
+
     // bool literal
     if (raw == "true" || raw == "false") {
         out = (raw == "true");
