@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- The runtime-config schema accepts unknown keys under `safety.stop_chain`,
+  its `status` and a `devices` mapping entry, as it does everywhere else and
+  as the loader does (it warns and ignores them). A config could pass
+  `anolis-runtime --check-config` and still fail schema validation. A contract
+  fixture now checks that the two agree (#550).
+
 ## [0.16.0] - 2026-11-15
 
 0.16.0 is a minor release because an existing config now polls differently
