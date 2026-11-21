@@ -55,6 +55,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/18-restart-timeout-below-startup-budget.yaml
     expect: valid
     note: explicit restart_policy.timeout_ms below hello_timeout_ms + ready_timeout_ms warns, not rejects (#556)
+  - file: tests/contracts/runtime-config/valid/19-safety-stop-chain-unknown-keys.yaml
+    expect: valid
+    note: unknown keys under safety.stop_chain, its status and a devices mapping are warn-and-ignore in both the schema and the loader (#550)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema

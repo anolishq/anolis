@@ -22,10 +22,8 @@ Supported runtime YAML sections:
 8. `safety`
 9. `health`
 
-Unknown keys at the top level and in most sections are warned about and
-ignored. Unknown keys under `polling` and `logging` are ignored without a
-warning. The schema rejects unknown keys under `safety.stop_chain`, its
-`status` and its `devices` mappings, where the runtime only warns.
+Unknown keys at the top level and in every section are warned about and
+ignored. The schema allows unknown keys everywhere, as the runtime does.
 
 ## `runtime`
 
