@@ -568,7 +568,10 @@ automation:
 
     ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
     EXPECT_TRUE(config.automation.enabled);
-    EXPECT_EQ(config.automation.behavior_tree, "/path/to/tree.xml");
+    // On Windows "/path/to/tree.xml" has no drive, so it is resolved onto the
+    // config file's drive (#804); compare the part every platform keeps.
+    EXPECT_TRUE(fs::path(config.automation.behavior_tree).has_root_directory()) << config.automation.behavior_tree;
+    EXPECT_EQ(fs::path(config.automation.behavior_tree).relative_path().generic_string(), "path/to/tree.xml");
     EXPECT_EQ(config.automation.tick_rate_hz, 20);
     EXPECT_EQ(config.automation.parameters.size(), 1);
     EXPECT_EQ(config.automation.parameters[0].name, "test_param");
@@ -599,7 +602,10 @@ automation:
 
     ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
     EXPECT_TRUE(config.automation.enabled);
-    EXPECT_EQ(config.automation.behavior_tree, "/path/to/tree.xml");
+    // On Windows "/path/to/tree.xml" has no drive, so it is resolved onto the
+    // config file's drive (#804); compare the part every platform keeps.
+    EXPECT_TRUE(fs::path(config.automation.behavior_tree).has_root_directory()) << config.automation.behavior_tree;
+    EXPECT_EQ(fs::path(config.automation.behavior_tree).relative_path().generic_string(), "path/to/tree.xml");
 }
 
 TEST_F(ConfigTest, AutomationModeTransitionHooksConfiguration) {
