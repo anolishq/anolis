@@ -13,6 +13,14 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
+  but its close cannot be written to the run log, and the run stays open. It
+  answered `404 NOT_FOUND`, the same as an unknown run, so a client could
+  drop a run that was still open. An unknown `run_id` is still 404, and
+  `closeRun` in the OpenAPI declares the 500 (#554).
+
 ## [0.16.0] - 2026-11-15
 
 0.16.0 is a minor release because an existing config now polls differently
