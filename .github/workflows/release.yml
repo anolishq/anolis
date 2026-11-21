@@ -327,6 +327,7 @@ jobs:
           mkdir -p rc-staging/tests/contracts/runtime-config/valid
           mkdir -p rc-staging/tests/contracts/runtime-config/invalid/schema
           mkdir -p rc-staging/tests/contracts/runtime-config/invalid/runtime
+          mkdir -p rc-staging/tests/contracts/runtime-config/behaviors
 
           cp "${SCHEMA_PATH}" rc-staging/schemas/runtime/
           cp "${BASELINE_PATH}" rc-staging/docs/contracts/
@@ -335,6 +336,8 @@ jobs:
           cp tests/contracts/runtime-config/valid/*.yaml rc-staging/tests/contracts/runtime-config/valid/
           cp tests/contracts/runtime-config/invalid/schema/*.yaml rc-staging/tests/contracts/runtime-config/invalid/schema/
           cp tests/contracts/runtime-config/invalid/runtime/*.yaml rc-staging/tests/contracts/runtime-config/invalid/runtime/
+          # The trees the fixtures name: --check-config loads them (#804).
+          cp tests/contracts/runtime-config/behaviors/*.xml rc-staging/tests/contracts/runtime-config/behaviors/
 
           tar -czf "${SCHEMA_ARTIFACT}" -C rc-staging .
           echo "artifact=${SCHEMA_ARTIFACT}" >> "$GITHUB_OUTPUT"

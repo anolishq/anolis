@@ -131,7 +131,10 @@ void HttpServer::handle_post_run_close(const httplib::Request &req, httplib::Res
 
     auto result = run_journal_->close(run_id, reason);
     if (!result.ok || !result.run.has_value()) {
-        send_json(res, StatusCode::NOT_FOUND, make_error_response(StatusCode::NOT_FOUND, result.error));
+        // An unknown run is 404. A known run whose close could not be written
+        // stays open, and that is the runtime's failure, not the client's (#554).
+        const StatusCode code = result.not_found ? StatusCode::NOT_FOUND : StatusCode::INTERNAL;
+        send_json(res, code, make_error_response(code, result.error));
         return;
     }
     send_json(res, StatusCode::OK, run_envelope(*result.run));

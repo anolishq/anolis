@@ -76,11 +76,14 @@ public:
 
     struct CloseResult {
         bool ok = false;
+        /// Set when ok=false because no run has this id. Otherwise ok=false
+        /// means the close could not be written, and the run stays open (#554).
+        bool not_found = false;
         std::string error;
         std::optional<Run> run;
     };
     /// Close a run. Idempotent: closing an already-closed run returns ok with the
-    /// existing record. Unknown id => ok=false.
+    /// existing record. Unknown id => ok=false, not_found=true.
     CloseResult close(const std::string& run_id, CloseReason reason);
 
     std::optional<Run> get(const std::string& run_id) const;

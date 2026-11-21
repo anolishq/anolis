@@ -43,6 +43,8 @@ if(ANOLIS_ENABLE_AUTOMATION)
     list(APPEND ANOLIS_UNIT_TEST_SOURCES
         bt_runtime_test.cpp
         bt_nodes_test.cpp
+        call_device_args_test.cpp
+        check_quality_node_test.cpp
         mode_dispatch_test.cpp
         mode_manager_test.cpp
         runtime_mode_hooks_test.cpp

@@ -713,3 +713,40 @@ TEST(RunLabelTest, AnOpenRequestWithTwoDifferentLabelsIsRefused) {
     EXPECT_NE(error.find("experiment_label"), std::string::npos) << error;
     EXPECT_FALSE(label.has_value());
 }
+
+// A close that cannot be written is not an unknown run: the caller must be
+// able to tell them apart, and the run stays open (#554).
+TEST(RunJournalTest, ACloseThatCannotBeWrittenIsNotAnUnknownRun) {
+    auto dir = unique_dir();
+    RunJournal journal(dir, "rt1", 2000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto opened = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(opened.ok) << opened.error;
+
+    auto unknown = journal.close("rt1-NONEXISTENT", CloseReason::OperatorStop);
+    EXPECT_FALSE(unknown.ok);
+    EXPECT_TRUE(unknown.not_found);
+
+    // The run log cannot be appended to.
+    std::filesystem::path index;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        if (entry.path().filename() == "index.jsonl") index = entry.path();
+    }
+    ASSERT_FALSE(index.empty()) << "no index.jsonl under " << dir;
+    std::filesystem::permissions(index, std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                                            std::filesystem::perms::others_read);
+
+    auto failed = journal.close(opened.run.run_id, CloseReason::OperatorStop);
+    EXPECT_FALSE(failed.ok);
+    EXPECT_FALSE(failed.not_found);
+    EXPECT_FALSE(failed.error.empty());
+    auto still = journal.get(opened.run.run_id);
+    ASSERT_TRUE(still.has_value());
+    EXPECT_EQ(still->state, RunState::Open);
+
+    std::filesystem::permissions(index, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+    auto closed = journal.close(opened.run.run_id, CloseReason::OperatorStop);
+    EXPECT_TRUE(closed.ok) << closed.error;
+    std::filesystem::remove_all(dir);
+}
