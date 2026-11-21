@@ -1,0 +1,21 @@
+providers:
+  - id: bread0
+    command: ./provider-test
+
+http:
+  enabled: false
+
+safety:
+  stop_chain:
+    future_key: 1
+    status:
+      signal: gpio0/estop/chain_open
+      future_key: 1
+    devices:
+      - bread0/rlht0
+      - handle: relay0/heater0
+        expect: power_loss
+        future_key: 1
+
+logging:
+  level: info

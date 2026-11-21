@@ -378,7 +378,9 @@ header; see [install-sh.md](deploy/install-sh.md#after-installing).
 
 ### MANUAL to AUTO
 
-1. Validate behavior tree configuration and parameters.
+1. Validate behavior tree configuration and parameters: `anolis-runtime
+   --check-config` loads the tree and checks the parameters, but not that the
+   devices and functions the tree calls exist.
 2. Confirm manual verification is complete.
 3. Transition to `AUTO`.
 4. Monitor `/v0/automation/status` and `/v0/providers/health`.
