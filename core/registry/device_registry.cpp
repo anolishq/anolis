@@ -84,12 +84,7 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
         reg_device.provider_id = provider_id;
         reg_device.device_id = device_id;
 
-        if (!build_capabilities(describe_response.device(), describe_response.capabilities(),
-                                reg_device.capabilities)) {
-            // Capability parsing failed - log error and continue
-            LOG_WARN("[Registry] Device " << device_id << " capability parsing failed: " << error_);
-            continue;  // Skip this device
-        }
+        build_capabilities(describe_response.device(), describe_response.capabilities(), reg_device.capabilities);
 
         // Log BEFORE the move
         std::string handle = reg_device.get_handle();
@@ -226,7 +221,7 @@ std::string DeviceRegistry::last_error() const {
     return error_;
 }
 
-bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device &proto_device,
+void DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device &proto_device,
                                         const anolis::deviceprovider::v1::CapabilitySet &proto_caps,
                                         DeviceCapabilitySet &caps) {
     // Store the raw proto metadata for downstream consumers, then build the
@@ -273,8 +268,6 @@ bool DeviceRegistry::build_capabilities(const anolis::deviceprovider::v1::Device
 
         caps.functions_by_id[spec.function_name] = spec;
     }
-
-    return true;
 }
 
 bool is_actuating(const FunctionSpec &spec) {
