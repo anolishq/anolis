@@ -206,5 +206,13 @@ private:
     std::atomic<bool> running_{false};
 };
 
+/**
+ * The behaviour-tree part of `--check-config` (#804): when automation is
+ * enabled, loads automation.behavior_tree with the node set the runtime
+ * registers. Returns false with the reason when it cannot load. Sets
+ * `checked` to false when this runtime is built without automation.
+ */
+bool check_behavior_tree(const RuntimeConfig &config, bool &checked, std::string &error);
+
 }  // namespace runtime
 }  // namespace anolis

@@ -171,7 +171,9 @@ Purpose: behavior-tree runtime wiring and parameter declaration.
 Fields:
 
 1. `enabled` (bool)
-2. `behavior_tree` (string; required when enabled)
+2. `behavior_tree` (string; required when enabled). A relative path is
+   resolved against the config file's directory; one found only relative to
+   the working directory still loads, with a deprecation warning.
 3. `tick_rate_hz` (int)
 4. `manual_gating_policy` (`BLOCK|OVERRIDE`)
 5. `on_terminal` (`repeat|stop`, default `repeat`): what the tick loop does once
