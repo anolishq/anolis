@@ -15,6 +15,16 @@ commit messages only.
 
 ### Fixed
 
+- A quoted hook argument in `safety.safe_state` or
+  `automation.mode_transition_hooks` is a string, whatever its text. A quoted
+  `"1"` or `"true"` used to reach the call as an int64 or a bool, so a
+  function with a string argument refused it as a type mismatch and nothing
+  in YAML could pass such a string. A plain `1`, `true` or `1.5` keeps its
+  type (#637).
+- `ReadSignal` on a string, bytes or unset signal fails, with the reason
+  logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
+  signal, such as the simulator's `control_mode`, got a plausible number and
+  no error (#816).
 - `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
   unknown quality. It knew only `UNKNOWN` and compared any other name
   against an unspecified quality no reading has, so the node always failed.

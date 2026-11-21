@@ -659,6 +659,55 @@ automation:
     EXPECT_TRUE(std::holds_alternative<bool>(before.calls[0].args.at("brake")));
 }
 
+// A quoted hook argument is a string whatever its text, so a function whose
+// argument is declared string can be called with "1" or "true"; a plain
+// scalar keeps the type its text gives it (#637).
+TEST_F(ConfigTest, AQuotedHookArgumentIsAString) {
+    std::string config_content = R"(
+http:
+  enabled: false
+
+providers:
+  - id: test
+    command: /path/to/provider
+
+automation:
+  enabled: true
+  behavior_tree: /path/to/tree.xml
+  mode_transition_hooks:
+    before_transition:
+      - from: AUTO
+        to: MANUAL
+        calls:
+          - device_handle: sim0/chaos_control
+            function_name: inject_call_failure
+            args:
+              double_quoted: "1"
+              single_quoted: '1'
+              quoted_bool: "true"
+              quoted_float: "1.5"
+              tagged: !!str 7
+              plain_int: 1
+              plain_bool: true
+              plain_float: 1.5
+)";
+
+    std::string config_path = create_config_file("quoted_hook_args.yaml", config_content);
+    RuntimeConfig config;
+    std::string error;
+
+    ASSERT_TRUE(load_config(config_path, config, error)) << "Error: " << error;
+    const auto& args = config.automation.mode_transition_hooks.before_transition.at(0).calls.at(0).args;
+    EXPECT_EQ(std::get<std::string>(args.at("double_quoted")), "1");
+    EXPECT_EQ(std::get<std::string>(args.at("single_quoted")), "1");
+    EXPECT_EQ(std::get<std::string>(args.at("quoted_bool")), "true");
+    EXPECT_EQ(std::get<std::string>(args.at("quoted_float")), "1.5");
+    EXPECT_EQ(std::get<std::string>(args.at("tagged")), "7");
+    EXPECT_EQ(std::get<int64_t>(args.at("plain_int")), 1);
+    EXPECT_EQ(std::get<bool>(args.at("plain_bool")), true);
+    EXPECT_EQ(std::get<double>(args.at("plain_float")), 1.5);
+}
+
 TEST_F(ConfigTest, AutomationModeTransitionHooksRejectInvalidModeName) {
     std::string config_content = R"(
 runtime:

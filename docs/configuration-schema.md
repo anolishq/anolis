@@ -341,7 +341,10 @@ handle listed twice in `devices`, in either form, fails config load.
 
 Call objects use the same shape as `mode_transition_hooks` calls
 (`device_handle`, `function_id` or `function_name`, `args`). Each call requires
-`device_handle` and a function selector. When none of the three apply,
+`device_handle` and a function selector. An `args` value is typed by its YAML
+scalar: a quoted value (`"1"`, `'true'`) or one tagged `!!str` is a string,
+and a plain value is a bool, an integer, a number or a string by its text.
+Quote a string argument that looks like a number or a bool. When none of the three apply,
 `POST /v0/estop` reports `software_safe_state: "none"` and latches without
 running a ladder. On an automation machine its `FAULT` entry still runs the
 `-> FAULT` mode-transition hooks, actuating calls included.
