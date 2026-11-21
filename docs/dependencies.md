@@ -46,6 +46,8 @@ Rules:
 - **Advisory lanes**: optional non-blocking lanes may be added as needed.
 - **Extended lanes** (outside the required `ok` gate): sanitizer (ASan/UBSan/TSan), coverage, valgrind and fuzz run on
   every PR to and push to `main` (path-filtered) through `extended.yml` and `hardening.yml`.
+  When one of them fails on `main`, the run opens an issue labelled `ci-main` titled `main: <workflow> failed`, or
+  comments on the one already open; close it once `main` is green again.
 - **Periodic lanes**: weekly: the restart-churn soak (Sundays), dependency-scan and metrics (Mondays); metrics also runs
   on every push to `main`.
 
