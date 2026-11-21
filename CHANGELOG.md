@@ -27,6 +27,14 @@ Upgrade notes:
 
 ### Fixed
 
+- `CallDevice` no longer sends a call with no arguments when its `args` cannot
+  be read. An `args` that named a blackboard key nothing wrote, or JSON
+  written without the `json:` prefix (which reads as such a key), became an
+  empty argument set, so a function whose arguments are all optional ran with
+  its defaults and logged success. Such args now fail the node and count as a
+  failed call, as do args that are not JSON, so repeated failures reach FAULT.
+  Literal args that are not a JSON object refuse the tree when it loads
+  (#806).
 - `anolis-runtime --check-config` checks the behaviour tree. It returned
   before anything read `automation.behavior_tree`, so a missing tree, a file
   that is not XML or an unregistered node passed the check and was found at

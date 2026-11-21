@@ -176,7 +176,13 @@ Constraint rules:
 
 Core runtime nodes include:
 
-1. `CallDevice`
+1. `CallDevice`: calls `function_name` on `device_handle`. Its `args` is a
+   JSON object after the `json:` prefix (`args='json:{"target":30.0}'`), or a
+   blackboard reference holding one (`args="{target_args}"`); with no `args`
+   it sends no arguments. Literal `args` that are not a JSON object refuse the
+   tree when it loads. Args that cannot be read at tick fail the node and count
+   as a failed call, so they reach FAULT after
+   `automation.max_consecutive_call_failures`.
 2. `ReadSignal`: writes a signal's value to its `value` port as a double, and
    its quality to `quality`. It reads numeric and bool signals (a bool as 1.0
    or 0.0); a string, bytes or unset signal fails the node with the reason
