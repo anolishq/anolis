@@ -29,6 +29,25 @@ commit messages only.
   function with a string argument refused it as a type mismatch and nothing
   in YAML could pass such a string. A plain `1`, `true` or `1.5` keeps its
   type (#637).
+- `ReadSignal` on a string, bytes or unset signal fails, with the reason
+  logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
+  signal, such as the simulator's `control_mode`, got a plausible number and
+  no error (#816).
+- `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
+  unknown quality. It knew only `UNKNOWN` and compared any other name
+  against an unspecified quality no reading has, so the node always failed.
+  A name that is not a quality now refuses the tree when it loads, rather
+  than never matching (#797).
+- `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
+  but its close cannot be written to the run log, and the run stays open. It
+  answered `404 NOT_FOUND`, the same as an unknown run, so a client could
+  drop a run that was still open. An unknown `run_id` is still 404, and
+  `closeRun` in the OpenAPI declares the 500 (#554).
+- The runtime-config schema accepts unknown keys under `safety.stop_chain`,
+  its `status` and a `devices` mapping entry, as it does everywhere else and
+  as the loader does (it warns and ignores them). A config could pass
+  `anolis-runtime --check-config` and still fail schema validation. A contract
+  fixture now checks that the two agree (#550).
 
 ## [0.16.0] - 2026-11-15
 

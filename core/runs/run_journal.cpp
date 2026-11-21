@@ -662,6 +662,7 @@ RunJournal::CloseResult RunJournal::close(const std::string& run_id, CloseReason
     CloseResult result;
     auto it = runs_.find(run_id);
     if (it == runs_.end()) {
+        result.not_found = true;
         result.error = "unknown run: " + run_id;
         return result;
     }

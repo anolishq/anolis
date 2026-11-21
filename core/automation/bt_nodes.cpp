@@ -39,8 +39,10 @@ int64_t current_time_ms() {
 }
 }  // namespace
 
-// Helper: Convert protobuf Value to double (for output port)
-static double value_to_double(const anolis::deviceprovider::v1::Value &val) {
+// Helper: Convert protobuf Value to double (for output port). A string, bytes
+// or unset value has no number to give, so there is none: ReadSignal fails
+// rather than report 0.0 as a successful read (#816).
+static std::optional<double> value_to_double(const anolis::deviceprovider::v1::Value &val) {
     switch (val.kind_case()) {
         case anolis::deviceprovider::v1::Value::kDoubleValue:
             return val.double_value();
@@ -51,7 +53,18 @@ static double value_to_double(const anolis::deviceprovider::v1::Value &val) {
         case anolis::deviceprovider::v1::Value::kBoolValue:
             return val.bool_value() ? 1.0 : 0.0;
         default:
-            return 0.0;  // Default for string/bytes/unspecified
+            return std::nullopt;
+    }
+}
+
+static const char *value_kind_name(const anolis::deviceprovider::v1::Value &val) {
+    switch (val.kind_case()) {
+        case anolis::deviceprovider::v1::Value::kStringValue:
+            return "a string";
+        case anolis::deviceprovider::v1::Value::kBytesValue:
+            return "bytes";
+        default:
+            return "unset";
     }
 }
 
@@ -72,7 +85,10 @@ static std::string quality_to_string(anolis::deviceprovider::v1::SignalValue_Qua
 }
 
 // Helper: Convert string to quality enum
-static anolis::deviceprovider::v1::SignalValue_Quality string_to_quality(const std::string &s) {
+// The quality names CheckQuality accepts. UNAVAILABLE is the name HTTP and
+// events give QUALITY_UNKNOWN; UNKNOWN is kept for trees written before. Any
+// other text is not a quality (#797).
+static std::optional<anolis::deviceprovider::v1::SignalValue_Quality> string_to_quality(const std::string &s) {
     if (s == "OK") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK;
     }
@@ -82,11 +98,13 @@ static anolis::deviceprovider::v1::SignalValue_Quality string_to_quality(const s
     if (s == "FAULT") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_FAULT;
     }
-    if (s == "UNKNOWN") {
+    if (s == "UNAVAILABLE" || s == "UNKNOWN") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNKNOWN;
     }
-    return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNSPECIFIED;
+    return std::nullopt;
 }
+
+static constexpr const char *kQualityNames = "OK, STALE, FAULT, UNAVAILABLE";
 
 // Helper: Create protobuf Value from double
 static anolis::deviceprovider::v1::Value double_to_value(double d) {
@@ -159,10 +177,16 @@ BT::NodeStatus ReadSignalNode::tick() {
     }
 
     // Convert and write output ports
-    double value_out = value_to_double(signal_value->value);
+    const std::optional<double> value_out = value_to_double(signal_value->value);
+    if (!value_out) {
+        LOG_ERROR("[ReadSignalNode] Signal " << device_handle.value() << "/" << signal_id.value() << " is "
+                                             << value_kind_name(signal_value->value)
+                                             << "; ReadSignal reads numeric and bool signals only");
+        return BT::NodeStatus::FAILURE;
+    }
     std::string quality_out = quality_to_string(signal_value->quality);
 
-    setOutput("value", value_out);
+    setOutput("value", *value_out);
     setOutput("quality", quality_out);
 
     return BT::NodeStatus::SUCCESS;
@@ -379,7 +403,17 @@ std::optional<BTServiceContext> CallDeviceNode::get_services() const {
 //-----------------------------------------------------------------------------
 
 CheckQualityNode::CheckQualityNode(const std::string &name, const BT::NodeConfig &config)
-    : BT::SyncActionNode(name, config) {}
+    : BT::SyncActionNode(name, config) {
+    // A literal expected_quality is checked when the tree is built, so a typo
+    // refuses the tree instead of a node that can never match (#797). A value
+    // from the blackboard is checked at tick.
+    const auto it = config.input_ports.find("expected_quality");
+    if (it != config.input_ports.end() && !BT::TreeNode::isBlackboardPointer(it->second) &&
+        !string_to_quality(it->second)) {
+        throw BT::RuntimeError("CheckQuality '", name, "': expected_quality '", it->second, "' is not one of ",
+                               kQualityNames);
+    }
+}
 
 BT::PortsList CheckQualityNode::providedPorts() {
     return {BT::InputPort<std::string>("device_handle", "Device handle (provider_id/device_id)"),
@@ -413,9 +447,14 @@ BT::NodeStatus CheckQualityNode::tick() {
     }
 
     // Check quality
-    auto expected_quality = string_to_quality(expected_quality_str);
+    const auto expected_quality = string_to_quality(expected_quality_str);
+    if (!expected_quality) {
+        LOG_ERROR("[CheckQualityNode] expected_quality '" << expected_quality_str << "' is not one of "
+                                                          << kQualityNames);
+        return BT::NodeStatus::FAILURE;
+    }
 
-    if (signal_value->quality == expected_quality) {
+    if (signal_value->quality == *expected_quality) {
         return BT::NodeStatus::SUCCESS;
     }
 
