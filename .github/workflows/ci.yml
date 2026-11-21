@@ -9,7 +9,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A later push to a pull request supersedes the run before it. On main
+  # each run checks a different merge, so none is cancelled (#504).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -324,13 +326,8 @@ jobs:
             configure_preset: ci-windows-release-strict
             test_preset: ci-windows-release-strict
             triplet: x64-windows
-          - lane: Windows Release (Core, no automation)
-            os: windows-2025
-            configure_preset: ci-windows-release-no-automation
-            test_preset: ci-windows-release-no-automation
-            triplet: x64-windows
 
-    steps:
+    steps: &core-build-test-steps
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -404,6 +401,26 @@ jobs:
           path: ${{ steps.package.outputs.name }}.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  core-build-test-main:
+    # Windows no-automation runs on main only (#504): on a pull request the
+    # Linux no-automation lane covers the build option and the strict
+    # Windows lane covers Windows. A failure here opens a ci-main issue.
+    name: ${{ matrix.lane }}
+    needs: [changes]
+    if: needs.changes.outputs.native == 'true' && github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: Windows Release (Core, no automation)
+            os: windows-2025
+            configure_preset: ci-windows-release-no-automation
+            test_preset: ci-windows-release-no-automation
+            triplet: x64-windows
+    steps: *core-build-test-steps
 
   anolis-provider-compat:
     name: anolis-provider-compat
@@ -555,6 +572,7 @@ jobs:
       - observability
       - ui-contracts
       - core-build-test
+      - core-build-test-main
       - anolis-provider-compat
       - clang-tidy
       - version-sync
@@ -569,3 +587,29 @@ jobs:
       - uses: anolishq/.github/.github/actions/require-needs-passed@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
         with:
           results: ${{ join(needs.*.result, ' ') }}
+
+  report-main-failure:
+    # A failure on main opens or updates a ci-main issue, so a lane that runs
+    # only on main is still reported (#504).
+    name: Report a failure on main
+    needs: [ok]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Open or update the ci-main issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/report-main-failure.sh
