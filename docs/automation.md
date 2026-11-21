@@ -267,7 +267,10 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
 1. `UNAVAILABLE` from automation endpoints:
    - automation disabled in config or compiled out.
 2. BT load failure:
-   - invalid tree path/XML or port type mismatch.
+   - invalid tree path/XML, an unregistered node or a port type mismatch.
+     `anolis-runtime --check-config` loads the tree and reports these before
+     a start. A relative `automation.behavior_tree` is resolved against the
+     config file's directory.
 3. Manual calls blocked unexpectedly:
    - verify mode and `manual_gating_policy`.
 4. Parameter update rejected:

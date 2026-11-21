@@ -4,7 +4,7 @@ providers:
 
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
+  behavior_tree: ../behaviors/demo.xml
   tick_rate_hz: 5
   mode_transition_hooks:
     before_transition:

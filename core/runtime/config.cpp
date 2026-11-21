@@ -1385,6 +1385,31 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     .string();
         }
 
+        // A relative behavior_tree is resolved against the config file's
+        // directory, as data_dir is (#804). A tree found only relative to the
+        // start directory still loads, with a warning, so configs written for
+        // the old rule keep working until they move.
+        if (!config.automation.behavior_tree.empty()) {
+            const std::filesystem::path tree(config.automation.behavior_tree);
+            if (!tree.is_absolute()) {
+                const auto from_config = (std::filesystem::path(config.config_dir) / tree).lexically_normal();
+                std::error_code ec;
+                const auto from_cwd = std::filesystem::absolute(tree, ec).lexically_normal();
+                if (!std::filesystem::exists(from_config, ec) && !from_cwd.empty() &&
+                    std::filesystem::is_regular_file(from_cwd, ec)) {
+                    const auto suggested = std::filesystem::relative(from_cwd, config.config_dir, ec);
+                    LOG_WARN("[Config] automation.behavior_tree '"
+                             << config.automation.behavior_tree << "' was found relative to the start directory ("
+                             << from_cwd.string()
+                             << "), not to the config file's directory. That fallback is deprecated: write it as '"
+                             << (suggested.empty() ? from_cwd.string() : suggested.generic_string()) << "'.");
+                    config.automation.behavior_tree = from_cwd.string();
+                } else {
+                    config.automation.behavior_tree = from_config.string();
+                }
+            }
+        }
+
         // Structural YAML checks above guarantee node shape; centralized
         // validation here enforces cross-field and semantic constraints.
         if (!validate_config(config, error)) {

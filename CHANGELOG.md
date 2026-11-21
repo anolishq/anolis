@@ -13,8 +13,25 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- `anolis-runtime --check-config` now loads the behaviour tree when
+  automation is enabled, so a config whose tree is missing, is not XML or
+  names an unregistered node fails the check (exit 1) where it used to pass.
+  Before 1.0 a new refusal is a MINOR change.
+- A relative `automation.behavior_tree` is resolved against the config file's
+  directory, as `runtime.data_dir` is. A tree found only relative to the
+  working directory, as configs written for the old rule have it, still
+  loads, with a `[Config]` warning naming the path to use. Move such paths
+  to config-relative ones: the fallback will be removed in a later MINOR.
+
 ### Fixed
 
+- `anolis-runtime --check-config` checks the behaviour tree. It returned
+  before anything read `automation.behavior_tree`, so a missing tree, a file
+  that is not XML or an unregistered node passed the check and was found at
+  start. A bare tree file name, which failed at start with `cannot make
+  absolute path`, loads (#804).
 - A quoted hook argument in `safety.safe_state` or
   `automation.mode_transition_hooks` is a string, whatever its text. A quoted
   `"1"` or `"true"` used to reach the call as an int64 or a bool, so a

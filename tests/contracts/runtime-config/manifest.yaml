@@ -126,3 +126,12 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/10-parameter-duplicate-name.yaml
     expect: invalid/runtime
     note: two automation parameters share a name (#567)
+  - file: tests/contracts/runtime-config/invalid/runtime/11-automation-behavior-tree-missing.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree names a file that does not exist (#804)
+  - file: tests/contracts/runtime-config/invalid/runtime/12-automation-behavior-tree-not-xml.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree is not XML (#804)
+  - file: tests/contracts/runtime-config/invalid/runtime/13-automation-behavior-tree-unregistered-node.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree names a node the runtime does not register (#804)

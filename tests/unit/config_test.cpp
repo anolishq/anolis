@@ -2259,3 +2259,93 @@ logging:
     EXPECT_EQ(config.polling.interval_ms, 250);
     EXPECT_EQ(config.logging.level, "debug");
 }
+
+namespace {
+
+// Runs a scope from another working directory, as the runtime does when it is
+// not started beside its config.
+class InDirectory {
+public:
+    explicit InDirectory(const fs::path& cwd) : saved_(fs::current_path()) {
+        fs::create_directories(cwd);
+        fs::current_path(cwd);
+    }
+    ~InDirectory() { fs::current_path(saved_); }
+    InDirectory(const InDirectory&) = delete;
+    InDirectory& operator=(const InDirectory&) = delete;
+
+private:
+    fs::path saved_;
+};
+
+std::string automation_config(const std::string& tree) {
+    return "providers:\n  - id: test\n    command: /path/to/provider\n\nautomation:\n  enabled: true\n"
+           "  behavior_tree: " +
+           tree + "\n";
+}
+
+void touch(const fs::path& path) {
+    fs::create_directories(path.parent_path());
+    std::ofstream(path) << "<root BTCPP_format=\"4\"/>\n";
+}
+
+}  // namespace
+
+// #804: a relative behavior_tree is beside the config file, as data_dir is,
+// whatever directory the runtime starts in.
+TEST_F(ConfigTest, ARelativeBehaviorTreeIsResolvedAgainstTheConfigFile) {
+    touch(temp_dir / "cfg" / "behaviors" / "tree.xml");
+    fs::create_directories(temp_dir / "cfg");
+    const auto path = create_config_file("cfg/runtime.yaml", automation_config("behaviors/tree.xml"));
+    const InDirectory in(temp_dir / "elsewhere");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    std::error_code ec;
+    EXPECT_TRUE(fs::equivalent(config.automation.behavior_tree, temp_dir / "cfg" / "behaviors" / "tree.xml", ec))
+        << config.automation.behavior_tree;
+}
+
+// #804: a bare file name is beside the config file. It used to stay relative
+// and fail at start with "cannot make absolute path".
+TEST_F(ConfigTest, ABareBehaviorTreeFileNameIsBesideTheConfigFile) {
+    touch(temp_dir / "cfg" / "tree.xml");
+    const auto path = create_config_file("cfg/runtime.yaml", automation_config("tree.xml"));
+    const InDirectory in(temp_dir / "elsewhere");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_TRUE(fs::path(config.automation.behavior_tree).is_absolute()) << config.automation.behavior_tree;
+    std::error_code ec;
+    EXPECT_TRUE(fs::equivalent(config.automation.behavior_tree, temp_dir / "cfg" / "tree.xml", ec))
+        << config.automation.behavior_tree;
+}
+
+// #804: a config written for the old rule, whose tree exists only relative to
+// the start directory, still finds it (with a deprecation warning).
+TEST_F(ConfigTest, ABehaviorTreeFoundOnlyFromTheStartDirectoryStillLoads) {
+    touch(temp_dir / "start" / "projects" / "tree.xml");
+    fs::create_directories(temp_dir / "cfg");
+    const auto path = create_config_file("cfg/runtime.yaml", automation_config("projects/tree.xml"));
+    const InDirectory in(temp_dir / "start");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    std::error_code ec;
+    EXPECT_TRUE(fs::equivalent(config.automation.behavior_tree, temp_dir / "start" / "projects" / "tree.xml", ec))
+        << config.automation.behavior_tree;
+}
+
+// #804: when the tree exists in neither place, the path the runtime reports is
+// the config-relative one, the rule a config should follow.
+TEST_F(ConfigTest, AMissingBehaviorTreeIsReportedRelativeToTheConfigFile) {
+    fs::create_directories(temp_dir / "cfg");
+    const auto path = create_config_file("cfg/runtime.yaml", automation_config("behaviors/missing.xml"));
+    const InDirectory in(temp_dir / "elsewhere");
+    RuntimeConfig config;
+    std::string error;
+    ASSERT_TRUE(load_config(path, config, error)) << error;
+    EXPECT_EQ(fs::path(config.automation.behavior_tree).filename(), "missing.xml");
+    EXPECT_EQ(fs::path(config.automation.behavior_tree).parent_path().parent_path().filename(), "cfg")
+        << config.automation.behavior_tree;
+}

@@ -184,6 +184,9 @@ declare, since such an entry excludes nothing.
    Unknown keys under `polling` and `logging` are ignored with no warning, and the
    JSON schema rejects unknown keys under `safety.stop_chain`.
 2. `automation.behavior_tree_path` is an accepted alias for `automation.behavior_tree`.
+   A relative tree path is resolved against the config file's directory, as
+   `runtime.data_dir` is. A tree found only relative to the working directory
+   still loads, with a deprecation warning naming the path to use.
 3. `runtime.mode` in YAML is rejected.
 
 ## Related References

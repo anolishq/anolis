@@ -4,7 +4,7 @@ providers:
 
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
+  behavior_tree: ../behaviors/demo.xml
   parameters:
     - name: setpoint
       type: double

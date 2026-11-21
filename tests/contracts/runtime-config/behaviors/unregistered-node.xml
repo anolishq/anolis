@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- Names a node the runtime does not register (#804). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <NoSuchNode/>
+  </BehaviorTree>
+</root>
