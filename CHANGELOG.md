@@ -21,6 +21,10 @@ commit messages only.
   function with a string argument refused it as a type mismatch and nothing
   in YAML could pass such a string. A plain `1`, `true` or `1.5` keeps its
   type (#637).
+- `ReadSignal` on a string, bytes or unset signal fails, with the reason
+  logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
+  signal, such as the simulator's `control_mode`, got a plausible number and
+  no error (#816).
 
 ## [0.16.0] - 2026-11-15
 

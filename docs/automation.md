@@ -177,7 +177,10 @@ Constraint rules:
 Core runtime nodes include:
 
 1. `CallDevice`
-2. `ReadSignal`
+2. `ReadSignal`: writes a signal's value to its `value` port as a double, and
+   its quality to `quality`. It reads numeric and bool signals (a bool as 1.0
+   or 0.0); a string, bytes or unset signal fails the node with the reason
+   logged.
 3. `CheckQuality`
 4. `GetParameter`
 5. `GetParameterBool`

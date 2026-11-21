@@ -39,8 +39,10 @@ int64_t current_time_ms() {
 }
 }  // namespace
 
-// Helper: Convert protobuf Value to double (for output port)
-static double value_to_double(const anolis::deviceprovider::v1::Value &val) {
+// Helper: Convert protobuf Value to double (for output port). A string, bytes
+// or unset value has no number to give, so there is none: ReadSignal fails
+// rather than report 0.0 as a successful read (#816).
+static std::optional<double> value_to_double(const anolis::deviceprovider::v1::Value &val) {
     switch (val.kind_case()) {
         case anolis::deviceprovider::v1::Value::kDoubleValue:
             return val.double_value();
@@ -51,7 +53,18 @@ static double value_to_double(const anolis::deviceprovider::v1::Value &val) {
         case anolis::deviceprovider::v1::Value::kBoolValue:
             return val.bool_value() ? 1.0 : 0.0;
         default:
-            return 0.0;  // Default for string/bytes/unspecified
+            return std::nullopt;
+    }
+}
+
+static const char *value_kind_name(const anolis::deviceprovider::v1::Value &val) {
+    switch (val.kind_case()) {
+        case anolis::deviceprovider::v1::Value::kStringValue:
+            return "a string";
+        case anolis::deviceprovider::v1::Value::kBytesValue:
+            return "bytes";
+        default:
+            return "unset";
     }
 }
 
@@ -159,10 +172,16 @@ BT::NodeStatus ReadSignalNode::tick() {
     }
 
     // Convert and write output ports
-    double value_out = value_to_double(signal_value->value);
+    const std::optional<double> value_out = value_to_double(signal_value->value);
+    if (!value_out) {
+        LOG_ERROR("[ReadSignalNode] Signal " << device_handle.value() << "/" << signal_id.value() << " is "
+                                             << value_kind_name(signal_value->value)
+                                             << "; ReadSignal reads numeric and bool signals only");
+        return BT::NodeStatus::FAILURE;
+    }
     std::string quality_out = quality_to_string(signal_value->quality);
 
-    setOutput("value", value_out);
+    setOutput("value", *value_out);
     setOutput("quality", quality_out);
 
     return BT::NodeStatus::SUCCESS;

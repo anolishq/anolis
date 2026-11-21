@@ -2,10 +2,12 @@
 
 #include <behaviortree_cpp/blackboard.h>
 #include <behaviortree_cpp/bt_factory.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -16,13 +18,14 @@
 #include "automation/parameter_manager.hpp"
 #include "control/call_router.hpp"
 #include "logging/logger.hpp"
+#include "mocks/mock_provider_handle.hpp"
 #include "provider/provider_registry.hpp"
 #include "registry/device_registry.hpp"
 #include "state/state_cache.hpp"
 
 namespace {
 
-std::string make_get_parameter_tree_xml(const std::string& param_name) {
+std::string make_get_parameter_tree_xml(const std::string &param_name) {
     return std::string(R"(<?xml version="1.0"?>
 <root BTCPP_format="4">
   <BehaviorTree ID="MainTree">
@@ -34,7 +37,7 @@ std::string make_get_parameter_tree_xml(const std::string& param_name) {
 )";
 }
 
-std::string make_get_parameter_bool_tree_xml(const std::string& param_name) {
+std::string make_get_parameter_bool_tree_xml(const std::string &param_name) {
     return std::string(R"(<?xml version="1.0"?>
 <root BTCPP_format="4">
   <BehaviorTree ID="MainTree">
@@ -46,7 +49,7 @@ std::string make_get_parameter_bool_tree_xml(const std::string& param_name) {
 )";
 }
 
-std::string make_get_parameter_int64_tree_xml(const std::string& param_name) {
+std::string make_get_parameter_int64_tree_xml(const std::string &param_name) {
     return std::string(R"(<?xml version="1.0"?>
 <root BTCPP_format="4">
   <BehaviorTree ID="MainTree">
@@ -165,7 +168,7 @@ protected:
     anolis::provider::ProviderRegistry provider_registry_;
     anolis::automation::ParameterManager parameter_manager_;
 
-    static void register_nodes(BT::BehaviorTreeFactory& factory) {
+    static void register_nodes(BT::BehaviorTreeFactory &factory) {
         factory.registerNodeType<anolis::automation::GetParameterNode>("GetParameter");
         factory.registerNodeType<anolis::automation::GetParameterBoolNode>("GetParameterBool");
         factory.registerNodeType<anolis::automation::GetParameterInt64Node>("GetParameterInt64");
@@ -229,7 +232,7 @@ TEST_F(BTNodesTest, GetParameterNodeLogsNoSuccessfulReadAtInfo) {
 
     anolis::logging::Logger::set_level(anolis::logging::Level::LVL_INFO);
     std::ostringstream captured;
-    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    std::streambuf *old = std::cerr.rdbuf(captured.rdbuf());
     for (int tick = 0; tick < 3; ++tick) {
         EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
     }
@@ -398,7 +401,7 @@ TEST_F(BTNodesTest, RequestedPulseWindowRunsQueuedRequestsOneAfterAnother) {
 // beyond it add nothing, and the baseline still moves.
 namespace {
 
-int count_pulses(RequestedPulse& p, int presses) {
+int count_pulses(RequestedPulse &p, int presses) {
     int pulses = 0;
     bool was_active = false;
     int64_t request = 0;
@@ -420,7 +423,7 @@ int count_pulses(RequestedPulse& p, int presses) {
 TEST_F(BTNodesTest, RequestedPulseWindowCapsTheRequestsOutstanding) {
     BT::BehaviorTreeFactory factory;
     register_nodes(factory);
-    for (const auto& [cap, pulses] : std::vector<std::pair<int64_t, int>>{{1, 1}, {3, 3}}) {
+    for (const auto &[cap, pulses] : std::vector<std::pair<int64_t, int>>{{1, 1}, {3, 3}}) {
         auto blackboard = make_blackboard(true);
         RequestedPulse p{factory.createTreeFromText(make_requested_pulse_tree_xml(2, 3, cap), blackboard), blackboard};
         EXPECT_EQ(pulses, count_pulses(p, 5)) << "max_queued " << cap;
@@ -502,8 +505,8 @@ TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
     EXPECT_NO_THROW(factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice"));
     EXPECT_NO_THROW(factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality"));
 
-    const auto expect_ports = [](const BT::PortsList& ports, std::initializer_list<const char*> keys) {
-        for (const char* key : keys) {
+    const auto expect_ports = [](const BT::PortsList &ports, std::initializer_list<const char *> keys) {
+        for (const char *key : keys) {
             EXPECT_TRUE(ports.find(key) != ports.end()) << "missing port: " << key;
         }
     };
@@ -527,5 +530,105 @@ TEST_F(BTNodesTest, NodesRegisterAndDeclareTheirPorts) {
 // gives nodes a read-only view and a node that calls set does not compile.
 TEST(BTServiceContextTest, NodesGetAReadOnlyParameterManager) {
     EXPECT_TRUE((std::is_same_v<decltype(anolis::automation::BTServiceContext::parameter_manager),
-                                const anolis::automation::ParameterManager*>));
+                                const anolis::automation::ParameterManager *>));
+}
+
+namespace {
+
+// ReadSignal against a state cache filled by one poll of a mock provider that
+// reports a double `temp` and a string `control_mode`, as the simulator does.
+class ReadSignalNodeTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        using anolis::deviceprovider::v1::DescribeDeviceResponse;
+        using anolis::deviceprovider::v1::Device;
+        using anolis::deviceprovider::v1::ReadSignalsResponse;
+        using ::testing::_;
+        using ::testing::Invoke;
+        using ::testing::Return;
+        using ::testing::ReturnRef;
+
+        mock_provider_ = std::make_shared<::testing::NiceMock<anolis::tests::MockProviderHandle>>();
+        ON_CALL(*mock_provider_, provider_id()).WillByDefault(ReturnRef(mock_provider_->_id));
+        ON_CALL(*mock_provider_, is_available()).WillByDefault(Return(true));
+        ON_CALL(*mock_provider_, get_health(_)).WillByDefault(Return(false));
+        ON_CALL(*mock_provider_, list_devices(_)).WillByDefault(Invoke([](std::vector<Device> &devices) {
+            Device dev;
+            dev.set_device_id("dev0");
+            devices.push_back(dev);
+            return true;
+        }));
+        ON_CALL(*mock_provider_, describe_device(_, _))
+            .WillByDefault(Invoke([](const std::string &id, DescribeDeviceResponse &response) {
+                response.mutable_device()->set_device_id(id);
+                auto *caps = response.mutable_capabilities();
+                auto *temp = caps->add_signals();
+                temp->set_signal_id("temp");
+                temp->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+                temp->set_poll_hint_hz(1.0);
+                auto *mode = caps->add_signals();
+                mode->set_signal_id("control_mode");
+                mode->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
+                mode->set_poll_hint_hz(1.0);
+                return true;
+            }));
+        ON_CALL(*mock_provider_, read_signals(_, _, _, _))
+            .WillByDefault(Invoke([](const std::string &, const std::vector<std::string> &,
+                                     ReadSignalsResponse &response, anolis::deviceprovider::v1::Status_Code &) {
+                auto *temp = response.add_values();
+                temp->set_signal_id("temp");
+                temp->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                temp->mutable_value()->set_double_value(37.5);
+                auto *mode = response.add_values();
+                mode->set_signal_id("control_mode");
+                mode->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                mode->mutable_value()->set_string_value("closed");
+                return true;
+            }));
+        provider_registry_.add_provider("sim0", mock_provider_);
+        registry_.discover_provider("sim0", *mock_provider_);
+        state_cache_ = std::make_unique<anolis::state::StateCache>(registry_, 500);
+        ASSERT_TRUE(state_cache_->initialize());
+        state_cache_->poll_once(provider_registry_);
+    }
+
+    BT::NodeStatus tick_read(const std::string &signal_id, BT::Blackboard::Ptr &blackboard) {
+        BT::BehaviorTreeFactory factory;
+        factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
+        blackboard = BT::Blackboard::create();
+        anolis::automation::BTServiceContext services;
+        services.state_cache = state_cache_.get();
+        blackboard->set(anolis::automation::kBTServiceContextKey, services);
+        const std::string xml = R"(<root BTCPP_format="4"><BehaviorTree ID="Main">
+<ReadSignal device_handle="sim0/dev0" signal_id=")" +
+                                signal_id +
+                                R"(" value="{value}" quality="{quality}"/>
+</BehaviorTree></root>)";
+        auto tree = factory.createTreeFromText(xml, blackboard);
+        return tree.tickOnce();
+    }
+
+    anolis::registry::DeviceRegistry registry_;
+    anolis::provider::ProviderRegistry provider_registry_;
+    std::shared_ptr<::testing::NiceMock<anolis::tests::MockProviderHandle>> mock_provider_;
+    std::unique_ptr<anolis::state::StateCache> state_cache_;
+};
+
+}  // namespace
+
+TEST_F(ReadSignalNodeTest, ReadsANumericSignal) {
+    BT::Blackboard::Ptr blackboard;
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, tick_read("temp", blackboard));
+    EXPECT_DOUBLE_EQ(37.5, blackboard->get<double>("value"));
+    EXPECT_EQ("OK", blackboard->get<std::string>("quality"));
+}
+
+// A text signal has no number to give; reporting 0.0 with SUCCESS handed the
+// tree a plausible value and no error (#816).
+TEST_F(ReadSignalNodeTest, FailsOnAStringSignalInsteadOfReadingZero) {
+    BT::Blackboard::Ptr blackboard;
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick_read("control_mode", blackboard));
+    // The port's entry exists from tree creation; nothing was written to it.
+    const auto entry = blackboard->getEntry("value");
+    EXPECT_TRUE(entry == nullptr || entry->value.empty());
 }
