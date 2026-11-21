@@ -247,3 +247,29 @@ jobs:
             coverage.info
             coverage-html/
           retention-days: 14
+
+  report-main-failure:
+    # A lane that fails on main opens or updates a ci-main issue, so a
+    # failure no pull request ran into is still reported (#504).
+    name: Report a failure on main
+    needs: [sanitizer-linux, tsan-linux, coverage-linux]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Open or update the ci-main issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/report-main-failure.sh
