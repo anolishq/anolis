@@ -14,7 +14,8 @@ Fixture layout:
 Use these fixtures to lock compatibility behavior while the runtime-config contract evolves.
 
 Edge-case coverage includes quoted scalar values in automation hook args
-(numeric-like, bool-like, and text) to guard current loader scalar parsing behavior.
+(numeric-like, bool-like, and text). The loader keeps a quoted hook argument as
+a string whatever its text (#637); these fixtures check that such configs load.
 
 Runtime parser semantics (`yaml-cpp`) remain authoritative; fixture outcomes must
 be verified through `anolis-runtime --check-config` as part of the contract gate.

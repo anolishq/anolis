@@ -13,6 +13,15 @@ commit messages only.
 
 ## [Unreleased]
 
+### Fixed
+
+- A quoted hook argument in `safety.safe_state` or
+  `automation.mode_transition_hooks` is a string, whatever its text. A quoted
+  `"1"` or `"true"` used to reach the call as an int64 or a bool, so a
+  function with a string argument refused it as a type mismatch and nothing
+  in YAML could pass such a string. A plain `1`, `true` or `1.5` keeps its
+  type (#637).
+
 ## [0.16.0] - 2026-11-15
 
 0.16.0 is a minor release because an existing config now polls differently
