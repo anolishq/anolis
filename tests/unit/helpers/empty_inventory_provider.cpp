@@ -189,6 +189,7 @@ int main(int argc, char **argv) {
     bool mixed = false;
     bool allowed_values = false;
     bool heater = false;
+    bool duty = false;  // --duty: heater0 also has set_duty, a uint64 argument
     std::string stop_chain_dir;
     bool stop_chain_actuating = false;
     bool stop_chain_no_hint = false;
@@ -221,6 +222,8 @@ int main(int argc, char **argv) {
             allowed_values = true;
         } else if (std::string(argv[i]) == "--heater") {
             heater = true;
+        } else if (std::string(argv[i]) == "--duty") {
+            duty = true;
         } else if (std::string(argv[i]) == "--stop-chain" && i + 1 < argc) {
             stop_chain_dir = argv[i + 1];
         } else if (std::string(argv[i]) == "--stop-chain-actuating") {
@@ -361,6 +364,17 @@ int main(int argc, char **argv) {
             pwm->set_required(true);
             pwm->set_min_int64(0);
             pwm->set_max_int64(100);
+            // A uint64 argument, which a config integer reaches by coercion.
+            if (duty) {
+                auto *duty_fn = describe->mutable_capabilities()->add_functions();
+                duty_fn->set_name("set_duty");
+                duty_fn->set_function_id(2);
+                duty_fn->mutable_policy()->set_category(adpp::FunctionPolicy_Category_CATEGORY_ACTUATE);
+                auto *duty_arg = duty_fn->add_args();
+                duty_arg->set_name("duty");
+                duty_arg->set_type(adpp::VALUE_TYPE_UINT64);
+                duty_arg->set_required(true);
+            }
         } else if (!stop_chain_dir.empty() && request.has_describe_device() &&
                    (request.describe_device().device_id() == "gpio0" ||
                     request.describe_device().device_id() == "motor0")) {

@@ -377,7 +377,9 @@ std::vector<std::string> Runtime::preflight_declared_calls() const {
     const std::string active_rung = control::safe_state_kind_to_string(plan.kind);
     const bool hooks_plan = plan.kind == control::SafeStateKind::Hooks;
 
-    const auto check = [&](const std::string &where, bool active, const ModeTransitionCallConfig &call) {
+    // `unused` says why an inactive call is not part of any plan.
+    const auto check = [&](const std::string &where, bool active, const ModeTransitionCallConfig &call,
+                           const char *unused) {
         control::CallRequest request;
         request.device_handle = call.device_handle;
         request.function_id = call.function_id;
@@ -419,32 +421,35 @@ std::vector<std::string> Runtime::preflight_declared_calls() const {
                                    << err);
         } else {
             LOG_WARN("[Runtime] " << where << " cannot be dispatched: " << call.device_handle << "/" << target << " - "
-                                  << err << " (unused: safety.safe_state.hooks are the e-stop's whole plan)");
+                                  << err << " (unused: " << unused << ")");
         }
     };
 
     for (const auto &call : config_.safety.safe_state.hooks) {
-        check("safety.safe_state.hooks", hooks_plan, call);
+        check("safety.safe_state.hooks", hooks_plan, call, "safety.safe_state.setpoints are the e-stop's whole plan");
     }
     for (const auto &call : config_.safety.safe_state.setpoints) {
-        check("safety.safe_state.setpoints", !hooks_plan, call);
+        check("safety.safe_state.setpoints", !hooks_plan, call, "safety.safe_state.hooks are the e-stop's whole plan");
     }
 
-    // Mode-transition hooks only ever fire on an automation machine.
-    if (config_.automation.enabled) {
-        const auto check_group = [&](const std::vector<ModeTransitionHookConfig> &hooks, const char *group) {
-            for (const auto &hook : hooks) {
-                const std::string where = std::string("automation.mode_transition_hooks.") + group + " (" +
-                                          (hook.from.empty() ? "*" : hook.from) + "->" +
-                                          (hook.to.empty() ? "*" : hook.to) + ")";
-                for (const auto &call : hook.calls) {
-                    check(where, true, call);
-                }
+    // Mode-transition hooks only ever fire on an automation machine. With
+    // automation off they are checked as unused, so a broken one is still
+    // reported, never refused (review of #912).
+    const bool automation_on = config_.automation.enabled;
+    const auto check_group = [&](const std::vector<ModeTransitionHookConfig> &hooks, const char *group) {
+        for (const auto &hook : hooks) {
+            const std::string where = std::string("automation.mode_transition_hooks.") + group + " (" +
+                                      (hook.from.empty() ? "*" : hook.from) + "->" + (hook.to.empty() ? "*" : hook.to) +
+                                      ")";
+            for (const auto &call : hook.calls) {
+                check(where, automation_on, call, "automation is disabled, so mode transitions never run");
             }
-        };
-        check_group(config_.automation.mode_transition_hooks.before_transition, "before_transition");
-        check_group(config_.automation.mode_transition_hooks.after_transition, "after_transition");
+        }
+    };
+    check_group(config_.automation.mode_transition_hooks.before_transition, "before_transition");
+    check_group(config_.automation.mode_transition_hooks.after_transition, "after_transition");
 
+    if (automation_on) {
         // The refuse-hookless gate admits AUTO on a hook's from/to filters, so
         // one AUTO->FAULT hook satisfies it for every output, driven or not
         // (#246). Name the ones it leaves alone. A warning, not a refusal: an
