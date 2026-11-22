@@ -257,3 +257,65 @@ TEST(RuntimePreflightTest, PassesAHookValueInsideTheProvidersAllowedValues) {
     EXPECT_TRUE(startup.safe_state_achieved);
     EXPECT_TRUE(startup.failed_actions.empty());
 }
+
+namespace {
+
+std::string heater_hook_yaml(const std::string &pwm) {
+    return std::string(R"(
+runtime: {}
+http:
+  enabled: false
+providers:
+  - id: bread0
+    command: ")") +
+           kHelperPath + R"("
+    args: ["--heater"]
+    timeout_ms: 2000
+    hello_timeout_ms: 2000
+    ready_timeout_ms: 5000
+polling:
+  interval_ms: 200
+telemetry:
+  enabled: false
+safety:
+  safe_state:
+    hooks:
+      - device_handle: bread0/heater0
+        function_name: set_pwm
+        args:
+          pwm: )" +
+           pwm + "\n";
+}
+
+}  // namespace
+
+// Review of #886: a quoted hook argument is a string, so `pwm: "0"` for an
+// int64 argument could never dispatch, and the machine started anyway with the
+// safe state broken. Startup now refuses it, naming the hook and both types.
+TEST(RuntimePreflightTest, AHookArgumentOfTheWrongTypeRefusesStartup) {
+    anolis::runtime::Runtime runtime(load("anolis-886-quoted-pwm.yaml", heater_hook_yaml("\"0\"")));
+    std::string error;
+    std::string log;
+    EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
+    EXPECT_NE(error.find("wrong type"), std::string::npos) << error;
+    EXPECT_NE(error.find("safety.safe_state.hooks bread0/heater0/set_pwm"), std::string::npos) << error;
+    EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
+}
+
+TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
+    anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
+    std::string error;
+    std::string log;
+    EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+}
+
+// A value of the right type that is out of range is still reported, not
+// refused: only a type mismatch stops startup.
+TEST(RuntimePreflightTest, AHookArgumentOutOfRangeIsReportedNotRefused) {
+    anolis::runtime::Runtime runtime(load("anolis-886-range-pwm.yaml", heater_hook_yaml("500")));
+    std::string error;
+    std::string log;
+    EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    EXPECT_NE(log.find("safety.safe_state.hooks cannot be dispatched: bread0/heater0/set_pwm"), std::string::npos)
+        << log;
+}

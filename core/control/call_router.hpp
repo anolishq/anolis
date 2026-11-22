@@ -158,6 +158,14 @@ public:
     bool validate_call(const CallRequest &request, std::string &error) const;
 
     /**
+     * @brief As validate_call, and also reports whether the refusal was an
+     * argument whose type does not match the function's declared type (after
+     * the widening coerce_arguments allows). Startup refuses a declared call
+     * with such an argument rather than finding out when it fires.
+     */
+    bool validate_call(const CallRequest &request, std::string &error, bool &argument_type_mismatch) const;
+
+    /**
      * @brief Whether execute_call would refuse this request for the e-stop
      * latch, answered without dispatching or logging anything.
      *
@@ -218,8 +226,8 @@ private:
                                const registry::FunctionSpec *&out_spec, std::string &out_function_name,
                                std::string &error) const;
     bool validate_arguments(const registry::FunctionSpec &spec,
-                            const std::map<std::string, anolis::deviceprovider::v1::Value> &args,
-                            std::string &error) const;
+                            const std::map<std::string, anolis::deviceprovider::v1::Value> &args, std::string &error,
+                            bool *argument_type_mismatch = nullptr) const;
     /**
      * @brief Reconcile integer signedness of `args` against the resolved spec.
      *

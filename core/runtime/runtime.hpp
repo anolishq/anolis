@@ -7,7 +7,9 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "anolis_build_config.hpp"
 #include "config.hpp"
@@ -120,7 +122,7 @@ private:
      *
      * Reports loudly; never refuses to start.
      */
-    void preflight_declared_calls() const;
+    std::vector<std::string> preflight_declared_calls() const;
 
     /**
      * @brief Give StateCache each provider's read-gap limit: three quarters of

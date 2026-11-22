@@ -15,6 +15,12 @@ commit messages only.
 
 Upgrade notes:
 
+- A quoted hook argument in `safety.safe_state` or
+  `automation.mode_transition_hooks` is now a string (#637). A config that
+  quotes a number or a bool for a numeric or bool argument, such as
+  `pwm: "0"`, now refuses startup, naming the call, the argument and both
+  types: that call could never dispatch, and the safe state needing it would
+  have failed when it fired. Write numbers and bools unquoted.
 - `anolis-runtime --check-config` now loads the behaviour tree when
   automation is enabled, so a config whose tree is missing, is not XML or
   names an unregistered node fails the check (exit 1) where it used to pass.

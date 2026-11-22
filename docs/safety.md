@@ -300,7 +300,8 @@ and logs a WARN; the runtime starts. A call to a device its provider reports
 `UNREACHABLE`, and that is not registered, is skipped rather than failed: it
 is listed in `skipped_actions` with the provider's reason and logged at WARN,
 and preflight warns `absent at startup` for it. Any other call that cannot be
-resolved still fails, at ERROR. `safe_state_achieved` is `true` only when at
+resolved still fails, at ERROR. A call whose argument has the wrong type for
+its function refuses startup instead, since it could never dispatch. `safe_state_achieved` is `true` only when at
 least one call ran and every call that ran succeeded, so a boot with every
 device absent reports `false` with no failed actions, logged at WARN. A
 skipped device is not driven when it appears later.

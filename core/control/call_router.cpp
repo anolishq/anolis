@@ -397,6 +397,12 @@ bool CallRouter::latch_refuses(const CallRequest& request) const {
 }
 
 bool CallRouter::validate_call(const CallRequest& request, std::string& error) const {
+    bool argument_type_mismatch = false;
+    return validate_call(request, error, argument_type_mismatch);
+}
+
+bool CallRouter::validate_call(const CallRequest& request, std::string& error, bool& argument_type_mismatch) const {
+    argument_type_mismatch = false;
     // Check device exists
     if (!validate_device_exists(request.device_handle, error)) {
         return false;
@@ -431,7 +437,7 @@ bool CallRouter::validate_call(const CallRequest& request, std::string& error) c
     }
 
     // Validate arguments
-    if (!validate_arguments(*func_spec, args, error)) {
+    if (!validate_arguments(*func_spec, args, error, &argument_type_mismatch)) {
         return false;
     }
 
@@ -597,7 +603,7 @@ bool CallRouter::resolve_function_spec(const registry::RegisteredDevice& device,
 
 bool CallRouter::validate_arguments(const registry::FunctionSpec& spec,
                                     const std::map<std::string, anolis::deviceprovider::v1::Value>& args,
-                                    std::string& error) const {
+                                    std::string& error, bool* argument_type_mismatch) const {
     // Build arg name to ArgSpec map for validation
     std::unordered_map<std::string, const anolis::deviceprovider::v1::ArgSpec*> spec_map;
     for (const auto& arg_spec : spec.args) {
@@ -625,6 +631,9 @@ bool CallRouter::validate_arguments(const registry::FunctionSpec& spec,
 
         // Type validation
         if (!validate_argument_type(arg_spec, arg_value, error)) {
+            if (argument_type_mismatch != nullptr) {
+                *argument_type_mismatch = true;
+            }
             std::string message;
             message.reserve(arg_name.size() + error.size() + 14);
             message.append("Argument '");

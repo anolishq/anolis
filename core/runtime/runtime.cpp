@@ -265,7 +265,16 @@ bool Runtime::init_providers(std::string &error) {
     }
 
     LOG_INFO("[Runtime] All providers started");
-    preflight_declared_calls();
+    // A declared call whose argument has the wrong type for the function it
+    // calls can never dispatch, so it is refused now, not found out when the
+    // safe state or a mode transition needs it (review of #886).
+    if (const auto mismatches = preflight_declared_calls(); !mismatches.empty()) {
+        error = "declared call argument has the wrong type for its function: " + mismatches.front();
+        if (mismatches.size() > 1) {
+            error += " (and " + std::to_string(mismatches.size() - 1) + " more, logged above)";
+        }
+        return false;
+    }
 
     // The firmware command watchdog is what stops a device when the runtime or
     // its provider is lost (#297). Keyed on the SDK-reserved watchdog_armed
@@ -322,7 +331,7 @@ control::AbsentDevices Runtime::devices_reported_missing() const {
     return absent;
 }
 
-void Runtime::preflight_declared_calls() const {
+std::vector<std::string> Runtime::preflight_declared_calls() const {
     // Every call the config declares is dispatched at a moment when nobody is
     // watching a terminal: a mode transition, or an operator pulling the e-stop.
     // A call that cannot resolve or type-check stays invisible until then. This
@@ -341,11 +350,15 @@ void Runtime::preflight_declared_calls() const {
     // the latch, deliberately -- see safe_state.cpp). Passing preflight means
     // "dispatchable", not "will run".
     //
-    // Reports, never refuses. A machine whose safe state is partly undispatchable
-    // is still far better up than down, and the operator needs the runtime alive
-    // to fix it. The loud ERROR is the point.
+    // Reports, and refuses only one kind. A machine whose safe state is partly
+    // undispatchable is still far better up than down, and the operator needs
+    // the runtime alive to fix it: the loud ERROR is the point. The exception is
+    // an argument whose type does not match the function's (a quoted "0" for an
+    // int64 argument, say). That is wrong in the config, not in the inventory,
+    // and the caller refuses startup on it; the list returned names each one.
+    std::vector<std::string> type_mismatches;
     if (call_router_ == nullptr) {
-        return;
+        return type_mismatches;
     }
 
     size_t checked = 0;
@@ -377,7 +390,8 @@ void Runtime::preflight_declared_calls() const {
 
         ++checked;
         std::string err;
-        if (call_router_->validate_call(request, err)) {
+        bool argument_type_mismatch = false;
+        if (call_router_->validate_call(request, err, argument_type_mismatch)) {
             return;
         }
 
@@ -387,6 +401,13 @@ void Runtime::preflight_declared_calls() const {
             LOG_WARN("[Runtime] " << where << " " << call.device_handle << "/" << target
                                   << " absent at startup: " << it->second);
             ++absent_calls;
+            return;
+        }
+        if (argument_type_mismatch) {
+            ++failed;
+            const std::string line = where + " " + call.device_handle + "/" + target + " - " + err;
+            LOG_ERROR("[Runtime] " << line << ". Write the value as the function's type (a quoted value is a string).");
+            type_mismatches.push_back(line);
             return;
         }
         if (active) {
@@ -487,6 +508,7 @@ void Runtime::preflight_declared_calls() const {
         LOG_INFO("[Runtime] preflight: all " << checked
                                              << " declared call(s) dispatchable against the current inventory");
     }
+    return type_mismatches;
 }
 
 bool Runtime::init_automation(std::string &error) {
@@ -1459,7 +1481,8 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     // renamed functions, changed argument types — any of which silently
     // invalidates the boot-time preflight. Re-run it against what is actually
     // registered now, for the same reason the hookless gate is re-checked below.
-    preflight_declared_calls();
+    // The machine is running, so a type mismatch here is reported, not refused.
+    (void)preflight_declared_calls();
     // Its devices' watchdog timeouts may have changed with its config (#831).
     refresh_poll_gap_limits();
 
