@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   scan:
-    uses: anolishq/.github/.github/workflows/dependency-scan.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/dependency-scan.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3.1
+    secrets: inherit
     with:
       triplet: x64-linux-static

@@ -45,9 +45,14 @@ jobs:
           sudo apt-get install -y ninja-build g++
 
       - name: Setup vcpkg
-        uses: anolishq/.github/.github/actions/setup-vcpkg@f4817837f29993c35b5350fbb5dfe2563437fcde # v2.11
+        uses: anolishq/.github/.github/actions/setup-vcpkg@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3.1
         with:
-          triplet: x64-linux-static
+          r2-endpoint: ${{ vars.VCPKG_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.VCPKG_R2_BUCKET }}
+          r2-read-access-key-id: ${{ secrets.VCPKG_R2_READ_ACCESS_KEY_ID }}
+          r2-read-secret-access-key: ${{ secrets.VCPKG_R2_READ_SECRET_ACCESS_KEY }}
+          r2-write-access-key-id: ${{ secrets.VCPKG_R2_WRITE_ACCESS_KEY_ID }}
+          r2-write-secret-access-key: ${{ secrets.VCPKG_R2_WRITE_SECRET_ACCESS_KEY }}
 
       - name: Build anolis-runtime
         run: |
