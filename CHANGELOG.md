@@ -33,6 +33,12 @@ Upgrade notes:
 
 ### Fixed
 
+- When `systemctl restart anolis-runtime` fails, `install.sh` no longer
+  reports `health: runtime responding` for whatever answers on the port: it
+  says that is the runtime from before the install, and skips the checks
+  that would describe it. The summary now says how to see why and that
+  `--rollback` returns to the previous install. The install has failed in
+  this case since #859, with exit 1.
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an
