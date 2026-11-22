@@ -139,9 +139,11 @@ Notes:
    wire is sorted by name (bytewise), not declared. Each arg carries
    `position`, its 0-based index in the declared order; sort by it to list or
    prompt for arguments in that order. A call still names each argument, so
-   order never changes what a call sends. A device whose function declares
-   two arguments with one name is not registered: the runtime logs the
-   function and the argument, and the device never appears here.
+   order never changes what a call sends. A function that declares two
+   arguments with one name is left out: the runtime logs the function and the
+   argument at ERROR, the function never appears here, and a call to it is
+   refused as an unknown function. The device and its other functions are
+   registered as usual.
 
 ### State reads
 
