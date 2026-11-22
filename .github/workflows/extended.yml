@@ -33,7 +33,9 @@ on:
 
 concurrency:
   group: extended-${{ github.ref }}
-  cancel-in-progress: true
+  # A later push to a pull request supersedes the run before it. On main
+  # each run checks a different merge, so none is cancelled (#504).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -166,6 +168,8 @@ jobs:
 
   coverage-linux:
     name: Coverage Analysis (Linux, Advisory)
+    # Advisory and up to 90 minutes: main only, not on pull requests (#504).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     continue-on-error: true

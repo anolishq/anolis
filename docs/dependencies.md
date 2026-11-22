@@ -44,8 +44,9 @@ Rules:
   (runtime HTTP, machine profile, telemetry), shell tests, observability, docs, version-sync, clang-tidy on changed lines,
   the provider-compat lane (which runs the Python integration and scenario tests, excluding those marked stress or slow), and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
 - **Advisory lanes**: optional non-blocking lanes may be added as needed.
-- **Extended lanes** (outside the required `ok` gate): sanitizer (ASan/UBSan/TSan), coverage, valgrind and fuzz run on
-  every PR to and push to `main` (path-filtered) through `extended.yml` and `hardening.yml`.
+- **Extended lanes** (outside the required `ok` gate): sanitizer (ASan/UBSan/TSan), valgrind and fuzz run on every PR
+  to and push to `main` (path-filtered) through `extended.yml` and `hardening.yml`; coverage runs on `main` only. A
+  later push cancels a pull request's earlier run, but runs on `main` are never cancelled.
   When one of them fails on `main`, the run opens an issue labelled `ci-main` titled `main: <workflow> failed`, or
   comments on the one already open; close it once `main` is green again.
 - **Periodic lanes**: weekly: the restart-churn soak (Sundays), dependency-scan and metrics (Mondays); metrics also runs
