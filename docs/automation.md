@@ -184,9 +184,12 @@ Core runtime nodes include:
    as a failed call, so they reach FAULT after
    `automation.max_consecutive_call_failures`.
 2. `ReadSignal`: writes a signal's value to its `value` port as a double, and
-   its quality to `quality`. It reads numeric and bool signals (a bool as 1.0
-   or 0.0); a string, bytes or unset signal fails the node with the reason
-   logged.
+   its quality to `quality` with the names HTTP and events use (`OK`, `STALE`,
+   `FAULT`, `UNAVAILABLE`; a quality the provider did not set is
+   `UNAVAILABLE`). It reads numeric and bool signals (a bool as 1.0 or 0.0); a
+   string, bytes or unset signal fails the node with the reason logged. On that
+   failure `quality` is still written and `value` is not, so read `value`
+   only after a SUCCESS.
 3. `CheckQuality`: SUCCESS when a signal's quality is `expected_quality`
    (default `OK`): one of `OK`, `STALE`, `FAULT` or `UNAVAILABLE`, the names
    HTTP and events use (`UNKNOWN` is accepted for `UNAVAILABLE`). Any other

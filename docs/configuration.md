@@ -185,7 +185,9 @@ declare, since such an entry excludes nothing.
 2. `automation.behavior_tree_path` is an accepted alias for `automation.behavior_tree`.
    A relative tree path is resolved against the config file's directory, as
    `runtime.data_dir` is. A tree found only relative to the working directory
-   still loads, with a deprecation warning naming the path to use.
+   still loads, with a deprecation warning naming the path to use. A tree that
+   exists in both places loads from beside the config file, with a warning
+   naming both.
 3. `runtime.mode` in YAML is rejected.
 
 ## Related References
