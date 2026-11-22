@@ -28,7 +28,10 @@ Upgrade notes:
   - an unquoted number or bool for a string argument;
   - a number, such as `0` or `1`, for a bool argument;
   - any value for a bytes argument, which no config value is;
-  - any value for an argument whose type the runtime does not know.
+  - any value for an argument whose type the runtime does not know;
+  - a value the widening cannot carry: a negative number for a uint64
+    argument, one above the int64 range for an int64 argument, or an integer
+    beyond 2^53 for a double argument.
   A setpoint the plan does not use, because declared hooks are the whole
   plan, is warned about instead. Write numbers and bools unquoted, and quote
   a string that looks like one.
