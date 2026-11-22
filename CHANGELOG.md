@@ -28,7 +28,10 @@ Upgrade notes:
   - an unquoted number or bool for a string argument;
   - a number, such as `0` or `1`, for a bool argument;
   - any value for a bytes argument, which no config value is;
-  - any value for an argument whose type the runtime does not know.
+  - any value for an argument whose type the runtime does not know;
+  - a value the widening cannot carry: a negative number for a uint64
+    argument, one above the int64 range for an int64 argument, or an integer
+    beyond 2^53 for a double argument.
   A setpoint the plan does not use, because declared hooks are the whole
   plan, is warned about instead. Write numbers and bools unquoted, and quote
   a string that looks like one.
@@ -92,6 +95,12 @@ Upgrade notes:
 
 ### Fixed
 
+- With automation disabled, startup preflight checks mode-transition hooks
+  as unused: one that cannot be dispatched is warned about, naming the hook,
+  where it was skipped. It never refuses startup.
+- `install.sh` refuses a telemetry-export pin or a project directory name
+  with a non-ASCII letter in any locale. Under a UTF-8 locale its checks'
+  `[A-Za-z]` ranges also took letters such as `é`.
 - The OpenAPI contract declares `400` and `503` for `openRun` and
   `closeRun`, which the runtime already answers for a malformed body and
   when the run registry is not enabled.
@@ -104,7 +113,8 @@ Upgrade notes:
 - The ADPP `Hello` sends the runtime's version as `client_version`. It always
   sent `0.1.0` (#545).
 - `install.sh` reads the telemetry-export pin from `manifest.json` as JSON,
-  or, on a target without python3, by the layout `--stage` writes. The line
+  or, on a target without python3, by the layout `--stage` writes, warning
+  when a manifest in another layout leaves it unread. The line
   scan took a provider named `telemetry_export` listed after one named
   `optional` as the pin (#538).
 - The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when
