@@ -33,6 +33,9 @@ Upgrade notes:
 
 ### Fixed
 
+- The bearer-token check compares SHA-256 digests of the presented and the
+  configured token with OpenSSL's constant-time compare. The byte-wise walk
+  that #522 made branched on the presented token's length on every byte.
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an
