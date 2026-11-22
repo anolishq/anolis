@@ -344,6 +344,20 @@ health_without_curl() {
 # Review of #905: "the one from before this install" was asserted, not
 # checked. With Restart=on-failure systemd can start the new binary after the
 # failed restart; a different main pid is then not called the old one.
+# Review of #917: with no runtime running before the restart (main pid 0),
+# the health line said the answering one was "not the process that was
+# running before", as if there had been one.
+@test "917: with nothing running before the restart, the health line says so" {
+    health_with '{"version":"0.0.0"}'
+    RUNTIME_RESTART_FAILED=1
+    PRE_RESTART_PID=0
+    systemctl() { [[ "$*" == *"MainPID"* ]] && echo 5151; }
+    _run_registry_available() { echo "REGISTRY CHECKED"; return 0; }
+    run phase_health
+    [[ "${output}" == *"none was running before it"* ]]
+    [[ "${output}" != *"REGISTRY CHECKED"* ]]
+}
+
 @test "905: a runtime with a new main pid is not called the old one" {
     health_with '{"version":"0.0.0"}'
     RUNTIME_RESTART_FAILED=1
