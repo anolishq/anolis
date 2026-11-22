@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
@@ -110,6 +111,35 @@ TEST(ParameterTypesTest, Int64BoundsAreComparedExactly) {
                            std::nullopt, std::nullopt};
     EXPECT_TRUE(low.validate(ParameterValue{int64_t{-9007199254740992}}, error)) << error;
     EXPECT_FALSE(low.validate(ParameterValue{int64_t{-9007199254740993}}, error));
+}
+
+// Review of #882: the exact comparison at the ends of the int64 range. A bound
+// at or past +-2^63, or infinite, holds every int64 on its side, and the
+// largest double below 2^63 (2^63 - 1024) is a finite bound like any other.
+TEST(ParameterTypesTest, Int64BoundsHoldAtTheEndsOfTheInt64Range) {
+    constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
+    constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+    constexpr double kTwo63 = 9223372036854775808.0;
+    const double inf = std::numeric_limits<double>::infinity();
+    std::string error;
+
+    ParameterDef full{"p", ParameterType::INT64, ParameterValue{int64_t{0}}, -kTwo63, kTwo63, std::nullopt};
+    EXPECT_TRUE(full.validate(ParameterValue{kMin}, error)) << error;
+    EXPECT_TRUE(full.validate(ParameterValue{kMax}, error)) << error;
+
+    ParameterDef open{"p", ParameterType::INT64, ParameterValue{int64_t{0}}, -inf, inf, std::nullopt};
+    EXPECT_TRUE(open.validate(ParameterValue{kMin}, error)) << error;
+    EXPECT_TRUE(open.validate(ParameterValue{kMax}, error)) << error;
+
+    const double below_two63 = std::nextafter(kTwo63, 0.0);  // 2^63 - 1024
+    ParameterDef near_top{"p",          ParameterType::INT64, ParameterValue{int64_t{0}},
+                          std::nullopt, below_two63,          std::nullopt};
+    EXPECT_TRUE(near_top.validate(ParameterValue{int64_t{9223372036854774784}}, error)) << error;
+    EXPECT_FALSE(near_top.validate(ParameterValue{int64_t{9223372036854774785}}, error));
+    EXPECT_FALSE(near_top.validate(ParameterValue{kMax}, error));
+
+    ParameterDef at_bottom{"p", ParameterType::INT64, ParameterValue{int64_t{0}}, -kTwo63, std::nullopt, std::nullopt};
+    EXPECT_TRUE(at_bottom.validate(ParameterValue{kMin}, error)) << error;
 }
 
 }  // namespace
