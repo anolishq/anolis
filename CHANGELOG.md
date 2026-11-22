@@ -93,8 +93,8 @@ Upgrade notes:
 - A behaviour tree is refused when it loads, and `--check-config` fails,
   for a `CheckQuality` `expected_quality` that is not a quality name (#797)
   and for `CallDevice` literal args that are not a JSON object (#806).
-  `CallDevice` args that cannot be read at tick fail the node and count as a failed call;
-  they sent a call with no arguments and logged success.
+  `CallDevice` args that cannot be read at tick fail the node and count as
+  a failed call; they sent a call with no arguments and logged success.
 - An automation parameter whose `default`, `min` or `max` is NaN is refused
   at load. A NaN default passed any bound, and a NaN bound turned its check
   off (#755).
