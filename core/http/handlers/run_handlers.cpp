@@ -88,9 +88,10 @@ void HttpServer::handle_post_runs(const httplib::Request &req, httplib::Response
 
     auto result = run_journal_->open(spec, std::move(version));
     if (!result.ok) {
-        // A run is already open (one open run per runtime) — or a write failure.
-        send_json(res, StatusCode::FAILED_PRECONDITION,
-                  make_error_response(StatusCode::FAILED_PRECONDITION, result.error));
+        // One open run per runtime: a second is a conflict. A run that could
+        // not be written is the runtime's failure, not the client's.
+        const auto code = result.already_open ? StatusCode::FAILED_PRECONDITION : StatusCode::INTERNAL;
+        send_json(res, code, make_error_response(code, result.error));
         return;
     }
     send_json(res, StatusCode::OK, run_envelope(result.run));

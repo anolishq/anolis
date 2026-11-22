@@ -139,9 +139,11 @@ Notes:
    wire is sorted by name (bytewise), not declared. Each arg carries
    `position`, its 0-based index in the declared order; sort by it to list or
    prompt for arguments in that order. A call still names each argument, so
-   order never changes what a call sends. A device whose function declares
-   two arguments with one name is not registered: the runtime logs the
-   function and the argument, and the device never appears here.
+   order never changes what a call sends. A function that declares two
+   arguments with one name is left out: the runtime logs the function and the
+   argument at ERROR, the function never appears here, and a call to it is
+   refused as an unknown function. The device and its other functions are
+   registered as usual.
 
 ### State reads
 
@@ -284,7 +286,8 @@ own lifecycle events in it (`run_opened`, `run_closed`, `mode_change`,
 tied to a run by its time window.
 
 1. `POST /v0/runs` - open a run. Optional body: `label`, `params` (any
-   object), `tag_scope`. Returns `409` while another run is open. A run's
+   object), `tag_scope`. Returns `409` while another run is open, and `500`
+   when the run cannot be written to the run log (no run opens). A run's
    record carries `label` and, through 0.9.x, the same value as the deprecated
    `experiment_label`, which a request may still send instead of `label`.
    Sent both with different values, the request is refused with `400`.

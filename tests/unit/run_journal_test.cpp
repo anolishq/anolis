@@ -716,6 +716,39 @@ TEST(RunLabelTest, AnOpenRequestWithTwoDifferentLabelsIsRefused) {
 
 // A close that cannot be written is not an unknown run: the caller must be
 // able to tell them apart, and the run stays open (#554).
+// Review of #852: openRun's 409 also covered a run that could not be written.
+// A second open is a conflict; a write failure is not one, and no run opens.
+TEST(RunJournalTest, AnOpenThatCannotBeWrittenIsNotAConflict) {
+    auto dir = unique_dir();
+    RunJournal journal(dir, "rt1", 2000);
+    std::string err;
+    ASSERT_TRUE(journal.initialize(err)) << err;
+    auto first = journal.open(RunOpenSpec{}, std::nullopt);
+    ASSERT_TRUE(first.ok) << first.error;
+
+    auto second = journal.open(RunOpenSpec{}, std::nullopt);
+    EXPECT_FALSE(second.ok);
+    EXPECT_TRUE(second.already_open);
+
+    ASSERT_TRUE(journal.close(first.run.run_id, CloseReason::OperatorStop).ok);
+    std::filesystem::path index;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        if (entry.path().filename() == "index.jsonl") index = entry.path();
+    }
+    ASSERT_FALSE(index.empty()) << "no index.jsonl under " << dir;
+    std::filesystem::permissions(index, std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                                            std::filesystem::perms::others_read);
+
+    auto failed = journal.open(RunOpenSpec{}, std::nullopt);
+    EXPECT_FALSE(failed.ok);
+    EXPECT_FALSE(failed.already_open);
+    EXPECT_FALSE(failed.error.empty());
+    std::filesystem::permissions(index, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+
+    auto reopened = journal.open(RunOpenSpec{}, std::nullopt);
+    EXPECT_TRUE(reopened.ok) << reopened.error;
+}
+
 TEST(RunJournalTest, ACloseThatCannotBeWrittenIsNotAnUnknownRun) {
     auto dir = unique_dir();
     RunJournal journal(dir, "rt1", 2000);

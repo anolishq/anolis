@@ -1263,7 +1263,10 @@ _manifest_telemetry_export_pin() {
     # components.optional.telemetry_export.version, read as JSON, so no
     # provider name and no key order can stand in for it (#538). python3 is
     # already needed here: telemetry-export installs into a python3 venv.
-    # Prints nothing when there is no pin or the manifest cannot be read.
+    # Prints nothing when there is no pin, the manifest cannot be read, or
+    # there is no python3 to read it. The caller runs this as pin=$(...) under
+    # set -e, so it must not fail: without python3 that ended the whole install
+    # with exit 127 and no message, mid-way (review of #863).
     python3 -I -c '
 import json, sys
 try:
@@ -1273,7 +1276,7 @@ except Exception:
     sys.exit(0)
 if isinstance(v, str):
     print(v)
-' "$1" 2>/dev/null
+' "$1" 2>/dev/null || true
 }
 
 # =============================================================================

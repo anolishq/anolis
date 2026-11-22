@@ -136,6 +136,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: >-
+            The run could not be written to the run log; no run is open and
+            `status.message` names the write error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v0/runs/{run_id}:
     get:
       tags: [runs]

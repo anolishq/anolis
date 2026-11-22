@@ -21,6 +21,11 @@ Upgrade notes:
   `pwm: "0"`, now refuses startup, naming the call, the argument and both
   types: that call could never dispatch, and the safe state needing it would
   have failed when it fired. Write numbers and bools unquoted.
+- A provider function that declares two arguments with one name is left out
+  of the registry, logged at ERROR, and a call to it is refused as an unknown
+  function. The device and its other functions register as usual. Such a
+  function used to be listed with only the last of the two arguments while a
+  call was checked against both (#741).
 - `anolis-runtime --check-config` now loads the behaviour tree when
   automation is enabled, so a config whose tree is missing, is not XML or
   names an unregistered node fails the check (exit 1) where it used to pass.
@@ -30,9 +35,26 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
+  A tree that exists in both places loads from beside the config file, and
+  a `[Config]` warning names both, so check which one a config meant.
 
 ### Fixed
 
+- `install.sh --local` on a target without python3 no longer stops halfway
+  through. Reading the telemetry-export pin from `manifest.json` failed with
+  exit 127 and no message, after the new binaries were in place and before
+  the runtime restarted. Without python3 the pin is now unread, as it was
+  before the reader moved to JSON (#538).
+- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
+  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
+  `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
+  `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
+  number, `ReadSignal` still writes `quality`, so the port no longer keeps the
+  previous tick's.
+- `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
+  run log, and `409` only while another run is open. Both used to be `409`,
+  so a client read a full or read-only disk as a run already in progress.
+  The OpenAPI document declares the `500` (#852).
 - When `systemctl restart anolis-runtime` fails, `install.sh` no longer
   reports `health: runtime responding` for whatever answers on the port: it
   says that is the runtime from before the install, and skips the checks
