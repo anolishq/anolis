@@ -1405,6 +1405,18 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                              << (suggested.empty() ? from_cwd.string() : suggested.generic_string()) << "'.");
                     config.automation.behavior_tree = from_cwd.string();
                 } else {
+                    // A tree beside the config wins. A different file at the old
+                    // start-directory location is likely the one a config written
+                    // for the old rule meant, so say which was chosen (review of
+                    // #892).
+                    if (std::filesystem::is_regular_file(from_config, ec) && !from_cwd.empty() &&
+                        std::filesystem::is_regular_file(from_cwd, ec) &&
+                        !std::filesystem::equivalent(from_config, from_cwd, ec)) {
+                        LOG_WARN("[Config] automation.behavior_tree '"
+                                 << config.automation.behavior_tree << "' exists beside the config file ("
+                                 << from_config.string() << ") and relative to the start directory ("
+                                 << from_cwd.string() << "); using the one beside the config file.");
+                    }
                     config.automation.behavior_tree = from_config.string();
                 }
             }

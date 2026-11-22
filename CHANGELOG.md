@@ -35,6 +35,8 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
+  A tree that exists in both places loads from beside the config file, and
+  a `[Config]` warning names both, so check which one a config meant.
 
 ### Fixed
 
