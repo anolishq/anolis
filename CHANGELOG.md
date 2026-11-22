@@ -15,6 +15,17 @@ commit messages only.
 
 Upgrade notes:
 
+- A quoted hook argument in `safety.safe_state` or
+  `automation.mode_transition_hooks` is now a string (#637). A config that
+  quotes a number or a bool for a numeric or bool argument, such as
+  `pwm: "0"`, now refuses startup, naming the call, the argument and both
+  types: that call could never dispatch, and the safe state needing it would
+  have failed when it fired. Write numbers and bools unquoted.
+- A provider function that declares two arguments with one name is left out
+  of the registry, logged at ERROR, and a call to it is refused as an unknown
+  function. The device and its other functions register as usual. Such a
+  function used to be listed with only the last of the two arguments while a
+  call was checked against both (#741).
 - `anolis-runtime --check-config` now loads the behaviour tree when
   automation is enabled, so a config whose tree is missing, is not XML or
   names an unregistered node fails the check (exit 1) where it used to pass.
@@ -24,6 +35,8 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
+  A tree that exists in both places loads from beside the config file, and
+  a `[Config]` warning names both, so check which one a config meant.
 
 ### Fixed
 
