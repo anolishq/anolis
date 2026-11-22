@@ -2355,3 +2355,25 @@ TEST_F(ConfigTest, AMissingBehaviorTreeIsReportedRelativeToTheConfigFile) {
     EXPECT_EQ(fs::path(config.automation.behavior_tree).parent_path().parent_path().filename(), "cfg")
         << config.automation.behavior_tree;
 }
+
+// Review of #892: a tree both beside the config and under the start
+// directory. The config-side one is used, and the warning names both, so a
+// stale copy beside the config does not replace the live tree silently.
+TEST_F(ConfigTest, ATreeInBothPlacesUsesTheConfigSideOneAndSaysSo) {
+    touch(temp_dir / "cfg" / "tree.xml");
+    touch(temp_dir / "start" / "tree.xml");
+    const auto path = create_config_file("cfg/runtime.yaml", automation_config("tree.xml"));
+    const InDirectory in(temp_dir / "start");
+    std::ostringstream captured;
+    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    RuntimeConfig config;
+    std::string error;
+    const bool ok = load_config(path, config, error);
+    std::cerr.rdbuf(old);
+    ASSERT_TRUE(ok) << error;
+    std::error_code ec;
+    EXPECT_TRUE(fs::equivalent(config.automation.behavior_tree, temp_dir / "cfg" / "tree.xml", ec))
+        << config.automation.behavior_tree;
+    EXPECT_NE(captured.str().find("exists beside the config file"), std::string::npos) << captured.str();
+    EXPECT_NE(captured.str().find("using the one beside the config file"), std::string::npos) << captured.str();
+}

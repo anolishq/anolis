@@ -292,6 +292,8 @@ target_include_directories(anolis_http PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+find_package(OpenSSL REQUIRED)
+target_link_libraries(anolis_http PRIVATE OpenSSL::Crypto)
 target_link_libraries(anolis_http PUBLIC
     anolis_proto
     anolis_provider
