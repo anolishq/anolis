@@ -68,19 +68,31 @@ static const char *value_kind_name(const anolis::deviceprovider::v1::Value &val)
     }
 }
 
-// Helper: Convert quality enum to string
-static std::string quality_to_string(anolis::deviceprovider::v1::SignalValue_Quality q) {
+// The quality a reading has as HTTP and events name it: an unknown quality,
+// or one the provider did not set, is UNAVAILABLE (#888 review).
+static anolis::deviceprovider::v1::SignalValue_Quality normalized_quality(
+    anolis::deviceprovider::v1::SignalValue_Quality q) {
     switch (q) {
+        case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK:
+        case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_STALE:
+        case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_FAULT:
+            return q;
+        default:
+            return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNKNOWN;
+    }
+}
+
+// Helper: Convert quality enum to string, with the names HTTP and events use.
+static std::string quality_to_string(anolis::deviceprovider::v1::SignalValue_Quality q) {
+    switch (normalized_quality(q)) {
         case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK:
             return "OK";
         case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_STALE:
             return "STALE";
         case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_FAULT:
             return "FAULT";
-        case anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNKNOWN:
-            return "UNKNOWN";
         default:
-            return "UNSPECIFIED";
+            return "UNAVAILABLE";
     }
 }
 
@@ -148,7 +160,7 @@ ReadSignalNode::ReadSignalNode(const std::string &name, const BT::NodeConfig &co
 BT::PortsList ReadSignalNode::providedPorts() {
     return {BT::InputPort<std::string>("device_handle", "Device handle (provider_id/device_id)"),
             BT::InputPort<std::string>("signal_id", "Signal identifier"),
-            BT::OutputPort<double>("value", "Signal value (as double)"),
+            BT::OutputPort<double>("value", "Signal value (as double); written only on SUCCESS"),
             BT::OutputPort<std::string>("quality", "Signal quality (OK/STALE/UNAVAILABLE/FAULT)")};
 }
 
@@ -176,7 +188,11 @@ BT::NodeStatus ReadSignalNode::tick() {
         return BT::NodeStatus::FAILURE;
     }
 
-    // Convert and write output ports
+    // Quality is written whatever the value: a reading with no number to give
+    // still has a quality, and the port must not keep the last tick's (#887
+    // review). `value` is written only on SUCCESS.
+    setOutput("quality", quality_to_string(signal_value->quality));
+
     const std::optional<double> value_out = value_to_double(signal_value->value);
     if (!value_out) {
         LOG_ERROR("[ReadSignalNode] Signal " << device_handle.value() << "/" << signal_id.value() << " is "
@@ -184,11 +200,7 @@ BT::NodeStatus ReadSignalNode::tick() {
                                              << "; ReadSignal reads numeric and bool signals only");
         return BT::NodeStatus::FAILURE;
     }
-    std::string quality_out = quality_to_string(signal_value->quality);
-
     setOutput("value", *value_out);
-    setOutput("quality", quality_out);
-
     return BT::NodeStatus::SUCCESS;
 }
 
@@ -454,7 +466,7 @@ BT::NodeStatus CheckQualityNode::tick() {
         return BT::NodeStatus::FAILURE;
     }
 
-    if (signal_value->quality == *expected_quality) {
+    if (normalized_quality(signal_value->quality) == *expected_quality) {
         return BT::NodeStatus::SUCCESS;
     }
 

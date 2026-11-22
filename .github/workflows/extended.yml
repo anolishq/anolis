@@ -32,9 +32,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: extended-${{ github.ref }}
+  group: extended-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # A later push to a pull request supersedes the run before it. On main
-  # each run checks a different merge, so none is cancelled (#504).
+  # each run checks a different merge: keyed on its commit, each gets its own
+  # group, so none is cancelled or left pending behind another (#504). One
+  # group per ref keeps only one pending run, so a third quick merge dropped
+  # the second unstarted.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
@@ -172,7 +175,8 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 90
-    continue-on-error: true
+    # No continue-on-error: Extended is not a required check, and with it a
+    # coverage failure on main never reached report-main-failure (#504).
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

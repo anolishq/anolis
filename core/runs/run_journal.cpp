@@ -620,6 +620,7 @@ RunJournal::OpenResult RunJournal::open(const RunOpenSpec& spec, std::optional<A
     std::lock_guard<std::mutex> lock(mutex_);
     OpenResult result;
     if (open_run_id_.has_value()) {
+        result.already_open = true;
         result.error = "a run is already open: " + *open_run_id_ + " (one open run per runtime)";
         return result;
     }

@@ -29,8 +29,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: anolis-hardening-${{ github.ref }}
-  # Superseded pull request runs are cancelled; main runs are not (#504).
+  group: anolis-hardening-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # A later push to a pull request supersedes the run before it. On main
+  # each run checks a different merge: keyed on its commit, each gets its own
+  # group, so none is cancelled or left pending behind another (#504). One
+  # group per ref keeps only one pending run, so a third quick merge dropped
+  # the second unstarted.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:

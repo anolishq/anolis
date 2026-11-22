@@ -18,7 +18,8 @@ A relative path in the config, such as a provider's `command`, is resolved
 against the current directory, not the config file's directory. Two are
 resolved against the config file's directory instead: `runtime.data_dir`, and
 `automation.behavior_tree`. A behaviour tree found only relative to the current
-directory still loads, with a deprecation warning.
+directory still loads, with a deprecation warning. One that exists in both
+places loads from beside the config file, with a warning naming both.
 
 ## Checking a config
 

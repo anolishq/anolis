@@ -38,28 +38,21 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit("ERROR: missing dependency 'requests' (pip install requests)") from exc
 
 
-REQUIRED_OPERATIONS: list[tuple[str, str]] = [
-    ("get", "/v0/runtime/status"),
-    ("get", "/v0/providers/health"),
-    ("get", "/v0/telemetry/status"),
-    ("get", "/v0/runs"),
-    ("post", "/v0/runs"),
-    ("post", "/v0/runs/{run_id}/close"),
-    ("post", "/v0/runs/{run_id}/events"),
-    ("get", "/v0/runs/{run_id}/events"),
-    ("get", "/v0/devices"),
-    ("get", "/v0/devices/{provider_id}/{device_id}/capabilities"),
-    ("get", "/v0/state"),
-    ("get", "/v0/state/{provider_id}/{device_id}"),
-    ("post", "/v0/call"),
-    ("get", "/v0/mode"),
-    ("post", "/v0/mode"),
-    ("get", "/v0/parameters"),
-    ("post", "/v0/parameters"),
-    ("get", "/v0/automation/tree"),
-    ("get", "/v0/automation/status"),
-    ("get", "/v0/events"),
-]
+# Every operation in the OpenAPI document must be exercised live, except the
+# ones named here with the reason. The list of required operations comes from
+# the document itself, so an operation added there fails this guard until a
+# check covers it or it is listed here (review of #868).
+NOT_EXERCISED: dict[tuple[str, str], str] = {}
+
+
+def spec_operations(openapi_doc: dict[str, Any]) -> set[tuple[str, str]]:
+    methods = {"get", "post", "put", "patch", "delete"}
+    return {
+        (method, path)
+        for path, item in (openapi_doc.get("paths") or {}).items()
+        for method in item
+        if method in methods
+    }
 
 
 @dataclass
@@ -730,7 +723,7 @@ def main() -> int:
         checking openRun, appendRunMarker, listRunEvents and closeRun against
         their schemas live."""
         nonlocal checks_run, checks_passed
-        # openRun, appendRunMarker, listRunEvents and closeRun: four checks.
+        # openRun, getRun, appendRunMarker, listRunEvents and closeRun: five checks.
         try:
             open_resp = _invoke_json("POST", f"{fixture.base_url}/v0/runs", json_body={"label": "conformance"})
             opened = check_run_response("openRun", "post", "/v0/runs", open_resp)
@@ -741,11 +734,22 @@ def main() -> int:
             opened = False
         run_id = open_resp.json().get("run", {}).get("run_id") if opened else None
         if not isinstance(run_id, str):
-            checks_run += 3
+            checks_run += 4
             if opened:
                 failures.append(Failure("response", "run_marker_lifecycle: open response missing run.run_id"))
-            failures.append(Failure("check", "run_marker_lifecycle: no run opened, so markers and close not checked"))
+            failures.append(
+                Failure("check", "run_marker_lifecycle: no run opened, so getRun, markers and close not checked")
+            )
             return
+
+        # getRun, on the run just opened.
+        run_json_check(
+            name="getRun",
+            method="GET",
+            path_template="/v0/runs/{run_id}",
+            actual_path=f"/v0/runs/{run_id}",
+            expected_status=200,
+        )
 
         try:
             # appendRunMarker
@@ -918,6 +922,21 @@ def main() -> int:
         )
         run_marker_lifecycle_check()
         run_events_check(name="events")
+        # Last: the software stop latches, which would refuse later calls.
+        run_json_check(
+            name="estop",
+            method="POST",
+            path_template="/v0/estop",
+            actual_path="/v0/estop",
+            expected_status=200,
+        )
+        run_json_check(
+            name="estop_clear",
+            method="POST",
+            path_template="/v0/estop/clear",
+            actual_path="/v0/estop/clear",
+            expected_status=200,
+        )
     finally:
         fixture.cleanup()
 
@@ -927,11 +946,12 @@ def main() -> int:
     print(f"  base_url: http://127.0.0.1:{port}")
     print(f"  checks run: {checks_run}")
     print(f"  checks passed: {checks_passed}")
-    print(f"  required operations covered: {len(set(REQUIRED_OPERATIONS) & exercised)} of {len(REQUIRED_OPERATIONS)}")
+    required_operations = sorted(spec_operations(openapi_doc) - set(NOT_EXERCISED))
+    print(f"  required operations covered: {len(set(required_operations) & exercised)} of {len(required_operations)}")
     if capture_dir is not None:
         print(f"  capture_dir: {capture_dir}")
 
-    missing = [op for op in REQUIRED_OPERATIONS if op not in exercised]
+    missing = [op for op in required_operations if op not in exercised]
     if missing:
         failures.append(
             Failure(
@@ -940,12 +960,12 @@ def main() -> int:
                 + ", ".join(f"{method.upper()} {path}" for method, path in missing),
             )
         )
-    unlisted = sorted(exercised - set(REQUIRED_OPERATIONS))
+    unlisted = sorted(exercised - spec_operations(openapi_doc))
     if unlisted:
         failures.append(
             Failure(
                 "coverage",
-                "operations exercised but missing from REQUIRED_OPERATIONS: "
+                "operations exercised but not in the OpenAPI document: "
                 + ", ".join(f"{method.upper()} {path}" for method, path in unlisted),
             )
         )
