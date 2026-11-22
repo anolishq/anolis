@@ -570,6 +570,10 @@ protected:
                 mode->set_signal_id("control_mode");
                 mode->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_STRING);
                 mode->set_poll_hint_hz(1.0);
+                auto *level = caps->add_signals();
+                level->set_signal_id("level");
+                level->set_value_type(anolis::deviceprovider::v1::VALUE_TYPE_DOUBLE);
+                level->set_poll_hint_hz(1.0);
                 return true;
             }));
         ON_CALL(*mock_provider_, read_signals(_, _, _, _))
@@ -581,8 +585,11 @@ protected:
                 temp->mutable_value()->set_double_value(37.5);
                 auto *mode = response.add_values();
                 mode->set_signal_id("control_mode");
-                mode->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+                mode->set_quality(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_STALE);
                 mode->mutable_value()->set_string_value("closed");
+                auto *level = response.add_values();  // no quality set: UNSPECIFIED
+                level->set_signal_id("level");
+                level->mutable_value()->set_double_value(4.0);
                 return true;
             }));
         provider_registry_.add_provider("sim0", mock_provider_);
@@ -631,4 +638,37 @@ TEST_F(ReadSignalNodeTest, FailsOnAStringSignalInsteadOfReadingZero) {
     // The port's entry exists from tree creation; nothing was written to it.
     const auto entry = blackboard->getEntry("value");
     EXPECT_TRUE(entry == nullptr || entry->value.empty());
+}
+
+// Review of #887: the reading's quality is written even when its value has
+// no number to give, so `quality` never keeps an earlier tick's.
+TEST_F(ReadSignalNodeTest, WritesTheQualityOfASignalItCannotRead) {
+    BT::Blackboard::Ptr blackboard;
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick_read("control_mode", blackboard));
+    EXPECT_EQ("STALE", blackboard->get<std::string>("quality"));
+}
+
+// Review of #888: a quality the provider did not set is UNAVAILABLE, the name
+// HTTP and events give it, not UNSPECIFIED.
+TEST_F(ReadSignalNodeTest, AnUnsetQualityReadsAsUnavailable) {
+    BT::Blackboard::Ptr blackboard;
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, tick_read("level", blackboard));
+    EXPECT_EQ("UNAVAILABLE", blackboard->get<std::string>("quality"));
+}
+
+// Review of #888: CheckQuality expected_quality="UNAVAILABLE" matches a
+// reading HTTP shows as UNAVAILABLE, including one with no quality set.
+TEST_F(ReadSignalNodeTest, CheckQualityUnavailableMatchesAnUnsetQuality) {
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
+    auto blackboard = BT::Blackboard::create();
+    anolis::automation::BTServiceContext services;
+    services.state_cache = state_cache_.get();
+    blackboard->set(anolis::automation::kBTServiceContextKey, services);
+    auto tree = factory.createTreeFromText(
+        R"(<root BTCPP_format="4"><BehaviorTree ID="Main">
+<CheckQuality device_handle="sim0/dev0" signal_id="level" expected_quality="UNAVAILABLE"/>
+</BehaviorTree></root>)",
+        blackboard);
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
 }

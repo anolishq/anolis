@@ -33,6 +33,12 @@ Upgrade notes:
 
 ### Fixed
 
+- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
+  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
+  `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
+  `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
+  number, `ReadSignal` still writes `quality`, so the port no longer keeps the
+  previous tick's.
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an
