@@ -102,6 +102,11 @@ Upgrade notes:
   logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
   signal, such as the simulator's `control_mode`, got a plausible number and
   no error (#816).
+- A device that declares a signal with no value type, or one the runtime does
+  not know, is not registered; an ERROR names the signal, and the provider's
+  other devices register as usual. Such a signal used to register, and HTTP
+  reported its type as `unknown`, which is not one of the API's value types
+  (#499).
 
 ### Fixed
 

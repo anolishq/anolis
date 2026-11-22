@@ -30,6 +30,19 @@ namespace {
 // two while a call is checked against every one (#741), so the function is
 // left out. The device and its other functions are kept: a restart must not
 // take a working device off a running machine (review of #885).
+// The id of the first signal whose value type is unset or not one the runtime
+// knows, if any (#499).
+std::optional<std::string> signal_without_value_type(const anolis::deviceprovider::v1::CapabilitySet &caps) {
+    for (const auto &signal : caps.signals()) {
+        const auto type = signal.value_type();
+        if (type == anolis::deviceprovider::v1::VALUE_TYPE_UNSPECIFIED ||
+            !anolis::deviceprovider::v1::ValueType_IsValid(type)) {
+            return signal.signal_id();
+        }
+    }
+    return std::nullopt;
+}
+
 std::vector<std::pair<std::string, std::string>> remove_functions_with_duplicate_args(DeviceCapabilitySet &caps) {
     std::vector<std::pair<std::string, std::string>> removed;
     for (auto it = caps.functions_by_id.begin(); it != caps.functions_by_id.end();) {
@@ -111,6 +124,15 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
             // Device unavailable - log warning and continue with other devices
             LOG_WARN("[Registry] Device " << device_id << " unavailable: " << provider.last_error());
             continue;  // Skip this device, don't fail entire provider
+        }
+
+        // A signal needs a value type the runtime knows: one without was
+        // registered and reported to HTTP as "unknown", outside the API's
+        // value types (#499). Such a device is not registered.
+        if (const auto untyped = signal_without_value_type(describe_response.capabilities())) {
+            LOG_ERROR("[Registry] " << provider_id << "/" << device_id << ": signal '" << *untyped
+                                    << "' declares no value type the runtime knows; the device is not registered");
+            continue;
         }
 
         // Build capabilities

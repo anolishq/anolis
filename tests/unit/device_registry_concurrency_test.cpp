@@ -189,6 +189,36 @@ TEST_F(DeviceRegistryConcurrencyTest, DiscoverProviderKeepsSignalUnitAndDescript
     EXPECT_TRUE(signals.at("count").description.empty());
 }
 
+// #499: a signal declared with no value type was registered, and HTTP reported
+// its type as "unknown", outside the OpenAPI enum. Such a device is now refused
+// at discovery, naming the signal, and the provider's other devices register.
+TEST_F(DeviceRegistryConcurrencyTest, ADeviceWithASignalOfNoValueTypeIsNotRegistered) {
+    auto mock = std::make_shared<StrictMock<MockProviderHandle>>();
+    EXPECT_CALL(*mock, list_devices(_)).WillOnce(Invoke([](std::vector<Device> &devices) {
+        Device untyped;
+        untyped.set_device_id("untyped0");
+        devices.push_back(untyped);
+        Device typed;
+        typed.set_device_id("typed0");
+        devices.push_back(typed);
+        return true;
+    }));
+    EXPECT_CALL(*mock, describe_device(_, _))
+        .WillRepeatedly(Invoke([](const std::string &device_id, DescribeDeviceResponse &response) {
+            response.mutable_device()->set_device_id(device_id);
+            auto *signal = response.mutable_capabilities()->add_signals();
+            signal->set_signal_id("level");
+            if (device_id == "typed0") {
+                signal->set_value_type(deviceprovider::v1::VALUE_TYPE_DOUBLE);
+            }
+            return true;
+        }));
+
+    ASSERT_TRUE(registry->discover_provider("sim0", *mock));
+    EXPECT_FALSE(registry->get_device_copy("sim0", "untyped0").has_value());
+    EXPECT_TRUE(registry->get_device_copy("sim0", "typed0").has_value());
+}
+
 // ============================================================================
 // Concurrency Tests
 // ============================================================================
