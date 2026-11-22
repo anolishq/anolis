@@ -279,7 +279,8 @@ health_without_curl() {
     run phase_summary
     summary=$(summary_text "${output}")
     [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
-    [[ "$(tail -1 <<< "${summary}")" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+    [[ "${summary}" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+    [[ "$(tail -1 <<< "${summary}")" == *"--rollback"* ]]
     [[ "${summary}" != *"Runtime did not come up"* ]]
 }
 
@@ -302,7 +303,21 @@ health_without_curl() {
     summary=$(summary_text "${output}")
     [[ "${summary}" == *"Anolis installed, but NOT ready"* ]]
     [[ "${summary}" != *"Anolis installation complete"* ]]
-    [[ "$(tail -1 <<< "${summary}")" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+    [[ "${summary}" == *"systemctl restart anolis-runtime failed — the install did NOT succeed."* ]]
+    [[ "${summary}" == *"journalctl -u anolis-runtime"* ]]
+    [[ "${summary}" == *"--rollback"* ]]
+}
+
+# Review of #859: with the restart failed, the runtime that answers is the
+# one from before the install, so the health check must not call it fine.
+@test "744: the health check does not call the old runtime this install's" {
+    health_with '{"version":"0.0.0"}'
+    RUNTIME_RESTART_FAILED=1
+    _run_registry_available() { echo "REGISTRY CHECKED"; return 0; }
+    run phase_health
+    [[ "${output}" != *"health: runtime responding"* ]]
+    [[ "${output}" == *"the restart failed: it is the one from before this install"* ]]
+    [[ "${output}" != *"REGISTRY CHECKED"* ]]
 }
 
 @test "536: control: the same PATH with a curl on it runs the health check" {

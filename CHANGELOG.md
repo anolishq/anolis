@@ -35,6 +35,8 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
+  A tree that exists in both places loads from beside the config file, and
+  a `[Config]` warning names both, so check which one a config meant.
 - An int64 automation parameter whose `min` or `max` a double cannot hold
   exactly, such as `9007199254740993`, is refused at load. It used to load
   rounded to the nearest double (#755).
@@ -48,6 +50,30 @@ Upgrade notes:
 
 ### Fixed
 
+- `install.sh --local` on a target without python3 no longer stops halfway
+  through. Reading the telemetry-export pin from `manifest.json` failed with
+  exit 127 and no message, after the new binaries were in place and before
+  the runtime restarted. Without python3 the pin is now unread, as it was
+  before the reader moved to JSON (#538).
+- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
+  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
+  `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
+  `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
+  number, `ReadSignal` still writes `quality`, so the port no longer keeps the
+  previous tick's.
+- `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
+  run log, and `409` only while another run is open. Both used to be `409`,
+  so a client read a full or read-only disk as a run already in progress.
+  The OpenAPI document declares the `500` (#852).
+- When `systemctl restart anolis-runtime` fails, `install.sh` no longer
+  reports `health: runtime responding` for whatever answers on the port: it
+  says that is the runtime from before the install, and skips the checks
+  that would describe it. The summary now says how to see why and that
+  `--rollback` returns to the previous install. The install has failed in
+  this case since #859, with exit 1.
+- The bearer-token check compares SHA-256 digests of the presented and the
+  configured token with OpenSSL's constant-time compare. The byte-wise walk
+  that #522 made branched on the presented token's length on every byte.
 - An int64 automation parameter is held to its bounds exactly. A value above
   2^53 was compared as a double, so `2^53 + 1` passed `max: 2^53` (#755).
 - The ADPP `Hello` sends the runtime's version as `client_version`. It always
@@ -63,7 +89,6 @@ Upgrade notes:
 - The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when
   a run is already open, which is what the runtime answers. It declared
   `412` (#541).
-
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an

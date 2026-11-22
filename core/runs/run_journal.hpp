@@ -67,6 +67,9 @@ public:
 
     struct OpenResult {
         bool ok = false;
+        /// Set when ok=false because a run is already open. Otherwise ok=false
+        /// means the run could not be written, and none is open.
+        bool already_open = false;
         std::string error;
         Run run;
     };
