@@ -102,6 +102,10 @@ Upgrade notes:
   logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
   signal, such as the simulator's `control_mode`, got a plausible number and
   no error (#816).
+- `CheckBool` and `CheckQuality` are Conditions, not Actions, so editors
+  such as Groot2 list and draw them as such. Every tree loads as before,
+  including one that names the old kind explicitly (`<Action ID="CheckBool">`)
+  (#822).
 
 ### Fixed
 

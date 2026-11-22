@@ -1,6 +1,7 @@
 #pragma once
 
 #include <behaviortree_cpp/action_node.h>
+#include <behaviortree_cpp/condition_node.h>
 
 #include <cstdint>
 #include <memory>
@@ -117,7 +118,7 @@ private:
  *               args='{"target":30.0}'/>
  * </Sequence>
  */
-class CheckQualityNode : public BT::SyncActionNode {
+class CheckQualityNode : public BT::ConditionNode {
 public:
     CheckQualityNode(const std::string &name, const BT::NodeConfig &config);
 
@@ -204,7 +205,7 @@ private:
  *
  * Returns SUCCESS when input `value` equals `expected` (default true).
  */
-class CheckBoolNode : public BT::SyncActionNode {
+class CheckBoolNode : public BT::ConditionNode {
 public:
     CheckBoolNode(const std::string &name, const BT::NodeConfig &config);
 

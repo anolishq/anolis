@@ -421,7 +421,7 @@ std::optional<BTServiceContext> CallDeviceNode::get_services() const {
 //-----------------------------------------------------------------------------
 
 CheckQualityNode::CheckQualityNode(const std::string &name, const BT::NodeConfig &config)
-    : BT::SyncActionNode(name, config) {
+    : BT::ConditionNode(name, config) {
     // A literal expected_quality is checked when the tree is built, so a typo
     // refuses the tree instead of a node that can never match (#797). A value
     // from the blackboard is checked at tick.
@@ -644,8 +644,7 @@ std::optional<BTServiceContext> GetParameterInt64Node::get_services() const {
 // CheckBoolNode
 //-----------------------------------------------------------------------------
 
-CheckBoolNode::CheckBoolNode(const std::string &name, const BT::NodeConfig &config)
-    : BT::SyncActionNode(name, config) {}
+CheckBoolNode::CheckBoolNode(const std::string &name, const BT::NodeConfig &config) : BT::ConditionNode(name, config) {}
 
 /*static*/ BT::PortsList CheckBoolNode::providedPorts() {
     return {BT::InputPort<bool>("value", "Boolean value to compare"),
