@@ -1,5 +1,9 @@
 #include "http/auth.hpp"
 
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+
+#include <array>
 #include <cctype>
 #include <cstddef>
 
@@ -11,14 +15,21 @@ bool is_loopback(const std::string &remote_addr) {
 }
 
 bool constant_time_equals(std::string_view a, std::string_view b) {
-    // Walk b's length whatever a's is, and fold a length mismatch into diff,
-    // so the time depends on b (the expected token) only (#522).
-    std::size_t diff = a.size() ^ b.size();
-    for (std::size_t i = 0; i < b.size(); ++i) {
-        const unsigned char ai = i < a.size() ? static_cast<unsigned char>(a[i]) : 0;
-        diff |= ai ^ static_cast<unsigned char>(b[i]);
+    // Compare SHA-256 digests, always 32 bytes, with OpenSSL's constant-time
+    // compare. Hashing a takes time that depends on a alone, and hashing b
+    // on b alone, so nothing about the expected token (b) shows in how long a
+    // presented one (a) takes to refuse, its length included (#522). A
+    // byte-wise walk branched on a's length every iteration (review of #879).
+    std::array<unsigned char, 32> da{};
+    std::array<unsigned char, 32> db{};
+    unsigned int la = 0;
+    unsigned int lb = 0;
+    const bool hashed = EVP_Digest(a.data(), a.size(), da.data(), &la, EVP_sha256(), nullptr) == 1 &&
+                        EVP_Digest(b.data(), b.size(), db.data(), &lb, EVP_sha256(), nullptr) == 1;
+    if (!hashed || la != da.size() || lb != db.size()) {
+        return false;  // cannot happen with SHA-256; refuse rather than compare garbage
     }
-    return diff == 0;
+    return CRYPTO_memcmp(da.data(), db.data(), da.size()) == 0;
 }
 
 bool authorize(bool auth_enabled, bool exempt_loopback, const std::string &expected_token,

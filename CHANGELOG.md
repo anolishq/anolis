@@ -61,6 +61,9 @@ Upgrade notes:
   that would describe it. The summary now says how to see why and that
   `--rollback` returns to the previous install. The install has failed in
   this case since #859, with exit 1.
+- The bearer-token check compares SHA-256 digests of the presented and the
+  configured token with OpenSSL's constant-time compare. The byte-wise walk
+  that #522 made branched on the presented token's length on every byte.
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an
