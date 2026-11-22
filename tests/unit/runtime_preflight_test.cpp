@@ -302,6 +302,18 @@ TEST(RuntimePreflightTest, AHookArgumentOfTheWrongTypeRefusesStartup) {
     EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
 }
 
+// Review of #896: the mismatch was seen only when the type check was the first
+// thing to fail. An unknown or a missing argument in the same hook hid it, and
+// the machine started with an ERROR logged. `aaa` sorts before `pwm`.
+TEST(RuntimePreflightTest, AWrongTypeBehindAnotherArgumentFaultStillRefusesStartup) {
+    anolis::runtime::Runtime runtime(
+        load("anolis-896-quoted-pwm-and-unknown.yaml", heater_hook_yaml("\"0\"\n          aaa: 1")));
+    std::string error;
+    std::string log;
+    EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
+    EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
+}
+
 TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
     anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
     std::string error;

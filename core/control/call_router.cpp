@@ -397,12 +397,16 @@ bool CallRouter::latch_refuses(const CallRequest& request) const {
 }
 
 bool CallRouter::validate_call(const CallRequest& request, std::string& error) const {
-    bool argument_type_mismatch = false;
-    return validate_call(request, error, argument_type_mismatch);
+    return validate_call_impl(request, error, nullptr);
 }
 
 bool CallRouter::validate_call(const CallRequest& request, std::string& error, bool& argument_type_mismatch) const {
     argument_type_mismatch = false;
+    return validate_call_impl(request, error, &argument_type_mismatch);
+}
+
+bool CallRouter::validate_call_impl(const CallRequest& request, std::string& error,
+                                    bool* argument_type_mismatch) const {
     // Check device exists
     if (!validate_device_exists(request.device_handle, error)) {
         return false;
@@ -437,7 +441,7 @@ bool CallRouter::validate_call(const CallRequest& request, std::string& error, b
     }
 
     // Validate arguments
-    if (!validate_arguments(*func_spec, args, error, &argument_type_mismatch)) {
+    if (!validate_arguments(*func_spec, args, error, argument_type_mismatch)) {
         return false;
     }
 
@@ -608,6 +612,25 @@ bool CallRouter::validate_arguments(const registry::FunctionSpec& spec,
     std::unordered_map<std::string, const anolis::deviceprovider::v1::ArgSpec*> spec_map;
     for (const auto& arg_spec : spec.args) {
         spec_map[arg_spec.name()] = &arg_spec;
+    }
+
+    // A caller asking about type mismatches (startup preflight) is told of one
+    // even when a missing or an unknown argument would fail first: preflight
+    // refuses startup on a mismatch, and another fault in the same call hid it
+    // (review of #896).
+    if (argument_type_mismatch != nullptr) {
+        for (const auto& [arg_name, arg_value] : args) {
+            const auto spec_it = spec_map.find(arg_name);
+            if (spec_it != spec_map.end() && !validate_argument_type(*spec_it->second, arg_value, error)) {
+                *argument_type_mismatch = true;
+                std::string message("Argument '");
+                message.append(arg_name);
+                message.append("': ");
+                message.append(error);
+                error = std::move(message);
+                return false;
+            }
+        }
     }
 
     // Check all required arguments are present
