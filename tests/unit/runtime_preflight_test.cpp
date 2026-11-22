@@ -317,32 +317,34 @@ TEST(RuntimePreflightTest, AWrongTypeInAnUnusedSetpointIsAWarningNotARefusal) {
     std::string log;
     ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
     EXPECT_NE(log.find("Type mismatch: expected int64, got string (unused"), std::string::npos) << log;
-    // Review of #896: the mismatch was seen only when the type check was the first
-    // thing to fail. An unknown or a missing argument in the same hook hid it, and
-    // the machine started with an ERROR logged. `aaa` sorts before `pwm`.
-    TEST(RuntimePreflightTest, AWrongTypeBehindAnotherArgumentFaultStillRefusesStartup) {
-        anolis::runtime::Runtime runtime(
-            load("anolis-896-quoted-pwm-and-unknown.yaml", heater_hook_yaml("\"0\"\n          aaa: 1")));
-        std::string error;
-        std::string log;
-        EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
-        EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
-    }
+}
 
-    TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
-        anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
-        std::string error;
-        std::string log;
-        EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
-    }
+// Review of #896: the mismatch was seen only when the type check was the first
+// thing to fail. An unknown or a missing argument in the same hook hid it, and
+// the machine started with an ERROR logged. `aaa` sorts before `pwm`.
+TEST(RuntimePreflightTest, AWrongTypeBehindAnotherArgumentFaultStillRefusesStartup) {
+    anolis::runtime::Runtime runtime(
+        load("anolis-896-quoted-pwm-and-unknown.yaml", heater_hook_yaml("\"0\"\n          aaa: 1")));
+    std::string error;
+    std::string log;
+    EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
+    EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
+}
 
-    // A value of the right type that is out of range is still reported, not
-    // refused: only a type mismatch stops startup.
-    TEST(RuntimePreflightTest, AHookArgumentOutOfRangeIsReportedNotRefused) {
-        anolis::runtime::Runtime runtime(load("anolis-886-range-pwm.yaml", heater_hook_yaml("500")));
-        std::string error;
-        std::string log;
-        EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
-        EXPECT_NE(log.find("safety.safe_state.hooks cannot be dispatched: bread0/heater0/set_pwm"), std::string::npos)
-            << log;
-    }
+TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
+    anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
+    std::string error;
+    std::string log;
+    EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+}
+
+// A value of the right type that is out of range is still reported, not
+// refused: only a type mismatch stops startup.
+TEST(RuntimePreflightTest, AHookArgumentOutOfRangeIsReportedNotRefused) {
+    anolis::runtime::Runtime runtime(load("anolis-886-range-pwm.yaml", heater_hook_yaml("500")));
+    std::string error;
+    std::string log;
+    EXPECT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    EXPECT_NE(log.find("safety.safe_state.hooks cannot be dispatched: bread0/heater0/set_pwm"), std::string::npos)
+        << log;
+}
