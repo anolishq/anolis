@@ -43,7 +43,8 @@ permissions:
 jobs:
   valgrind:
     name: Valgrind leak-check
-    uses: anolishq/.github/.github/workflows/valgrind-leak.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/valgrind-leak.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3.1
+    secrets: inherit
     with:
       build-preset: ci-linux-release
       build-target: anolis-runtime
@@ -52,7 +53,8 @@ jobs:
 
   fuzz:
     name: Fuzz (libFuzzer)
-    uses: anolishq/.github/.github/workflows/fuzz.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/fuzz.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3.1
+    secrets: inherit
     with:
       build-preset: ci-fuzz
       fuzz-binaries: "build/ci-fuzz/fuzz/fuzz_config build/ci-fuzz/fuzz/fuzz_frame"
