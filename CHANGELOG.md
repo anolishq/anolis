@@ -51,6 +51,10 @@ Upgrade notes:
   `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
   number, `ReadSignal` still writes `quality`, so the port no longer keeps the
   previous tick's.
+- `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
+  run log, and `409` only while another run is open. Both used to be `409`,
+  so a client read a full or read-only disk as a run already in progress.
+  The OpenAPI document declares the `500` (#852).
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
   written without the `json:` prefix (which reads as such a key), became an
