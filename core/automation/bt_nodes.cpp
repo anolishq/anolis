@@ -165,10 +165,18 @@ BT::PortsList ReadSignalNode::providedPorts() {
 }
 
 BT::NodeStatus ReadSignalNode::tick() {
+    // Every failure writes a quality, so the port never keeps an earlier
+    // tick's: a reading that cannot be had at all is UNAVAILABLE (review of
+    // #902). `value` is written only on SUCCESS.
+    const auto unavailable = [this] {
+        setOutput("quality", std::string("UNAVAILABLE"));
+        return BT::NodeStatus::FAILURE;
+    };
+
     const auto services = get_services();
     if (!services || services->state_cache == nullptr) {
         LOG_ERROR("[ReadSignalNode] StateCache not available in BT service context");
-        return BT::NodeStatus::FAILURE;
+        return unavailable();
     }
 
     // Get input ports
@@ -177,7 +185,7 @@ BT::NodeStatus ReadSignalNode::tick() {
 
     if (!device_handle || !signal_id) {
         LOG_ERROR("[ReadSignalNode] Missing required input ports");
-        return BT::NodeStatus::FAILURE;
+        return unavailable();
     }
 
     // Read signal from StateCache
@@ -185,12 +193,10 @@ BT::NodeStatus ReadSignalNode::tick() {
 
     if (!signal_value) {
         LOG_ERROR("[ReadSignalNode] Signal not found: " << device_handle.value() << "/" << signal_id.value());
-        return BT::NodeStatus::FAILURE;
+        return unavailable();
     }
 
-    // Quality is written whatever the value: a reading with no number to give
-    // still has a quality, and the port must not keep the last tick's (#887
-    // review). `value` is written only on SUCCESS.
+    // A reading with no number to give still has its own quality (#887 review).
     setOutput("quality", quality_to_string(signal_value->quality));
 
     const std::optional<double> value_out = value_to_double(signal_value->value);

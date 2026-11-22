@@ -22,11 +22,27 @@ body="${WORKFLOW} failed on main at ${SHA}: ${RUN_URL}"
 gh label create "${label}" --color B60205 \
     --description "A workflow failed on main" >/dev/null 2>&1 || true
 
-# Listed into a variable, not through a process substitution: a failed
-# listing must stop the script rather than read as "no open issue" and open
-# a duplicate.
-open_issues=$(gh issue list --state open --label "${label}" --limit 100 \
-    --json number,title --jq '.[] | "\(.number)\t\(.title)"')
+# A failed listing must not read as "no open issue". It is retried; if it
+# never answers, the failure is reported anyway in a new issue that says it
+# may duplicate an open one: an unreported failure on main is worse than a
+# duplicate issue (review of #901).
+open_issues=""
+listed=0
+for attempt in 1 2 3; do
+    if open_issues=$(gh issue list --state open --label "${label}" --limit 100 \
+        --json number,title --jq '.[] | "\(.number)\t\(.title)"'); then
+        listed=1
+        break
+    fi
+    echo "Listing the open ${label} issues failed (attempt ${attempt} of 3)" >&2
+    [[ ${attempt} -lt 3 ]] && sleep "${LIST_RETRY_DELAY:-10}"
+done
+if [[ ${listed} -eq 0 ]]; then
+    open_issues=""
+    body="${body}
+
+The open ${label} issues could not be listed, so this may duplicate one."
+fi
 
 existing=""
 while IFS=$'\t' read -r number issue_title; do
