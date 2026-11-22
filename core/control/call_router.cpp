@@ -437,6 +437,12 @@ bool CallRouter::validate_call_impl(const CallRequest& request, std::string& err
     // dry-run validation accepts exactly what a real dispatch would.
     std::map<std::string, anolis::deviceprovider::v1::Value> args = request.args;
     if (!coerce_arguments(*func_spec, args, error)) {
+        // A value that cannot be converted to the argument's type is wrong in
+        // the config as a wrong type is, so startup preflight refuses it too
+        // (review of #911).
+        if (argument_type_mismatch != nullptr) {
+            *argument_type_mismatch = true;
+        }
         return false;
     }
 
