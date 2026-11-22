@@ -7,13 +7,18 @@ SCRIPT="${BATS_TEST_DIRNAME}/../../.github/scripts/report-main-failure.sh"
 
 setup() {
     export WORKFLOW="Extended Checks" RUN_URL="https://example.invalid/run/1" SHA="abc1234"
-    export GH_LOG="${BATS_TEST_TMPDIR}/gh.log" ISSUES=""
+    export GH_LOG="${BATS_TEST_TMPDIR}/gh.log" ISSUES="" LIST_RETRY_DELAY=0
     mkdir -p "${BATS_TEST_TMPDIR}/bin"
     cat > "${BATS_TEST_TMPDIR}/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${GH_LOG}"
 if [[ "$1 $2" == "issue list" ]]; then
     [[ -n "${LIST_FAILS:-}" ]] && exit 1
+    if [[ -n "${LIST_FAILS_FIRST:-}" ]]; then
+        n=$(( $(cat "${GH_LOG}.lists" 2>/dev/null || echo 0) + 1 ))
+        echo "${n}" > "${GH_LOG}.lists"
+        (( n <= LIST_FAILS_FIRST )) && exit 1
+    fi
     printf '%b' "${ISSUES}"
 fi
 STUB
@@ -58,10 +63,23 @@ STUB
     [ ! -s "${GH_LOG}" ]
 }
 
-@test "504: a failed issue listing stops the script and opens no duplicate" {
+# Review of #901: a failed listing ended the reporter with no issue and no
+# retry, so that main failure went unreported. The listing is retried; if it
+# never answers, the issue is opened anyway, saying it may be a duplicate.
+@test "504: a listing that fails once is retried and the open issue is reused" {
+    export LIST_FAILS_FIRST=1 ISSUES='7\tmain: Extended Checks failed\n'
+    run bash "${SCRIPT}"
+    [ "${status}" -eq 0 ]
+    [ "$(grep -c '^issue list' "${GH_LOG}")" -eq 2 ]
+    grep -q '^issue comment 7' "${GH_LOG}"
+    ! grep -q '^issue create' "${GH_LOG}"
+}
+
+@test "504: a listing that never answers still reports the failure" {
     export LIST_FAILS=1
     run bash "${SCRIPT}"
-    [ "${status}" -ne 0 ]
-    ! grep -q '^issue create' "${GH_LOG}"
-    ! grep -q '^issue comment' "${GH_LOG}"
+    [ "${status}" -eq 0 ]
+    [ "$(grep -c '^issue list' "${GH_LOG}")" -eq 3 ]
+    grep -q '^issue create' "${GH_LOG}"
+    grep -q 'may duplicate' "${GH_LOG}"
 }
