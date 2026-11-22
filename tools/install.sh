@@ -2903,6 +2903,13 @@ phase_health() {
         if _runtime_curl -fsS "${url}" &>/dev/null; then
             local version
             version=$(_runtime_curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
+            # The restart failed, so what answers is the runtime that was
+            # running before this install; checking it says nothing of this
+            # one (review of #859).
+            if [[ ${RUNTIME_RESTART_FAILED} -eq 1 ]]; then
+                log_warn "health: a runtime answers (v${version}), but the restart failed: it is the one from before this install"
+                return
+            fi
             log_ok "health: runtime responding (v${version})"
             if _run_registry_available "${base}"; then
                 log_ok "health: run registry available"
@@ -3001,6 +3008,9 @@ phase_summary() {
     if [[ ${RUNTIME_RESTART_FAILED} -eq 1 ]]; then
         echo ""
         log_err "systemctl restart anolis-runtime failed — the install did NOT succeed."
+        log_info "  Why: sudo systemctl status anolis-runtime; sudo journalctl -u anolis-runtime --no-pager -n 50"
+        log_info "  The new files are installed; any runtime still answering is the one from before."
+        log_info "  To go back to the previous install, run this script with --rollback."
     elif [[ ${HEALTH_FAILED} -eq 1 ]]; then
         echo ""
         log_err "Runtime did not come up — the install did NOT succeed."
