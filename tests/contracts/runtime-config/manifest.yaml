@@ -15,7 +15,7 @@ fixtures:
     note: hooks and restart policy configured together
   - file: tests/contracts/runtime-config/valid/05-hooks-quoted-numeric-like-scalars.yaml
     expect: valid
-    note: hook args with quoted numeric-like scalar values
+    note: quoted hook args load as strings at config time; one sent to an int64 or bool argument refuses startup once providers report their functions (not checked by --check-config)
   - file: tests/contracts/runtime-config/valid/06-hooks-scalar-edge-cases.yaml
     expect: valid
     note: hook args with bool-like and text scalar edge cases
