@@ -35,8 +35,34 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
+- An int64 automation parameter whose `min` or `max` a double cannot hold
+  exactly, such as `9007199254740993`, is refused at load. It used to load
+  rounded to the nearest double (#755).
+- `POST /v0/runs/{run_id}/close` refuses `close_reason: "abandoned"` with
+  `400 INVALID_ARGUMENT` and leaves the run open. Only restart recovery
+  records `abandoned`; runs persisted with it still load (#555).
+- A double parameter value is printed in its shortest round-trip form
+  (`1e-08`, `3.14`, `25`) in the log, `parameter_change` events, the InfluxDB
+  fields and the run journal. It was `%f` with six decimals, so `1e-8` and
+  `2e-8` both printed `0.000000` (#756).
 
 ### Fixed
+
+- An int64 automation parameter is held to its bounds exactly. A value above
+  2^53 was compared as a double, so `2^53 + 1` passed `max: 2^53` (#755).
+- The ADPP `Hello` sends the runtime's version as `client_version`. It always
+  sent `0.1.0` (#545).
+- `install.sh` fails when `systemctl restart anolis-runtime` fails, even when
+  something still answers on the runtime's port. The old runtime left
+  running passed the health check, and the install reported success (#744).
+- `install.sh` refuses `--stage` with `--dry-run`. The dry run downloaded
+  every component and wrote the bundle (#532).
+- `install.sh` reads the telemetry-export pin from `manifest.json` as JSON.
+  The line scan took a provider named `telemetry_export` listed after one
+  named `optional` as the pin (#538).
+- The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when
+  a run is already open, which is what the runtime answers. It declared
+  `412` (#541).
 
 - `CallDevice` no longer sends a call with no arguments when its `args` cannot
   be read. An `args` that named a blackboard key nothing wrote, or JSON
