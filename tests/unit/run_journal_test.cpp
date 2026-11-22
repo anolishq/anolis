@@ -714,8 +714,6 @@ TEST(RunLabelTest, AnOpenRequestWithTwoDifferentLabelsIsRefused) {
     EXPECT_FALSE(label.has_value());
 }
 
-// A close that cannot be written is not an unknown run: the caller must be
-// able to tell them apart, and the run stays open (#554).
 // Review of #852: openRun's 409 also covered a run that could not be written.
 // A second open is a conflict; a write failure is not one, and no run opens.
 TEST(RunJournalTest, AnOpenThatCannotBeWrittenIsNotAConflict) {
@@ -749,6 +747,8 @@ TEST(RunJournalTest, AnOpenThatCannotBeWrittenIsNotAConflict) {
     EXPECT_TRUE(reopened.ok) << reopened.error;
 }
 
+// A close that cannot be written is not an unknown run: the caller must be
+// able to tell them apart, and the run stays open (#554).
 TEST(RunJournalTest, ACloseThatCannotBeWrittenIsNotAnUnknownRun) {
     auto dir = unique_dir();
     RunJournal journal(dir, "rt1", 2000);

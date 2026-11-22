@@ -35,6 +35,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "control/call_router.hpp"
 #include "control/device_loss_latch.hpp"
 #include "control/safe_state.hpp"
@@ -46,6 +50,7 @@
 #include "provider/provider_registry.hpp"
 #include "provider/provider_supervisor.hpp"
 #include "registry/device_registry.hpp"
+#include "runs/run_journal.hpp"
 #include "runtime/config.hpp"
 #include "state/state_cache.hpp"
 
@@ -1027,6 +1032,71 @@ TEST_F(HttpHandlersTest, GetRuntimeStatusCarriesTheStopChainWithItsExpectations)
     // The server holds a pointer to the monitor: stop it before the monitor goes.
     client.reset();
     server->stop();
+}
+
+// Review of #903: POST /v0/runs answers 409 only while another run is open,
+// and 500 when the run cannot be written. Only the journal's half had a
+// test, so a handler that sent 409 for both passed.
+TEST_F(HttpHandlersTest, OpenRunAnswers409ForAnOpenRunAnd500ForAWriteFailure) {
+#ifdef _WIN32
+    GTEST_SKIP() << "the write failure is a read-only file, a POSIX permission";
+#else
+    if (::geteuid() == 0) {
+        GTEST_SKIP() << "root writes through a read-only file";
+    }
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("anolis-903-runs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    runs::RunJournal journal(dir, "rt1", 2000);
+    std::string error;
+    ASSERT_TRUE(journal.initialize(error)) << error;
+
+    client.reset();
+    server->stop();
+    runtime::HttpConfig http_config;
+    http_config.enabled = true;
+    http_config.bind = "127.0.0.1";
+    http_config.port = 0;
+    HttpServerDependencies dependencies(*registry, *state_cache, *call_router, *provider_registry);
+    dependencies.run_journal = &journal;
+    server = std::make_unique<HttpServer>(http_config, 100, std::move(dependencies));
+    ASSERT_TRUE(server->start(error)) << error;
+    client = std::make_unique<httplib::Client>("127.0.0.1", server->get_port());
+    client->set_connection_timeout(1, 0);
+
+    const auto open = [&] { return client->Post("/v0/runs", "{}", "application/json"); };
+    const auto code_of = [](const httplib::Result& res) {
+        return nlohmann::json::parse(res->body)["status"]["code"].get<std::string>();
+    };
+
+    auto first = open();
+    ASSERT_TRUE(first);
+    ASSERT_EQ(200, first->status) << first->body;
+    auto second = open();
+    ASSERT_TRUE(second);
+    EXPECT_EQ(409, second->status) << second->body;
+    EXPECT_EQ("FAILED_PRECONDITION", code_of(second));
+
+    const auto run_id = nlohmann::json::parse(first->body)["run"]["run_id"].get<std::string>();
+    ASSERT_TRUE(journal.close(run_id, runs::CloseReason::OperatorStop).ok);
+    std::filesystem::path index;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        if (entry.path().filename() == "index.jsonl") index = entry.path();
+    }
+    ASSERT_FALSE(index.empty()) << "no index.jsonl under " << dir;
+    std::filesystem::permissions(index, std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                                            std::filesystem::perms::others_read);
+
+    auto failed = open();
+    std::filesystem::permissions(index, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+    ASSERT_TRUE(failed);
+    EXPECT_EQ(500, failed->status) << failed->body;
+    EXPECT_EQ("INTERNAL", code_of(failed));
+
+    // The server holds a pointer to the journal: stop it before the journal goes.
+    client.reset();
+    server->stop();
+    std::filesystem::remove_all(dir);
+#endif
 }
 
 TEST_F(HttpHandlersTest, GetRuntimeStatusUsesUnavailableWhenProviderUnavailable) {

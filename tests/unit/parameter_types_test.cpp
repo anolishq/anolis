@@ -140,6 +140,15 @@ TEST(ParameterTypesTest, Int64BoundsHoldAtTheEndsOfTheInt64Range) {
 
     ParameterDef at_bottom{"p", ParameterType::INT64, ParameterValue{int64_t{0}}, -kTwo63, std::nullopt, std::nullopt};
     EXPECT_TRUE(at_bottom.validate(ParameterValue{kMin}, error)) << error;
+
+    // A min at or above 2^63 is above every int64, so nothing passes it. The
+    // guard in int64_below must catch 2^63 itself, where ceil(b) cannot be
+    // cast (review of #907).
+    for (const double min : {kTwo63, inf}) {
+        ParameterDef above_all{"p", ParameterType::INT64, ParameterValue{int64_t{0}}, min, std::nullopt, std::nullopt};
+        EXPECT_FALSE(above_all.validate(ParameterValue{kMax}, error)) << min;
+        EXPECT_FALSE(above_all.validate(ParameterValue{kMin}, error)) << min;
+    }
 }
 
 }  // namespace

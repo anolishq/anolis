@@ -58,15 +58,16 @@ Upgrade notes:
   (`1e-08`, `3.14`, `25`) in the log, `parameter_change` events, the InfluxDB
   fields and the run journal. It was `%f` with six decimals, so `1e-8` and
   `2e-8` both printed `0.000000` (#756).
+- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
+  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
+  `UNSPECIFIED` or `UNKNOWN`. A tree that compares `quality` with
+  `UNSPECIFIED` or `UNKNOWN` no longer matches; compare with `UNAVAILABLE`.
+  `CheckQuality` with `expected_quality` `UNAVAILABLE` now matches such a
+  reading. Every `ReadSignal` failure writes `quality`, `UNAVAILABLE` when
+  there is no reading at all, so the port never keeps the previous tick's.
 
 ### Fixed
 
-- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
-  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
-  `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
-  `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
-  number, `ReadSignal` still writes `quality`, so the port no longer keeps the
-  previous tick's.
 - `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
   run log, and `409` only while another run is open. Both used to be `409`,
   so a client read a full or read-only disk as a run already in progress.
