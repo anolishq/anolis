@@ -55,6 +55,18 @@ std::string gating_policy_to_string(GatingPolicy policy) {
 
 namespace {
 
+// Whether two files hold the same bytes. A file that cannot be read counts as
+// different, so the caller still says which one it chose.
+bool same_file_contents(const std::filesystem::path &a, const std::filesystem::path &b) {
+    std::ifstream fa(a, std::ios::binary);
+    std::ifstream fb(b, std::ios::binary);
+    if (!fa || !fb) {
+        return false;
+    }
+    return std::equal(std::istreambuf_iterator<char>(fa), std::istreambuf_iterator<char>(),
+                      std::istreambuf_iterator<char>(fb), std::istreambuf_iterator<char>());
+}
+
 // True when a token key holds a value. A YAML null (no value, `~`, `null`,
 // `Null`, `NULL` or an explicit `!!null`) leaves the token unset, so its
 // environment fallback applies; as<std::string>() would return its text.
@@ -1395,7 +1407,10 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                 const auto from_config = (std::filesystem::path(config.config_dir) / tree).lexically_normal();
                 std::error_code ec;
                 const auto from_cwd = std::filesystem::absolute(tree, ec).lexically_normal();
-                if (!std::filesystem::exists(from_config, ec) && !from_cwd.empty() &&
+                // Only a file beside the config is a tree there: a directory of
+                // that name hid a real tree under the start directory (review of
+                // #898).
+                if (!std::filesystem::is_regular_file(from_config, ec) && !from_cwd.empty() &&
                     std::filesystem::is_regular_file(from_cwd, ec)) {
                     const auto suggested = std::filesystem::relative(from_cwd, config.config_dir, ec);
                     LOG_WARN("[Config] automation.behavior_tree '"
@@ -1408,10 +1423,12 @@ bool load_config(const std::string &config_path, RuntimeConfig &config, std::str
                     // A tree beside the config wins. A different file at the old
                     // start-directory location is likely the one a config written
                     // for the old rule meant, so say which was chosen (review of
-                    // #892).
-                    if (std::filesystem::is_regular_file(from_config, ec) && !from_cwd.empty() &&
-                        std::filesystem::is_regular_file(from_cwd, ec) &&
-                        !std::filesystem::equivalent(from_config, from_cwd, ec)) {
+                    // #892), when automation will load it and the two differ
+                    // (review of #898).
+                    if (config.automation.enabled && std::filesystem::is_regular_file(from_config, ec) &&
+                        !from_cwd.empty() && std::filesystem::is_regular_file(from_cwd, ec) &&
+                        !std::filesystem::equivalent(from_config, from_cwd, ec) &&
+                        !same_file_contents(from_config, from_cwd)) {
                         LOG_WARN("[Config] automation.behavior_tree '"
                                  << config.automation.behavior_tree << "' exists beside the config file ("
                                  << from_config.string() << ") and relative to the start directory ("

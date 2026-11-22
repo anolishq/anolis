@@ -2362,6 +2362,7 @@ TEST_F(ConfigTest, AMissingBehaviorTreeIsReportedRelativeToTheConfigFile) {
 TEST_F(ConfigTest, ATreeInBothPlacesUsesTheConfigSideOneAndSaysSo) {
     touch(temp_dir / "cfg" / "tree.xml");
     touch(temp_dir / "start" / "tree.xml");
+    std::ofstream(temp_dir / "start" / "tree.xml", std::ios::app) << "<!-- the live one -->\n";
     const auto path = create_config_file("cfg/runtime.yaml", automation_config("tree.xml"));
     const InDirectory in(temp_dir / "start");
     std::ostringstream captured;
@@ -2376,4 +2377,60 @@ TEST_F(ConfigTest, ATreeInBothPlacesUsesTheConfigSideOneAndSaysSo) {
         << config.automation.behavior_tree;
     EXPECT_NE(captured.str().find("exists beside the config file"), std::string::npos) << captured.str();
     EXPECT_NE(captured.str().find("using the one beside the config file"), std::string::npos) << captured.str();
+}
+
+namespace {
+
+// Loads `yaml` from cfg/runtime.yaml with the start directory `start`, and
+// returns what the loader logged.
+std::string load_logging(const fs::path& temp_dir, const std::string& yaml, const fs::path& start,
+                         RuntimeConfig& config) {
+    const auto path = (temp_dir / "cfg" / "runtime.yaml").string();
+    fs::create_directories(temp_dir / "cfg");
+    std::ofstream(path) << yaml;
+    const InDirectory in(start);
+    std::ostringstream captured;
+    std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+    std::string error;
+    const bool ok = load_config(path, config, error);
+    std::cerr.rdbuf(old);
+    EXPECT_TRUE(ok) << error;
+    return captured.str();
+}
+
+}  // namespace
+
+// Review of #898: the same tree copied to both places is not worth a warning.
+TEST_F(ConfigTest, AnIdenticalTreeInBothPlacesIsNotWarnedAbout) {
+    touch(temp_dir / "cfg" / "tree.xml");
+    touch(temp_dir / "start" / "tree.xml");
+    RuntimeConfig config;
+    const auto log = load_logging(temp_dir, automation_config("tree.xml"), temp_dir / "start", config);
+    EXPECT_EQ(log.find("exists beside the config file"), std::string::npos) << log;
+}
+
+// Review of #898: with automation off the tree is never loaded, so its
+// location is not worth a warning.
+TEST_F(ConfigTest, ATreeInBothPlacesIsNotWarnedAboutWithAutomationOff) {
+    touch(temp_dir / "cfg" / "tree.xml");
+    touch(temp_dir / "start" / "tree.xml");
+    std::ofstream(temp_dir / "start" / "tree.xml", std::ios::app) << "<!-- different -->\n";
+    std::string yaml = automation_config("tree.xml");
+    yaml.replace(yaml.find("enabled: true"), 13, "enabled: false");
+    RuntimeConfig config;
+    const auto log = load_logging(temp_dir, yaml, temp_dir / "start", config);
+    EXPECT_EQ(log.find("exists beside the config file"), std::string::npos) << log;
+}
+
+// Review of #898: a directory named like the tree beside the config is not a
+// tree. It won silently over a real file under the start directory.
+TEST_F(ConfigTest, ADirectoryBesideTheConfigDoesNotHideTheTreeUnderTheStartDirectory) {
+    fs::create_directories(temp_dir / "cfg" / "tree.xml");
+    touch(temp_dir / "start" / "tree.xml");
+    RuntimeConfig config;
+    const auto log = load_logging(temp_dir, automation_config("tree.xml"), temp_dir / "start", config);
+    std::error_code ec;
+    EXPECT_TRUE(fs::equivalent(config.automation.behavior_tree, temp_dir / "start" / "tree.xml", ec))
+        << config.automation.behavior_tree;
+    EXPECT_NE(log.find("relative to the start directory"), std::string::npos) << log;
 }
