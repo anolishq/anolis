@@ -1418,8 +1418,16 @@ resolve_telemetry_export_version() {
     elif [[ -f "${BUNDLE_DIR}/manifest.json" ]]; then
         if ! command -v python3 >/dev/null 2>&1; then
             log_info "telemetry-export: no python3; reading the manifest pin by its layout"
+            pin=$(_manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json")
+            # The layout read finds a pin only where --stage writes one. A
+            # manifest in another layout read as "no pin" and the default was
+            # installed with nothing said (review of #916).
+            if [[ -z "${pin}" ]] && grep -q '"telemetry_export"' "${BUNDLE_DIR}/manifest.json" 2>/dev/null; then
+                log_warn "telemetry-export: no python3, and could not read the telemetry-export pin from manifest.json (it is not in the layout --stage writes); using ${TELEMETRY_EXPORT_VERSION}. Install python3, or set TELEMETRY_EXPORT_VERSION, to use the bundle's pin."
+            fi
+        else
+            pin=$(_manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json")
         fi
-        pin=$(_manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json")
     fi
     # Trust the pin only if it is fully a version string (fully anchored so a
     # tampered manifest like "1.2.3; rm -rf /" is rejected, not passed to pip).

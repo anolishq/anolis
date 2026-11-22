@@ -107,7 +107,8 @@ Upgrade notes:
 - The ADPP `Hello` sends the runtime's version as `client_version`. It always
   sent `0.1.0` (#545).
 - `install.sh` reads the telemetry-export pin from `manifest.json` as JSON,
-  or, on a target without python3, by the layout `--stage` writes. The line
+  or, on a target without python3, by the layout `--stage` writes, warning
+  when a manifest in another layout leaves it unread. The line
   scan took a provider named `telemetry_export` listed after one named
   `optional` as the pin (#538).
 - The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when

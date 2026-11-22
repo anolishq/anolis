@@ -52,57 +52,60 @@ setup() {
 
 # Review of #900: v0.16.0 read the pin without python3, so dropping it then
 # installed the hardcoded default instead. Without python3 the pin is read
-# from the layout install.sh --stage writes (json.dump, indent 2).
-_staged_manifest() {
-    cat > "${BUNDLE_DIR}/manifest.json" <<JSON
-{
-  "schema_version": 1,
-  "profile": "demo",
-  "version": "0.16.0",
-  "components": {
-    "runtime": {
-      "version": "0.16.0"
-    },
-    "providers": {
-      "optional": {
-        "version": "9.9.9"
-      },
-      "telemetry_export": {
-        "version": "8.8.8"
-      }
-    }$1
-  }
+# from the layout install.sh --stage writes. The manifests here come from the
+# same json.dump call --stage makes, run with the host's real python3.
+_writer_manifest() {  # <pin or empty> [layout: staged|minified]
+    local py
+    py=$(type -P python3) || skip "python3 not installed here, to write the fixture"
+    "${py}" - "${BUNDLE_DIR}/manifest.json" "$1" "${2:-staged}" <<'PY_WRITER'
+import json, sys
+out, tex_pin, layout = sys.argv[1:4]
+components = {
+    "runtime": {"version": "0.16.0"},
+    "providers": {n: {"version": v} for n, v in [("optional", "9.9.9"), ("telemetry_export", "8.8.8")]},
 }
-JSON
+if tex_pin:
+    components["optional"] = {"telemetry_export": {"version": tex_pin}}
+doc = {"schema_version": 1, "profile": "demo", "version": "0.16.0", "arch": "x86_64",
+       "prefix": "/opt/anolis", "components": components}
+if layout == "staged":
+    json.dump(doc, open(out, "w"), indent=2)
+else:
+    json.dump(doc, open(out, "w"), separators=(",", ":"))
+PY_WRITER
 }
 
 @test "900: with no python3 the staged manifest's pin is read" {
-    _staged_manifest ',
-    "optional": {
-      "telemetry_export": {
-        "version": "0.4.2"
-      }
-    }'
+    _writer_manifest 0.4.2
     run _manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json"
     [ "${status}" -eq 0 ]
     [ "${output}" = "0.4.2" ]
 }
 
-@test "900: with no python3 a provider named optional or telemetry_export is not the pin" {
-    _staged_manifest ""
+@test "900: with no python3 providers named optional and telemetry_export do not stand in for the pin" {
+    # Listed before the real pin, as the writer orders them.
+    _writer_manifest 0.4.2
+    run _manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json"
+    [ "${output}" = "0.4.2" ]
+    _writer_manifest ""
     run _manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json"
     [ "${status}" -eq 0 ]
     [ -z "${output}" ]
 }
 
 @test "900: with no python3 the install uses the manifest pin" {
-    _staged_manifest ',
-    "optional": {
-      "telemetry_export": {
-        "version": "0.4.2"
-      }
-    }'
+    _writer_manifest 0.4.2
     TELEMETRY_EXPORT_VERSION="0.1.1"
     resolve_telemetry_export_version
     [ "${TELEMETRY_EXPORT_VERSION}" = "0.4.2" ]
+}
+
+# Review of #916: a manifest in any other layout read as no pin, and the
+# install used the default with only an info line. It now warns.
+@test "916: with no python3 a pin in another layout is warned about" {
+    _writer_manifest 0.4.2 minified
+    TELEMETRY_EXPORT_VERSION="0.1.1"
+    run resolve_telemetry_export_version
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"could not read the telemetry-export pin"* ]]
 }
