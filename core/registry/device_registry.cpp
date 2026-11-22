@@ -15,6 +15,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "logging/logger.hpp"
 
@@ -24,16 +25,30 @@ namespace registry {
 namespace {
 
 // The first (function, arg) whose arg name repeats within that function.
-std::optional<std::pair<std::string, std::string>> first_duplicate_arg(const DeviceCapabilitySet &caps) {
-    for (const auto &[name, spec] : caps.functions_by_id) {
+// Removes each function that declares two args with one name and returns
+// (function, argument) for each. Capabilities would show only the last of the
+// two while a call is checked against every one (#741), so the function is
+// left out. The device and its other functions are kept: a restart must not
+// take a working device off a running machine (review of #885).
+std::vector<std::pair<std::string, std::string>> remove_functions_with_duplicate_args(DeviceCapabilitySet &caps) {
+    std::vector<std::pair<std::string, std::string>> removed;
+    for (auto it = caps.functions_by_id.begin(); it != caps.functions_by_id.end();) {
         std::unordered_set<std::string> seen;
-        for (const auto &arg : spec.args) {
+        std::optional<std::string> duplicate;
+        for (const auto &arg : it->second.args) {
             if (!seen.insert(arg.name()).second) {
-                return std::make_pair(spec.function_name, arg.name());
+                duplicate = arg.name();
+                break;
             }
         }
+        if (duplicate) {
+            removed.emplace_back(it->second.function_name, *duplicate);
+            it = caps.functions_by_id.erase(it);
+        } else {
+            ++it;
+        }
     }
-    return std::nullopt;
+    return removed;
 }
 
 }  // namespace
@@ -105,12 +120,12 @@ bool DeviceRegistry::inspect_provider_devices(const std::string &provider_id,
 
         build_capabilities(describe_response.device(), describe_response.capabilities(), reg_device.capabilities);
 
-        // Two args with one name: capabilities would show only the last while a
-        // call is checked against every one, so refuse the device (#741).
-        if (const auto duplicate = first_duplicate_arg(reg_device.capabilities)) {
-            LOG_WARN("[Registry] Device " << device_id << " not registered: function '" << duplicate->first
-                                          << "' declares more than one argument named '" << duplicate->second << "'");
-            continue;
+        // Two args with one name: that function is left out (#741), the device
+        // is kept.
+        for (const auto &[function, argument] : remove_functions_with_duplicate_args(reg_device.capabilities)) {
+            LOG_ERROR("[Registry] " << provider_id << "/" << device_id << ": function '" << function
+                                    << "' declares more than one argument named '" << argument
+                                    << "'; it is left out, and calls to it are refused as an unknown function");
         }
 
         // Log BEFORE the move

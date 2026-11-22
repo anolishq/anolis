@@ -15,6 +15,11 @@ commit messages only.
 
 Upgrade notes:
 
+- A provider function that declares two arguments with one name is left out
+  of the registry, logged at ERROR, and a call to it is refused as an unknown
+  function. The device and its other functions register as usual. Such a
+  function used to be listed with only the last of the two arguments while a
+  call was checked against both (#741).
 - `anolis-runtime --check-config` now loads the behaviour tree when
   automation is enabled, so a config whose tree is missing, is not XML or
   names an unregistered node fails the check (exit 1) where it used to pass.
