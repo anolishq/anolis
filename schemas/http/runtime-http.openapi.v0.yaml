@@ -118,6 +118,10 @@ paths:
             schema:
               $ref: '#/components/schemas/RunOpenRequest'
       responses:
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "503":
+          $ref: '#/components/responses/Unavailable'
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":
@@ -182,6 +186,10 @@ paths:
             schema:
               $ref: '#/components/schemas/RunCloseRequest'
       responses:
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "503":
+          $ref: '#/components/responses/Unavailable'
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":

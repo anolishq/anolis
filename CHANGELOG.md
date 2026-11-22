@@ -92,6 +92,9 @@ Upgrade notes:
 
 ### Fixed
 
+- The OpenAPI contract declares `400` and `503` for `openRun` and
+  `closeRun`, which the runtime already answers for a malformed body and
+  when the run registry is not enabled.
 - The bearer-token check compares SHA-256 digests of the presented and the
   configured token with OpenSSL's constant-time compare. It returned early
   when the two lengths differed, so how fast a token was refused showed
