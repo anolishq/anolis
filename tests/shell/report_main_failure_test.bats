@@ -12,7 +12,10 @@ setup() {
     cat > "${BATS_TEST_TMPDIR}/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${GH_LOG}"
-if [[ "$1 $2" == "issue list" ]]; then printf '%b' "${ISSUES}"; fi
+if [[ "$1 $2" == "issue list" ]]; then
+    [[ -n "${LIST_FAILS:-}" ]] && exit 1
+    printf '%b' "${ISSUES}"
+fi
 STUB
     chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
     export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
@@ -53,4 +56,12 @@ STUB
     [ "${status}" -ne 0 ]
     [[ "${output}" == *"RUN_URL is required"* ]]
     [ ! -s "${GH_LOG}" ]
+}
+
+@test "504: a failed issue listing stops the script and opens no duplicate" {
+    export LIST_FAILS=1
+    run bash "${SCRIPT}"
+    [ "${status}" -ne 0 ]
+    ! grep -q '^issue create' "${GH_LOG}"
+    ! grep -q '^issue comment' "${GH_LOG}"
 }
