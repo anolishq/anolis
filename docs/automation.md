@@ -187,9 +187,10 @@ Core runtime nodes include:
    its quality to `quality` with the names HTTP and events use (`OK`, `STALE`,
    `FAULT`, `UNAVAILABLE`; a quality the provider did not set is
    `UNAVAILABLE`). It reads numeric and bool signals (a bool as 1.0 or 0.0); a
-   string, bytes or unset signal fails the node with the reason logged. On that
-   failure `quality` is still written and `value` is not, so read `value`
-   only after a SUCCESS.
+   string, bytes or unset signal fails the node with the reason logged. Every
+   failure writes `quality`: the reading's own, or `UNAVAILABLE` when there is
+   no reading, such as a signal the cache does not hold. `value` is written
+   only on SUCCESS, so read it only after one.
 3. `CheckQuality`: SUCCESS when a signal's quality is `expected_quality`
    (default `OK`): one of `OK`, `STALE`, `FAULT` or `UNAVAILABLE`, the names
    HTTP and events use (`UNKNOWN` is accepted for `UNAVAILABLE`). Any other

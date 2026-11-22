@@ -1264,13 +1264,13 @@ _manifest_prefix() {
 
 _manifest_telemetry_export_pin() {
     # components.optional.telemetry_export.version, read as JSON, so no
-    # provider name and no key order can stand in for it (#538). python3 is
-    # already needed here: telemetry-export installs into a python3 venv.
-    # Prints nothing when there is no pin, the manifest cannot be read, or
-    # there is no python3 to read it. The caller runs this as pin=$(...) under
-    # set -e, so it must not fail: without python3 that ended the whole install
-    # with exit 127 and no message, mid-way (review of #863).
-    python3 -I -c '
+    # provider name and no key order can stand in for it (#538). Prints
+    # nothing when there is no pin or the manifest cannot be read. The caller
+    # runs this as pin=$(...) under set -e, so it must not fail: without
+    # python3 that ended the whole install with exit 127, mid-way (review of
+    # #863).
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -I -c '
 import json, sys
 try:
     with open(sys.argv[1]) as f:
@@ -1280,6 +1280,27 @@ except Exception:
 if isinstance(v, str):
     print(v)
 ' "$1" 2>/dev/null || true
+        return 0
+    fi
+    # No python3: read the layout `--stage` writes (json.dump, indent 2) by
+    # position. "optional" counts only as a key of "components" (indent 4),
+    # so a provider of that name (indent 6, under "providers") is not it
+    # (review of #900; v0.16.0 read the pin without python3 too).
+    awk '
+        /^  "components": \{/ { c = 1; next }
+        c && /^  \}/ { c = 0 }
+        c && /^    "optional": \{/ { o = 1; next }
+        o && /^    \}/ { o = 0 }
+        o && /^      "telemetry_export": \{/ { t = 1; next }
+        t && /^      \}/ { t = 0 }
+        t && /^        "version": "[^"]*"/ {
+            v = $0
+            sub(/^        "version": "/, "", v)
+            sub(/".*/, "", v)
+            print v
+            exit
+        }
+    ' "$1" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -1395,6 +1416,9 @@ resolve_telemetry_export_version() {
     if [[ -n "${ASSEMBLED_TELEMETRY_EXPORT_PIN}" ]]; then
         pin="${ASSEMBLED_TELEMETRY_EXPORT_PIN}"
     elif [[ -f "${BUNDLE_DIR}/manifest.json" ]]; then
+        if ! command -v python3 >/dev/null 2>&1; then
+            log_info "telemetry-export: no python3; reading the manifest pin by its layout"
+        fi
         pin=$(_manifest_telemetry_export_pin "${BUNDLE_DIR}/manifest.json")
     fi
     # Trust the pin only if it is fully a version string (fully anchored so a
