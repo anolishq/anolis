@@ -61,11 +61,6 @@ Upgrade notes:
 
 ### Fixed
 
-- `install.sh --local` on a target without python3 no longer stops halfway
-  through. Reading the telemetry-export pin from `manifest.json` failed with
-  exit 127 and no message, after the new binaries were in place and before
-  the runtime restarted. Without python3 the pin is now unread, as it was
-  before the reader moved to JSON (#538).
 - `ReadSignal`'s `quality` output uses the names HTTP and events use: a
   quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
   `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
@@ -94,9 +89,10 @@ Upgrade notes:
   running passed the health check, and the install reported success (#744).
 - `install.sh` refuses `--stage` with `--dry-run`. The dry run downloaded
   every component and wrote the bundle (#532).
-- `install.sh` reads the telemetry-export pin from `manifest.json` as JSON.
-  The line scan took a provider named `telemetry_export` listed after one
-  named `optional` as the pin (#538).
+- `install.sh` reads the telemetry-export pin from `manifest.json` as JSON,
+  or, on a target without python3, by the layout `--stage` writes. The line
+  scan took a provider named `telemetry_export` listed after one named
+  `optional` as the pin (#538).
 - The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when
   a run is already open, which is what the runtime answers. It declared
   `412` (#541).
