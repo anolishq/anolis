@@ -219,6 +219,8 @@ private:
                               const std::string &resolved_function_name, CallResult &result) const;
 
     // Validation helpers
+    // validate_call; a non-null flag asks for a type mismatch to be found first.
+    bool validate_call_impl(const CallRequest &request, std::string &error, bool *argument_type_mismatch) const;
     bool validate_device_exists(const std::string &device_handle, std::string &error) const;
     bool validate_function_exists(const registry::RegisteredDevice &device, const std::string &function_name,
                                   const registry::FunctionSpec *&out_spec, std::string &error) const;

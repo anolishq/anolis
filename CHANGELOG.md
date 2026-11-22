@@ -16,11 +16,22 @@ commit messages only.
 Upgrade notes:
 
 - A quoted hook argument in `safety.safe_state` or
-  `automation.mode_transition_hooks` is now a string (#637). A config that
-  quotes a number or a bool for a numeric or bool argument, such as
-  `pwm: "0"`, now refuses startup, naming the call, the argument and both
-  types: that call could never dispatch, and the safe state needing it would
-  have failed when it fired. Write numbers and bools unquoted.
+  `automation.mode_transition_hooks` is now a string (#637). Startup now
+  refuses a call the safe-state plan or a mode transition will make when an
+  argument's type is not the function's, naming the call, the argument and
+  both types: that call could never dispatch, and the safe state needing it
+  would have failed when it fired. Beyond the widening a call already gets
+  (int64 and uint64 either way, int64 to double), that is:
+  - a quoted number or bool, such as `pwm: "0"`, for a number or bool
+    argument;
+  - a fractional number, such as `1.5`, for an int64 or uint64 argument;
+  - an unquoted number or bool for a string argument;
+  - a number, such as `0` or `1`, for a bool argument;
+  - any value for a bytes argument, which no config value is;
+  - any value for an argument whose type the runtime does not know.
+  A setpoint the plan does not use, because declared hooks are the whole
+  plan, is warned about instead. Write numbers and bools unquoted, and quote
+  a string that looks like one.
 - A provider function that declares two arguments with one name is left out
   of the registry, logged at ERROR, and a call to it is refused as an unknown
   function. The device and its other functions register as usual. Such a

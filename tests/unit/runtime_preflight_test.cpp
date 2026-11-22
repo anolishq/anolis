@@ -302,6 +302,35 @@ TEST(RuntimePreflightTest, AHookArgumentOfTheWrongTypeRefusesStartup) {
     EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
 }
 
+// Review of #896: with hooks declared they are the e-stop's whole plan, so a
+// safe_state setpoint is unused. A wrong type there is a warning, as any other
+// fault in an unused setpoint is, not a reason to refuse startup.
+TEST(RuntimePreflightTest, AWrongTypeInAnUnusedSetpointIsAWarningNotARefusal) {
+    const std::string yaml = heater_hook_yaml("0") + R"(    setpoints:
+      - device_handle: bread0/heater0
+        function_name: set_pwm
+        args:
+          pwm: "0"
+)";
+    anolis::runtime::Runtime runtime(load("anolis-896-unused-setpoint.yaml", yaml));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    EXPECT_NE(log.find("Type mismatch: expected int64, got string (unused"), std::string::npos) << log;
+}
+
+// Review of #896: the mismatch was seen only when the type check was the first
+// thing to fail. An unknown or a missing argument in the same hook hid it, and
+// the machine started with an ERROR logged. `aaa` sorts before `pwm`.
+TEST(RuntimePreflightTest, AWrongTypeBehindAnotherArgumentFaultStillRefusesStartup) {
+    anolis::runtime::Runtime runtime(
+        load("anolis-896-quoted-pwm-and-unknown.yaml", heater_hook_yaml("\"0\"\n          aaa: 1")));
+    std::string error;
+    std::string log;
+    EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
+    EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
+}
+
 TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
     anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
     std::string error;

@@ -120,7 +120,9 @@ private:
      * invisible until the worst possible moment (#252). `--check-config` cannot
      * catch them: it exits before any provider starts, so no ArgSpec exists.
      *
-     * Reports loudly; never refuses to start.
+     * Reports loudly. Returns each call the plan will make whose argument has
+     * the wrong type for its function, on which startup refuses; after a
+     * provider restart the caller only reports them.
      */
     std::vector<std::string> preflight_declared_calls() const;
 
