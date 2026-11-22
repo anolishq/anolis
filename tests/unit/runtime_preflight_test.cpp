@@ -356,6 +356,22 @@ TEST(RuntimePreflightTest, AModeHookWithAutomationOffIsReportedAsUnused) {
     EXPECT_NE(log.find("(unused: automation is disabled"), std::string::npos) << log;
 }
 
+// Review of #911: a value the runtime cannot convert to the argument's type,
+// such as -1 for a uint64, only logged an ERROR, and hid a wrong type in the
+// same hook. It now refuses startup, as a wrong type does.
+TEST(RuntimePreflightTest, AValueThatCannotBeConvertedRefusesStartup) {
+    std::string yaml = heater_hook_yaml("0");
+    yaml.replace(yaml.find(R"(["--heater"])"), 12, R"(["--heater", "--duty"])");
+    yaml.replace(yaml.find("function_name: set_pwm"), 22, "function_name: set_duty");
+    yaml.replace(yaml.find("pwm: 0"), 6, "duty: -1");
+    anolis::runtime::Runtime runtime(load("anolis-911-negative-duty.yaml", yaml));
+    std::string error;
+    std::string log;
+    EXPECT_FALSE(initialize_capturing_log(runtime, error, log));
+    EXPECT_NE(error.find("set_duty"), std::string::npos) << error;
+    EXPECT_NE(error.find("duty"), std::string::npos) << error;
+}
+
 TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
     anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
     std::string error;
