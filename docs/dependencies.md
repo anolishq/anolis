@@ -42,7 +42,8 @@ Rules:
 
 - **Required PR lanes**: the `ok` job in the CI workflow gates formatting, Python lint/type, UI/runtime contracts
   (runtime HTTP, machine profile, telemetry), shell tests, observability, docs, version-sync, clang-tidy on changed lines,
-  the provider-compat lane (which runs the Python integration and scenario tests, excluding those marked stress or slow), and core build/test matrix lanes (Linux x64, Linux ARM64, Windows x64; strict and no-automation variants).
+  the provider-compat lane (which runs the Python integration and scenario tests, excluding those marked stress or slow), and core build/test matrix lanes (Linux x64 strict and no-automation, Linux ARM64 strict, Windows x64 strict). Windows x64
+  no-automation runs on `main` only; a CI failure on `main` opens a `ci-main` issue like the extended lanes do.
 - **Advisory lanes**: optional non-blocking lanes may be added as needed.
 - **Extended lanes** (outside the required `ok` gate): sanitizer (ASan/UBSan/TSan), valgrind and fuzz run on every PR
   to and push to `main` (path-filtered) through `extended.yml` and `hardening.yml`; coverage runs on `main` only. A
