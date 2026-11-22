@@ -354,8 +354,9 @@ std::vector<std::string> Runtime::preflight_declared_calls() const {
     // undispatchable is still far better up than down, and the operator needs
     // the runtime alive to fix it: the loud ERROR is the point. The exception is
     // an argument whose type does not match the function's (a quoted "0" for an
-    // int64 argument, say). That is wrong in the config, not in the inventory,
-    // and the caller refuses startup on it; the list returned names each one.
+    // int64 argument, say) in a call the plan will make. That is wrong in the
+    // config, not in the inventory, and the caller refuses startup on it; the
+    // list returned names each one.
     std::vector<std::string> type_mismatches;
     if (call_router_ == nullptr) {
         return type_mismatches;
@@ -403,7 +404,9 @@ std::vector<std::string> Runtime::preflight_declared_calls() const {
             ++absent_calls;
             return;
         }
-        if (argument_type_mismatch) {
+        // Only a call the plan will make refuses startup: an unused setpoint
+        // is warned about below, as any other fault in it is (review of #896).
+        if (argument_type_mismatch && active) {
             ++failed;
             const std::string line = where + " " + call.device_handle + "/" + target + " - " + err;
             LOG_ERROR("[Runtime] " << line << ". Write the value as the function's type (a quoted value is a string).");
