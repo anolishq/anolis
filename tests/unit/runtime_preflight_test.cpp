@@ -331,6 +331,31 @@ TEST(RuntimePreflightTest, AWrongTypeBehindAnotherArgumentFaultStillRefusesStart
     EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
 }
 
+// Review of #912: with automation off, mode-transition hooks never run, and
+// preflight skipped them entirely. A broken one is now reported as unused,
+// and never refuses startup.
+TEST(RuntimePreflightTest, AModeHookWithAutomationOffIsReportedAsUnused) {
+    const std::string yaml = heater_hook_yaml("0") + R"(automation:
+  enabled: false
+  mode_transition_hooks:
+    before_transition:
+      - to: FAULT
+        calls:
+          - device_handle: bread0/heater0
+            function_name: set_pwm
+            args:
+              pwm: "0"
+)";
+    anolis::runtime::Runtime runtime(load("anolis-912-hook-automation-off.yaml", yaml));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    EXPECT_NE(log.find("automation.mode_transition_hooks.before_transition (*->FAULT) cannot be dispatched"),
+              std::string::npos)
+        << log;
+    EXPECT_NE(log.find("(unused: automation is disabled"), std::string::npos) << log;
+}
+
 // Review of #911: a value the runtime cannot convert to the argument's type,
 // such as -1 for a uint64, only logged an ERROR, and hid a wrong type in the
 // same hook. It now refuses startup, as a wrong type does.
