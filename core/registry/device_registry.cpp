@@ -34,14 +34,14 @@ std::vector<std::pair<std::string, std::string>> remove_functions_with_duplicate
     std::vector<std::pair<std::string, std::string>> removed;
     for (auto it = caps.functions_by_id.begin(); it != caps.functions_by_id.end();) {
         std::unordered_set<std::string> seen;
-        std::optional<std::string> duplicate;
+        const std::string *duplicate = nullptr;
         for (const auto &arg : it->second.args) {
             if (!seen.insert(arg.name()).second) {
-                duplicate = arg.name();
+                duplicate = &arg.name();
                 break;
             }
         }
-        if (duplicate) {
+        if (duplicate != nullptr) {
             removed.emplace_back(it->second.function_name, *duplicate);
             it = caps.functions_by_id.erase(it);
         } else {

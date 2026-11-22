@@ -394,6 +394,9 @@ TEST_F(CallRouterTest, AFunctionDeclaringTwoArgsWithOneNameIsLeftOutAndTheDevice
 
     const auto device = registry->get_device_copy("sim0", "dev1");
     ASSERT_TRUE(device.has_value());
+    if (!device.has_value()) {
+        return;  // ASSERT_TRUE has failed; the check above is for clang-tidy's flow analysis
+    }
     EXPECT_EQ(device->capabilities.functions_by_id.count("f"), 0u);
     EXPECT_EQ(device->capabilities.functions_by_id.count("g"), 1u);
 
