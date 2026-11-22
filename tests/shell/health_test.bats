@@ -269,6 +269,7 @@ health_without_curl() {
 
 @test "536: no curl, and the restart itself failed: the install still fails, saying why" {
     health_without_curl
+    mkdir -p "${PREFIX}/.prev" && : > "${PREFIX}/.prev/anolis-runtime"  # an upgrade
     systemctl() { return 1; }
     phase_start >/dev/null
     unset -f systemctl
@@ -293,6 +294,7 @@ health_without_curl() {
     _runtime_api_token() { :; }
     HEALTH_NOT_CHECKED=0
     RUNTIME_RESTART_FAILED=0
+    mkdir -p "${PREFIX}/.prev" && : > "${PREFIX}/.prev/anolis-runtime"
     systemctl() { return 1; }
     phase_start >/dev/null
     unset -f systemctl
@@ -308,15 +310,49 @@ health_without_curl() {
     [[ "${summary}" == *"--rollback"* ]]
 }
 
+# Review of #905: --rollback was offered on a first install too, where it
+# dies "nothing to roll back".
+@test "905: a failed restart on a first install does not offer --rollback" {
+    health_with '{"version":"0.0.0"}'
+    PREFIX="${BATS_TEST_TMPDIR}/first-install"
+    _runtime_api_token() { :; }
+    HEALTH_NOT_CHECKED=0
+    RUNTIME_RESTART_FAILED=1
+    systemctl() { return 1; }
+    phase_health >/dev/null
+    _install_failed
+    run phase_summary
+    summary=$(summary_text "${output}")
+    [[ "${summary}" != *"--rollback"* ]]
+    [[ "${summary}" == *"no previous install to roll back to"* ]]
+}
+
 # Review of #859: with the restart failed, the runtime that answers is the
 # one from before the install, so the health check must not call it fine.
 @test "744: the health check does not call the old runtime this install's" {
     health_with '{"version":"0.0.0"}'
     RUNTIME_RESTART_FAILED=1
+    PRE_RESTART_PID=4242
+    systemctl() { [[ "$*" == *"MainPID"* ]] && echo 4242; }
     _run_registry_available() { echo "REGISTRY CHECKED"; return 0; }
     run phase_health
     [[ "${output}" != *"health: runtime responding"* ]]
     [[ "${output}" == *"the restart failed: it is the one from before this install"* ]]
+    [[ "${output}" != *"REGISTRY CHECKED"* ]]
+}
+
+# Review of #905: "the one from before this install" was asserted, not
+# checked. With Restart=on-failure systemd can start the new binary after the
+# failed restart; a different main pid is then not called the old one.
+@test "905: a runtime with a new main pid is not called the old one" {
+    health_with '{"version":"0.0.0"}'
+    RUNTIME_RESTART_FAILED=1
+    PRE_RESTART_PID=4242
+    systemctl() { [[ "$*" == *"MainPID"* ]] && echo 5151; }
+    _run_registry_available() { echo "REGISTRY CHECKED"; return 0; }
+    run phase_health
+    [[ "${output}" != *"from before this install"* ]]
+    [[ "${output}" != *"health: runtime responding"* ]]
     [[ "${output}" != *"REGISTRY CHECKED"* ]]
 }
 

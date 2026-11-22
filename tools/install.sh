@@ -93,6 +93,9 @@ RUNTIME_VARIANT=""
 HEALTH_FAILED=0
 # `systemctl restart anolis-runtime` failed in phase_start.
 RUNTIME_RESTART_FAILED=0
+# The runtime's systemd main pid before phase_start restarted it, so a failed
+# restart can tell the runtime it left running from one started since.
+PRE_RESTART_PID=""
 # phase_health ran none of its checks: curl is not on this host (#536).
 HEALTH_NOT_CHECKED=0
 # The startup safe state cannot be planned from the config on this machine's
@@ -2118,12 +2121,26 @@ _update_etc_hosts() {
 # Phase 18: Start services
 # =============================================================================
 
+_runtime_main_pid() {
+    systemctl show -p MainPID --value anolis-runtime 2>/dev/null || true
+}
+
+# Whether the runtime running now is the one phase_start found before its
+# failed restart: the same nonzero systemd main pid (review of #905). A
+# restart policy can start the new binary afterwards, under a new pid.
+_running_runtime_is_previous() {
+    local now
+    now=$(_runtime_main_pid)
+    [[ -n "${PRE_RESTART_PID}" && "${PRE_RESTART_PID}" != "0" && "${now}" == "${PRE_RESTART_PID}" ]]
+}
+
 phase_start() {
     if [[ ${NO_START} -eq 1 ]]; then
         log_skip "start: --no-start specified"
         return
     fi
 
+    PRE_RESTART_PID=$(_runtime_main_pid)
     systemctl restart anolis-runtime 2>/dev/null || {
         log_warn "start: failed to restart anolis-runtime"
         RUNTIME_RESTART_FAILED=1
@@ -2931,7 +2948,11 @@ phase_health() {
             # running before this install; checking it says nothing of this
             # one (review of #859).
             if [[ ${RUNTIME_RESTART_FAILED} -eq 1 ]]; then
-                log_warn "health: a runtime answers (v${version}), but the restart failed: it is the one from before this install"
+                if _running_runtime_is_previous; then
+                    log_warn "health: a runtime answers (v${version}), but the restart failed: it is the one from before this install (pid ${PRE_RESTART_PID})"
+                else
+                    log_warn "health: a runtime answers (v${version}), but the restart failed, and it is not the process that was running before; not checked"
+                fi
                 return
             fi
             log_ok "health: runtime responding (v${version})"
@@ -3033,8 +3054,16 @@ phase_summary() {
         echo ""
         log_err "systemctl restart anolis-runtime failed — the install did NOT succeed."
         log_info "  Why: sudo systemctl status anolis-runtime; sudo journalctl -u anolis-runtime --no-pager -n 50"
-        log_info "  The new files are installed; any runtime still answering is the one from before."
-        log_info "  To go back to the previous install, run this script with --rollback."
+        if _running_runtime_is_previous; then
+            log_info "  The new files are installed; the runtime still running (pid ${PRE_RESTART_PID}) is the one from before."
+        else
+            log_info "  The new files are installed; see systemctl status for what is running now."
+        fi
+        if [[ -f "${PREFIX}/.prev/anolis-runtime" ]]; then
+            log_info "  To go back to the previous install, run this script with --rollback."
+        else
+            log_info "  There is no previous install to roll back to."
+        fi
     elif [[ ${HEALTH_FAILED} -eq 1 ]]; then
         echo ""
         log_err "Runtime did not come up — the install did NOT succeed."
