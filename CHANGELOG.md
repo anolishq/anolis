@@ -68,31 +68,38 @@ Upgrade notes:
   `CheckQuality` with `expected_quality` `UNAVAILABLE` now matches such a
   reading. Every `ReadSignal` failure writes `quality`, `UNAVAILABLE` when
   there is no reading at all, so the port never keeps the previous tick's.
+- `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
+  run log, and `409` only while another run is open; both were `409`.
+  `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
+  but its close cannot be written, and the run stays open; it answered `404`.
+  The OpenAPI document declares both (#852, #554).
+- `install.sh` fails, with exit 1, when `systemctl restart anolis-runtime`
+  fails, even when something still answers on the runtime's port; it used to
+  report success (#744). It names the answering runtime as the one from
+  before the install only when its systemd main pid has not changed, and
+  offers `--rollback` only when there is a previous install.
+- `install.sh` refuses `--stage` with `--dry-run`. The dry run downloaded
+  every component and wrote the bundle (#532).
+- A behaviour tree is refused when it loads, and `--check-config` fails,
+  for a `CheckQuality` `expected_quality` that is not a quality name (#797)
+  and for `CallDevice` literal args that are not a JSON object (#806).
+  `CheckQuality` accepts `UNAVAILABLE`, which it never matched. `CallDevice`
+  args that cannot be read at tick fail the node and count as a failed call;
+  they sent a call with no arguments and logged success.
+- An automation parameter whose `default`, `min` or `max` is NaN is refused
+  at load. A NaN default passed any bound, and a NaN bound turned its check
+  off (#755).
 
 ### Fixed
 
-- `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
-  run log, and `409` only while another run is open. Both used to be `409`,
-  so a client read a full or read-only disk as a run already in progress.
-  The OpenAPI document declares the `500` (#852).
-- When `systemctl restart anolis-runtime` fails, `install.sh` no longer
-  reports `health: runtime responding` for whatever answers on the port: it
-  says that is the runtime from before the install, and skips the checks
-  that would describe it. The summary now says how to see why and that
-  `--rollback` returns to the previous install. The install has failed in
-  this case since #859, with exit 1.
 - The bearer-token check compares SHA-256 digests of the presented and the
-  configured token with OpenSSL's constant-time compare. The byte-wise walk
-  that #522 made branched on the presented token's length on every byte.
+  configured token with OpenSSL's constant-time compare. It returned early
+  when the two lengths differed, so how fast a token was refused showed
+  whether its length was right (#522).
 - An int64 automation parameter is held to its bounds exactly. A value above
   2^53 was compared as a double, so `2^53 + 1` passed `max: 2^53` (#755).
 - The ADPP `Hello` sends the runtime's version as `client_version`. It always
   sent `0.1.0` (#545).
-- `install.sh` fails when `systemctl restart anolis-runtime` fails, even when
-  something still answers on the runtime's port. The old runtime left
-  running passed the health check, and the install reported success (#744).
-- `install.sh` refuses `--stage` with `--dry-run`. The dry run downloaded
-  every component and wrote the bundle (#532).
 - `install.sh` reads the telemetry-export pin from `manifest.json` as JSON,
   or, on a target without python3, by the layout `--stage` writes. The line
   scan took a provider named `telemetry_export` listed after one named
@@ -100,14 +107,6 @@ Upgrade notes:
 - The OpenAPI contract declares `409 FAILED_PRECONDITION` for `openRun` when
   a run is already open, which is what the runtime answers. It declared
   `412` (#541).
-- `CallDevice` no longer sends a call with no arguments when its `args` cannot
-  be read. An `args` that named a blackboard key nothing wrote, or JSON
-  written without the `json:` prefix (which reads as such a key), became an
-  empty argument set, so a function whose arguments are all optional ran with
-  its defaults and logged success. Such args now fail the node and count as a
-  failed call, as do args that are not JSON, so repeated failures reach FAULT.
-  Literal args that are not a JSON object refuse the tree when it loads
-  (#806).
 - `anolis-runtime --check-config` checks the behaviour tree. It returned
   before anything read `automation.behavior_tree`, so a missing tree, a file
   that is not XML or an unregistered node passed the check and was found at
@@ -123,21 +122,29 @@ Upgrade notes:
   logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
   signal, such as the simulator's `control_mode`, got a plausible number and
   no error (#816).
-- `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
-  unknown quality. It knew only `UNKNOWN` and compared any other name
-  against an unspecified quality no reading has, so the node always failed.
-  A name that is not a quality now refuses the tree when it loads, rather
-  than never matching (#797).
-- `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
-  but its close cannot be written to the run log, and the run stays open. It
-  answered `404 NOT_FOUND`, the same as an unknown run, so a client could
-  drop a run that was still open. An unknown `run_id` is still 404, and
-  `closeRun` in the OpenAPI declares the 500 (#554).
 - The runtime-config schema accepts unknown keys under `safety.stop_chain`,
   its `status` and a `devices` mapping entry, as it does everywhere else and
   as the loader does (it warns and ignores them). A config could pass
   `anolis-runtime --check-config` and still fail schema validation. A contract
   fixture now checks that the two agree (#550).
+- The `Bearer` scheme in `Authorization` matches in any case, and one or
+  more spaces may follow it, as RFC 7235 allows. `bearer <token>` was refused
+  with the right token (#523).
+- A device a provider lists twice is registered once, so it is polled,
+  listed and visited by the safe state once (#558).
+- `polling` and `logging` warn about an unknown key, as every other config
+  section does. A typo such as `polling.interval` was dropped silently and
+  the default used (#546).
+- `HttpServer::start()` returns once the listen loop runs, so a `stop()`
+  soon after it no longer hangs (#870).
+- `install.sh`'s health poll gives up on a runtime that accepts a connection
+  and never answers, rather than hanging the install (#745).
+- `install.sh` on a target without curl says `curl not found` where it
+  blamed the network (#746).
+- `install.sh --stage` prints verify and install commands that work on the
+  target the bundle is carried to (#533).
+- Preflight no longer says "the rest are dispatchable" when every declared
+  call targets an absent device (#465).
 
 ## [0.16.0] - 2026-11-15
 
