@@ -174,7 +174,8 @@ Constraint rules:
 
 ## Custom BT Nodes (Runtime)
 
-Core runtime nodes include:
+Core runtime nodes include the following. `CheckQuality` and `CheckBool` are
+Conditions; the rest are Actions.
 
 1. `CallDevice`: calls `function_name` on `device_handle`. Its `args` is a
    JSON object after the `json:` prefix (`args='json:{"target":30.0}'`), or a

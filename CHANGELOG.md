@@ -107,6 +107,10 @@ Upgrade notes:
   other devices register as usual. Such a signal used to register, and HTTP
   reported its type as `unknown`, which is not one of the API's value types
   (#499).
+- `CheckBool` and `CheckQuality` are Conditions, not Actions, so editors
+  such as Groot2 list and draw them as such. Every tree loads as before,
+  including one that names the old kind explicitly (`<Action ID="CheckBool">`)
+  (#822).
 
 ### Fixed
 

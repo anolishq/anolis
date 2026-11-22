@@ -690,3 +690,31 @@ TEST_F(ReadSignalNodeTest, CheckQualityUnavailableMatchesAnUnsetQuality) {
         blackboard);
     EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
 }
+
+// #822: CheckBool and CheckQuality only test something, so they are
+// Conditions, which editors such as Groot2 list and draw as such.
+TEST(BtNodeKinds, CheckBoolAndCheckQualityAreConditions) {
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
+    factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
+    EXPECT_EQ(factory.manifests().at("CheckBool").type, BT::NodeType::CONDITION);
+    EXPECT_EQ(factory.manifests().at("CheckQuality").type, BT::NodeType::CONDITION);
+}
+
+// What the changelog says: every form a tree may use still loads, the explicit
+// Action form included, since BehaviorTree.CPP does not check the kind an
+// explicit tag names against the registered one.
+TEST(BtNodeKinds, EveryFormOfATreeStillLoads) {
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
+    const auto tree_with = [](const std::string &node) {
+        return std::string(R"(<root BTCPP_format="4"><BehaviorTree ID="Main">)") + node + "</BehaviorTree></root>";
+    };
+    auto blackboard = BT::Blackboard::create();
+    blackboard->set("flag", true);
+    EXPECT_NO_THROW((void)factory.createTreeFromText(tree_with(R"(<CheckBool value="{flag}"/>)"), blackboard));
+    EXPECT_NO_THROW(
+        (void)factory.createTreeFromText(tree_with(R"(<Condition ID="CheckBool" value="{flag}"/>)"), blackboard));
+    EXPECT_NO_THROW(
+        (void)factory.createTreeFromText(tree_with(R"(<Action ID="CheckBool" value="{flag}"/>)"), blackboard));
+}
