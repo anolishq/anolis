@@ -16,11 +16,22 @@ commit messages only.
 Upgrade notes:
 
 - A quoted hook argument in `safety.safe_state` or
-  `automation.mode_transition_hooks` is now a string (#637). A config that
-  quotes a number or a bool for a numeric or bool argument, such as
-  `pwm: "0"`, now refuses startup, naming the call, the argument and both
-  types: that call could never dispatch, and the safe state needing it would
-  have failed when it fired. Write numbers and bools unquoted.
+  `automation.mode_transition_hooks` is now a string (#637). Startup now
+  refuses a call the safe-state plan or a mode transition will make when an
+  argument's type is not the function's, naming the call, the argument and
+  both types: that call could never dispatch, and the safe state needing it
+  would have failed when it fired. Beyond the widening a call already gets
+  (int64 and uint64 either way, int64 to double), that is:
+  - a quoted number or bool, such as `pwm: "0"`, for a number or bool
+    argument;
+  - a fractional number, such as `1.5`, for an int64 or uint64 argument;
+  - an unquoted number or bool for a string argument;
+  - a number, such as `0` or `1`, for a bool argument;
+  - any value for a bytes argument, which no config value is;
+  - any value for an argument whose type the runtime does not know.
+  A setpoint the plan does not use, because declared hooks are the whole
+  plan, is warned about instead. Write numbers and bools unquoted, and quote
+  a string that looks like one.
 - A provider function that declares two arguments with one name is left out
   of the registry, logged at ERROR, and a call to it is refused as an unknown
   function. The device and its other functions register as usual. Such a
@@ -47,6 +58,13 @@ Upgrade notes:
   (`1e-08`, `3.14`, `25`) in the log, `parameter_change` events, the InfluxDB
   fields and the run journal. It was `%f` with six decimals, so `1e-8` and
   `2e-8` both printed `0.000000` (#756).
+- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
+  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
+  `UNSPECIFIED` or `UNKNOWN`. A tree that compares `quality` with
+  `UNSPECIFIED` or `UNKNOWN` no longer matches; compare with `UNAVAILABLE`.
+  `CheckQuality` with `expected_quality` `UNAVAILABLE` now matches such a
+  reading. Every `ReadSignal` failure writes `quality`, `UNAVAILABLE` when
+  there is no reading at all, so the port never keeps the previous tick's.
 
 ### Fixed
 
@@ -55,12 +73,6 @@ Upgrade notes:
   exit 127 and no message, after the new binaries were in place and before
   the runtime restarted. Without python3 the pin is now unread, as it was
   before the reader moved to JSON (#538).
-- `ReadSignal`'s `quality` output uses the names HTTP and events use: a
-  quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
-  `UNSPECIFIED` or `UNKNOWN`. `CheckQuality` with `expected_quality`
-  `UNAVAILABLE` now matches such a reading. On a signal it cannot read as a
-  number, `ReadSignal` still writes `quality`, so the port no longer keeps the
-  previous tick's.
 - `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
   run log, and `409` only while another run is open. Both used to be `409`,
   so a client read a full or read-only disk as a run already in progress.
