@@ -98,6 +98,9 @@ Upgrade notes:
 - With automation disabled, startup preflight checks mode-transition hooks
   as unused: one that cannot be dispatched is warned about, naming the hook,
   where it was skipped. It never refuses startup.
+- `install.sh` refuses a telemetry-export pin or a project directory name
+  with a non-ASCII letter in any locale. Under a UTF-8 locale its checks'
+  `[A-Za-z]` ranges also took letters such as `é`.
 - The bearer-token check compares SHA-256 digests of the presented and the
   configured token with OpenSSL's constant-time compare. It returned early
   when the two lengths differed, so how fast a token was refused showed

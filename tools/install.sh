@@ -93,6 +93,11 @@ RUNTIME_VARIANT=""
 HEALTH_FAILED=0
 # `systemctl restart anolis-runtime` failed in phase_start.
 RUNTIME_RESTART_FAILED=0
+# Character classes spelled out: bash reads a bracket range such as [A-Za-z]
+# by the locale's collation, which under a UTF-8 locale also takes letters
+# such as é (review of #916).
+_ASCII_DIGITS=0123456789
+_ASCII_ALNUM=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 # The runtime's systemd main pid before phase_start restarted it, so a failed
 # restart can tell the runtime it left running from one started since.
 PRE_RESTART_PID=""
@@ -1432,7 +1437,7 @@ resolve_telemetry_export_version() {
     # Trust the pin only if it is fully a version string (fully anchored so a
     # tampered manifest like "1.2.3; rm -rf /" is rejected, not passed to pip).
     if [[ -n "${pin}" ]]; then
-        if [[ "${pin}" =~ ^[0-9]+\.[0-9]+\.[0-9][A-Za-z0-9.]*$ ]]; then
+        if [[ "${pin}" =~ ^[${_ASCII_DIGITS}]+\.[${_ASCII_DIGITS}]+\.[${_ASCII_DIGITS}][${_ASCII_ALNUM}.]*$ ]]; then
             if [[ -n "${TELEMETRY_EXPORT_VERSION_ENV}" && "${TELEMETRY_EXPORT_VERSION_ENV}" != "${pin}" ]]; then
                 log_warn "telemetry-export: profile pin ${pin} overrides TELEMETRY_EXPORT_VERSION=${TELEMETRY_EXPORT_VERSION_ENV} (D12: profile is source of truth)"
             fi
@@ -2952,14 +2957,18 @@ phase_health() {
         if _runtime_curl -fsS "${url}" &>/dev/null; then
             local version
             version=$(_runtime_curl -fsS "${url}" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"\(.*\)"/\1/' || echo "unknown")
-            # The restart failed, so what answers is the runtime that was
-            # running before this install; checking it says nothing of this
-            # one (review of #859).
+            # The restart failed, so whatever answers is not known to run this
+            # install's binaries: the runtime from before it, kept running, or
+            # one a restart policy started since. It is named only when its
+            # systemd main pid shows which, and not checked either way
+            # (review of #859, #905, #917).
             if [[ ${RUNTIME_RESTART_FAILED} -eq 1 ]]; then
                 if _running_runtime_is_previous; then
                     log_warn "health: a runtime answers (v${version}), but the restart failed: it is the one from before this install (pid ${PRE_RESTART_PID})"
+                elif [[ -z "${PRE_RESTART_PID}" || "${PRE_RESTART_PID}" == "0" ]]; then
+                    log_warn "health: a runtime answers (v${version}), but the restart failed, and none was running before it; which binaries it runs is unknown, so it is not checked"
                 else
-                    log_warn "health: a runtime answers (v${version}), but the restart failed, and it is not the process that was running before; not checked"
+                    log_warn "health: a runtime answers (v${version}), but the restart failed, and it started after that restart; which binaries it runs is unknown, so it is not checked"
                 fi
                 return
             fi
@@ -3563,7 +3572,7 @@ stage_check_deps() {
 # writes it into the rendered configs as projects/<name>/, as it is: outside
 # letters, digits, `.`, `_` and `-` it could change what those configs mean.
 _check_project_name() {
-    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] \
+    [[ "$1" =~ ^[${_ASCII_ALNUM}._-]+$ ]] \
         || die "project directory name '$1' has characters other than letters, digits, '.', '_' and '-'; rename the directory"
 }
 
