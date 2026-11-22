@@ -1483,5 +1483,33 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     return true;
 }
 
+bool check_behavior_tree(const RuntimeConfig &config, bool &checked, std::string &error) {
+    checked = false;
+    if (!config.automation.enabled) {
+        return true;
+    }
+#if ANOLIS_ENABLE_AUTOMATION
+    checked = true;
+    registry::DeviceRegistry registry;
+    state::StateCache state_cache(registry, config.polling.interval_ms);
+    control::CallRouter call_router(registry, state_cache);
+    provider::ProviderRegistry provider_registry;
+    automation::ModeManager mode_manager(automation::RuntimeMode::MANUAL);
+    automation::ParameterManager parameter_manager;
+    // The tree is loaded against the config's parameters, as at start.
+    for (const auto &param_config : config.automation.parameters) {
+        (void)parameter_manager.define(param_config.name, param_config.type, param_config.default_value,
+                                       param_config.min, param_config.max, param_config.allowed_values_constraint());
+    }
+    automation::BTRuntime bt_runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto outcome = bt_runtime.load(automation::AutomationDefinitionRef{config.automation.behavior_tree});
+    if (!outcome.ok) {
+        error = outcome.error;
+        return false;
+    }
+#endif
+    return true;
+}
+
 }  // namespace runtime
 }  // namespace anolis

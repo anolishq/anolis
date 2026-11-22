@@ -1,0 +1,1 @@
+this file is not XML; --check-config must refuse a tree that does not parse (#804)

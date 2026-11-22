@@ -55,6 +55,9 @@ fixtures:
   - file: tests/contracts/runtime-config/valid/18-restart-timeout-below-startup-budget.yaml
     expect: valid
     note: explicit restart_policy.timeout_ms below hello_timeout_ms + ready_timeout_ms warns, not rejects (#556)
+  - file: tests/contracts/runtime-config/valid/19-safety-stop-chain-unknown-keys.yaml
+    expect: valid
+    note: unknown keys under safety.stop_chain, its status and a devices mapping are warn-and-ignore in both the schema and the loader (#550)
 
   - file: tests/contracts/runtime-config/invalid/schema/01-runtime-mode-forbidden.yaml
     expect: invalid/schema
@@ -126,3 +129,12 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/10-parameter-duplicate-name.yaml
     expect: invalid/runtime
     note: two automation parameters share a name (#567)
+  - file: tests/contracts/runtime-config/invalid/runtime/11-automation-behavior-tree-missing.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree names a file that does not exist (#804)
+  - file: tests/contracts/runtime-config/invalid/runtime/12-automation-behavior-tree-not-xml.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree is not XML (#804)
+  - file: tests/contracts/runtime-config/invalid/runtime/13-automation-behavior-tree-unregistered-node.yaml
+    expect: invalid/runtime
+    note: automation.behavior_tree names a node the runtime does not register (#804)

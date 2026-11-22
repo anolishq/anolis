@@ -85,7 +85,10 @@ static std::string quality_to_string(anolis::deviceprovider::v1::SignalValue_Qua
 }
 
 // Helper: Convert string to quality enum
-static anolis::deviceprovider::v1::SignalValue_Quality string_to_quality(const std::string &s) {
+// The quality names CheckQuality accepts. UNAVAILABLE is the name HTTP and
+// events give QUALITY_UNKNOWN; UNKNOWN is kept for trees written before. Any
+// other text is not a quality (#797).
+static std::optional<anolis::deviceprovider::v1::SignalValue_Quality> string_to_quality(const std::string &s) {
     if (s == "OK") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK;
     }
@@ -95,11 +98,13 @@ static anolis::deviceprovider::v1::SignalValue_Quality string_to_quality(const s
     if (s == "FAULT") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_FAULT;
     }
-    if (s == "UNKNOWN") {
+    if (s == "UNAVAILABLE" || s == "UNKNOWN") {
         return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNKNOWN;
     }
-    return anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_UNSPECIFIED;
+    return std::nullopt;
 }
+
+static constexpr const char *kQualityNames = "OK, STALE, FAULT, UNAVAILABLE";
 
 // Helper: Create protobuf Value from double
 static anolis::deviceprovider::v1::Value double_to_value(double d) {
@@ -195,16 +200,62 @@ std::optional<BTServiceContext> ReadSignalNode::get_services() const {
 // CallDeviceNode
 //-----------------------------------------------------------------------------
 
+namespace {
+
+// The args a CallDevice port carries when it is literal text, not a
+// blackboard reference: what follows "json:" must be a JSON object. Returns
+// the reason when it is not (#806).
+std::optional<std::string> literal_args_problem(const std::string &raw) {
+    if (raw.empty() || raw == "{}") {
+        return std::nullopt;
+    }
+    if (raw.rfind("json:", 0) == 0) {
+        try {
+            if (!nlohmann::json::parse(raw.substr(5)).is_object()) {
+                return "args after json: must be a JSON object, got: " + raw;
+            }
+        } catch (const nlohmann::json::parse_error &e) {
+            return "args after json: are not valid JSON: " + std::string(e.what());
+        }
+        return std::nullopt;
+    }
+    if (BT::TreeNode::isBlackboardPointer(raw)) {
+        // {"value":25.0} reads as a reference to a blackboard key named
+        // "value":25.0, which nothing writes, so its call went out with no
+        // arguments. A key with quotes or a colon is JSON meant literally.
+        if (raw.find_first_of("\":") != std::string::npos) {
+            return "args " + raw + " is JSON without the json: prefix; write it as json:" + raw;
+        }
+        return std::nullopt;
+    }
+    return "args must be json:{...} or a blackboard reference {key}, got: " + raw;
+}
+
+}  // namespace
+
 CallDeviceNode::CallDeviceNode(const std::string &name, const BT::NodeConfig &config)
-    : BT::SyncActionNode(name, config) {}
+    : BT::SyncActionNode(name, config) {
+    // Literal args are checked when the tree is built, so a malformed one
+    // refuses the tree rather than failing, or calling with no arguments, at
+    // every tick (#806).
+    const auto it = config.input_ports.find("args");
+    if (it != config.input_ports.end()) {
+        if (const auto problem = literal_args_problem(it->second)) {
+            throw BT::RuntimeError("CallDevice '", name, "': ", *problem);
+        }
+    }
+}
 
 BT::PortsList CallDeviceNode::providedPorts() {
     // Structured payload interface: device_handle + function_name + args (JSON)
-    // Args is a JSON object string, e.g., '{"target":30.0}'
+    // Args is a JSON object after the json: prefix, e.g. 'json:{"target":30.0}',
+    // or a blackboard reference holding one.
     // Validation handled by CallRouter using ArgSpec metadata
     return {BT::InputPort<std::string>("device_handle", "Device handle (provider_id/device_id)"),
             BT::InputPort<std::string>("function_name", "Function identifier"),
-            BT::InputPort<std::string>("args", "{}", "Arguments as JSON object (e.g., '{\"target\":30.0}')"),
+            BT::InputPort<std::string>("args", "{}",
+                                       "Arguments as a JSON object after the json: prefix (e.g., "
+                                       "'json:{\"target\":30.0}'), or a blackboard reference holding one"),
             BT::InputPort<std::string>("reason", "", "Optional emission reason included in the success log"),
             BT::OutputPort<bool>("success", "Call result (true/false)"),
             BT::OutputPort<std::string>("error", "Error message if call failed")};
@@ -237,8 +288,33 @@ BT::NodeStatus CallDeviceNode::tick() {
     request.is_automated = true;      // Mark as automated (BT) call to bypass manual gating
     request.is_behavior_tree = true;  // Subject to the device-loss latch (#285)
 
-    // Parse args JSON and convert to protobuf Value map
-    auto args_str = getInput<std::string>("args").value_or("{}");
+    // An args failure is a failed call: it is reported and counted like one,
+    // so repeated failures reach FAULT, and no call goes out (#806).
+    const auto fail_args = [&](const std::string &reason) {
+        LOG_ERROR("[CallDeviceNode] " << device_handle.value() << "/" << function_name.value() << ": " << reason);
+        setOutput("success", false);
+        setOutput("error", reason);
+        if (services->on_call_result) {
+            const auto fault = services->on_call_result(device_handle.value(), function_name.value(), false, reason);
+            if (!fault.empty()) {
+                throw std::runtime_error(fault);
+            }
+        }
+        return BT::NodeStatus::FAILURE;
+    };
+
+    // Parse args JSON and convert to protobuf Value map. An absent port means
+    // no arguments; a port that is present but cannot be read is a failure,
+    // not an empty argument set.
+    std::string args_str = "{}";
+    const auto args_port = config().input_ports.find("args");
+    if (args_port != config().input_ports.end() && !args_port->second.empty() && args_port->second != "{}") {
+        auto read = getInput<std::string>("args");
+        if (!read) {
+            return fail_args("args could not be read: " + read.error());
+        }
+        args_str = read.value();
+    }
 
     // Strip "json:" prefix if present (BT.CPP convention for JSON literals)
     if (args_str.size() >= 5 && args_str.substr(0, 5) == "json:") {
@@ -250,10 +326,7 @@ BT::NodeStatus CallDeviceNode::tick() {
             auto json_args = nlohmann::json::parse(args_str);
 
             if (!json_args.is_object()) {
-                LOG_ERROR("[CallDeviceNode] args must be a JSON object, got: " << args_str);
-                setOutput("success", false);
-                setOutput("error", "args must be a JSON object");
-                return BT::NodeStatus::FAILURE;
+                return fail_args("args must be a JSON object, got: " + args_str);
             }
             for (auto &[key, value] : json_args.items()) {
                 if (value.is_number_float()) {
@@ -266,17 +339,11 @@ BT::NodeStatus CallDeviceNode::tick() {
                 } else if (value.is_string()) {
                     request.args[key] = string_to_value(value.get<std::string>());
                 } else {
-                    LOG_ERROR("[CallDeviceNode] Unsupported JSON type for arg '" << key << "'");
-                    setOutput("success", false);
-                    setOutput("error", "Unsupported JSON type for arg '" + key + "'");
-                    return BT::NodeStatus::FAILURE;
+                    return fail_args("Unsupported JSON type for arg '" + key + "'");
                 }
             }
         } catch (const nlohmann::json::parse_error &e) {
-            LOG_ERROR("[CallDeviceNode] JSON parse error: " << e.what());
-            setOutput("success", false);
-            setOutput("error", std::string("JSON parse error: ") + e.what());
-            return BT::NodeStatus::FAILURE;
+            return fail_args(std::string("JSON parse error: ") + e.what());
         }
     }
 
@@ -336,7 +403,17 @@ std::optional<BTServiceContext> CallDeviceNode::get_services() const {
 //-----------------------------------------------------------------------------
 
 CheckQualityNode::CheckQualityNode(const std::string &name, const BT::NodeConfig &config)
-    : BT::SyncActionNode(name, config) {}
+    : BT::SyncActionNode(name, config) {
+    // A literal expected_quality is checked when the tree is built, so a typo
+    // refuses the tree instead of a node that can never match (#797). A value
+    // from the blackboard is checked at tick.
+    const auto it = config.input_ports.find("expected_quality");
+    if (it != config.input_ports.end() && !BT::TreeNode::isBlackboardPointer(it->second) &&
+        !string_to_quality(it->second)) {
+        throw BT::RuntimeError("CheckQuality '", name, "': expected_quality '", it->second, "' is not one of ",
+                               kQualityNames);
+    }
+}
 
 BT::PortsList CheckQualityNode::providedPorts() {
     return {BT::InputPort<std::string>("device_handle", "Device handle (provider_id/device_id)"),
@@ -370,9 +447,14 @@ BT::NodeStatus CheckQualityNode::tick() {
     }
 
     // Check quality
-    auto expected_quality = string_to_quality(expected_quality_str);
+    const auto expected_quality = string_to_quality(expected_quality_str);
+    if (!expected_quality) {
+        LOG_ERROR("[CheckQualityNode] expected_quality '" << expected_quality_str << "' is not one of "
+                                                          << kQualityNames);
+        return BT::NodeStatus::FAILURE;
+    }
 
-    if (signal_value->quality == expected_quality) {
+    if (signal_value->quality == *expected_quality) {
         return BT::NodeStatus::SUCCESS;
     }
 

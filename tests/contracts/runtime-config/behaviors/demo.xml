@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!-- The tree the runtime-config fixtures name. anolis-runtime --check-config
+     loads it, so it must parse with the runtime's node set (#804). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <AlwaysSuccess/>
+  </BehaviorTree>
+</root>

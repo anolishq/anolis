@@ -4,5 +4,5 @@ providers:
 
 automation:
   enabled: true
-  behavior_tree: ./behaviors/demo.xml
+  behavior_tree: ../behaviors/demo.xml
   max_consecutive_call_failures: 5

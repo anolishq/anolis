@@ -13,8 +13,33 @@ commit messages only.
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- `anolis-runtime --check-config` now loads the behaviour tree when
+  automation is enabled, so a config whose tree is missing, is not XML or
+  names an unregistered node fails the check (exit 1) where it used to pass.
+  Before 1.0 a new refusal is a MINOR change.
+- A relative `automation.behavior_tree` is resolved against the config file's
+  directory, as `runtime.data_dir` is. A tree found only relative to the
+  working directory, as configs written for the old rule have it, still
+  loads, with a `[Config]` warning naming the path to use. Move such paths
+  to config-relative ones: the fallback will be removed in a later MINOR.
+
 ### Fixed
 
+- `CallDevice` no longer sends a call with no arguments when its `args` cannot
+  be read. An `args` that named a blackboard key nothing wrote, or JSON
+  written without the `json:` prefix (which reads as such a key), became an
+  empty argument set, so a function whose arguments are all optional ran with
+  its defaults and logged success. Such args now fail the node and count as a
+  failed call, as do args that are not JSON, so repeated failures reach FAULT.
+  Literal args that are not a JSON object refuse the tree when it loads
+  (#806).
+- `anolis-runtime --check-config` checks the behaviour tree. It returned
+  before anything read `automation.behavior_tree`, so a missing tree, a file
+  that is not XML or an unregistered node passed the check and was found at
+  start. A bare tree file name, which failed at start with `cannot make
+  absolute path`, loads (#804).
 - A quoted hook argument in `safety.safe_state` or
   `automation.mode_transition_hooks` is a string, whatever its text. A quoted
   `"1"` or `"true"` used to reach the call as an int64 or a bool, so a
@@ -25,6 +50,21 @@ commit messages only.
   logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
   signal, such as the simulator's `control_mode`, got a plausible number and
   no error (#816).
+- `CheckQuality` accepts `UNAVAILABLE`, the name HTTP and events give an
+  unknown quality. It knew only `UNKNOWN` and compared any other name
+  against an unspecified quality no reading has, so the node always failed.
+  A name that is not a quality now refuses the tree when it loads, rather
+  than never matching (#797).
+- `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
+  but its close cannot be written to the run log, and the run stays open. It
+  answered `404 NOT_FOUND`, the same as an unknown run, so a client could
+  drop a run that was still open. An unknown `run_id` is still 404, and
+  `closeRun` in the OpenAPI declares the 500 (#554).
+- The runtime-config schema accepts unknown keys under `safety.stop_chain`,
+  its `status` and a `devices` mapping entry, as it does everywhere else and
+  as the loader does (it warns and ignores them). A config could pass
+  `anolis-runtime --check-config` and still fail schema validation. A contract
+  fixture now checks that the two agree (#550).
 
 ## [0.16.0] - 2026-11-15
 

@@ -939,6 +939,53 @@ TEST(BTRuntimeTest, RepeatedCallFailuresDriveFaultNamingTheCall) {
     std::filesystem::remove(tree_path, ec);
 }
 
+namespace {
+
+// anolis#806: args read from the blackboard that are not JSON. Every tick's
+// CallDevice fails before any call goes out.
+constexpr char kBadArgsTreeXml[] = R"(<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <SetBlackboard output_key="pump_args" value="not json"/>
+      <CallDevice device_handle="ghost0/pump0" function_name="dose_on" args="{pump_args}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+)";
+
+}  // namespace
+
+// anolis#806: an args failure is a failed call, so it is counted like one and
+// three in a row fault the runtime. Before, the node failed outside the
+// accounting and the runtime stayed in AUTO, logging an error every tick.
+TEST(BTRuntimeTest, RepeatedArgsFailuresDriveFault) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto tree_path = write_tree_file("anolis-806-bad-args", kBadArgsTreeXml);
+    ASSERT_TRUE(runtime.load(AutomationDefinitionRef{tree_path.string()}).ok);
+    std::string err;
+    ASSERT_TRUE(mode_manager.set_mode(RuntimeMode::AUTO, err)) << err;
+    ASSERT_TRUE(runtime.start(err)) << err;
+
+    ASSERT_TRUE(wait_for([&] { return mode_manager.current_mode() == RuntimeMode::FAULT; }))
+        << "bad args kept the runtime in " << mode_to_string(mode_manager.current_mode());
+    const auto health = runtime.get_health();
+    EXPECT_NE(health.last_error.find("ghost0/pump0 dose_on"), std::string::npos) << health.last_error;
+    EXPECT_NE(health.last_error.find("JSON parse error"), std::string::npos) << health.last_error;
+
+    runtime.stop();
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
 // anolis#678: entering AUTO starts a new run, so the count starts again: after
 // a recovery through MANUAL, it takes another three failures to fault, not one.
 TEST(BTRuntimeTest, EnteringAutoRestartsTheCallFailureCount) {

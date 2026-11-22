@@ -176,12 +176,22 @@ Constraint rules:
 
 Core runtime nodes include:
 
-1. `CallDevice`
+1. `CallDevice`: calls `function_name` on `device_handle`. Its `args` is a
+   JSON object after the `json:` prefix (`args='json:{"target":30.0}'`), or a
+   blackboard reference holding one (`args="{target_args}"`); with no `args`
+   it sends no arguments. Literal `args` that are not a JSON object refuse the
+   tree when it loads. Args that cannot be read at tick fail the node and count
+   as a failed call, so they reach FAULT after
+   `automation.max_consecutive_call_failures`.
 2. `ReadSignal`: writes a signal's value to its `value` port as a double, and
    its quality to `quality`. It reads numeric and bool signals (a bool as 1.0
    or 0.0); a string, bytes or unset signal fails the node with the reason
    logged.
-3. `CheckQuality`
+3. `CheckQuality`: SUCCESS when a signal's quality is `expected_quality`
+   (default `OK`): one of `OK`, `STALE`, `FAULT` or `UNAVAILABLE`, the names
+   HTTP and events use (`UNKNOWN` is accepted for `UNAVAILABLE`). Any other
+   name refuses the tree when it loads, or fails the node when it comes from
+   the blackboard.
 4. `GetParameter`
 5. `GetParameterBool`
 6. `GetParameterInt64`
@@ -270,7 +280,10 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
 1. `UNAVAILABLE` from automation endpoints:
    - automation disabled in config or compiled out.
 2. BT load failure:
-   - invalid tree path/XML or port type mismatch.
+   - invalid tree path/XML, an unregistered node or a port type mismatch.
+     `anolis-runtime --check-config` loads the tree and reports these before
+     a start. A relative `automation.behavior_tree` is resolved against the
+     config file's directory.
 3. Manual calls blocked unexpectedly:
    - verify mode and `manual_gating_policy`.
 4. Parameter update rejected:
