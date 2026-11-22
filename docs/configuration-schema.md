@@ -344,7 +344,11 @@ Call objects use the same shape as `mode_transition_hooks` calls
 `device_handle` and a function selector. An `args` value is typed by its YAML
 scalar: a quoted value (`"1"`, `'true'`) or one tagged `!!str` is a string,
 and a plain value is a bool, an integer, a number or a string by its text.
-Quote a string argument that looks like a number or a bool. When none of the three apply,
+Quote a string argument that looks like a number or a bool, and leave a
+number or a bool unquoted. A declared call whose argument has the wrong type
+for its function (`pwm: "0"` for an int64 `pwm`) refuses startup once the
+providers report their functions, naming the call, the argument and both
+types. `--check-config` cannot catch it: it runs before any provider does. When none of the three apply,
 `POST /v0/estop` reports `software_safe_state: "none"` and latches without
 running a ladder. On an automation machine its `FAULT` entry still runs the
 `-> FAULT` mode-transition hooks, actuating calls included.
