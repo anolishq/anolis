@@ -353,10 +353,12 @@ TEST_F(CallRouterTest, ValidateCallAcceptsWhatExecuteCallWouldDispatch) {
 // is enforced, and each duplicate converts the value in declared order before
 // the last one's type and range are checked. A call that matches the shown arg
 // can still be refused.
-// #741: a function that declares two args with one name is refused at
+// #741: a function that declares two args with one name is left out at
 // registration, so capabilities never shows one arg while calls are checked
-// against another.
-TEST_F(CallRouterTest, ADeviceDeclaringTwoArgsWithOneNameIsNotRegistered) {
+// against another. The device and its other functions are kept: dropping the
+// whole device took a working device off a running machine on a provider
+// restart (review of #885).
+TEST_F(CallRouterTest, AFunctionDeclaringTwoArgsWithOneNameIsLeftOutAndTheDeviceKept) {
     EXPECT_CALL(*mock_provider, list_devices(_)).WillOnce(Invoke([](std::vector<Device>& devices) {
         Device dev;
         dev.set_device_id("dev1");
@@ -379,18 +381,37 @@ TEST_F(CallRouterTest, ADeviceDeclaringTwoArgsWithOneNameIsNotRegistered) {
             last->set_required(false);
             last->set_min_int64(0);
             last->set_max_int64(10);
+            auto* good = response.mutable_capabilities()->add_functions();
+            good->set_name("g");
+            good->set_function_id(2);
+            auto* y = good->add_args();
+            y->set_name("y");
+            y->set_type(anolis::deviceprovider::v1::VALUE_TYPE_INT64);
+            y->set_required(true);
             return true;
         }));
     registry->discover_provider("sim0", *mock_provider);
 
-    EXPECT_FALSE(registry->get_device_copy("sim0", "dev1").has_value());
+    const auto device = registry->get_device_copy("sim0", "dev1");
+    ASSERT_TRUE(device.has_value());
+    if (!device.has_value()) {
+        return;  // ASSERT_TRUE has failed; the check above is for clang-tidy's flow analysis
+    }
+    EXPECT_EQ(device->capabilities.functions_by_id.count("f"), 0u);
+    EXPECT_EQ(device->capabilities.functions_by_id.count("g"), 1u);
 
     std::string error;
-    control::CallRequest call;
-    call.device_handle = "sim0/dev1";
-    call.function_id = 1;
-    call.args["x"] = Int64Value(3);
-    EXPECT_FALSE(router->validate_call(call, error));
+    control::CallRequest bad;
+    bad.device_handle = "sim0/dev1";
+    bad.function_id = 1;
+    bad.args["x"] = Int64Value(3);
+    EXPECT_FALSE(router->validate_call(bad, error));
+
+    control::CallRequest ok;
+    ok.device_handle = "sim0/dev1";
+    ok.function_name = "g";
+    ok.args["y"] = Int64Value(3);
+    EXPECT_TRUE(router->validate_call(ok, error)) << error;
 }
 
 TEST_F(CallRouterTest, ExecuteCallSuccess) {

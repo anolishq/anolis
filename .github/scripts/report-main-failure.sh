@@ -22,14 +22,19 @@ body="${WORKFLOW} failed on main at ${SHA}: ${RUN_URL}"
 gh label create "${label}" --color B60205 \
     --description "A workflow failed on main" >/dev/null 2>&1 || true
 
+# Listed into a variable, not through a process substitution: a failed
+# listing must stop the script rather than read as "no open issue" and open
+# a duplicate.
+open_issues=$(gh issue list --state open --label "${label}" --limit 100 \
+    --json number,title --jq '.[] | "\(.number)\t\(.title)"')
+
 existing=""
 while IFS=$'\t' read -r number issue_title; do
     if [[ "${issue_title}" == "${title}" ]]; then
         existing="${number}"
         break
     fi
-done < <(gh issue list --state open --label "${label}" --limit 100 \
-    --json number,title --jq '.[] | "\(.number)\t\(.title)"')
+done <<< "${open_issues}"
 
 if [[ -n "${existing}" ]]; then
     gh issue comment "${existing}" --body "${body}"
