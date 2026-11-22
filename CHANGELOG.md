@@ -92,6 +92,9 @@ Upgrade notes:
 
 ### Fixed
 
+- With automation disabled, startup preflight checks mode-transition hooks
+  as unused: one that cannot be dispatched is warned about, naming the hook,
+  where it was skipped. It never refuses startup.
 - The bearer-token check compares SHA-256 digests of the presented and the
   configured token with OpenSSL's constant-time compare. It returned early
   when the two lengths differed, so how fast a token was refused showed
