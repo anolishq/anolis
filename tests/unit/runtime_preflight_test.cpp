@@ -302,6 +302,23 @@ TEST(RuntimePreflightTest, AHookArgumentOfTheWrongTypeRefusesStartup) {
     EXPECT_NE(error.find("Argument 'pwm': Type mismatch: expected int64, got string"), std::string::npos) << error;
 }
 
+// Review of #896: with hooks declared they are the e-stop's whole plan, so a
+// safe_state setpoint is unused. A wrong type there is a warning, as any other
+// fault in an unused setpoint is, not a reason to refuse startup.
+TEST(RuntimePreflightTest, AWrongTypeInAnUnusedSetpointIsAWarningNotARefusal) {
+    const std::string yaml = heater_hook_yaml("0") + R"(    setpoints:
+      - device_handle: bread0/heater0
+        function_name: set_pwm
+        args:
+          pwm: "0"
+)";
+    anolis::runtime::Runtime runtime(load("anolis-896-unused-setpoint.yaml", yaml));
+    std::string error;
+    std::string log;
+    ASSERT_TRUE(initialize_capturing_log(runtime, error, log)) << error;
+    EXPECT_NE(log.find("Type mismatch: expected int64, got string (unused"), std::string::npos) << log;
+}
+
 TEST(RuntimePreflightTest, AHookArgumentOfTheRightTypeStarts) {
     anolis::runtime::Runtime runtime(load("anolis-886-plain-pwm.yaml", heater_hook_yaml("0")));
     std::string error;
