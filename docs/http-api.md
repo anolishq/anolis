@@ -284,7 +284,8 @@ own lifecycle events in it (`run_opened`, `run_closed`, `mode_change`,
 tied to a run by its time window.
 
 1. `POST /v0/runs` - open a run. Optional body: `label`, `params` (any
-   object), `tag_scope`. Returns `409` while another run is open. A run's
+   object), `tag_scope`. Returns `409` while another run is open, and `500`
+   when the run cannot be written to the run log (no run opens). A run's
    record carries `label` and, through 0.9.x, the same value as the deprecated
    `experiment_label`, which a request may still send instead of `label`.
    Sent both with different values, the request is refused with `400`.
