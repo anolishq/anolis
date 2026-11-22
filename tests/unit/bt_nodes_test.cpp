@@ -648,6 +648,24 @@ TEST_F(ReadSignalNodeTest, WritesTheQualityOfASignalItCannotRead) {
     EXPECT_EQ("STALE", blackboard->get<std::string>("quality"));
 }
 
+// Review of #902: a signal the cache no longer holds (its device dropped
+// out) left `quality` at the last tick's value. Every failure writes one.
+TEST_F(ReadSignalNodeTest, ASignalNotInTheCacheWritesUnavailableOverTheLastQuality) {
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
+    auto blackboard = BT::Blackboard::create();
+    anolis::automation::BTServiceContext services;
+    services.state_cache = state_cache_.get();
+    blackboard->set(anolis::automation::kBTServiceContextKey, services);
+    blackboard->set<std::string>("quality", "OK");  // an earlier tick's
+    auto tree = factory.createTreeFromText(R"(<root BTCPP_format="4"><BehaviorTree ID="Main">
+<ReadSignal device_handle="sim0/gone0" signal_id="temp" value="{value}" quality="{quality}"/>
+</BehaviorTree></root>)",
+                                           blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    EXPECT_EQ("UNAVAILABLE", blackboard->get<std::string>("quality"));
+}
+
 // Review of #888: a quality the provider did not set is UNAVAILABLE, the name
 // HTTP and events give it, not UNSPECIFIED.
 TEST_F(ReadSignalNodeTest, AnUnsetQualityReadsAsUnavailable) {
