@@ -15,16 +15,20 @@ commit messages only.
 
 Upgrade notes:
 
-- A quoted hook argument in `safety.safe_state` or
-  `automation.mode_transition_hooks` is now a string (#637). Startup now
+- A quoted argument in a `safety.safe_state` hook or setpoint, or in
+  `automation.mode_transition_hooks`, is now a string (#637). Startup now
   refuses a call the safe-state plan or a mode transition will make when an
-  argument's type is not the function's, naming the call, the argument and
-  both types: that call could never dispatch, and the safe state needing it
-  would have failed when it fired. Beyond the widening a call already gets
-  (int64 and uint64 either way, int64 to double), that is:
-  - a quoted number or bool, such as `pwm: "0"`, for a number or bool
-    argument;
-  - a fractional number, such as `1.5`, for an int64 or uint64 argument;
+  argument's type is not the function's, naming the call and the argument,
+  and both types where the runtime knows them: that call could never
+  dispatch, and the safe state needing it would have failed when it fired.
+  Beyond the widening a call already gets (int64 and uint64 either way,
+  int64 to double), that is:
+  - text for a number or bool argument: a quoted value such as `pwm: "0"`,
+    or a plain word the loader reads as text, such as `True`, `yes`, `on`,
+    `1e3`, `0x10` or `.inf`;
+  - a number with a decimal point, such as `1.5` or `1.0`, for an int64 or
+    uint64 argument;
+  - an unquoted `true` or `false` for a number argument;
   - an unquoted number or bool for a string argument;
   - a number, such as `0` or `1`, for a bool argument;
   - any value for a bytes argument, which no config value is;
@@ -68,9 +72,12 @@ Upgrade notes:
   quality the provider did not set, or an unknown one, is `UNAVAILABLE`, not
   `UNSPECIFIED` or `UNKNOWN`. A tree that compares `quality` with
   `UNSPECIFIED` or `UNKNOWN` no longer matches; compare with `UNAVAILABLE`.
-  `CheckQuality` with `expected_quality` `UNAVAILABLE` now matches such a
-  reading. Every `ReadSignal` failure writes `quality`, `UNAVAILABLE` when
-  there is no reading at all, so the port never keeps the previous tick's.
+  `CheckQuality` compares the same names: `expected_quality` `UNAVAILABLE`
+  or `UNKNOWN` matches a reading whose quality is unset or unknown. At
+  v0.16.0 `UNAVAILABLE`, a name it did not know, matched only an unset
+  quality, and `UNKNOWN` did not match one. Every `ReadSignal` failure writes
+  `quality`, `UNAVAILABLE` when there is no reading at all, so the port never
+  keeps the previous tick's.
 - `POST /v0/runs` answers `500 INTERNAL` when the run cannot be written to the
   run log, and `409` only while another run is open; both were `409`.
   `POST /v0/runs/{run_id}/close` answers `500 INTERNAL` when the run exists
@@ -86,12 +93,15 @@ Upgrade notes:
 - A behaviour tree is refused when it loads, and `--check-config` fails,
   for a `CheckQuality` `expected_quality` that is not a quality name (#797)
   and for `CallDevice` literal args that are not a JSON object (#806).
-  `CheckQuality` accepts `UNAVAILABLE`, which it never matched. `CallDevice`
-  args that cannot be read at tick fail the node and count as a failed call;
-  they sent a call with no arguments and logged success.
+  `CallDevice` args that cannot be read at tick fail the node and count as
+  a failed call; they sent a call with no arguments and logged success.
 - An automation parameter whose `default`, `min` or `max` is NaN is refused
   at load. A NaN default passed any bound, and a NaN bound turned its check
   off (#755).
+- `ReadSignal` on a string, bytes or unset signal fails, with the reason
+  logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
+  signal, such as the simulator's `control_mode`, got a plausible number and
+  no error (#816).
 
 ### Fixed
 
@@ -131,10 +141,6 @@ Upgrade notes:
   function with a string argument refused it as a type mismatch and nothing
   in YAML could pass such a string. A plain `1`, `true` or `1.5` keeps its
   type (#637).
-- `ReadSignal` on a string, bytes or unset signal fails, with the reason
-  logged. It returned SUCCESS with `value` 0.0, so a tree reading a text
-  signal, such as the simulator's `control_mode`, got a plausible number and
-  no error (#816).
 - The runtime-config schema accepts unknown keys under `safety.stop_chain`,
   its `status` and a `devices` mapping entry, as it does everywhere else and
   as the loader does (it warns and ignores them). A config could pass
@@ -158,6 +164,12 @@ Upgrade notes:
   target the bundle is carried to (#533).
 - Preflight no longer says "the rest are dispatchable" when every declared
   call targets an absent device (#465).
+- The startup "Routes configured" log lists the six `/v0/runs` routes, which
+  it left out (#561).
+- The telemetry and machine-profile schema bundles ship the fixture files
+  their validators read, and the release checks each bundle from an
+  extracted copy. The bundled validators failed every fixture with a missing
+  file (#595, #593).
 
 ## [0.16.0] - 2026-11-15
 
