@@ -46,8 +46,11 @@ Upgrade notes:
   working directory, as configs written for the old rule have it, still
   loads, with a `[Config]` warning naming the path to use. Move such paths
   to config-relative ones: the fallback will be removed in a later MINOR.
-  A tree that exists in both places loads from beside the config file, and
-  a `[Config]` warning names both, so check which one a config meant.
+  A tree that exists in both places loads from beside the config file. With
+  automation enabled and the two files different, a `[Config]` warning names
+  both, so check which one a config meant. Only a file counts as a tree
+  beside the config: a directory of that name does not hide one under the
+  start directory.
 - An int64 automation parameter whose `min` or `max` a double cannot hold
   exactly, such as `9007199254740993`, is refused at load. It used to load
   rounded to the nearest double (#755).
