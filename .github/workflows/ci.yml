@@ -116,7 +116,7 @@ jobs:
     name: Docs
     needs: [changes]
     if: needs.changes.outputs.docs == 'true'
-    uses: anolishq/.github/.github/workflows/docs-check.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/docs-check.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3
 
   format-check:
     name: C++ Formatting (clang-format)
@@ -534,7 +534,7 @@ jobs:
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: anolishq/.github/.github/workflows/version-sync.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/version-sync.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3
     with:
       python-version: '3.12'
       working-directory: '.'
@@ -598,7 +598,7 @@ jobs:
       - name: Evaluate job results
         run: |
           echo "Job results: ${{ toJSON(needs.*.result) }}"
-      - uses: anolishq/.github/.github/actions/require-needs-passed@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+      - uses: anolishq/.github/.github/actions/require-needs-passed@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3
         with:
           results: ${{ join(needs.*.result, ' ') }}
 
