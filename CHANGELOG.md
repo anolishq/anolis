@@ -111,6 +111,14 @@ Upgrade notes:
   such as Groot2 list and draw them as such. Every tree loads as before,
   including one that names the old kind explicitly (`<Action ID="CheckBool">`)
   (#822).
+- A behaviour tree whose node carries an underscore attribute the runtime
+  does not run is refused when it loads, and `--check-config` fails, naming
+  the node and the attribute (#805). BehaviorTree.CPP stored such an
+  attribute and ignored it, so a misspelt `_skipif` or a newer version's
+  `_onlyIf` never stopped the node. Allowed are the linked BehaviorTree.CPP's
+  pre and post conditions (`_failureIf`, `_successIf`, `_skipIf`, `_while`,
+  `_onSuccess`, `_onFailure`, `_onHalted`, `_post`), `_description`,
+  `_autoremap`, `_uid` and `_fullpath`; see `docs/automation.md`.
 
 ### Fixed
 

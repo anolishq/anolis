@@ -220,6 +220,21 @@ Conditions; the rest are Actions.
 
 Use runtime capability metadata and parameter constraints to keep BT logic generic.
 
+### Underscore attributes
+
+Any node may carry these attributes, and no others that start with `_`:
+
+- the pre and post conditions of the linked BehaviorTree.CPP (4.9.0):
+  `_failureIf`, `_successIf`, `_skipIf`, `_while`, `_onSuccess`, `_onFailure`,
+  `_onHalted` and `_post`;
+- `_description`, `_autoremap` (on a `SubTree`), `_uid` and `_fullpath`.
+
+Any other underscore attribute, such as a misspelt `_skipif` or the
+`_onlyIf` that newer BehaviorTree.CPP versions and Groot2 offer, refuses the
+tree when it loads and at `--check-config`, naming the node and the
+attribute. BehaviorTree.CPP alone would store such an attribute and ignore it,
+so a misspelt guard would never stop the node.
+
 ## Quick Walkthrough
 
 ### 1) Start runtime with automation enabled

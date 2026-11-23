@@ -1,0 +1,10 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ../../behaviors/misspelt-precondition.xml
+
+logging:
+  level: info

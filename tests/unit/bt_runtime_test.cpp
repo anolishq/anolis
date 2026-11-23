@@ -1116,3 +1116,72 @@ TEST(BTRuntimeTest, CallFailureLimitOfOneFaultsOnTheFirstFailure) {
     EXPECT_EQ("automation call ghost0/pump0 dose_on failed once; last error: refused",
               runtime.record_call_result("ghost0/pump0", "dose_on", false, "refused"));
 }
+
+namespace {
+
+// Loads `xml` into a fresh BTRuntime and returns the outcome (#805).
+anolis::automation::LoadOutcome load_tree_xml(const std::string& stem, const std::string& xml) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    const auto path = write_tree_file(stem, xml);
+    auto outcome = runtime.load(AutomationDefinitionRef{path.string()});
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return outcome;
+}
+
+std::string one_node_tree(const std::string& attribute) {
+    return R"(<root BTCPP_format="4" main_tree_to_execute="Main"><BehaviorTree ID="Main">)"
+           R"(<AlwaysSuccess name="guarded" )" +
+           attribute + R"(/></BehaviorTree></root>)";
+}
+
+}  // namespace
+
+// #805: BehaviorTree.CPP stores an underscore attribute it does not know and
+// ignores it, so a misspelt guard on a node did nothing. The load refuses it,
+// naming the node and the attribute.
+TEST(BTRuntimeUnknownAttributeTest, AMisspeltPreconditionIsRefused) {
+    const auto outcome = load_tree_xml("anolis-bt-skipif", one_node_tree(R"(_skipif="true")"));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_skipif"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("guarded"), std::string::npos) << outcome.error;
+}
+
+// A newer BehaviorTree.CPP's condition, which the linked one does not run.
+TEST(BTRuntimeUnknownAttributeTest, AConditionTheLinkedVersionLacksIsRefused) {
+    const auto outcome = load_tree_xml("anolis-bt-onlyif", one_node_tree(R"(_onlyIf="false")"));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_onlyIf"), std::string::npos) << outcome.error;
+}
+
+TEST(BTRuntimeUnknownAttributeTest, AnAttributeInsideASubTreeIsRefused) {
+    const std::string xml = R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                            R"(<BehaviorTree ID="Main"><SubTree ID="Inner"/></BehaviorTree>)"
+                            R"(<BehaviorTree ID="Inner"><AlwaysSuccess name="deep" _sucessIf="true"/></BehaviorTree>)"
+                            R"(</root>)";
+    const auto outcome = load_tree_xml("anolis-bt-subtree-attr", xml);
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_sucessIf"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("deep"), std::string::npos) << outcome.error;
+}
+
+TEST(BTRuntimeUnknownAttributeTest, TheAllowedAttributesLoad) {
+    for (const std::string attribute :
+         {R"(_skipIf="false")", R"(_failureIf="false")", R"(_successIf="false")", R"(_while="true")",
+          R"(_onSuccess="x:=1")", R"(_onFailure="x:=1")", R"(_onHalted="x:=1")", R"(_post="x:=1")",
+          R"(_description="what it does")", R"(_uid="7")"}) {
+        const auto outcome = load_tree_xml("anolis-bt-allowed", one_node_tree(attribute));
+        EXPECT_TRUE(outcome.ok) << attribute << ": " << outcome.error;
+    }
+    const std::string autoremap = R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                                  R"(<BehaviorTree ID="Main"><SubTree ID="Inner" _autoremap="true"/></BehaviorTree>)"
+                                  R"(<BehaviorTree ID="Inner"><AlwaysSuccess/></BehaviorTree></root>)";
+    const auto outcome = load_tree_xml("anolis-bt-autoremap", autoremap);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}

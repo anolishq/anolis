@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- A precondition spelt _skipif, not _skipIf: BehaviorTree.CPP would ignore it (#805). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <AlwaysSuccess _skipif="true"/>
+  </BehaviorTree>
+</root>

@@ -46,6 +46,43 @@ std::string file_basename(const std::string &path) {
     return (dot == std::string::npos) ? name : name.substr(0, dot);
 }
 
+// The underscore attributes a node may carry: the linked BehaviorTree.CPP's
+// pre and post conditions, which it runs, and the four it reads for itself.
+bool allowed_underscore_attribute(const std::string &name) {
+    for (const auto &cond : BT::PreCondNames) {
+        if (name == cond) {
+            return true;
+        }
+    }
+    for (const auto &cond : BT::PostCondNames) {
+        if (name == cond) {
+            return true;
+        }
+    }
+    return name == "_description" || name == "_autoremap" || name == "_uid" || name == "_fullpath";
+}
+
+// BehaviorTree.CPP keeps an underscore attribute it does not know and ignores
+// it, so a misspelt guard on a node, or a newer version's condition, did
+// nothing and nothing said so (#805). Names the first such attribute, or "".
+std::string unknown_underscore_attribute(const BT::Tree &tree) {
+    for (const auto &subtree : tree.subtrees) {
+        for (const auto &node : subtree->nodes) {
+            const BT::TreeNode &visited = *node;  // the public, const config()
+            for (const auto &[name, value] : visited.config().other_attributes) {
+                (void)value;
+                if (!name.empty() && name.front() == '_' && !allowed_underscore_attribute(name)) {
+                    return "node '" + node->fullPath() + "' (" + node->registrationName() + ") has attribute '" + name +
+                           "', which this runtime does not run. Allowed: the pre and post conditions "
+                           "(_failureIf, _successIf, _skipIf, _while, _onSuccess, _onFailure, _onHalted, "
+                           "_post), _description, _autoremap, _uid and _fullpath";
+                }
+            }
+        }
+    }
+    return "";
+}
+
 }  // namespace
 
 BTRuntime::BTRuntime(state::StateCache &state_cache, control::CallRouter &call_router,
@@ -155,6 +192,11 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
         candidate = std::make_shared<BT::Tree>(factory_->createTreeFromFile(path));
     } catch (const std::exception &e) {
         outcome.error = std::string("failed to parse automation definition: ") + e.what();
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
+    }
+    if (const std::string unknown = unknown_underscore_attribute(*candidate); !unknown.empty()) {
+        outcome.error = "automation definition refused: " + unknown;
         LOG_ERROR("[BTRuntime] " << outcome.error);
         return outcome;  // previous active definition preserved
     }
