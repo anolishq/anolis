@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -46,20 +47,14 @@ std::string file_basename(const std::string &path) {
     return (dot == std::string::npos) ? name : name.substr(0, dot);
 }
 
-// The underscore attributes a node may carry: the linked BehaviorTree.CPP's
-// pre and post conditions, which it runs, and the four it reads for itself.
+// What a node may still carry in other_attributes. BehaviorTree.CPP takes its
+// own reserved attributes out before they get there: the pre and post
+// conditions of the linked version (so a newer version's, such as 4.11's
+// _onlyIf, is run by it and never reaches this check) and _autoremap.
+// These three it neither runs nor rejects: _description is the editor's
+// note, and _uid and _fullpath are what its own writer puts in a saved tree.
 bool allowed_underscore_attribute(const std::string &name) {
-    for (const auto &cond : BT::PreCondNames) {
-        if (name == cond) {
-            return true;
-        }
-    }
-    for (const auto &cond : BT::PostCondNames) {
-        if (name == cond) {
-            return true;
-        }
-    }
-    return name == "_description" || name == "_autoremap" || name == "_uid" || name == "_fullpath";
+    return name == "_description" || name == "_uid" || name == "_fullpath";
 }
 
 // BehaviorTree.CPP keeps an underscore attribute it does not know and ignores
@@ -72,10 +67,11 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
             for (const auto &[name, value] : visited.config().other_attributes) {
                 (void)value;
                 if (!name.empty() && name.front() == '_' && !allowed_underscore_attribute(name)) {
-                    return "node '" + node->fullPath() + "' (" + node->registrationName() + ") has attribute '" + name +
-                           "', which this runtime does not run. Allowed: the pre and post conditions "
-                           "(_failureIf, _successIf, _skipIf, _while, _onSuccess, _onFailure, _onHalted, "
-                           "_post), _description, _autoremap, _uid and _fullpath";
+                    return std::format(
+                        "node '{}' ({}) has attribute '{}', which this runtime does not run. A node may carry "
+                        "the pre and post conditions of the linked BehaviorTree.CPP, _description, _uid and "
+                        "_fullpath; _autoremap belongs on a SubTree",
+                        node->fullPath(), node->registrationName(), name);
                 }
             }
         }

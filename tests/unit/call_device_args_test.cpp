@@ -106,3 +106,17 @@ TEST_F(CallDeviceArgsTest, BadJsonFromTheBlackboardIsACountedFailure) {
 }
 
 }  // namespace
+
+// #805: the allowed precondition does what it says on the call it guards, the
+// behaviour the refusal of a misspelt one protects.
+TEST_F(CallDeviceArgsTest, ATrueSkipIfMakesNoCall) {
+    auto tree = build(R"(_skipIf="true")");
+    (void)tree.tickOnce();
+    EXPECT_TRUE(reported_.empty());
+}
+
+TEST_F(CallDeviceArgsTest, AFalseSkipIfStillMakesTheCall) {
+    auto tree = build(R"(_skipIf="false")");
+    (void)tree.tickOnce();
+    EXPECT_EQ(1U, reported_.size());
+}

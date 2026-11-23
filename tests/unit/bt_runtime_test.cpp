@@ -1153,7 +1153,8 @@ TEST(BTRuntimeUnknownAttributeTest, AMisspeltPreconditionIsRefused) {
     EXPECT_NE(outcome.error.find("guarded"), std::string::npos) << outcome.error;
 }
 
-// A newer BehaviorTree.CPP's condition, which the linked one does not run.
+// A newer BehaviorTree.CPP's condition, which the linked 4.9.0 does not run.
+// Linking 4.11 or later, which runs _onlyIf, turns this red on purpose.
 TEST(BTRuntimeUnknownAttributeTest, AConditionTheLinkedVersionLacksIsRefused) {
     const auto outcome = load_tree_xml("anolis-bt-onlyif", one_node_tree(R"(_onlyIf="false")"));
     EXPECT_FALSE(outcome.ok);
@@ -1171,6 +1172,9 @@ TEST(BTRuntimeUnknownAttributeTest, AnAttributeInsideASubTreeIsRefused) {
     EXPECT_NE(outcome.error.find("deep"), std::string::npos) << outcome.error;
 }
 
+// BehaviorTree.CPP removes its own conditions before the check sees a node's
+// attributes, so these load because it runs them; _description and _uid load
+// because the check allows them.
 TEST(BTRuntimeUnknownAttributeTest, TheAllowedAttributesLoad) {
     for (const std::string attribute :
          {R"(_skipIf="false")", R"(_failureIf="false")", R"(_successIf="false")", R"(_while="true")",
