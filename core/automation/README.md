@@ -24,7 +24,10 @@ The automation layer is a **consumer of kernel services**, NOT a replacement for
 
 ### Blackboard Schema
 
-Populated in `BTRuntime::populate_blackboard()` before each tick:
+Populated in `BTRuntime::populate_blackboard()` before each tick, on the
+top of the tree's blackboard parent chain. The nodes read it from there, so a
+node in a `SubTree` finds it without `_autoremap`; code that builds a tree
+itself must set it on that root-most blackboard too (#807):
 
 ```cpp
 BTServiceContext services{
