@@ -116,8 +116,9 @@ Upgrade notes:
   the node and the attribute (#805). BehaviorTree.CPP stored such an
   attribute and ignored it, so a misspelt `_skipif` or a newer version's
   `_onlyIf` never stopped the node. Allowed are the linked BehaviorTree.CPP's
-  pre and post conditions, `_description`, `_uid`, `_fullpath`, and
-  `_autoremap` on a `SubTree`; `docs/automation.md` lists them for 4.9.0.
+  pre and post conditions, `_description`, `_uid`, `_fullpath` and
+  `_autoremap`, which acts only on a `SubTree`; `docs/automation.md` lists
+  them for 4.9.0.
 
 ### Fixed
 

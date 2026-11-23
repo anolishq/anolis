@@ -1,6 +1,8 @@
 #include "automation/bt_runtime.hpp"
 
 #include <behaviortree_cpp/basic_types.h>
+#include <behaviortree_cpp/bt_factory.h>
+#include <behaviortree_cpp/xml_parsing.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -1170,6 +1172,27 @@ TEST(BTRuntimeUnknownAttributeTest, AnAttributeInsideASubTreeIsRefused) {
     EXPECT_FALSE(outcome.ok);
     EXPECT_NE(outcome.error.find("_sucessIf"), std::string::npos) << outcome.error;
     EXPECT_NE(outcome.error.find("deep"), std::string::npos) << outcome.error;
+}
+
+// A tree saved by BehaviorTree.CPP with its metadata, which adds _uid and, on
+// a SubTree, _fullpath, loads again: why the check allows those two.
+TEST(BTRuntimeUnknownAttributeTest, ATreeSavedWithMetadataLoads) {
+    BT::BehaviorTreeFactory factory;
+    const auto saved = BT::WriteTreeToXML(
+        factory.createTreeFromText(R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                                   R"(<BehaviorTree ID="Main"><SubTree ID="Inner"/></BehaviorTree>)"
+                                   R"(<BehaviorTree ID="Inner"><AlwaysSuccess/></BehaviorTree></root>)"),
+        true, false);
+    ASSERT_NE(saved.find("_uid="), std::string::npos) << saved;
+    ASSERT_NE(saved.find("_fullpath="), std::string::npos) << saved;
+    // The writer leaves out main_tree_to_execute, which a file with two trees
+    // needs to load at all.
+    std::string loadable = saved;
+    const auto root_at = loadable.find("<root");
+    ASSERT_NE(root_at, std::string::npos) << saved;
+    loadable.insert(root_at + 5, R"( main_tree_to_execute="Main")");
+    const auto outcome = load_tree_xml("anolis-bt-saved-metadata", loadable);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
 }
 
 // BehaviorTree.CPP removes its own conditions before the check sees a node's

@@ -228,8 +228,10 @@ Any node may carry these attributes, and no others that start with `_`:
   the version this runtime links, those are `_failureIf`, `_successIf`,
   `_skipIf`, `_while`, `_onSuccess`, `_onFailure`, `_onHalted` and `_post`;
 - `_description`, and the `_uid` and `_fullpath` that BehaviorTree.CPP's
-  writer puts in a saved tree;
-- on a `SubTree`, `_autoremap`.
+  writer adds to a tree saved with its metadata;
+- `_autoremap`, which BehaviorTree.CPP accepts on any node and acts on only
+  on a `SubTree`: on any other node it does nothing, and the check does not
+  see it.
 
 Any other underscore attribute on a node, such as a misspelt `_skipif` or
 the `_onlyIf` that BehaviorTree.CPP 4.11 and Groot2 offer, refuses the tree
