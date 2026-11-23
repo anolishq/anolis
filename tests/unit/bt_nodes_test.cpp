@@ -345,16 +345,23 @@ TEST_F(BTNodesTest, PeriodicPulseWindowClearsItsOutputsWhenItRefusesASchedule) {
     };
 
     ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 0));
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 1000));
     ASSERT_TRUE(blackboard->get<bool>("active"));
+    ASSERT_EQ(1000, blackboard->get<int64_t>("elapsed"));
 
     EXPECT_EQ(BT::NodeStatus::FAILURE, tick(0, 2, 4000)) << "interval_s 0";
     EXPECT_FALSE(blackboard->get<bool>("active"));
     EXPECT_EQ(-1, blackboard->get<int64_t>("index"));
     EXPECT_EQ(0, blackboard->get<int64_t>("elapsed"));
 
-    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 5000));
-    ASSERT_TRUE(blackboard->get<bool>("active")) << "back in a pulse";
-    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 5500)) << "pulse longer than the interval";
+    // Valid again: the schedule starts over from this tick, as after a
+    // disable, instead of carrying on from t=0.
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 61000));
+    EXPECT_TRUE(blackboard->get<bool>("active"));
+    EXPECT_EQ(0, blackboard->get<int64_t>("index"));
+    EXPECT_EQ(0, blackboard->get<int64_t>("elapsed"));
+
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 61500)) << "pulse longer than the interval";
     EXPECT_FALSE(blackboard->get<bool>("active"));
 }
 
