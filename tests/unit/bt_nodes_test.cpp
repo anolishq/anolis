@@ -324,6 +324,40 @@ TEST_F(BTNodesTest, PeriodicPulseWindowNodeComputesExpectedWindow) {
     EXPECT_EQ(0, blackboard->get<int64_t>("idx"));
 }
 
+// #810: a schedule refused mid-pulse left `active` as it was, so a pump
+// commanded on stayed on. The node now writes the outputs it writes when
+// disabled before it fails.
+TEST_F(BTNodesTest, PeriodicPulseWindowClearsItsOutputsWhenItRefusesASchedule) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    auto tree = factory.createTreeFromText(
+        R"(<root BTCPP_format="4"><BehaviorTree ID="Main">
+<PeriodicPulseWindow interval_s="{interval}" pulse_s="{pulse}" now_ms="{now}"
+                     active="{active}" pulse_index="{index}" elapsed_ms="{elapsed}"/>
+</BehaviorTree></root>)",
+        blackboard);
+    const auto tick = [&](int64_t interval, int64_t pulse, int64_t now) {
+        blackboard->set("interval", interval);
+        blackboard->set("pulse", pulse);
+        blackboard->set("now", now);
+        return tree.tickOnce();
+    };
+
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 0));
+    ASSERT_TRUE(blackboard->get<bool>("active"));
+
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(0, 2, 4000)) << "interval_s 0";
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+    EXPECT_EQ(-1, blackboard->get<int64_t>("index"));
+    EXPECT_EQ(0, blackboard->get<int64_t>("elapsed"));
+
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 5000));
+    ASSERT_TRUE(blackboard->get<bool>("active")) << "back in a pulse";
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 5500)) << "pulse longer than the interval";
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+}
+
 TEST_F(BTNodesTest, PeriodicPulseWindowNodeAcceptsNumericParametersFromGetParameter) {
     ASSERT_TRUE(parameter_manager_.define("feed_enable", anolis::automation::ParameterType::BOOL, true));
     ASSERT_TRUE(

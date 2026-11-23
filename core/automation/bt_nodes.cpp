@@ -691,6 +691,11 @@ BT::NodeStatus PeriodicPulseWindowNode::tick() {
 
     if (startup_delay_s < 0 || interval_s <= 0 || pulse_s <= 0 || pulse_s > interval_s || max_pulses_per_hour < 0) {
         LOG_ERROR("[PeriodicPulseWindowNode] Invalid scheduling inputs");
+        // The disabled outputs, so a window refused mid-pulse does not leave
+        // `active` true and the output it drives commanded on (#810).
+        setOutput("active", false);
+        setOutput("pulse_index", int64_t{-1});
+        setOutput("elapsed_ms", int64_t{0});
         return BT::NodeStatus::FAILURE;
     }
 
