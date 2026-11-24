@@ -362,7 +362,9 @@ TEST_F(BTNodesTest, PeriodicPulseWindowClearsItsOutputsWhenItRefusesASchedule) {
     EXPECT_EQ(12, blackboard->get<int64_t>("index"));
     EXPECT_EQ(63000, blackboard->get<int64_t>("elapsed"));
 
-    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 65000)) << "pulse longer than the interval";
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 65000));
+    ASSERT_TRUE(blackboard->get<bool>("active")) << "in a pulse again";
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 65500)) << "pulse longer than the interval";
     EXPECT_FALSE(blackboard->get<bool>("active"));
 }
 

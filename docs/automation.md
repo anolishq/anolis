@@ -202,8 +202,10 @@ Conditions; the rest are Actions.
 6. `GetParameterInt64`
 7. `CheckBool`
 8. `PeriodicPulseWindow`: `active` is true for `pulse_s` at the start of
-   each `interval_s`, or each 3600/`max_pulses_per_hour` seconds if that
-   is longer, after `startup_delay_s`; `enabled="false"` writes
+   each `interval_s`, or, with a positive `max_pulses_per_hour` (0, the
+   default, is no cap), each 3600/`max_pulses_per_hour` seconds if that is
+   longer. The schedule starts at the node's first enabled tick, and
+   `startup_delay_s` counts from there. `enabled="false"` writes
    `active=false`, `pulse_index=-1` and `elapsed_ms=0` and restarts the
    schedule. The inputs are checked first, even when disabled: a schedule
    it refuses (`interval_s` or `pulse_s` 0 or less, `pulse_s` longer than
