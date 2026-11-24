@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -44,6 +45,38 @@ std::string file_basename(const std::string &path) {
     std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
     auto dot = name.find_last_of('.');
     return (dot == std::string::npos) ? name : name.substr(0, dot);
+}
+
+// What a node may still carry in other_attributes. BehaviorTree.CPP takes its
+// own reserved attributes out before they get there: the pre and post
+// conditions of the linked version (so a newer version's, such as 4.11's
+// _onlyIf, is run by it and never reaches this check) and _autoremap.
+// These three it neither runs nor rejects: _description is the editor's
+// note, and _uid and _fullpath are what its own writer puts in a saved tree.
+bool allowed_underscore_attribute(const std::string &name) {
+    return name == "_description" || name == "_uid" || name == "_fullpath";
+}
+
+// BehaviorTree.CPP keeps an underscore attribute it does not know and ignores
+// it, so a misspelt guard on a node, or a newer version's condition, did
+// nothing and nothing said so (#805). Names the first such attribute, or "".
+std::string unknown_underscore_attribute(const BT::Tree &tree) {
+    for (const auto &subtree : tree.subtrees) {
+        for (const auto &node : subtree->nodes) {
+            const BT::TreeNode &visited = *node;  // the public, const config()
+            for (const auto &[name, value] : visited.config().other_attributes) {
+                (void)value;
+                if (!name.empty() && name.front() == '_' && !allowed_underscore_attribute(name)) {
+                    return std::format(
+                        "node '{}' ({}) has attribute '{}', which this runtime does not run. A node may carry "
+                        "the pre and post conditions of the linked BehaviorTree.CPP, _description, _uid, "
+                        "_fullpath and _autoremap (which acts only on a SubTree)",
+                        node->fullPath(), node->registrationName(), name);
+                }
+            }
+        }
+    }
+    return "";
 }
 
 }  // namespace
@@ -155,6 +188,11 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
         candidate = std::make_shared<BT::Tree>(factory_->createTreeFromFile(path));
     } catch (const std::exception &e) {
         outcome.error = std::string("failed to parse automation definition: ") + e.what();
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
+    }
+    if (const std::string unknown = unknown_underscore_attribute(*candidate); !unknown.empty()) {
+        outcome.error = "automation definition refused: " + unknown;
         LOG_ERROR("[BTRuntime] " << outcome.error);
         return outcome;  // previous active definition preserved
     }

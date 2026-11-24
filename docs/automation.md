@@ -220,6 +220,27 @@ Conditions; the rest are Actions.
 
 Use runtime capability metadata and parameter constraints to keep BT logic generic.
 
+### Underscore attributes
+
+Any node may carry these attributes, and no others that start with `_`:
+
+- the pre and post conditions of the linked BehaviorTree.CPP. In 4.9.0,
+  the version this runtime links, those are `_failureIf`, `_successIf`,
+  `_skipIf`, `_while`, `_onSuccess`, `_onFailure`, `_onHalted` and `_post`;
+- `_description`, and the `_uid` and `_fullpath` that BehaviorTree.CPP's
+  writer adds to a tree saved with its metadata;
+- `_autoremap`, which BehaviorTree.CPP accepts on any node and acts on only
+  on a `SubTree`: on any other node it does nothing, and the check does not
+  see it.
+
+Any other underscore attribute on a node, such as a misspelt `_skipif` or
+the `_onlyIf` that BehaviorTree.CPP 4.11 and Groot2 offer, refuses the tree
+when it loads and at `--check-config`, naming the node and the attribute.
+BehaviorTree.CPP alone would store such an attribute and ignore it, so a
+misspelt guard would never stop the node. The check covers the nodes the
+tree runs; an attribute on a `<BehaviorTree>` element itself, or in a tree
+nothing references, is not checked.
+
 ### SubTrees
 
 Anolis nodes work in a `SubTree` at any depth, with or without
@@ -294,7 +315,9 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
 1. `UNAVAILABLE` from automation endpoints:
    - automation disabled in config or compiled out.
 2. BT load failure:
-   - invalid tree path/XML, an unregistered node or a port type mismatch.
+   - invalid tree path/XML, an unregistered node, a port type mismatch or an
+     underscore attribute the runtime does not run (see
+     [Underscore attributes](#underscore-attributes)).
      `anolis-runtime --check-config` loads the tree and reports these before
      a start. A relative `automation.behavior_tree` is resolved against the
      config file's directory.

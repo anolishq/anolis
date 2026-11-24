@@ -1,6 +1,8 @@
 #include "automation/bt_runtime.hpp"
 
 #include <behaviortree_cpp/basic_types.h>
+#include <behaviortree_cpp/bt_factory.h>
+#include <behaviortree_cpp/xml_parsing.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -1142,4 +1144,98 @@ TEST(BTRuntimeTest, CallFailureLimitOfOneFaultsOnTheFirstFailure) {
 
     EXPECT_EQ("automation call ghost0/pump0 dose_on failed once; last error: refused",
               runtime.record_call_result("ghost0/pump0", "dose_on", false, "refused"));
+}
+
+namespace {
+
+// Loads `xml` into a fresh BTRuntime and returns the outcome (#805).
+anolis::automation::LoadOutcome load_tree_xml(const std::string& stem, const std::string& xml) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    const auto path = write_tree_file(stem, xml);
+    auto outcome = runtime.load(AutomationDefinitionRef{path.string()});
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return outcome;
+}
+
+std::string one_node_tree(const std::string& attribute) {
+    return R"(<root BTCPP_format="4" main_tree_to_execute="Main"><BehaviorTree ID="Main">)"
+           R"(<AlwaysSuccess name="guarded" )" +
+           attribute + R"(/></BehaviorTree></root>)";
+}
+
+}  // namespace
+
+// #805: BehaviorTree.CPP stores an underscore attribute it does not know and
+// ignores it, so a misspelt guard on a node did nothing. The load refuses it,
+// naming the node and the attribute.
+TEST(BTRuntimeUnknownAttributeTest, AMisspeltPreconditionIsRefused) {
+    const auto outcome = load_tree_xml("anolis-bt-skipif", one_node_tree(R"(_skipif="true")"));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_skipif"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("guarded"), std::string::npos) << outcome.error;
+}
+
+// A newer BehaviorTree.CPP's condition, which the linked 4.9.0 does not run.
+// Linking 4.11 or later, which runs _onlyIf, turns this red on purpose.
+TEST(BTRuntimeUnknownAttributeTest, AConditionTheLinkedVersionLacksIsRefused) {
+    const auto outcome = load_tree_xml("anolis-bt-onlyif", one_node_tree(R"(_onlyIf="false")"));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_onlyIf"), std::string::npos) << outcome.error;
+}
+
+TEST(BTRuntimeUnknownAttributeTest, AnAttributeInsideASubTreeIsRefused) {
+    const std::string xml = R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                            R"(<BehaviorTree ID="Main"><SubTree ID="Inner"/></BehaviorTree>)"
+                            R"(<BehaviorTree ID="Inner"><AlwaysSuccess name="deep" _sucessIf="true"/></BehaviorTree>)"
+                            R"(</root>)";
+    const auto outcome = load_tree_xml("anolis-bt-subtree-attr", xml);
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("_sucessIf"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("deep"), std::string::npos) << outcome.error;
+}
+
+// A tree saved by BehaviorTree.CPP with its metadata, which adds _uid and, on
+// a SubTree, _fullpath, loads again: why the check allows those two.
+TEST(BTRuntimeUnknownAttributeTest, ATreeSavedWithMetadataLoads) {
+    BT::BehaviorTreeFactory factory;
+    const auto saved = BT::WriteTreeToXML(
+        factory.createTreeFromText(R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                                   R"(<BehaviorTree ID="Main"><SubTree ID="Inner"/></BehaviorTree>)"
+                                   R"(<BehaviorTree ID="Inner"><AlwaysSuccess/></BehaviorTree></root>)"),
+        true, false);
+    ASSERT_NE(saved.find("_uid="), std::string::npos) << saved;
+    ASSERT_NE(saved.find("_fullpath="), std::string::npos) << saved;
+    // The writer leaves out main_tree_to_execute, which a file with two trees
+    // needs to load at all.
+    std::string loadable = saved;
+    const auto root_at = loadable.find("<root");
+    ASSERT_NE(root_at, std::string::npos) << saved;
+    loadable.insert(root_at + 5, R"( main_tree_to_execute="Main")");
+    const auto outcome = load_tree_xml("anolis-bt-saved-metadata", loadable);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+// BehaviorTree.CPP removes its own conditions before the check sees a node's
+// attributes, so these load because it runs them; _description and _uid load
+// because the check allows them.
+TEST(BTRuntimeUnknownAttributeTest, TheAllowedAttributesLoad) {
+    for (const std::string attribute :
+         {R"(_skipIf="false")", R"(_failureIf="false")", R"(_successIf="false")", R"(_while="true")",
+          R"(_onSuccess="x:=1")", R"(_onFailure="x:=1")", R"(_onHalted="x:=1")", R"(_post="x:=1")",
+          R"(_description="what it does")", R"(_uid="7")"}) {
+        const auto outcome = load_tree_xml("anolis-bt-allowed", one_node_tree(attribute));
+        EXPECT_TRUE(outcome.ok) << attribute << ": " << outcome.error;
+    }
+    const std::string autoremap = R"(<root BTCPP_format="4" main_tree_to_execute="Main">)"
+                                  R"(<BehaviorTree ID="Main"><SubTree ID="Inner" _autoremap="true"/></BehaviorTree>)"
+                                  R"(<BehaviorTree ID="Inner"><AlwaysSuccess/></BehaviorTree></root>)";
+    const auto outcome = load_tree_xml("anolis-bt-autoremap", autoremap);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
 }
