@@ -138,3 +138,6 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/13-automation-behavior-tree-unregistered-node.yaml
     expect: invalid/runtime
     note: automation.behavior_tree names a node the runtime does not register (#804)
+  - file: tests/contracts/runtime-config/invalid/runtime/14-automation-behavior-tree-unknown-underscore-attribute.yaml
+    expect: invalid/runtime
+    note: a node carries an underscore attribute the runtime does not run, such as a misspelt precondition (#805)

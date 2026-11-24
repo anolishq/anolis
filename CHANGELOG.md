@@ -111,6 +111,14 @@ Upgrade notes:
   such as Groot2 list and draw them as such. Every tree loads as before,
   including one that names the old kind explicitly (`<Action ID="CheckBool">`)
   (#822).
+- A behaviour tree whose node carries an underscore attribute the runtime
+  does not run is refused when it loads, and `--check-config` fails, naming
+  the node and the attribute (#805). BehaviorTree.CPP stored such an
+  attribute and ignored it, so a misspelt `_skipif` or a newer version's
+  `_onlyIf` never stopped the node. Allowed are the linked BehaviorTree.CPP's
+  pre and post conditions, `_description`, `_uid`, `_fullpath` and
+  `_autoremap`, which acts only on a `SubTree`; `docs/automation.md` lists
+  them for 4.9.0.
 
 ### Fixed
 
@@ -119,9 +127,15 @@ Upgrade notes:
   less, `pulse_s` longer than `interval_s`, and the like). It left `active`
   as it was, so a window refused mid-pulse still said active (#810). The
   schedule keeps its start, so once the inputs are valid again it carries
-  on where it would have been. It still fails, so a tree that should command the output
-  off must catch the failure, as bioreactor-v1's spare disabled window
-  does; that spare could now be an `<AlwaysSuccess/>`.
+  on where it would have been. It still fails, so a tree that should
+  command the output off must catch the failure, as bioreactor-v1's spare
+  disabled window does; that spare could now be an `<AlwaysSuccess/>`.
+- Anolis nodes in a `SubTree` without `_autoremap` find the runtime's
+  services. They read them from their own blackboard, and a SubTree's own
+  blackboard did not hold them, so `GetParameter`, `GetParameterBool`,
+  `GetParameterInt64`, `ReadSignal`, `CheckQuality` and `CallDevice` there
+  loaded and then failed every tick with "Missing key
+  [anolis.bt_service_context]" (#807).
 - With automation disabled, startup preflight checks mode-transition hooks
   as unused: one that cannot be dispatched is warned about, naming the hook,
   where it was skipped. It never refuses startup.

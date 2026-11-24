@@ -25,7 +25,10 @@ std::optional<BTServiceContext> read_service_context(const BT::TreeNode &node, c
     }
 
     try {
-        return blackboard->get<BTServiceContext>(kBTServiceContextKey);
+        // BTRuntime puts the context on the root blackboard. A SubTree has its
+        // own, whose parent chain leads there, so read the root's: a node in a
+        // SubTree without _autoremap found nothing and failed every tick (#807).
+        return blackboard->rootBlackboard()->get<BTServiceContext>(kBTServiceContextKey);
     } catch (const std::exception &e) {
         LOG_ERROR("[" << node_name << "] Missing/invalid BT service context: " << e.what());
         return std::nullopt;

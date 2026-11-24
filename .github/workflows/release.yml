@@ -11,7 +11,7 @@ permissions:
 jobs:
   metrics:
     name: Collect metrics
-    uses: anolishq/.github/.github/workflows/metrics.yml@f4817837f29993c35b5350fbb5dfe2563437fcde # v2
+    uses: anolishq/.github/.github/workflows/metrics.yml@b11cc3033d90ce17a35fdcffae9bff6388542f6a # v3
     with:
       tag: ${{ github.ref_name }}
 

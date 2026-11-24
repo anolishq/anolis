@@ -48,6 +48,7 @@ if(ANOLIS_ENABLE_AUTOMATION)
         mode_dispatch_test.cpp
         mode_manager_test.cpp
         runtime_mode_hooks_test.cpp
+        subtree_service_context_test.cpp
     )
 endif()
 
