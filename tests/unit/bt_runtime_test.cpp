@@ -82,6 +82,33 @@ TEST(BTRuntimeTest, DirectTickUsesTypedServiceContext) {
     std::filesystem::remove(tree_path, ec);
 }
 
+// The route #807 reproduced: BTRuntime loads a tree whose GetParameter sits
+// in a SubTree without _autoremap, and its tick reads the parameter.
+TEST(BTRuntimeTest, AnAnolisNodeInASubTreeGetsItsServices) {
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    anolis::automation::ModeManager mode_manager(anolis::automation::RuntimeMode::MANUAL);
+    anolis::automation::ParameterManager parameter_manager;
+    ASSERT_TRUE(parameter_manager.define("temp_setpoint", anolis::automation::ParameterType::DOUBLE, 25.0));
+    anolis::automation::BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager,
+                                          &parameter_manager);
+
+    const std::string xml = R"(<?xml version="1.0"?>
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree"><SubTree ID="Inner"/></BehaviorTree>
+  <BehaviorTree ID="Inner"><GetParameter param="temp_setpoint" value="{target_temp}"/></BehaviorTree>
+</root>
+)";
+    const auto tree_path = write_tree_file("anolis-bt-subtree-services", xml);
+    ASSERT_TRUE(runtime.load_tree(tree_path.string()));
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, runtime.tick());
+
+    std::error_code ec;
+    std::filesystem::remove(tree_path, ec);
+}
+
 namespace {
 
 constexpr char kSimpleTreeXml[] = R"(<?xml version="1.0"?>

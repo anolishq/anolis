@@ -220,6 +220,15 @@ Conditions; the rest are Actions.
 
 Use runtime capability metadata and parameter constraints to keep BT logic generic.
 
+### SubTrees
+
+Anolis nodes work in a `SubTree` at any depth, with or without
+`_autoremap`: they take the runtime's services from the tree's root
+blackboard. A SubTree's own blackboard still holds its own keys, so a value
+one node writes inside a SubTree is seen outside it only through a port
+remapping, `_autoremap="true"`, or a `{@key}` port, which BehaviorTree.CPP
+writes to the root blackboard.
+
 ## Quick Walkthrough
 
 ### 1) Start runtime with automation enabled
