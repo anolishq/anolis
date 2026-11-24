@@ -115,8 +115,8 @@ Upgrade notes:
 ### Fixed
 
 - Anolis nodes in a `SubTree` without `_autoremap` find the runtime's
-  services. They read them from their own blackboard, and a SubTree had its
-  own without them, so `GetParameter`, `GetParameterBool`,
+  services. They read them from their own blackboard, and a SubTree's own
+  blackboard did not hold them, so `GetParameter`, `GetParameterBool`,
   `GetParameterInt64`, `ReadSignal`, `CheckQuality` and `CallDevice` there
   loaded and then failed every tick with "Missing key
   [anolis.bt_service_context]" (#807).
