@@ -69,8 +69,8 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
                 if (!name.empty() && name.front() == '_' && !allowed_underscore_attribute(name)) {
                     return std::format(
                         "node '{}' ({}) has attribute '{}', which this runtime does not run. A node may carry "
-                        "the pre and post conditions of the linked BehaviorTree.CPP, _description, _uid and "
-                        "_fullpath, and _autoremap, which acts only on a SubTree",
+                        "the pre and post conditions of the linked BehaviorTree.CPP, _description, _uid, "
+                        "_fullpath and _autoremap (which acts only on a SubTree)",
                         node->fullPath(), node->registrationName(), name);
                 }
             }
