@@ -202,12 +202,15 @@ Conditions; the rest are Actions.
 6. `GetParameterInt64`
 7. `CheckBool`
 8. `PeriodicPulseWindow`: `active` is true for `pulse_s` at the start of
-   each `interval_s`, after `startup_delay_s`; `enabled="false"` writes
+   each `interval_s`, or each 3600/`max_pulses_per_hour` seconds if that
+   is longer, after `startup_delay_s`; `enabled="false"` writes
    `active=false`, `pulse_index=-1` and `elapsed_ms=0` and restarts the
-   schedule. A schedule it refuses (`interval_s` or `pulse_s` 0 or less,
-   `pulse_s` longer than `interval_s`, a negative `startup_delay_s` or
-   `max_pulses_per_hour`) does the same and fails the node, so a sequence
-   stops there: catch the failure, for instance with a `Fallback`, where
+   schedule. The inputs are checked first, even when disabled: a schedule
+   it refuses (`interval_s` or `pulse_s` 0 or less, `pulse_s` longer than
+   `interval_s`, a negative `startup_delay_s` or `max_pulses_per_hour`)
+   writes those same outputs and fails the node, keeping the schedule's
+   start for when the inputs are valid again. A failing node stops a
+   sequence, so catch the failure, for instance with a `Fallback`, where
    the tree must still command the output off.
 9. `RequestedPulseWindow`: one pulse, `delay_s` after a request and
    `pulse_s` long, each time the `request` counter parameter increases.

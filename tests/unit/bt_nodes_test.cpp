@@ -324,9 +324,9 @@ TEST_F(BTNodesTest, PeriodicPulseWindowNodeComputesExpectedWindow) {
     EXPECT_EQ(0, blackboard->get<int64_t>("idx"));
 }
 
-// #810: a schedule refused mid-pulse left `active` as it was, so a pump
-// commanded on stayed on. The node now writes the outputs it writes when
-// disabled before it fails.
+// #810: a schedule refused mid-pulse left `active` true. The node now writes
+// the outputs it writes when disabled before it fails, and keeps its
+// schedule for when the inputs become valid again.
 TEST_F(BTNodesTest, PeriodicPulseWindowClearsItsOutputsWhenItRefusesASchedule) {
     BT::BehaviorTreeFactory factory;
     register_nodes(factory);
@@ -354,14 +354,15 @@ TEST_F(BTNodesTest, PeriodicPulseWindowClearsItsOutputsWhenItRefusesASchedule) {
     EXPECT_EQ(-1, blackboard->get<int64_t>("index"));
     EXPECT_EQ(0, blackboard->get<int64_t>("elapsed"));
 
-    // Valid again: the schedule starts over from this tick, as after a
-    // disable, instead of carrying on from t=0.
-    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 61000));
-    EXPECT_TRUE(blackboard->get<bool>("active"));
-    EXPECT_EQ(0, blackboard->get<int64_t>("index"));
-    EXPECT_EQ(0, blackboard->get<int64_t>("elapsed"));
+    // Valid again: the schedule carries on from t=0. Restarting it would
+    // pulse at once on every refused-then-valid edge, a dose the interval
+    // does not allow; at t=63000 the schedule is between pulses.
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tick(5, 2, 63000));
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+    EXPECT_EQ(12, blackboard->get<int64_t>("index"));
+    EXPECT_EQ(63000, blackboard->get<int64_t>("elapsed"));
 
-    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 61500)) << "pulse longer than the interval";
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tick(1, 2, 65000)) << "pulse longer than the interval";
     EXPECT_FALSE(blackboard->get<bool>("active"));
 }
 

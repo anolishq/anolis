@@ -114,12 +114,12 @@ Upgrade notes:
 
 ### Fixed
 
-- `PeriodicPulseWindow` does what disabling does before it fails on a
-  schedule it refuses (`interval_s` 0 or less, `pulse_s` longer than
-  `interval_s`, and the like): it writes `active=false`, `pulse_index=-1`
-  and `elapsed_ms=0`, and a schedule that becomes valid again starts over.
-  It left `active` as it was, so a window refused mid-pulse still said
-  active (#810). It still fails, so a tree that should command the output
+- `PeriodicPulseWindow` writes `active=false`, `pulse_index=-1` and
+  `elapsed_ms=0` before it fails on a schedule it refuses (`interval_s` 0 or
+  less, `pulse_s` longer than `interval_s`, and the like). It left `active`
+  as it was, so a window refused mid-pulse still said active (#810). The
+  schedule keeps its start, so once the inputs are valid again it carries
+  on where it would have been. It still fails, so a tree that should command the output
   off must catch the failure, as bioreactor-v1's spare disabled window
   does; that spare could now be an `<AlwaysSuccess/>`.
 - With automation disabled, startup preflight checks mode-transition hooks

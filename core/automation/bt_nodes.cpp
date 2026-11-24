@@ -691,10 +691,10 @@ BT::NodeStatus PeriodicPulseWindowNode::tick() {
 
     if (startup_delay_s < 0 || interval_s <= 0 || pulse_s <= 0 || pulse_s > interval_s || max_pulses_per_hour < 0) {
         LOG_ERROR("[PeriodicPulseWindowNode] Invalid scheduling inputs");
-        // What disabling does, outputs and all: a window refused mid-pulse
-        // no longer leaves `active` true, and a schedule that becomes valid
-        // again starts over, startup delay included (#810).
-        initialized_ = false;
+        // The disabled outputs, so a window refused mid-pulse does not leave
+        // `active` true (#810). The schedule keeps its start: restarting it
+        // here would pulse at once when the inputs become valid again,
+        // whatever interval_s and max_pulses_per_hour allow.
         setOutput("active", false);
         setOutput("pulse_index", int64_t{-1});
         setOutput("elapsed_ms", int64_t{0});
