@@ -241,6 +241,15 @@ misspelt guard would never stop the node. The check covers the nodes the
 tree runs; an attribute on a `<BehaviorTree>` element itself, or in a tree
 nothing references, is not checked.
 
+### SubTrees
+
+Anolis nodes work in a `SubTree` at any depth, with or without
+`_autoremap`: they take the runtime's services from the tree's root
+blackboard. A SubTree's own blackboard still holds its own keys, so a value
+one node writes inside a SubTree is seen outside it only through a port
+remapping, `_autoremap="true"`, or a `{@key}` port, which BehaviorTree.CPP
+writes to the root blackboard.
+
 ## Quick Walkthrough
 
 ### 1) Start runtime with automation enabled

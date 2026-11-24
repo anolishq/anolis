@@ -505,8 +505,11 @@ void BTRuntime::reset_run_status_locked() {
 }
 
 void BTRuntime::populate_blackboard(BT::Tree &tree) {
-    auto blackboard = tree.rootBlackboard();
-    if (!blackboard) {
+    // The top of the blackboard parent chain, which is where the nodes read
+    // the context (read_service_context): a node in a SubTree reaches it
+    // through its parent chain (#807).
+    auto *blackboard = tree.rootBlackboard() ? tree.rootBlackboard()->rootBlackboard() : nullptr;
+    if (blackboard == nullptr) {
         LOG_ERROR("[BTRuntime] Cannot populate blackboard, root blackboard is null");
         return;
     }

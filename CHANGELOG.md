@@ -122,6 +122,12 @@ Upgrade notes:
 
 ### Fixed
 
+- Anolis nodes in a `SubTree` without `_autoremap` find the runtime's
+  services. They read them from their own blackboard, and a SubTree's own
+  blackboard did not hold them, so `GetParameter`, `GetParameterBool`,
+  `GetParameterInt64`, `ReadSignal`, `CheckQuality` and `CallDevice` there
+  loaded and then failed every tick with "Missing key
+  [anolis.bt_service_context]" (#807).
 - With automation disabled, startup preflight checks mode-transition hooks
   as unused: one that cannot be dispatched is warned about, naming the hook,
   where it was skipped. It never refuses startup.
