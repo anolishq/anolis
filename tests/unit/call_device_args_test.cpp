@@ -107,6 +107,14 @@ TEST_F(CallDeviceArgsTest, AnEmptyValueFromTheBlackboardIsACountedFailure) {
     EXPECT_EQ(reported_[0].error.find("Provider not found"), std::string::npos) << "the call was dispatched";
 }
 
+TEST_F(CallDeviceArgsTest, APrefixWithNothingAfterItIsACountedFailure) {
+    auto tree = build(R"(args="{json}")");
+    blackboard_->set("json", std::string("json:"));
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    ASSERT_EQ(1u, reported_.size());
+    EXPECT_NE(reported_[0].error.find("args is empty"), std::string::npos) << reported_[0].error;
+}
+
 TEST_F(CallDeviceArgsTest, BadJsonFromTheBlackboardIsACountedFailure) {
     auto tree = build(R"(args="{args}")");
     blackboard_->set("args", std::string(R"({"value":)"));
