@@ -85,7 +85,8 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
 // A script, or a pre or post condition, that reads a blackboard name nothing
 // in the tree sets loaded, and its first tick in AUTO threw (#809). Names the
 // first such read, or "". The order nodes run in is not followed: a name set
-// anywhere in the tree counts as set. Every script here built with the tree,
+// anywhere in the tree counts as set, and so does a name a script uses in the
+// same assignment that sets it (`x := x + 1`). Every script here built with the tree,
 // so it parses: Script, ScriptCondition and Precondition parse theirs when
 // the node is built, and BehaviorTree.CPP parses the conditions then too.
 std::string script_reading_an_unset_name(const BT::Tree &tree) {
@@ -128,12 +129,18 @@ std::string script_reading_an_unset_name(const BT::Tree &tree) {
             const BT::TreeNode &visited = *node;
             const auto &config = visited.config();
             for (const auto &[port, value] : config.output_ports) {
-                if (const auto key = BT::TreeNode::getRemappedKey(port, value)) {
+                // SetBlackboard reads output_key as the name of the entry it
+                // writes, so only a literal one names it; `{key}` would read
+                // the name from `key`.
+                const bool set_blackboard_key = visited.registrationName() == "SetBlackboard" && port == "output_key";
+                if (set_blackboard_key) {
+                    if (!BT::TreeNode::isBlackboardPointer(value)) {
+                        created.insert(bare(value));
+                    }
+                } else if (const auto key = BT::TreeNode::getRemappedKey(port, value)) {
                     if (const auto entry = config.blackboard->getEntry(std::string(key.value()))) {
                         written.insert(entry.get());
                     }
-                } else if (visited.registrationName() == "SetBlackboard" && port == "output_key") {
-                    created.insert(bare(value));
                 }
             }
             const std::string &type = visited.registrationName();
@@ -160,8 +167,10 @@ std::string script_reading_an_unset_name(const BT::Tree &tree) {
         if (created.contains(bare(read.name))) {
             continue;
         }
+        // An entry that already holds a value was set when the tree was
+        // built: a literal on a SubTree port, or the port's model default.
         const auto entry = read.node->config().blackboard->getEntry(read.name);
-        if (entry && written.contains(entry.get())) {
+        if (entry && (written.contains(entry.get()) || !entry->value.empty())) {
             continue;
         }
         return std::format(

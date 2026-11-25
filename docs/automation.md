@@ -258,18 +258,24 @@ nothing references, is not checked.
 A `Script`, `ScriptCondition` or `Precondition`, or a pre or post condition,
 that reads a blackboard name nothing in the tree sets refuses the tree when
 it loads and at `--check-config`, naming the node and the name. A name is set
-when an output port writes it (`{name}`, or `SetBlackboard`'s
-`output_key`) or a script creates it with `:=`; `=`, `+=` and the like
-assign only to a name that exists. Without the check the tree loaded and
-its first tick in AUTO threw, which the runtime turns into FAULT.
+when an output port writes it (`value="{name}"`), when `SetBlackboard`
+names it with a literal `output_key="name"`, when a literal on a `SubTree`
+port (or the port's model default) gives it a value as the tree is built,
+or when a script creates it with `:=`. `=`, `+=` and the like assign only to
+a name that exists: one a port declares, or one created with `:=`.
+`SetBlackboard output_key="{name}"` does not set `name`: it reads the name of
+the entry to write from `name`. Without the check the tree loaded and its
+first tick in AUTO threw, which the runtime turns into FAULT.
 
 The check follows the blackboard each node sees, so a name set in the main
 tree does not count inside a `SubTree` that neither remaps it nor sets
 `_autoremap`; a root name (`@name`) is seen from any SubTree. It does not
 follow the order nodes run in: a name set anywhere in the tree counts as
 set, so a script that reads a name before the node that sets it has run
-still throws at that tick. A name a script creates with `:=` counts as set
-in every SubTree.
+still throws at that tick. A name a script creates with `:=`, or a literal
+`SetBlackboard` key, counts as set in every SubTree. Some reads that throw at
+tick still load: `x := x + 1` where nothing else sets `x`, and `x += 1`
+where a port declares `x` but nothing writes it.
 
 ### SubTrees
 
