@@ -6,6 +6,7 @@
 #include <tinyxml2.h>
 
 #include <algorithm>
+#include <array>
 #include <behaviortree_cpp/scripting/any_types.hpp>
 #include <chrono>
 #include <filesystem>
@@ -88,12 +89,24 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
 // Groot2 saves every port a node's model declares, writing attr="" where the
 // author left the field empty (#818). BehaviorTree.CPP reads "" as a value:
 // it cannot convert it for a typed port, and an empty argN_str beside an
-// argN_num is two value sources. An empty port with no default, or an empty
-// default, is dropped so it reads as left out; one with a non-empty default is
-// refused, since "" there cannot mean the default. Returns the refusal, or "";
+// argN_num is two value sources. On an Anolis node, an empty port with no
+// default, or an empty default, is dropped so it reads as left out; one with
+// a non-empty default is refused, since "" there cannot mean the default. Returns the refusal, or "";
 // `rewritten` is the tree without the dropped ports, or empty when the file
 // had none. A relative <include> path is made absolute against `dir`, which
 // is where BehaviorTree.CPP would resolve it reading the file.
+// The node types Anolis registers in BTRuntime. Only their ports are read
+// this way: BehaviorTree.CPP's own nodes keep an empty attribute as written
+// (SetBlackboard value="" sets an empty string; dropped, it throws).
+constexpr std::array<std::string_view, 11> kAnolisNodes = {
+    "ReadSignal",        "CallDevice", "CheckQuality",        "GetParameter",         "GetParameterBool",
+    "GetParameterInt64", "CheckBool",  "PeriodicPulseWindow", "RequestedPulseWindow", "EmitOnChangeOrInterval",
+    "BuildArgsJson"};
+
+// Ports that name what a node acts on. An empty one is left as written, so
+// the config check refuses it as it did: dropped, it would read as absent.
+constexpr std::array<std::string_view, 4> kNamingPorts = {"device_handle", "function_name", "signal_id", "param"};
+
 std::string drop_empty_ports(const std::string &bytes, const std::filesystem::path &dir,
                              const BT::BehaviorTreeFactory &factory, std::string &rewritten) {
     tinyxml2::XMLDocument doc;
@@ -107,7 +120,8 @@ std::string drop_empty_ports(const std::string &bytes, const std::filesystem::pa
         for (auto *element = parent.FirstChildElement(); element != nullptr && refusal.empty();
              element = element->NextSiblingElement()) {
             const std::string type = element->Name();
-            if (const auto manifest = manifests.find(type); manifest != manifests.end()) {
+            const auto manifest = manifests.find(type);
+            if (manifest != manifests.end() && std::ranges::find(kAnolisNodes, type) != kAnolisNodes.end()) {
                 std::vector<std::string> empty;
                 for (const auto *attribute = element->FirstAttribute(); attribute != nullptr;
                      attribute = attribute->Next()) {
@@ -116,6 +130,11 @@ std::string drop_empty_ports(const std::string &bytes, const std::filesystem::pa
                     }
                 }
                 for (const auto &port : empty) {
+                    // CallDevice's args="" already means no arguments (#806).
+                    if (std::ranges::find(kNamingPorts, port) != kNamingPorts.end() ||
+                        (type == "CallDevice" && port == "args")) {
+                        continue;
+                    }
                     const std::string &fallback = manifest->second.ports.at(port).defaultValueString();
                     if (!fallback.empty()) {
                         const char *name = element->Attribute("name");

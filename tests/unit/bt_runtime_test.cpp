@@ -1596,3 +1596,34 @@ TEST(BTRuntimeGroot2SaveTest, ARelativeIncludeStillResolvesInARewrittenTree) {
     std::error_code ec;
     std::filesystem::remove(included, ec);
 }
+
+// Only Anolis nodes are read this way. BehaviorTree.CPP's own nodes keep an
+// empty attribute as written: SetBlackboard value="" sets an empty string,
+// and dropped it would throw at tick.
+TEST(BTRuntimeGroot2SaveTest, ABuiltInNodeKeepsItsEmptyAttribute) {
+    EXPECT_EQ("SUCCESS",
+              load_and_tick("anolis-bt-818-builtin", main_tree(R"(<Sequence><SetBlackboard value="" output_key="x"/>)"
+                                                               R"(<ScriptCondition code="x == ''"/></Sequence>)")));
+}
+
+// An empty port that names what a node acts on stays as written, so the
+// config check refuses it as before; CallDevice's args="" still means no
+// arguments (#806) and loads.
+TEST(BTRuntimeGroot2SaveTest, NamingPortsAndEmptyArgsKeepTheirMeaning) {
+    EXPECT_TRUE(mentions(check_one_node(R"(<CallDevice device_handle="" function_name="f"/>)"),
+                         "is not provider_id/device_id"));
+    EXPECT_TRUE(mentions(check_one_node(R"(<GetParameter param="" value="{v}"/>)"), "does not declare"));
+    const auto outcome = load_tree_xml("anolis-bt-818-args",
+                                       main_tree(R"(<CallDevice device_handle="sim0/d" function_name="f" args=""/>)"));
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+// Every <BehaviorTree> in the file is read, not only the first.
+TEST(BTRuntimeGroot2SaveTest, AnEmptyPortInASubTreeIsDropped) {
+    EXPECT_EQ("SUCCESS",
+              load_and_tick("anolis-bt-818-subtree",
+                            main_tree(R"(<SubTree ID="Inner"/>)",
+                                      R"(<BehaviorTree ID="Inner"><Sequence><PeriodicPulseWindow interval_s="60" )"
+                                      R"(pulse_s="60" now_ms="" active="{on}"/><ScriptCondition code="on"/></Sequence>)"
+                                      R"(</BehaviorTree>)")));
+}
