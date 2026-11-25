@@ -130,3 +130,11 @@ TEST_F(CheckQualityNodeTest, ANameFromTheBlackboardIsCheckedAtTick) {
 }
 
 }  // namespace
+
+// #941: an expected_quality read from a blackboard entry nothing wrote fails
+// the node; it was taken as OK.
+TEST_F(CheckQualityNodeTest, AnUnwrittenExpectedQualityFailsTheNode) {
+    poll_with(anolis::deviceprovider::v1::SignalValue_Quality_QUALITY_OK);
+    auto tree = build("{never_written}");
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+}

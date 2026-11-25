@@ -119,6 +119,16 @@ Upgrade notes:
   pre and post conditions, `_description`, `_uid`, `_fullpath` and
   `_autoremap`, which acts only on a `SubTree`; `docs/automation.md` lists
   them for 4.9.0.
+- A node input given as a blackboard reference fails the node, naming the
+  port, when the entry is unwritten or holds another type (#941). The
+  window, check and emit nodes took the port's default instead: a
+  `PeriodicPulseWindow` whose `enabled` entry was never written ran its
+  default schedule, `CheckBool` took an unwritten `expected` as true and
+  `CheckQuality` an unwritten `expected_quality` as `OK`, and
+  `BuildArgsJson` passed over an unwritten source for another one in the
+  same slot. An input left out of the tree still takes its default. When
+  they fail, `EmitOnChangeOrInterval` writes `emit=false` and
+  `BuildArgsJson` an empty `json`; both left the last tick's value.
 
 ### Fixed
 
