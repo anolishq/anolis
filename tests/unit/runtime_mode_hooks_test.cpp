@@ -301,6 +301,9 @@ TEST(RuntimeModeHooksTest, ATreeReadingAnUndeclaredParameterFailsInitialization)
 // The tree is read again once providers have started; a file that changed
 // in between is checked too, not run on the strength of the first check.
 TEST(RuntimeModeHooksTest, ATreeChangedWhileProvidersStartIsCheckedAgain) {
+#ifdef _WIN32
+    GTEST_SKIP() << "the provider swaps the tree through /bin/sh";
+#endif
     const auto rig = fresh_rig("anolis-808-changed");
     std::ofstream(rig.root / "bad.xml") << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    "
                                         << R"(<GetParameter param="not_declared" value="{v}"/>)"
