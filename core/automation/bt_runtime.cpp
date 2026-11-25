@@ -86,15 +86,6 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
     return "";
 }
 
-// Groot2 saves every port a node's model declares, writing attr="" where the
-// author left the field empty (#818). BehaviorTree.CPP reads "" as a value:
-// it cannot convert it for a typed port, and an empty argN_str beside an
-// argN_num is two value sources. On an Anolis node, an empty port with no
-// default, or an empty default, is dropped so it reads as left out; one with
-// a non-empty default is refused, since "" there cannot mean the default. Returns the refusal, or "";
-// `rewritten` is the tree without the dropped ports, or empty when the file
-// had none. A relative <include> path is made absolute against `dir`, which
-// is where BehaviorTree.CPP would resolve it reading the file.
 // The node types Anolis registers in BTRuntime. Only their ports are read
 // this way: BehaviorTree.CPP's own nodes keep an empty attribute as written
 // (SetBlackboard value="" sets an empty string; dropped, it throws).
@@ -103,10 +94,22 @@ constexpr std::array<std::string_view, 11> kAnolisNodes = {
     "GetParameterInt64", "CheckBool",  "PeriodicPulseWindow", "RequestedPulseWindow", "EmitOnChangeOrInterval",
     "BuildArgsJson"};
 
-// Ports that name what a node acts on. An empty one is left as written, so
-// the config check refuses it as it did: dropped, it would read as absent.
-constexpr std::array<std::string_view, 4> kNamingPorts = {"device_handle", "function_name", "signal_id", "param"};
+// Inputs an Anolis node reads with no fallback: what it acts on, and the
+// value it checks or watches. An empty one is left as written, so the config
+// check and the node treat it as they did; dropped, it would read as absent
+// (EmitOnChangeOrInterval with no key fails every tick).
+constexpr std::array<std::string_view, 7> kRequiredPorts = {"device_handle", "function_name", "signal_id", "param",
+                                                            "value",         "request",       "key"};
 
+// Groot2 saves every port a node's model declares, writing attr="" where the
+// author left the field empty (#818). BehaviorTree.CPP reads "" as a value:
+// it cannot convert it for a typed port, and an empty argN_str beside an
+// argN_num is two value sources. On an Anolis node, an empty port with no
+// default, or an empty default, is dropped so it reads as left out; one with
+// a non-empty default is refused, since "" there cannot mean the default.
+// Returns the refusal, or ""; `rewritten` is the tree without the dropped
+// ports, or empty when the file had none. A relative <include> path is made absolute against `dir`, which
+// is where BehaviorTree.CPP would resolve it reading the file.
 std::string drop_empty_ports(const std::string &bytes, const std::filesystem::path &dir,
                              const BT::BehaviorTreeFactory &factory, std::string &rewritten) {
     tinyxml2::XMLDocument doc;
@@ -131,7 +134,7 @@ std::string drop_empty_ports(const std::string &bytes, const std::filesystem::pa
                 }
                 for (const auto &port : empty) {
                     // CallDevice's args="" already means no arguments (#806).
-                    if (std::ranges::find(kNamingPorts, port) != kNamingPorts.end() ||
+                    if (std::ranges::find(kRequiredPorts, port) != kRequiredPorts.end() ||
                         (type == "CallDevice" && port == "args")) {
                         continue;
                     }

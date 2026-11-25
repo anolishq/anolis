@@ -1627,3 +1627,13 @@ TEST(BTRuntimeGroot2SaveTest, AnEmptyPortInASubTreeIsDropped) {
                                       R"(pulse_s="60" now_ms="" active="{on}"/><ScriptCondition code="on"/></Sequence>)"
                                       R"(</BehaviorTree>)")));
 }
+
+// An input the node reads with no fallback keeps an empty attribute, as on
+// main: EmitOnChangeOrInterval key="" still emits, and CheckBool value=""
+// is still refused when the tree is built.
+TEST(BTRuntimeGroot2SaveTest, RequiredInputsKeepTheirEmptyAttribute) {
+    EXPECT_EQ("SUCCESS", load_and_tick("anolis-bt-818-key",
+                                       main_tree(R"(<Sequence><EmitOnChangeOrInterval key="" emit="{e}" reason="{r}"/>)"
+                                                 R"(<ScriptCondition code="e"/></Sequence>)")));
+    EXPECT_FALSE(load_tree_xml("anolis-bt-818-value", main_tree(R"(<CheckBool value="" expected="true"/>)")).ok);
+}
