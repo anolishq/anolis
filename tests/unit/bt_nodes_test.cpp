@@ -762,3 +762,117 @@ TEST(BtNodeKinds, EveryFormOfATreeStillLoads) {
     EXPECT_NO_THROW(
         (void)factory.createTreeFromText(tree_with(R"(<Action ID="CheckBool" value="{flag}"/>)"), blackboard));
 }
+
+// #941: an input whose port reads a blackboard entry that is missing, or
+// holds another type, fails the node instead of taking the port's default;
+// and a node that fails writes defined outputs.
+namespace {
+
+BT::Tree one_node(BT::BehaviorTreeFactory &factory, const std::string &node, const BT::Blackboard::Ptr &blackboard) {
+    return factory.createTreeFromText(
+        R"(<root BTCPP_format="4"><BehaviorTree ID="Main">)" + node + "</BehaviorTree></root>", blackboard);
+}
+
+}  // namespace
+
+TEST_F(BTNodesTest, AnUnwrittenEnableFailsThePulseWindowInsteadOfRunningIt) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    auto tree = one_node(factory,
+                         R"(<PeriodicPulseWindow enabled="{en}" interval_s="5" pulse_s="2" now_ms="0" )"
+                         R"(active="{active}" pulse_index="{index}" elapsed_ms="{elapsed}"/>)",
+                         blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+
+    blackboard->set("en", true);
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce()) << "written, it runs";
+    EXPECT_TRUE(blackboard->get<bool>("active"));
+}
+
+TEST_F(BTNodesTest, ABlackboardInputOfAnotherTypeFailsTheNode) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    blackboard->set("interval", std::string("soon"));
+    auto tree =
+        one_node(factory, R"(<PeriodicPulseWindow interval_s="{interval}" pulse_s="2" now_ms="0" active="{active}"/>)",
+                 blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+}
+
+TEST_F(BTNodesTest, ALiteralOrAbsentInputKeepsItsDefault) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    auto tree = one_node(factory, R"(<PeriodicPulseWindow pulse_s="2" now_ms="0" active="{active}"/>)", blackboard);
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
+    EXPECT_TRUE(blackboard->get<bool>("active"));
+
+    auto disabled = one_node(
+        factory, R"(<PeriodicPulseWindow enabled="false" pulse_s="2" now_ms="0" active="{active}"/>)", blackboard);
+    disabled.tickOnce();
+    EXPECT_FALSE(blackboard->get<bool>("active")) << "a literal enabled=false is read, not the default";
+}
+
+TEST_F(BTNodesTest, AnUnwrittenInputFailsTheOtherWindowAndCheckNodes) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    blackboard->set("requests", int64_t{0});
+    blackboard->set("flag", true);
+    EXPECT_EQ(BT::NodeStatus::FAILURE,
+              one_node(factory,
+                       R"(<RequestedPulseWindow request="{requests}" delay_s="{delay}" pulse_s="2" now_ms="0" )"
+                       R"(active="{active}" queued="{queued}"/>)",
+                       blackboard)
+                  .tickOnce());
+    EXPECT_FALSE(blackboard->get<bool>("active"));
+    EXPECT_EQ(BT::NodeStatus::FAILURE,
+              one_node(factory, R"(<CheckBool value="{flag}" expected="{wanted}"/>)", blackboard).tickOnce())
+        << "an unwritten expected is not taken as true";
+}
+
+TEST_F(BTNodesTest, EmitOnChangeOrIntervalClearsEmitWhenItFails) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    blackboard->set("k", std::string("a"));
+    blackboard->set("keepalive", int64_t{30});
+    auto tree = one_node(factory,
+                         R"(<EmitOnChangeOrInterval key="{k}" keepalive_s="{keepalive}" now_ms="0" )"
+                         R"(emit="{emit}" reason="{reason}"/>)",
+                         blackboard);
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
+    ASSERT_TRUE(blackboard->get<bool>("emit"));
+
+    blackboard->set("keepalive", int64_t{-1});
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    EXPECT_FALSE(blackboard->get<bool>("emit")) << "a refused tick does not leave the last emit standing";
+}
+
+TEST_F(BTNodesTest, BuildArgsJsonClearsJsonWhenItFails) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    blackboard->set("n", 5.0);
+    auto tree = one_node(factory, R"(<BuildArgsJson arg1_name="p" arg1_num="{n}" json="{json}"/>)", blackboard);
+    ASSERT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
+    ASSERT_EQ(R"({"p":5.0})", blackboard->get<std::string>("json"));
+
+    blackboard->unset("n");
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    EXPECT_EQ("", blackboard->get<std::string>("json")) << "not the last tick's arguments";
+}
+
+// An unwritten source is not passed over for another: arg1_num reads a key
+// nothing wrote, so the literal arg1_str must not be sent in its place.
+TEST_F(BTNodesTest, BuildArgsJsonFailsOnAnUnwrittenSourceInsteadOfUsingAnother) {
+    BT::BehaviorTreeFactory factory;
+    register_nodes(factory);
+    auto blackboard = make_blackboard(true);
+    auto tree =
+        one_node(factory, R"(<BuildArgsJson arg1_name="p" arg1_num="{n}" arg1_str="x" json="{json}"/>)", blackboard);
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+}

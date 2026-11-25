@@ -35,6 +35,29 @@ std::optional<BTServiceContext> read_service_context(const BT::TreeNode &node, c
     }
 }
 
+// An optional input (#941): nullopt when the port is not in the node's
+// input_ports, so the caller's default applies, and the value otherwise.
+// BehaviorTree.CPP puts a declared port default there when the tree leaves the
+// port out, so only a port declared without one reaches nullopt. A port that
+// reads a blackboard entry nothing wrote, or one that cannot be converted to
+// the port's type, sets `error`, naming the port, so the node fails instead of
+// running on the default (an unwritten `enabled` ran a pulse window).
+template <typename T>
+std::optional<T> optional_input(const BT::TreeNode &node, const std::string &port, std::string &error) {
+    const auto &ports = node.config().input_ports;
+    if (ports.find(port) == ports.end()) {
+        return std::nullopt;
+    }
+    auto value = node.getInput<T>(port);
+    if (value) {
+        return value.value();
+    }
+    if (error.empty()) {
+        error = "input '" + port + "': " + value.error();
+    }
+    return std::nullopt;
+}
+
 int64_t current_time_ms() {
     // Use monotonic time to avoid schedule distortions from wall-clock jumps.
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
@@ -342,6 +365,14 @@ BT::NodeStatus CallDeviceNode::tick() {
         args_str = args_str.substr(5);  // Remove "json:" prefix
     }
 
+    // An empty value read from the blackboard, with or without the prefix,
+    // is not an argument object: a refused BuildArgsJson writes one (#941).
+    // An empty literal never gets here: it is skipped above and still means
+    // no arguments, and a literal `json:` is refused when the tree is built.
+    if (args_str.empty()) {
+        return fail_args("args is empty");
+    }
+
     if (!args_str.empty() && args_str != "{}") {
         try {
             auto json_args = nlohmann::json::parse(args_str);
@@ -452,10 +483,16 @@ BT::NodeStatus CheckQualityNode::tick() {
     // Get input ports
     auto device_handle = getInput<std::string>("device_handle");
     auto signal_id = getInput<std::string>("signal_id");
-    auto expected_quality_str = getInput<std::string>("expected_quality").value_or("OK");
+    std::string input_error;
+    const auto expected_quality_str =
+        optional_input<std::string>(*this, "expected_quality", input_error).value_or("OK");
 
     if (!device_handle || !signal_id) {
         LOG_ERROR("[CheckQualityNode] Missing required input ports");
+        return BT::NodeStatus::FAILURE;
+    }
+    if (!input_error.empty()) {
+        LOG_ERROR("[CheckQualityNode] " << input_error);
         return BT::NodeStatus::FAILURE;
     }
 
@@ -661,7 +698,12 @@ BT::NodeStatus CheckBoolNode::tick() {
         return BT::NodeStatus::FAILURE;
     }
 
-    const bool expected = getInput<bool>("expected").value_or(true);
+    std::string input_error;
+    const bool expected = optional_input<bool>(*this, "expected", input_error).value_or(true);
+    if (!input_error.empty()) {
+        LOG_ERROR("[CheckBoolNode] " << input_error);
+        return BT::NodeStatus::FAILURE;
+    }
     return (value.value() == expected) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
 }
 
@@ -685,15 +727,18 @@ PeriodicPulseWindowNode::PeriodicPulseWindowNode(const std::string &name, const 
 }
 
 BT::NodeStatus PeriodicPulseWindowNode::tick() {
-    const bool enabled = getInput<bool>("enabled").value_or(true);
-    const int64_t startup_delay_s = getInput<int64_t>("startup_delay_s").value_or(0);
-    const int64_t interval_s = getInput<int64_t>("interval_s").value_or(60);
-    const int64_t pulse_s = getInput<int64_t>("pulse_s").value_or(1);
-    const int64_t max_pulses_per_hour = getInput<int64_t>("max_pulses_per_hour").value_or(0);
-    const int64_t now_ms = getInput<int64_t>("now_ms").value_or(current_time_ms());
+    std::string input_error;
+    const bool enabled = optional_input<bool>(*this, "enabled", input_error).value_or(true);
+    const int64_t startup_delay_s = optional_input<int64_t>(*this, "startup_delay_s", input_error).value_or(0);
+    const int64_t interval_s = optional_input<int64_t>(*this, "interval_s", input_error).value_or(60);
+    const int64_t pulse_s = optional_input<int64_t>(*this, "pulse_s", input_error).value_or(1);
+    const int64_t max_pulses_per_hour = optional_input<int64_t>(*this, "max_pulses_per_hour", input_error).value_or(0);
+    const int64_t now_ms = optional_input<int64_t>(*this, "now_ms", input_error).value_or(current_time_ms());
 
-    if (startup_delay_s < 0 || interval_s <= 0 || pulse_s <= 0 || pulse_s > interval_s || max_pulses_per_hour < 0) {
-        LOG_ERROR("[PeriodicPulseWindowNode] Invalid scheduling inputs");
+    if (!input_error.empty() || startup_delay_s < 0 || interval_s <= 0 || pulse_s <= 0 || pulse_s > interval_s ||
+        max_pulses_per_hour < 0) {
+        LOG_ERROR("[PeriodicPulseWindowNode] Invalid scheduling inputs"
+                  << (input_error.empty() ? "" : ": " + input_error));
         // The disabled outputs, so a window refused mid-pulse does not leave
         // `active` true (#810). The schedule keeps its start: restarting it
         // here would pulse at once when the inputs become valid again,
@@ -770,15 +815,17 @@ RequestedPulseWindowNode::RequestedPulseWindowNode(const std::string &name, cons
 
 BT::NodeStatus RequestedPulseWindowNode::tick() {
     const auto request = getInput<int64_t>("request");
-    const int64_t delay_s = getInput<int64_t>("delay_s").value_or(0);
-    const int64_t pulse_s = getInput<int64_t>("pulse_s").value_or(1);
-    const int64_t max_queued = getInput<int64_t>("max_queued").value_or(1);
-    const int64_t now_ms = getInput<int64_t>("now_ms").value_or(current_time_ms());
+    std::string input_error;
+    const int64_t delay_s = optional_input<int64_t>(*this, "delay_s", input_error).value_or(0);
+    const int64_t pulse_s = optional_input<int64_t>(*this, "pulse_s", input_error).value_or(1);
+    const int64_t max_queued = optional_input<int64_t>(*this, "max_queued", input_error).value_or(1);
+    const int64_t now_ms = optional_input<int64_t>(*this, "now_ms", input_error).value_or(current_time_ms());
 
-    if (!request || delay_s < 0 || pulse_s <= 0 || max_queued < 1) {
+    if (!request || !input_error.empty() || delay_s < 0 || pulse_s <= 0 || max_queued < 1) {
         LOG_ERROR(
             "[RequestedPulseWindowNode] Invalid inputs: request must be set, delay_s >= 0, pulse_s > 0, "
-            "max_queued >= 1");
+            "max_queued >= 1"
+            << (input_error.empty() ? "" : "; " + input_error));
         setOutput("active", false);
         setOutput("queued", queued_);
         return BT::NodeStatus::FAILURE;
@@ -832,20 +879,32 @@ EmitOnChangeOrIntervalNode::EmitOnChangeOrIntervalNode(const std::string &name, 
 }
 
 BT::NodeStatus EmitOnChangeOrIntervalNode::tick() {
+    // A refused tick emits nothing, so a Fallback that catches the failure
+    // does not act on the last tick's `emit` (#941).
+    const auto refuse = [this] {
+        setOutput("emit", false);
+        setOutput("reason", std::string("refused"));
+        return BT::NodeStatus::FAILURE;
+    };
     const auto key = getInput<std::string>("key");
     if (!key) {
         LOG_ERROR("[EmitOnChangeOrIntervalNode] Missing required input 'key'");
-        return BT::NodeStatus::FAILURE;
+        return refuse();
     }
 
-    const int64_t keepalive_s = getInput<int64_t>("keepalive_s").value_or(30);
-    const int64_t min_spacing_ms = getInput<int64_t>("min_spacing_ms").value_or(0);
-    const bool force = getInput<bool>("force").value_or(false);
-    const int64_t now_ms = getInput<int64_t>("now_ms").value_or(current_time_ms());
+    std::string input_error;
+    const int64_t keepalive_s = optional_input<int64_t>(*this, "keepalive_s", input_error).value_or(30);
+    const int64_t min_spacing_ms = optional_input<int64_t>(*this, "min_spacing_ms", input_error).value_or(0);
+    const bool force = optional_input<bool>(*this, "force", input_error).value_or(false);
+    const int64_t now_ms = optional_input<int64_t>(*this, "now_ms", input_error).value_or(current_time_ms());
+    if (!input_error.empty()) {
+        LOG_ERROR("[EmitOnChangeOrIntervalNode] " << input_error);
+        return refuse();
+    }
 
     if (keepalive_s < 0 || min_spacing_ms < 0) {
         LOG_ERROR("[EmitOnChangeOrIntervalNode] keepalive_s and min_spacing_ms must be >= 0");
-        return BT::NodeStatus::FAILURE;
+        return refuse();
     }
 
     bool emit = false;
@@ -903,18 +962,32 @@ BuildArgsJsonNode::BuildArgsJsonNode(const std::string &name, const BT::NodeConf
 
 BT::NodeStatus BuildArgsJsonNode::tick() {
     nlohmann::json args = nlohmann::json::object();
+    // A refused tick leaves no arguments behind: an empty `json` is not an
+    // argument object, so a CallDevice reading it fails as a counted call
+    // instead of sending the last tick's arguments, or none (#941).
+    const auto refuse = [this] {
+        setOutput("json", std::string());
+        return BT::NodeStatus::FAILURE;
+    };
 
     for (int i = 1; i <= 6; ++i) {
         const std::string slot = std::to_string(i);
-        const auto arg_name = getInput<std::string>("arg" + slot + "_name");
+        // A source that reads an unwritten or mistyped entry is an error,
+        // not a source left out: arg1_num="{n}" with n unwritten must not
+        // let arg1_str be sent in its place (#941).
+        std::string input_error;
+        const auto arg_name = optional_input<std::string>(*this, "arg" + slot + "_name", input_error);
+        const auto arg_type = optional_input<std::string>(*this, "arg" + slot + "_type", input_error).value_or("");
+        const auto num_value = optional_input<double>(*this, "arg" + slot + "_num", input_error);
+        const auto bool_value = optional_input<bool>(*this, "arg" + slot + "_bool", input_error);
+        const auto str_value = optional_input<std::string>(*this, "arg" + slot + "_str", input_error);
+        if (!input_error.empty()) {
+            LOG_ERROR("[BuildArgsJsonNode] " << input_error);
+            return refuse();
+        }
         if (!arg_name || arg_name.value().empty()) {
             continue;
         }
-
-        const auto arg_type = getInput<std::string>("arg" + slot + "_type").value_or("");
-        const auto num_value = getInput<double>("arg" + slot + "_num");
-        const auto bool_value = getInput<bool>("arg" + slot + "_bool");
-        const auto str_value = getInput<std::string>("arg" + slot + "_str");
 
         int provided_count = 0;
         provided_count += num_value.has_value() ? 1 : 0;
@@ -922,46 +995,46 @@ BT::NodeStatus BuildArgsJsonNode::tick() {
         provided_count += str_value.has_value() ? 1 : 0;
         if (provided_count == 0) {
             LOG_ERROR("[BuildArgsJsonNode] Missing value for " << arg_name.value());
-            return BT::NodeStatus::FAILURE;
+            return refuse();
         }
         if (provided_count > 1) {
             LOG_ERROR("[BuildArgsJsonNode] Multiple value sources for " << arg_name.value());
-            return BT::NodeStatus::FAILURE;
+            return refuse();
         }
 
         if (arg_type == "int64") {
             if (!num_value.has_value()) {
                 LOG_ERROR("[BuildArgsJsonNode] int64 type requires numeric input for " << arg_name.value());
-                return BT::NodeStatus::FAILURE;
+                return refuse();
             }
             const double raw = num_value.value();
             const auto rounded = std::llround(raw);
             if (std::fabs(raw - static_cast<double>(rounded)) > 1e-9) {
                 LOG_ERROR("[BuildArgsJsonNode] Non-integral numeric value for int64 arg " << arg_name.value());
-                return BT::NodeStatus::FAILURE;
+                return refuse();
             }
             args[arg_name.value()] = rounded;
         } else if (arg_type == "double") {
             if (!num_value.has_value()) {
                 LOG_ERROR("[BuildArgsJsonNode] double type requires numeric input for " << arg_name.value());
-                return BT::NodeStatus::FAILURE;
+                return refuse();
             }
             args[arg_name.value()] = num_value.value();
         } else if (arg_type == "bool") {
             if (!bool_value.has_value()) {
                 LOG_ERROR("[BuildArgsJsonNode] bool type requires bool input for " << arg_name.value());
-                return BT::NodeStatus::FAILURE;
+                return refuse();
             }
             args[arg_name.value()] = bool_value.value();
         } else if (arg_type == "string") {
             if (!str_value.has_value()) {
                 LOG_ERROR("[BuildArgsJsonNode] string type requires string input for " << arg_name.value());
-                return BT::NodeStatus::FAILURE;
+                return refuse();
             }
             args[arg_name.value()] = str_value.value();
         } else if (!arg_type.empty()) {
             LOG_ERROR("[BuildArgsJsonNode] Unsupported arg type '" << arg_type << "' for " << arg_name.value());
-            return BT::NodeStatus::FAILURE;
+            return refuse();
         } else if (num_value.has_value()) {
             args[arg_name.value()] = num_value.value();
         } else if (bool_value.has_value()) {

@@ -71,6 +71,13 @@ TEST_F(CallDeviceArgsTest, AbsentArgsStillMeanNoArguments) {
     EXPECT_NE(reported_[0].error.find("Provider not found"), std::string::npos) << reported_[0].error;
 }
 
+TEST_F(CallDeviceArgsTest, AnEmptyLiteralStillMeansNoArguments) {
+    auto tree = build(R"(args="")");
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    ASSERT_EQ(1u, reported_.size());
+    EXPECT_NE(reported_[0].error.find("Provider not found"), std::string::npos) << reported_[0].error;
+}
+
 TEST_F(CallDeviceArgsTest, UnprefixedJsonRefusesTheTree) {
     EXPECT_THROW((void)build(R"(args='{"value":25.0}')"), BT::RuntimeError);
 }
@@ -95,6 +102,24 @@ TEST_F(CallDeviceArgsTest, AKeyWrittenUnderAnotherNameIsACountedFailure) {
     EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
     ASSERT_EQ(1u, reported_.size());
     EXPECT_NE(reported_[0].error.find("args could not be read"), std::string::npos) << reported_[0].error;
+}
+
+TEST_F(CallDeviceArgsTest, AnEmptyValueFromTheBlackboardIsACountedFailure) {
+    // What a refused BuildArgsJson leaves in its `json` output (#941).
+    auto tree = build(R"(args="{json}")");
+    blackboard_->set("json", std::string());
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    ASSERT_EQ(1u, reported_.size());
+    EXPECT_NE(reported_[0].error.find("args is empty"), std::string::npos) << reported_[0].error;
+    EXPECT_EQ(reported_[0].error.find("Provider not found"), std::string::npos) << "the call was dispatched";
+}
+
+TEST_F(CallDeviceArgsTest, APrefixWithNothingAfterItIsACountedFailure) {
+    auto tree = build(R"(args="{json}")");
+    blackboard_->set("json", std::string("json:"));
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    ASSERT_EQ(1u, reported_.size());
+    EXPECT_NE(reported_[0].error.find("args is empty"), std::string::npos) << reported_[0].error;
 }
 
 TEST_F(CallDeviceArgsTest, BadJsonFromTheBlackboardIsACountedFailure) {
