@@ -3,12 +3,15 @@
 #include <behaviortree_cpp/blackboard.h>
 #include <behaviortree_cpp/bt_factory.h>
 #include <openssl/evp.h>
+#include <tinyxml2.h>
 
 #include <algorithm>
 #include <behaviortree_cpp/scripting/any_types.hpp>
 #include <chrono>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <set>
 #include <string_view>
@@ -79,6 +82,74 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
             }
         }
     }
+    return "";
+}
+
+// Groot2 saves every port a node's model declares, writing attr="" where the
+// author left the field empty (#818). BehaviorTree.CPP reads "" as a value:
+// it cannot convert it for a typed port, and an empty argN_str beside an
+// argN_num is two value sources. An empty port with no default, or an empty
+// default, is dropped so it reads as left out; one with a non-empty default is
+// refused, since "" there cannot mean the default. Returns the refusal, or "";
+// `rewritten` is the tree without the dropped ports, or empty when the file
+// had none. A relative <include> path is made absolute against `dir`, which
+// is where BehaviorTree.CPP would resolve it reading the file.
+std::string drop_empty_ports(const std::string &bytes, const std::filesystem::path &dir,
+                             const BT::BehaviorTreeFactory &factory, std::string &rewritten) {
+    tinyxml2::XMLDocument doc;
+    if (doc.Parse(bytes.c_str(), bytes.size()) != tinyxml2::XML_SUCCESS || doc.RootElement() == nullptr) {
+        return "";  // BehaviorTree.CPP reports why when it parses the file
+    }
+    const auto &manifests = factory.manifests();
+    bool dropped = false;
+    std::string refusal;
+    std::function<void(tinyxml2::XMLElement &)> visit = [&](tinyxml2::XMLElement &parent) {
+        for (auto *element = parent.FirstChildElement(); element != nullptr && refusal.empty();
+             element = element->NextSiblingElement()) {
+            const std::string type = element->Name();
+            if (const auto manifest = manifests.find(type); manifest != manifests.end()) {
+                std::vector<std::string> empty;
+                for (const auto *attribute = element->FirstAttribute(); attribute != nullptr;
+                     attribute = attribute->Next()) {
+                    if (*attribute->Value() == '\0' && manifest->second.ports.contains(attribute->Name())) {
+                        empty.emplace_back(attribute->Name());
+                    }
+                }
+                for (const auto &port : empty) {
+                    const std::string &fallback = manifest->second.ports.at(port).defaultValueString();
+                    if (!fallback.empty()) {
+                        const char *name = element->Attribute("name");
+                        refusal = std::format(
+                            "node '{}' ({}, line {}) has {}=\"\", and that port's default is '{}': leave the port "
+                            "out to take the default, or give it a value",
+                            name != nullptr ? name : type, type, element->GetLineNum(), port, fallback);
+                        return;
+                    }
+                    element->DeleteAttribute(port.c_str());
+                    dropped = true;
+                }
+            }
+            visit(*element);
+        }
+    };
+    for (auto *tree = doc.RootElement()->FirstChildElement("BehaviorTree"); tree != nullptr && refusal.empty();
+         tree = tree->NextSiblingElement("BehaviorTree")) {
+        visit(*tree);
+    }
+    if (!refusal.empty() || !dropped) {
+        return refusal;
+    }
+    for (auto *include = doc.RootElement()->FirstChildElement("include"); include != nullptr;
+         include = include->NextSiblingElement("include")) {
+        const char *included = include->Attribute("path");
+        if (included != nullptr && include->Attribute("ros_pkg") == nullptr &&
+            std::filesystem::path(included).is_relative()) {
+            include->SetAttribute("path", (dir / included).string().c_str());
+        }
+    }
+    tinyxml2::XMLPrinter printer;
+    doc.Print(&printer);
+    rewritten = printer.CStr();
     return "";
 }
 
@@ -293,11 +364,24 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
     }
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
+    std::string without_empty_ports;
+    if (const std::string empty =
+            drop_empty_ports(bytes, std::filesystem::absolute(path).parent_path(), *factory_, without_empty_ports);
+        !empty.empty()) {
+        outcome.error = "automation definition refused: " + empty;
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
+    }
+
     std::shared_ptr<BT::Tree> candidate;
     try {
-        // Parse from the file (so <include> subtrees resolve); digest_scope stays
-        // "top_level_file" because only the top-level bytes are hashed/snapshotted.
-        candidate = std::make_shared<BT::Tree>(factory_->createTreeFromFile(path));
+        // Parse from the file (so <include> subtrees resolve), or from the
+        // text with Groot2's empty ports dropped and <include> paths made
+        // absolute; digest_scope stays "top_level_file" because only the
+        // top-level bytes are hashed/snapshotted.
+        candidate =
+            std::make_shared<BT::Tree>(without_empty_ports.empty() ? factory_->createTreeFromFile(path)
+                                                                   : factory_->createTreeFromText(without_empty_ports));
     } catch (const std::exception &e) {
         outcome.error = std::string("failed to parse automation definition: ") + e.what();
         LOG_ERROR("[BTRuntime] " << outcome.error);

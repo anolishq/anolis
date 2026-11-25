@@ -148,6 +148,14 @@ Upgrade notes:
   on a `SubTree` port or a port's model default gives it a value, or a
   script creates it with `:=`;
   the order nodes run in is not followed.
+- An empty attribute on a node port with no default, or an empty default,
+  is read as the port left out, so a tree saved by Groot2 with its default
+  preferences loads (#818). Groot2 writes every port its model declares as
+  `attr=""`; `now_ms=""` failed the load, and `arg1_str=""` beside
+  `arg1_num` was two value sources. An empty attribute on a port with a
+  non-empty default is refused, naming the node and the port. A lone
+  `argN_str=""` on `BuildArgsJson` gave the argument as `""`; it is now a
+  slot with no value, which fails the node.
 
 ### Fixed
 

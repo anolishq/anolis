@@ -248,6 +248,7 @@ anolis_apply_warnings(anolis_control)
 # Automation library (Behavior Trees)
 if(ANOLIS_ENABLE_AUTOMATION)
     find_package(behaviortree_cpp CONFIG REQUIRED)
+    find_package(tinyxml2 CONFIG REQUIRED)
 
     add_library(anolis_automation STATIC
         automation/automation_engine.cpp
@@ -266,6 +267,7 @@ if(ANOLIS_ENABLE_AUTOMATION)
         anolis_control
         anolis_automation_support
         BT::behaviortree_cpp
+        tinyxml2::tinyxml2
         nlohmann_json::nlohmann_json
         OpenSSL::Crypto
     )

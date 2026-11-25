@@ -296,6 +296,23 @@ failure acts on neither the last tick's emit nor its arguments. A
 `CallDevice` whose `args` reads an empty value fails as a counted call
 instead of sending one with no arguments.
 
+### Empty attributes
+
+An empty attribute on a node port (`now_ms=""`) is read as the port left
+out when the port has no default or an empty default, so the node runs as
+if the attribute were not there. Groot2 1.10.0 with its default preferences
+saves every port a node's model declares, writing `attr=""` for each one the
+author left empty, and a tree saved that way loads. An empty attribute on a
+port whose default is not empty (`interval_s=""` on `PeriodicPulseWindow`)
+refuses the tree, naming the node and the port: leave the port out to take
+the default, or give it a value.
+
+The cost is that an empty attribute cannot pass an empty string: a lone
+`arg1_str=""` on `BuildArgsJson` is a slot with a name and no value, and
+the node fails. Pass an empty string from the blackboard instead
+(`arg1_str="{empty}"`). Only the tree file the config names is read this
+way; a file it brings in with `<include>` is not.
+
 ### SubTrees
 
 Anolis nodes work in a `SubTree` at any depth, with or without
