@@ -5,10 +5,13 @@
 #include <openssl/evp.h>
 
 #include <algorithm>
+#include <behaviortree_cpp/scripting/any_types.hpp>
 #include <chrono>
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <set>
+#include <string_view>
 #include <thread>
 
 #include "automation/bt_nodes.hpp"
@@ -75,6 +78,115 @@ std::string unknown_underscore_attribute(const BT::Tree &tree) {
                 }
             }
         }
+    }
+    return "";
+}
+
+// A script, or a pre or post condition, that reads a blackboard name nothing
+// in the tree sets loaded, and its first tick in AUTO threw (#809). Names the
+// first such read, or "". The order nodes run in is not followed: a name set
+// anywhere in the tree counts as set, and so does a name a script uses in the
+// same assignment that sets it (`x := x + 1`). Every script here built with the tree,
+// so it parses: Script, ScriptCondition and Precondition parse theirs when
+// the node is built, and BehaviorTree.CPP parses the conditions then too.
+std::string script_reading_an_unset_name(const BT::Tree &tree) {
+    using BT::Scripting::TokenType;
+    struct Read {
+        const BT::TreeNode *node;
+        std::string name;
+    };
+    std::set<const BT::Blackboard::Entry *> written;
+    std::set<std::string> created;  // by `:=`, or SetBlackboard's literal output_key
+    std::vector<Read> reads;
+    const auto bare = [](std::string_view name) { return std::string(name.starts_with('@') ? name.substr(1) : name); };
+
+    const auto scan = [&](const BT::TreeNode &node, const std::string &script) {
+        const auto tokens = BT::Scripting::tokenize(script);
+        for (std::size_t i = 0; i < tokens.size(); ++i) {
+            if (tokens[i].type != TokenType::Identifier) {
+                continue;
+            }
+            const std::string name(tokens[i].text);
+            const TokenType next = i + 1 < tokens.size() ? tokens[i + 1].type : TokenType::EndOfInput;
+            if (next == TokenType::ColonEqual) {
+                created.insert(bare(name));
+                continue;
+            }
+            const bool assigns = next == TokenType::Equal || next == TokenType::PlusEqual ||
+                                 next == TokenType::MinusEqual || next == TokenType::StarEqual ||
+                                 next == TokenType::SlashEqual;
+            if (assigns) {
+                if (const auto entry = node.config().blackboard->getEntry(name)) {
+                    written.insert(entry.get());
+                }
+            }
+            reads.push_back({&node, name});
+        }
+    };
+
+    for (const auto &subtree : tree.subtrees) {
+        for (const auto &node : subtree->nodes) {
+            const BT::TreeNode &visited = *node;
+            const auto &config = visited.config();
+            for (const auto &[port, value] : config.output_ports) {
+                // SetBlackboard reads output_key as the name of the entry it
+                // writes, so only a literal one names it; `{key}` would read
+                // the name from `key`.
+                const bool set_blackboard_key = visited.registrationName() == "SetBlackboard" && port == "output_key";
+                if (set_blackboard_key) {
+                    if (!BT::TreeNode::isBlackboardPointer(value)) {
+                        created.insert(bare(value));
+                    }
+                } else if (const auto key = BT::TreeNode::getRemappedKey(port, value)) {
+                    if (const auto entry = config.blackboard->getEntry(std::string(key.value()))) {
+                        written.insert(entry.get());
+                    }
+                }
+            }
+            const std::string &type = visited.registrationName();
+            const char *script_port =
+                (type == "Script" || type == "ScriptCondition") ? "code" : (type == "Precondition" ? "if" : nullptr);
+            if (script_port != nullptr) {
+                const auto found = config.input_ports.find(script_port);
+                if (found != config.input_ports.end()) {
+                    // A script given as `{key}` built only because a SubTree
+                    // literal put it in the entry; read that script.
+                    if (const auto key = BT::TreeNode::getRemappedKey(script_port, found->second)) {
+                        const auto entry = config.blackboard->getEntry(std::string(key.value()));
+                        if (entry && entry->value.isString()) {
+                            scan(visited, entry->value.cast<std::string>());
+                        }
+                    } else {
+                        scan(visited, found->second);
+                    }
+                }
+            }
+            for (const auto &[condition, script] : config.pre_conditions) {
+                (void)condition;
+                scan(visited, script);
+            }
+            for (const auto &[condition, script] : config.post_conditions) {
+                (void)condition;
+                scan(visited, script);
+            }
+        }
+    }
+
+    for (const auto &read : reads) {
+        if (created.contains(bare(read.name))) {
+            continue;
+        }
+        // An entry that already holds a value was set when the tree was
+        // built: a literal on a SubTree port, or the port's model default.
+        const auto entry = read.node->config().blackboard->getEntry(read.name);
+        if (entry && (written.contains(entry.get()) || !entry->value.empty())) {
+            continue;
+        }
+        return std::format(
+            "node '{}' ({}) reads '{}' in a script or condition, and nothing in the tree sets it: no output "
+            "port writes it, no SetBlackboard names it, no SubTree literal gives it a value and no script "
+            "creates it with ':='",
+            read.node->fullPath(), read.node->registrationName(), read.name);
     }
     return "";
 }
@@ -193,6 +305,11 @@ LoadOutcome BTRuntime::load(const AutomationDefinitionRef &ref) {
     }
     if (const std::string unknown = unknown_underscore_attribute(*candidate); !unknown.empty()) {
         outcome.error = "automation definition refused: " + unknown;
+        LOG_ERROR("[BTRuntime] " << outcome.error);
+        return outcome;  // previous active definition preserved
+    }
+    if (const std::string unset = script_reading_an_unset_name(*candidate); !unset.empty()) {
+        outcome.error = "automation definition refused: " + unset;
         LOG_ERROR("[BTRuntime] " << outcome.error);
         return outcome;  // previous active definition preserved
     }

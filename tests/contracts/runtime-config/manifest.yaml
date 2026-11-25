@@ -150,3 +150,6 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/17-automation-tree-names-undeclared-provider.yaml
     expect: invalid/runtime
     note: a CallDevice device_handle names a provider not in providers[] (#808)
+  - file: tests/contracts/runtime-config/invalid/runtime/18-automation-tree-reads-unset-name.yaml
+    expect: invalid/runtime
+    note: a condition reads a blackboard name nothing in the tree sets (#809)

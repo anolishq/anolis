@@ -1318,3 +1318,134 @@ TEST(BTRuntimeConfigCheckTest, BlackboardPortsAreCountedNotChecked) {
     EXPECT_TRUE(check.refusals.empty());
     EXPECT_EQ(2, check.unchecked_ports);
 }
+
+namespace {
+
+std::string main_tree(const std::string& body, const std::string& more_trees = "") {
+    return R"(<root BTCPP_format="4" main_tree_to_execute="Main"><BehaviorTree ID="Main">)" + body + "</BehaviorTree>" +
+           more_trees + "</root>";
+}
+
+bool refused_naming(const anolis::automation::LoadOutcome& outcome, const std::string& node, const std::string& name) {
+    // The node is named by its full path, which ends in its name.
+    return !outcome.ok && outcome.error.find(node + "' (") != std::string::npos &&
+           outcome.error.find("reads '" + name + "'") != std::string::npos;
+}
+
+}  // namespace
+
+// #809: a condition that reads a name nothing sets loaded, and its first tick
+// threw, which the runtime turns into FAULT. The load refuses it, naming the
+// node and the name; behind an initialiser the same tree loads and runs.
+TEST(BTRuntimeScriptNameTest, AConditionReadingANameNothingSetsIsRefused) {
+    const std::string unset = main_tree(R"(<AlwaysSuccess name="heater" _skipIf="!heater_on"/>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_ANY_THROW(factory.createTreeFromText(unset).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
+    EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-unset", unset), "heater", "heater_on"));
+
+    const std::string initialised = main_tree(
+        R"(<Sequence><Script code="heater_on := false"/><AlwaysSuccess name="heater" _skipIf="!heater_on"/></Sequence>)");
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, factory.createTreeFromText(initialised).tickOnce());
+    const auto outcome = load_tree_xml("anolis-bt-809-initialised", initialised);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+TEST(BTRuntimeScriptNameTest, ANameAnOutputPortWritesLoads) {
+    for (const std::string writer :
+         {R"(<BuildArgsJson json="{level}"/>)", R"(<SetBlackboard value="3" output_key="level"/>)"}) {
+        const auto outcome =
+            load_tree_xml("anolis-bt-809-port",
+                          main_tree("<Sequence>" + writer + R"(<ScriptCondition code="level != ''"/></Sequence>)"));
+        EXPECT_TRUE(outcome.ok) << writer << ": " << outcome.error;
+    }
+}
+
+// SetBlackboard reads output_key as the name of the entry it writes, so
+// output_key="{level}" writes nothing called level: it reads the name from
+// level, which is empty, and throws at tick.
+TEST(BTRuntimeScriptNameTest, SetBlackboardWithABlackboardKeyDoesNotSetIt) {
+    const std::string xml = main_tree(
+        R"(<Sequence><SetBlackboard value="3" output_key="{level}"/><ScriptCondition name="check" code="level > 0"/></Sequence>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_ANY_THROW(factory.createTreeFromText(xml).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
+    EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-setbb-key", xml), "check", "level"));
+}
+
+// A literal on a SubTree port is written into the SubTree's blackboard when
+// the tree is built, so a script inside reads a set name.
+TEST(BTRuntimeScriptNameTest, ALiteralOnASubTreePortLoads) {
+    const std::string xml =
+        main_tree(R"(<SubTree ID="Inner" setpoint="37"/>)",
+                  R"(<BehaviorTree ID="Inner"><ScriptCondition code="setpoint > 0"/></BehaviorTree>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, factory.createTreeFromText(xml).tickOnce());
+    const auto outcome = load_tree_xml("anolis-bt-809-subtree-literal", xml);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+TEST(BTRuntimeScriptNameTest, APreconditionReadingANameNothingSetsIsRefused) {
+    EXPECT_TRUE(refused_naming(
+        load_tree_xml("anolis-bt-809-precondition",
+                      main_tree(R"(<Precondition name="gate" if="armed"><AlwaysSuccess/></Precondition>)")),
+        "gate", "armed"));
+}
+
+// An entry a port declares exists from the build, so '=' may assign it
+// without ':=', and a later read of it is of a set name.
+TEST(BTRuntimeScriptNameTest, AnAssignmentToAnExistingEntrySetsIt) {
+    const auto outcome =
+        load_tree_xml("anolis-bt-809-existing",
+                      main_tree(R"(<Sequence><Script code="fn = 'set'"/><ScriptCondition code="fn == 'set'"/>)"
+                                R"(<CallDevice device_handle="sim0/d" function_name="{fn}"/></Sequence>)"));
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+TEST(BTRuntimeScriptNameTest, AssignmentToANameNothingCreatesIsRefused) {
+    EXPECT_TRUE(
+        refused_naming(load_tree_xml("anolis-bt-809-assign", main_tree(R"(<Script name="count" code="total = 1"/>)")),
+                       "count", "total"))
+        << "'=' needs the entry to exist; ':=' creates it";
+    EXPECT_TRUE(load_tree_xml("anolis-bt-809-create", main_tree(R"(<Script code="total := 0; total = 1"/>)")).ok);
+    EXPECT_TRUE(refused_naming(
+        load_tree_xml("anolis-bt-809-post", main_tree(R"(<AlwaysSuccess name="tally" _onSuccess="total += 1"/>)")),
+        "tally", "total"));
+}
+
+// A name a port writes in the main tree is not seen in a SubTree that does
+// not remap it, where BehaviorTree.CPP reports "Variable not found" at tick;
+// with _autoremap it is, and a root name (@) is seen from any SubTree.
+TEST(BTRuntimeScriptNameTest, ASubTreeSeesOnlyTheNamesItsBlackboardReaches) {
+    const std::string inner =
+        R"(<BehaviorTree ID="Inner"><ScriptCondition name="check" code="level != ''"/></BehaviorTree>)";
+    const std::string writer = R"(<BuildArgsJson json="{level}"/>)";
+    EXPECT_TRUE(
+        refused_naming(load_tree_xml("anolis-bt-809-isolated",
+                                     main_tree("<Sequence>" + writer + R"(<SubTree ID="Inner"/></Sequence>)", inner)),
+                       "check", "level"));
+    EXPECT_TRUE(
+        load_tree_xml("anolis-bt-809-autoremap",
+                      main_tree("<Sequence>" + writer + R"(<SubTree ID="Inner" _autoremap="true"/></Sequence>)", inner))
+            .ok);
+    EXPECT_TRUE(load_tree_xml("anolis-bt-809-root",
+                              main_tree(R"(<Sequence><Script code="@flag := true"/><SubTree ID="Deep"/></Sequence>)",
+                                        R"(<BehaviorTree ID="Deep"><ScriptCondition code="@flag"/></BehaviorTree>)"))
+                    .ok);
+}
+
+// A script given through a SubTree port is read from the literal that built
+// it: the names it creates count, and the names it reads are checked.
+TEST(BTRuntimeScriptNameTest, AScriptPassedIntoASubTreeIsRead) {
+    const std::string creates = main_tree(
+        R"(<SubTree ID="Inner" code="y := 1"/>)",
+        R"(<BehaviorTree ID="Inner"><Sequence><Script code="{code}"/><ScriptCondition code="y > 0"/></Sequence></BehaviorTree>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, factory.createTreeFromText(creates).tickOnce());
+    const auto outcome = load_tree_xml("anolis-bt-809-passed-creates", creates);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+
+    const std::string reads =
+        main_tree(R"(<SubTree ID="Inner" code="nope > 1"/>)",
+                  R"(<BehaviorTree ID="Inner"><ScriptCondition name="check" code="{code}"/></BehaviorTree>)");
+    EXPECT_ANY_THROW(factory.createTreeFromText(reads).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
+    EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-passed-reads", reads), "check", "nope"));
+}

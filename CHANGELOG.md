@@ -140,6 +140,14 @@ Upgrade notes:
   `BuildArgsJson` an empty `json`; both left the last tick's value. A
   `CallDevice` whose `args` reads an empty value fails as a counted call;
   it sent the call with no arguments.
+- A tree whose script or condition reads a blackboard name nothing in the
+  tree sets is refused when it loads and at `--check-config`, naming the
+  node and the name (#809). It loaded, and its first tick in AUTO threw,
+  which the runtime turns into FAULT. A name counts as set when an output
+  port writes it, a literal `SetBlackboard` `output_key` names it, a literal
+  on a `SubTree` port or a port's model default gives it a value, or a
+  script creates it with `:=`;
+  the order nodes run in is not followed.
 
 ### Fixed
 

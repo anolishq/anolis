@@ -243,8 +243,9 @@ The runtime does enter FAULT autonomously in three cases:
 - **A behaviour-tree tick raises an exception** (#279). The control logic has reached a
   state its author did not model, so autonomous actuation is halted rather than continued.
   Note this is reachable from ordinary tree edits, not only from internal errors: BT nodes
-  guard their inputs but not their outputs, and a precondition script referencing an
-  undefined blackboard entry throws on the first tick of a tree that loaded cleanly.
+  guard their inputs but not their outputs, and a script that reads a blackboard entry
+  before anything has set it throws on that tick. A name nothing in the tree sets is
+  refused when the tree loads (#809); one set by a node that has not run yet is not.
 - **A provider restart republishes an inventory that fails the refuse-hookless gate**
   while in AUTO (#233).
 - **An observed stop chain changes to `in_force` or `unknown`** after startup, on
