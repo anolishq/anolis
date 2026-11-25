@@ -1636,4 +1636,17 @@ TEST(BTRuntimeGroot2SaveTest, RequiredInputsKeepTheirEmptyAttribute) {
                                        main_tree(R"(<Sequence><EmitOnChangeOrInterval key="" emit="{e}" reason="{r}"/>)"
                                                  R"(<ScriptCondition code="e"/></Sequence>)")));
     EXPECT_FALSE(load_tree_xml("anolis-bt-818-value", main_tree(R"(<CheckBool value="" expected="true"/>)")).ok);
+    EXPECT_FALSE(load_tree_xml("anolis-bt-818-request",
+                               main_tree(R"(<RequestedPulseWindow request="" pulse_s="2" active="{a}" queued="{q}"/>)"))
+                     .ok);
+}
+
+// An output named like a required input is dropped like any other: Groot2's
+// value="" on a ReadSignal that uses only its quality loads.
+TEST(BTRuntimeGroot2SaveTest, AnEmptyOutputNamedValueIsDropped) {
+    for (const std::string node : {R"(<ReadSignal device_handle="sim0/d" signal_id="t" value="" quality="{q}"/>)",
+                                   R"(<GetParameter param="sp" value=""/>)"}) {
+        const auto outcome = load_tree_xml("anolis-bt-818-output", main_tree(node));
+        EXPECT_TRUE(outcome.ok) << node << ": " << outcome.error;
+    }
 }

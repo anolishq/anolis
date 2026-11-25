@@ -154,8 +154,10 @@ Upgrade notes:
   `attr=""`; `now_ms=""` failed the load, and `arg1_str=""` beside
   `arg1_num` was two value sources. An empty attribute on a port with a
   non-empty default is refused, naming the node and the port. An empty
-  `device_handle`, `function_name`, `signal_id` or `param`, `CallDevice`'s
-  `args=""`, and BehaviorTree.CPP's own nodes are left as written. A lone
+  input the node needs with no fallback (`device_handle`, `function_name`,
+  `signal_id`, `param`, `CheckBool` `value`, `RequestedPulseWindow`
+  `request`, `EmitOnChangeOrInterval` `key`), `CallDevice`'s `args=""`, and
+  BehaviorTree.CPP's own nodes are left as written. A lone
   `argN_str=""` on `BuildArgsJson` gave the argument as `""`; it is now a
   slot with no value, which fails the node.
 

@@ -94,7 +94,7 @@ constexpr std::array<std::string_view, 11> kAnolisNodes = {
     "GetParameterInt64", "CheckBool",  "PeriodicPulseWindow", "RequestedPulseWindow", "EmitOnChangeOrInterval",
     "BuildArgsJson"};
 
-// Inputs an Anolis node reads with no fallback: what it acts on, and the
+// Inputs (not outputs of the same name) an Anolis node reads with no fallback: what it acts on, and the
 // value it checks or watches. An empty one is left as written, so the config
 // check and the node treat it as they did; dropped, it would read as absent
 // (EmitOnChangeOrInterval with no key fails every tick).
@@ -108,8 +108,9 @@ constexpr std::array<std::string_view, 7> kRequiredPorts = {"device_handle", "fu
 // default, or an empty default, is dropped so it reads as left out; one with
 // a non-empty default is refused, since "" there cannot mean the default.
 // Returns the refusal, or ""; `rewritten` is the tree without the dropped
-// ports, or empty when the file had none. A relative <include> path is made absolute against `dir`, which
-// is where BehaviorTree.CPP would resolve it reading the file.
+// ports, or empty when the file had none. A relative <include> path is made
+// absolute against `dir`, which is where BehaviorTree.CPP would resolve it
+// reading the file.
 std::string drop_empty_ports(const std::string &bytes, const std::filesystem::path &dir,
                              const BT::BehaviorTreeFactory &factory, std::string &rewritten) {
     tinyxml2::XMLDocument doc;
@@ -134,8 +135,11 @@ std::string drop_empty_ports(const std::string &bytes, const std::filesystem::pa
                 }
                 for (const auto &port : empty) {
                     // CallDevice's args="" already means no arguments (#806).
-                    if (std::ranges::find(kRequiredPorts, port) != kRequiredPorts.end() ||
-                        (type == "CallDevice" && port == "args")) {
+                    // An output named like a required input (ReadSignal's
+                    // `value`) is dropped like any other.
+                    const bool required = std::ranges::find(kRequiredPorts, port) != kRequiredPorts.end() &&
+                                          manifest->second.ports.at(port).direction() != BT::PortDirection::OUTPUT;
+                    if (required || (type == "CallDevice" && port == "args")) {
                         continue;
                     }
                     const std::string &fallback = manifest->second.ports.at(port).defaultValueString();

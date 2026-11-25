@@ -307,9 +307,11 @@ port whose default is not empty (`interval_s=""` on `PeriodicPulseWindow`)
 refuses the tree, naming the node and the port: leave the port out to take
 the default, or give it a value.
 
-Three cases keep an empty attribute as written, as before: a port that
-names what the node acts on (`device_handle`, `function_name`, `signal_id`,
-`param`), which the config check refuses when empty; `args=""` on
+Three cases keep an empty attribute as written, as before: an input the
+node needs, with no fallback (`device_handle`, `function_name`,
+`signal_id`, `param`, `CheckBool`'s `value`, `RequestedPulseWindow`'s
+`request` and `EmitOnChangeOrInterval`'s `key`), which the config check or
+the node treats as it did; `args=""` on
 `CallDevice`, which means no arguments; and every port of a
 BehaviorTree.CPP node, such as `SetBlackboard value=""`, which sets an
 empty string.
