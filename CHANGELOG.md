@@ -145,7 +145,8 @@ Upgrade notes:
   node and the name (#809). It loaded, and its first tick in AUTO threw,
   which the runtime turns into FAULT. A name counts as set when an output
   port writes it, a literal `SetBlackboard` `output_key` names it, a literal
-  on a `SubTree` port gives it a value, or a script creates it with `:=`;
+  on a `SubTree` port or a port's model default gives it a value, or a
+  script creates it with `:=`;
   the order nodes run in is not followed.
 
 ### Fixed

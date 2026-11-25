@@ -149,7 +149,16 @@ std::string script_reading_an_unset_name(const BT::Tree &tree) {
             if (script_port != nullptr) {
                 const auto found = config.input_ports.find(script_port);
                 if (found != config.input_ports.end()) {
-                    scan(visited, found->second);
+                    // A script given as `{key}` built only because a SubTree
+                    // literal put it in the entry; read that script.
+                    if (const auto key = BT::TreeNode::getRemappedKey(script_port, found->second)) {
+                        const auto entry = config.blackboard->getEntry(std::string(key.value()));
+                        if (entry && entry->value.isString()) {
+                            scan(visited, entry->value.cast<std::string>());
+                        }
+                    } else {
+                        scan(visited, found->second);
+                    }
                 }
             }
             for (const auto &[condition, script] : config.pre_conditions) {
@@ -175,7 +184,8 @@ std::string script_reading_an_unset_name(const BT::Tree &tree) {
         }
         return std::format(
             "node '{}' ({}) reads '{}' in a script or condition, and nothing in the tree sets it: no output "
-            "port writes it and no script creates it with ':='",
+            "port writes it, no SetBlackboard names it, no SubTree literal gives it a value and no script "
+            "creates it with ':='",
             read.node->fullPath(), read.node->registrationName(), read.name);
     }
     return "";

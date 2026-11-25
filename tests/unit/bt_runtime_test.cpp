@@ -1431,3 +1431,21 @@ TEST(BTRuntimeScriptNameTest, ASubTreeSeesOnlyTheNamesItsBlackboardReaches) {
                                         R"(<BehaviorTree ID="Deep"><ScriptCondition code="@flag"/></BehaviorTree>)"))
                     .ok);
 }
+
+// A script given through a SubTree port is read from the literal that built
+// it: the names it creates count, and the names it reads are checked.
+TEST(BTRuntimeScriptNameTest, AScriptPassedIntoASubTreeIsRead) {
+    const std::string creates = main_tree(
+        R"(<SubTree ID="Inner" code="y := 1"/>)",
+        R"(<BehaviorTree ID="Inner"><Sequence><Script code="{code}"/><ScriptCondition code="y > 0"/></Sequence></BehaviorTree>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, factory.createTreeFromText(creates).tickOnce());
+    const auto outcome = load_tree_xml("anolis-bt-809-passed-creates", creates);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+
+    const std::string reads =
+        main_tree(R"(<SubTree ID="Inner" code="nope > 1"/>)",
+                  R"(<BehaviorTree ID="Inner"><ScriptCondition name="check" code="{code}"/></BehaviorTree>)");
+    EXPECT_ANY_THROW(factory.createTreeFromText(reads).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
+    EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-passed-reads", reads), "check", "nope"));
+}

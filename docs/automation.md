@@ -271,11 +271,14 @@ The check follows the blackboard each node sees, so a name set in the main
 tree does not count inside a `SubTree` that neither remaps it nor sets
 `_autoremap`; a root name (`@name`) is seen from any SubTree. It does not
 follow the order nodes run in: a name set anywhere in the tree counts as
-set, so a script that reads a name before the node that sets it has run
-still throws at that tick. A name a script creates with `:=`, or a literal
-`SetBlackboard` key, counts as set in every SubTree. Some reads that throw at
-tick still load: `x := x + 1` where nothing else sets `x`, and `x += 1`
-where a port declares `x` but nothing writes it.
+set, so a script that reads a name before the node that sets it has run, or
+after an `UnsetBlackboard` removed it, still throws at that tick. A name a
+script creates with `:=`, or a literal `SetBlackboard` key, counts as set in
+every SubTree. Some reads that throw at tick still load: `x := x + 1` where
+nothing else sets `x`, and `x += 1` where a port declares `x` but nothing
+writes it. A script passed into a `SubTree` through a port (`code="{code}"`,
+with the script as a literal on the `SubTree` element) is read from that
+literal.
 
 ### Inputs from the blackboard
 
