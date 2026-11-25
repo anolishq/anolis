@@ -4,6 +4,7 @@
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
 #include <gtest/gtest.h>
+#include <tinyxml2.h>
 
 #include <atomic>
 #include <chrono>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "automation/bt_nodes.hpp"
 #include "automation/mode_manager.hpp"
 #include "automation/parameter_manager.hpp"
 #include "control/call_router.hpp"
@@ -1448,4 +1450,203 @@ TEST(BTRuntimeScriptNameTest, AScriptPassedIntoASubTreeIsRead) {
                   R"(<BehaviorTree ID="Inner"><ScriptCondition name="check" code="{code}"/></BehaviorTree>)");
     EXPECT_ANY_THROW(factory.createTreeFromText(reads).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
     EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-passed-reads", reads), "check", "nope"));
+}
+
+namespace {
+
+// The form Groot2 1.10.0 saves with default preferences (#818): every port a
+// node's model declares with no default, or an empty one, that the node
+// leaves out is written as attr="".
+std::string groot2_default_save(const std::string& xml) {
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<anolis::automation::ReadSignalNode>("ReadSignal");
+    factory.registerNodeType<anolis::automation::CallDeviceNode>("CallDevice");
+    factory.registerNodeType<anolis::automation::CheckQualityNode>("CheckQuality");
+    factory.registerNodeType<anolis::automation::GetParameterNode>("GetParameter");
+    factory.registerNodeType<anolis::automation::GetParameterBoolNode>("GetParameterBool");
+    factory.registerNodeType<anolis::automation::GetParameterInt64Node>("GetParameterInt64");
+    factory.registerNodeType<anolis::automation::CheckBoolNode>("CheckBool");
+    factory.registerNodeType<anolis::automation::PeriodicPulseWindowNode>("PeriodicPulseWindow");
+    factory.registerNodeType<anolis::automation::RequestedPulseWindowNode>("RequestedPulseWindow");
+    factory.registerNodeType<anolis::automation::EmitOnChangeOrIntervalNode>("EmitOnChangeOrInterval");
+    factory.registerNodeType<anolis::automation::BuildArgsJsonNode>("BuildArgsJson");
+    tinyxml2::XMLDocument doc;
+    EXPECT_EQ(tinyxml2::XML_SUCCESS, doc.Parse(xml.c_str()));
+    std::function<void(tinyxml2::XMLElement&)> fill = [&](tinyxml2::XMLElement& parent) {
+        for (auto* element = parent.FirstChildElement(); element != nullptr; element = element->NextSiblingElement()) {
+            if (const auto manifest = factory.manifests().find(element->Name());
+                manifest != factory.manifests().end()) {
+                for (const auto& [port, info] : manifest->second.ports) {
+                    if (info.defaultValueString().empty() && element->Attribute(port.c_str()) == nullptr) {
+                        element->SetAttribute(port.c_str(), "");
+                    }
+                }
+            }
+            fill(*element);
+        }
+    };
+    for (auto* tree = doc.RootElement()->FirstChildElement("BehaviorTree"); tree != nullptr;
+         tree = tree->NextSiblingElement("BehaviorTree")) {
+        fill(*tree);
+    }
+    tinyxml2::XMLPrinter printer;
+    doc.Print(&printer);
+    return printer.CStr();
+}
+
+// Loads `xml` into a fresh BTRuntime and ticks it once; "" when it does not load.
+std::string load_and_tick(const std::string& stem, const std::string& xml) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, nullptr);
+    const auto path = write_tree_file(stem, xml);
+    const auto outcome = runtime.load(AutomationDefinitionRef{path.string()});
+    std::string status;
+    if (outcome.ok) {
+        status = BT::toStr(runtime.tick());
+    } else {
+        ADD_FAILURE() << outcome.error;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return status;
+}
+
+}  // namespace
+
+// #818: Groot2's default save wrote now_ms="" on PeriodicPulseWindow, which
+// BehaviorTree.CPP cannot convert, and an empty argN_str beside an argN_num,
+// which is two value sources. Saved that way the tree loads and the window
+// and the arguments come out as they did before the save.
+TEST(BTRuntimeGroot2SaveTest, ATreeSavedWithItsEmptyPortsRunsTheSame) {
+    const std::string original = main_tree(
+        R"(<Sequence>)"
+        R"(<BuildArgsJson arg1_name="pwm" arg1_type="double" arg1_num="40" arg2_name="brake" arg2_bool="false" json="{args}"/>)"
+        R"(<PeriodicPulseWindow interval_s="60" pulse_s="60" active="{on}"/>)"
+        R"(<ScriptCondition code="on"/>)"
+        R"(<ScriptCondition code="args == '{&quot;brake&quot;:false,&quot;pwm&quot;:40.0}'"/>)"
+        R"(</Sequence>)");
+    const std::string saved = groot2_default_save(original);
+    ASSERT_NE(saved.find(R"(now_ms="")"), std::string::npos) << saved;
+    ASSERT_NE(saved.find(R"(arg1_str="")"), std::string::npos) << saved;
+    EXPECT_EQ("SUCCESS", load_and_tick("anolis-bt-818-original", original));
+    EXPECT_EQ("SUCCESS", load_and_tick("anolis-bt-818-saved", saved));
+}
+
+TEST(BTRuntimeGroot2SaveTest, EveryTreeInTheRepoLoadsInItsDefaultSaveForm) {
+    const std::filesystem::path source(ANOLIS_SOURCE_DIR);
+    int trees = 0;
+    for (const auto& dir :
+         {source / "tests/integration/fixtures/behaviors", source / "tools/derived-signals/tree-probe"}) {
+        for (const auto& file : std::filesystem::directory_iterator(dir)) {
+            if (file.path().extension() != ".xml") {
+                continue;
+            }
+            std::ifstream in(file.path());
+            const std::string xml((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            const auto original = load_tree_xml("anolis-bt-818-repo", xml);
+            ASSERT_TRUE(original.ok) << file.path() << ": " << original.error;
+            const auto saved = load_tree_xml("anolis-bt-818-repo-saved", groot2_default_save(xml));
+            EXPECT_TRUE(saved.ok) << file.path() << ": " << saved.error;
+            ++trees;
+        }
+    }
+    EXPECT_GE(trees, 5) << "the fixture trees were not found";
+}
+
+// "" cannot mean a default that is not empty, so the load refuses it.
+TEST(BTRuntimeGroot2SaveTest, AnEmptyPortWithADefaultIsRefused) {
+    const auto outcome = load_tree_xml(
+        "anolis-bt-818-default", main_tree(R"(<PeriodicPulseWindow name="dosing" interval_s="" active="{on}"/>)"));
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_NE(outcome.error.find("dosing"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("interval_s"), std::string::npos) << outcome.error;
+    EXPECT_NE(outcome.error.find("'60'"), std::string::npos) << outcome.error;
+}
+
+// The cost: an empty argN_str is the port left out, so a lone one is a slot
+// with a name and no value, which BuildArgsJson refuses. It gave {"p":""}.
+TEST(BTRuntimeGroot2SaveTest, ALoneEmptyStringArgumentIsAMissingValue) {
+    EXPECT_EQ("FAILURE", load_and_tick("anolis-bt-818-lone-str",
+                                       main_tree(R"(<BuildArgsJson arg1_name="p" arg1_str="" json="{j}"/>)")));
+    EXPECT_EQ("SUCCESS",
+              load_and_tick("anolis-bt-818-bb-str",
+                            main_tree(R"(<Sequence><Script code="empty := ''"/>)"
+                                      R"(<BuildArgsJson arg1_name="p" arg1_str="{empty}" json="{j}"/>)"
+                                      R"(<ScriptCondition code="j == '{&quot;p&quot;:&quot;&quot;}'"/></Sequence>)")))
+        << "an empty string from the blackboard is still an argument";
+}
+
+// The rewritten tree is parsed from text, where BehaviorTree.CPP would read a
+// relative <include> against the working directory; it still resolves
+// against the tree's own directory.
+TEST(BTRuntimeGroot2SaveTest, ARelativeIncludeStillResolvesInARewrittenTree) {
+    const auto included =
+        write_tree_file("anolis-bt-818-included",
+                        R"(<root BTCPP_format="4"><BehaviorTree ID="Inner"><AlwaysSuccess/></BehaviorTree></root>)");
+    const std::string xml = R"(<root BTCPP_format="4" main_tree_to_execute="Main"><include path=")" +
+                            included.filename().string() +
+                            R"("/><BehaviorTree ID="Main"><Sequence><PeriodicPulseWindow now_ms="" active="{on}"/>)"
+                            R"(<SubTree ID="Inner"/></Sequence></BehaviorTree></root>)";
+    EXPECT_EQ("SUCCESS", load_and_tick("anolis-bt-818-include", xml));
+    std::error_code ec;
+    std::filesystem::remove(included, ec);
+}
+
+// Only Anolis nodes are read this way. BehaviorTree.CPP's own nodes keep an
+// empty attribute as written: SetBlackboard value="" sets an empty string,
+// and dropped it would throw at tick.
+TEST(BTRuntimeGroot2SaveTest, ABuiltInNodeKeepsItsEmptyAttribute) {
+    EXPECT_EQ("SUCCESS",
+              load_and_tick("anolis-bt-818-builtin", main_tree(R"(<Sequence><SetBlackboard value="" output_key="x"/>)"
+                                                               R"(<ScriptCondition code="x == ''"/></Sequence>)")));
+}
+
+// An empty port that names what a node acts on stays as written, so the
+// config check refuses it as before; CallDevice's args="" still means no
+// arguments (#806) and loads.
+TEST(BTRuntimeGroot2SaveTest, NamingPortsAndEmptyArgsKeepTheirMeaning) {
+    EXPECT_TRUE(mentions(check_one_node(R"(<CallDevice device_handle="" function_name="f"/>)"),
+                         "is not provider_id/device_id"));
+    EXPECT_TRUE(mentions(check_one_node(R"(<GetParameter param="" value="{v}"/>)"), "does not declare"));
+    const auto outcome = load_tree_xml("anolis-bt-818-args",
+                                       main_tree(R"(<CallDevice device_handle="sim0/d" function_name="f" args=""/>)"));
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+// Every <BehaviorTree> in the file is read, not only the first.
+TEST(BTRuntimeGroot2SaveTest, AnEmptyPortInASubTreeIsDropped) {
+    EXPECT_EQ("SUCCESS",
+              load_and_tick("anolis-bt-818-subtree",
+                            main_tree(R"(<SubTree ID="Inner"/>)",
+                                      R"(<BehaviorTree ID="Inner"><Sequence><PeriodicPulseWindow interval_s="60" )"
+                                      R"(pulse_s="60" now_ms="" active="{on}"/><ScriptCondition code="on"/></Sequence>)"
+                                      R"(</BehaviorTree>)")));
+}
+
+// An input the node reads with no fallback keeps an empty attribute, as on
+// main: EmitOnChangeOrInterval key="" still emits, and CheckBool value=""
+// is still refused when the tree is built.
+TEST(BTRuntimeGroot2SaveTest, RequiredInputsKeepTheirEmptyAttribute) {
+    EXPECT_EQ("SUCCESS", load_and_tick("anolis-bt-818-key",
+                                       main_tree(R"(<Sequence><EmitOnChangeOrInterval key="" emit="{e}" reason="{r}"/>)"
+                                                 R"(<ScriptCondition code="e"/></Sequence>)")));
+    EXPECT_FALSE(load_tree_xml("anolis-bt-818-value", main_tree(R"(<CheckBool value="" expected="true"/>)")).ok);
+    EXPECT_FALSE(load_tree_xml("anolis-bt-818-request",
+                               main_tree(R"(<RequestedPulseWindow request="" pulse_s="2" active="{a}" queued="{q}"/>)"))
+                     .ok);
+}
+
+// An output named like a required input is dropped like any other: Groot2's
+// value="" on a ReadSignal that uses only its quality loads.
+TEST(BTRuntimeGroot2SaveTest, AnEmptyOutputNamedValueIsDropped) {
+    for (const std::string node : {R"(<ReadSignal device_handle="sim0/d" signal_id="t" value="" quality="{q}"/>)",
+                                   R"(<GetParameter param="sp" value=""/>)"}) {
+        const auto outcome = load_tree_xml("anolis-bt-818-output", main_tree(node));
+        EXPECT_TRUE(outcome.ok) << node << ": " << outcome.error;
+    }
 }

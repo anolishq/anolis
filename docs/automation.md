@@ -296,6 +296,32 @@ failure acts on neither the last tick's emit nor its arguments. A
 `CallDevice` whose `args` reads an empty value fails as a counted call
 instead of sending one with no arguments.
 
+### Empty attributes
+
+An empty attribute on a port of an Anolis node (`now_ms=""`) is read as the
+port left out when the port has no default or an empty default, so the
+node runs as if the attribute were not there. Groot2 1.10.0 with its default preferences
+saves every port a node's model declares, writing `attr=""` for each one the
+author left empty, and a tree saved that way loads. An empty attribute on a
+port whose default is not empty (`interval_s=""` on `PeriodicPulseWindow`)
+refuses the tree, naming the node and the port: leave the port out to take
+the default, or give it a value.
+
+Three cases keep an empty attribute as written, as before: an input the
+node needs, with no fallback (`device_handle`, `function_name`,
+`signal_id`, `param`, `CheckBool`'s `value`, `RequestedPulseWindow`'s
+`request` and `EmitOnChangeOrInterval`'s `key`), which the config check or
+the node treats as it did; `args=""` on
+`CallDevice`, which means no arguments; and every port of a
+BehaviorTree.CPP node, such as `SetBlackboard value=""`, which sets an
+empty string.
+
+The cost is that an empty attribute cannot pass an empty string: a lone
+`arg1_str=""` on `BuildArgsJson` is a slot with a name and no value, and
+the node fails. Pass an empty string from the blackboard instead
+(`arg1_str="{empty}"`). Only the tree file the config names is read this
+way; a file it brings in with `<include>` is not.
+
 ### SubTrees
 
 Anolis nodes work in a `SubTree` at any depth, with or without

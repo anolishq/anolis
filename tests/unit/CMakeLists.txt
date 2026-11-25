@@ -105,6 +105,7 @@ target_compile_definitions(anolis_unit_tests PRIVATE
     PROVIDER_HELLO_MISMATCH_HELPER_PATH="$<TARGET_FILE:provider_hello_mismatch_helper>"
     PROVIDER_STALLED_READ_HELPER_PATH="$<TARGET_FILE:provider_stalled_read_helper>"
     PROVIDER_EMPTY_INVENTORY_HELPER_PATH="$<TARGET_FILE:provider_empty_inventory_helper>"
+    ANOLIS_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 add_dependencies(anolis_unit_tests provider_hello_mismatch_helper provider_stalled_read_helper
                  provider_empty_inventory_helper)

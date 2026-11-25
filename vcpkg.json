@@ -12,6 +12,7 @@
     },
     "nlohmann-json",
     "behaviortree-cpp",
+    "tinyxml2",
     "gtest",
     "openssl"
   ]
