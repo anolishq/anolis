@@ -71,6 +71,13 @@ TEST_F(CallDeviceArgsTest, AbsentArgsStillMeanNoArguments) {
     EXPECT_NE(reported_[0].error.find("Provider not found"), std::string::npos) << reported_[0].error;
 }
 
+TEST_F(CallDeviceArgsTest, AnEmptyLiteralStillMeansNoArguments) {
+    auto tree = build(R"(args="")");
+    EXPECT_EQ(BT::NodeStatus::FAILURE, tree.tickOnce());
+    ASSERT_EQ(1u, reported_.size());
+    EXPECT_NE(reported_[0].error.find("Provider not found"), std::string::npos) << reported_[0].error;
+}
+
 TEST_F(CallDeviceArgsTest, UnprefixedJsonRefusesTheTree) {
     EXPECT_THROW((void)build(R"(args='{"value":25.0}')"), BT::RuntimeError);
 }

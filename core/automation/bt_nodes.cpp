@@ -351,7 +351,6 @@ BT::NodeStatus CallDeviceNode::tick() {
     // no arguments; a port that is present but cannot be read is a failure,
     // not an empty argument set.
     std::string args_str = "{}";
-    bool args_from_blackboard = false;
     const auto args_port = config().input_ports.find("args");
     if (args_port != config().input_ports.end() && !args_port->second.empty() && args_port->second != "{}") {
         auto read = getInput<std::string>("args");
@@ -359,7 +358,6 @@ BT::NodeStatus CallDeviceNode::tick() {
             return fail_args("args could not be read: " + read.error());
         }
         args_str = read.value();
-        args_from_blackboard = BT::TreeNode::isBlackboardPointer(args_port->second);
     }
 
     // Strip "json:" prefix if present (BT.CPP convention for JSON literals)
@@ -369,8 +367,9 @@ BT::NodeStatus CallDeviceNode::tick() {
 
     // An empty value read from the blackboard, with or without the prefix,
     // is not an argument object: a refused BuildArgsJson writes one (#941).
-    // An empty literal is skipped above and still means no arguments.
-    if (args_from_blackboard && args_str.empty()) {
+    // An empty literal never gets here: it is skipped above and still means
+    // no arguments, and a literal `json:` is refused when the tree is built.
+    if (args_str.empty()) {
         return fail_args("args is empty");
     }
 
