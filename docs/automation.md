@@ -253,6 +253,24 @@ misspelt guard would never stop the node. The check covers the nodes the
 tree runs; an attribute on a `<BehaviorTree>` element itself, or in a tree
 nothing references, is not checked.
 
+### Scripts and conditions
+
+A `Script`, `ScriptCondition` or `Precondition`, or a pre or post condition,
+that reads a blackboard name nothing in the tree sets refuses the tree when
+it loads and at `--check-config`, naming the node and the name. A name is set
+when an output port writes it (`{name}`, or `SetBlackboard`'s
+`output_key`) or a script creates it with `:=`; `=`, `+=` and the like
+assign only to a name that exists. Without the check the tree loaded and
+its first tick in AUTO threw, which the runtime turns into FAULT.
+
+The check follows the blackboard each node sees, so a name set in the main
+tree does not count inside a `SubTree` that neither remaps it nor sets
+`_autoremap`; a root name (`@name`) is seen from any SubTree. It does not
+follow the order nodes run in: a name set anywhere in the tree counts as
+set, so a script that reads a name before the node that sets it has run
+still throws at that tick. A name a script creates with `:=` counts as set
+in every SubTree.
+
 ### SubTrees
 
 Anolis nodes work in a `SubTree` at any depth, with or without
@@ -335,7 +353,9 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
      (`GetParameter` reads double or int64, `GetParameterBool` bool,
      `GetParameterInt64` int64), a provider missing from `providers[]`, or
      a `device_handle` that is not `provider_id/device_id`.
-     A name passed into a `SubTree` through a port is not checked.
+     A name passed into a `SubTree` through a port is not checked. A script
+     or condition that reads a name nothing in the tree sets is refused too
+     (see [Scripts and conditions](#scripts-and-conditions)).
      `anolis-runtime --check-config` loads the tree and reports these before
      a start. A relative `automation.behavior_tree` is resolved against the
      config file's directory.

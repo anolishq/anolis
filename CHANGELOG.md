@@ -128,6 +128,12 @@ Upgrade notes:
   provider in `providers[]`.
   Each failed only at tick, in AUTO. A port read from the blackboard is not
   checked; `--check-config` says how many were not.
+- A tree whose script or condition reads a blackboard name nothing in the
+  tree sets is refused when it loads and at `--check-config`, naming the
+  node and the name (#809). It loaded, and its first tick in AUTO threw,
+  which the runtime turns into FAULT. A name counts as set when an output
+  port writes it or a script creates it with `:=`; the order nodes run in is
+  not followed.
 
 ### Fixed
 

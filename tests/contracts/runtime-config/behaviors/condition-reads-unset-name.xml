@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- A condition reads heater_on, which nothing in the tree sets (#809). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <AlwaysSuccess _skipIf="!heater_on"/>
+  </BehaviorTree>
+</root>

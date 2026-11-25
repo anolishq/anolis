@@ -33,8 +33,10 @@ On failure it prints `ERROR:` with the reason and exits 1.
 With `automation.enabled: true` it also loads `automation.behavior_tree` with
 the node set the runtime registers, so a missing file, a file that is not XML,
 an unregistered node or malformed `CallDevice` args fail the check with
-BehaviorTree.CPP's reason, and a node carrying an underscore attribute the
-runtime does not run fails it naming the node and the attribute.
+BehaviorTree.CPP's reason. A node carrying an underscore attribute the
+runtime does not run fails it naming the node and the attribute, and so does
+a script or condition that reads a blackboard name nothing in the tree sets,
+naming the node and the name.
 
 The loaded tree is then checked against the config. A `GetParameter`,
 `GetParameterBool` or `GetParameterInt64` whose `param` names a parameter

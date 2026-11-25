@@ -1318,3 +1318,76 @@ TEST(BTRuntimeConfigCheckTest, BlackboardPortsAreCountedNotChecked) {
     EXPECT_TRUE(check.refusals.empty());
     EXPECT_EQ(2, check.unchecked_ports);
 }
+
+namespace {
+
+std::string main_tree(const std::string& body, const std::string& more_trees = "") {
+    return R"(<root BTCPP_format="4" main_tree_to_execute="Main"><BehaviorTree ID="Main">)" + body + "</BehaviorTree>" +
+           more_trees + "</root>";
+}
+
+bool refused_naming(const anolis::automation::LoadOutcome& outcome, const std::string& node, const std::string& name) {
+    // The node is named by its full path, which ends in its name.
+    return !outcome.ok && outcome.error.find(node + "' (") != std::string::npos &&
+           outcome.error.find("reads '" + name + "'") != std::string::npos;
+}
+
+}  // namespace
+
+// #809: a condition that reads a name nothing sets loaded, and its first tick
+// threw, which the runtime turns into FAULT. The load refuses it, naming the
+// node and the name; behind an initialiser the same tree loads and runs.
+TEST(BTRuntimeScriptNameTest, AConditionReadingANameNothingSetsIsRefused) {
+    const std::string unset = main_tree(R"(<AlwaysSuccess name="heater" _skipIf="!heater_on"/>)");
+    BT::BehaviorTreeFactory factory;
+    EXPECT_ANY_THROW(factory.createTreeFromText(unset).tickOnce()) << "BehaviorTree.CPP alone throws at tick";
+    EXPECT_TRUE(refused_naming(load_tree_xml("anolis-bt-809-unset", unset), "heater", "heater_on"));
+
+    const std::string initialised = main_tree(
+        R"(<Sequence><Script code="heater_on := false"/><AlwaysSuccess name="heater" _skipIf="!heater_on"/></Sequence>)");
+    EXPECT_EQ(BT::NodeStatus::SUCCESS, factory.createTreeFromText(initialised).tickOnce());
+    const auto outcome = load_tree_xml("anolis-bt-809-initialised", initialised);
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+TEST(BTRuntimeScriptNameTest, ANameAnOutputPortWritesLoads) {
+    for (const std::string writer :
+         {R"(<SetBlackboard value="3" output_key="{level}"/>)", R"(<SetBlackboard value="3" output_key="level"/>)"}) {
+        const auto outcome =
+            load_tree_xml("anolis-bt-809-port",
+                          main_tree("<Sequence>" + writer + R"(<ScriptCondition code="level > 0"/></Sequence>)"));
+        EXPECT_TRUE(outcome.ok) << writer << ": " << outcome.error;
+    }
+}
+
+TEST(BTRuntimeScriptNameTest, AssignmentToANameNothingCreatesIsRefused) {
+    EXPECT_TRUE(
+        refused_naming(load_tree_xml("anolis-bt-809-assign", main_tree(R"(<Script name="count" code="total = 1"/>)")),
+                       "count", "total"))
+        << "'=' needs the entry to exist; ':=' creates it";
+    EXPECT_TRUE(load_tree_xml("anolis-bt-809-create", main_tree(R"(<Script code="total := 0; total = 1"/>)")).ok);
+    EXPECT_TRUE(refused_naming(
+        load_tree_xml("anolis-bt-809-post", main_tree(R"(<AlwaysSuccess name="tally" _onSuccess="total += 1"/>)")),
+        "tally", "total"));
+}
+
+// A name a port writes in the main tree is not seen in a SubTree that does
+// not remap it, where BehaviorTree.CPP reports "Variable not found" at tick;
+// with _autoremap it is, and a root name (@) is seen from any SubTree.
+TEST(BTRuntimeScriptNameTest, ASubTreeSeesOnlyTheNamesItsBlackboardReaches) {
+    const std::string inner =
+        R"(<BehaviorTree ID="Inner"><ScriptCondition name="check" code="level > 0"/></BehaviorTree>)";
+    const std::string writer = R"(<SetBlackboard value="3" output_key="{level}"/>)";
+    EXPECT_TRUE(
+        refused_naming(load_tree_xml("anolis-bt-809-isolated",
+                                     main_tree("<Sequence>" + writer + R"(<SubTree ID="Inner"/></Sequence>)", inner)),
+                       "check", "level"));
+    EXPECT_TRUE(
+        load_tree_xml("anolis-bt-809-autoremap",
+                      main_tree("<Sequence>" + writer + R"(<SubTree ID="Inner" _autoremap="true"/></Sequence>)", inner))
+            .ok);
+    EXPECT_TRUE(load_tree_xml("anolis-bt-809-root",
+                              main_tree(R"(<Sequence><Script code="@flag := true"/><SubTree ID="Deep"/></Sequence>)",
+                                        R"(<BehaviorTree ID="Deep"><ScriptCondition code="@flag"/></BehaviorTree>)"))
+                    .ok);
+}
