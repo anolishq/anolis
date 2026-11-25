@@ -809,6 +809,11 @@ TEST_F(BTNodesTest, ALiteralOrAbsentInputKeepsItsDefault) {
     auto tree = one_node(factory, R"(<PeriodicPulseWindow pulse_s="2" now_ms="0" active="{active}"/>)", blackboard);
     EXPECT_EQ(BT::NodeStatus::SUCCESS, tree.tickOnce());
     EXPECT_TRUE(blackboard->get<bool>("active"));
+
+    auto disabled = one_node(
+        factory, R"(<PeriodicPulseWindow enabled="false" pulse_s="2" now_ms="0" active="{active}"/>)", blackboard);
+    disabled.tickOnce();
+    EXPECT_FALSE(blackboard->get<bool>("active")) << "a literal enabled=false is read, not the default";
 }
 
 TEST_F(BTNodesTest, AnUnwrittenInputFailsTheOtherWindowAndCheckNodes) {

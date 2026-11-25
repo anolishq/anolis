@@ -35,11 +35,13 @@ std::optional<BTServiceContext> read_service_context(const BT::TreeNode &node, c
     }
 }
 
-// An optional input (#941): nullopt when the tree leaves the port out, so the
-// caller's default applies, and the value otherwise. A port that reads a
-// blackboard entry nothing wrote, or one holding another type, is not left
-// out: it sets `error`, naming the port, so the node fails instead of running
-// on the default (an unwritten `enabled` ran a pulse window).
+// An optional input (#941): nullopt when the port is not in the node's
+// input_ports, so the caller's default applies, and the value otherwise.
+// BehaviorTree.CPP puts a declared port default there when the tree leaves the
+// port out, so only a port declared without one reaches nullopt. A port that
+// reads a blackboard entry nothing wrote, or one that cannot be converted to
+// the port's type, sets `error`, naming the port, so the node fails instead of
+// running on the default (an unwritten `enabled` ran a pulse window).
 template <typename T>
 std::optional<T> optional_input(const BT::TreeNode &node, const std::string &port, std::string &error) {
     const auto &ports = node.config().input_ports;
@@ -354,6 +356,12 @@ BT::NodeStatus CallDeviceNode::tick() {
         auto read = getInput<std::string>("args");
         if (!read) {
             return fail_args("args could not be read: " + read.error());
+        }
+        // Only a blackboard read can be empty here (an empty literal is
+        // skipped above), and an empty value is not an argument object: a
+        // refused BuildArgsJson writes one (#941).
+        if (read.value().empty()) {
+            return fail_args("args is empty");
         }
         args_str = read.value();
     }
