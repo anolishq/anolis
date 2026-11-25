@@ -129,10 +129,13 @@ public:
         int unchecked_ports = 0;            // param/device_handle ports read from the blackboard
     };
 
-    /// Checks the loaded tree against what the config declares, before any
-    /// provider starts: a literal `param` must name a declared parameter of a
-    /// type its node reads, and a literal `device_handle` must name a declared
-    /// provider. Ports that read the blackboard are counted, not checked.
+    /// Checks the loaded tree against what the config declares (#808): a
+    /// literal `param` must name a declared parameter of a type its node
+    /// reads, and a literal `device_handle` must name a declared provider and
+    /// a device. Ports that read the blackboard are counted, not checked;
+    /// that includes a SubTree port, whose literal on the SubTree element is
+    /// not followed. --check-config and Runtime::initialize run it, the
+    /// latter before any provider starts.
     ConfigCheck check_against_config(const std::vector<std::string>& provider_ids) const;
 
     /// Start using the engine's configured tick rate (set via the BT-specific

@@ -42,8 +42,10 @@ The loaded tree is then checked against the config. A `GetParameter`,
 read, fails the check, as does a `CallDevice`, `ReadSignal` or
 `CheckQuality` whose `device_handle` names a provider not in `providers[]`.
 A port that takes its value from the blackboard (`{key}`) is not checked,
-and the output says how many were not. The runtime refuses to start on the
-same findings.
+and the output says how many were not. That includes a port inside a
+`SubTree` that a literal on the `SubTree` element feeds: the literal is not
+followed through the port. The runtime refuses to start on the same
+findings, before it starts any provider.
 
 A runtime built without automation prints `Behavior tree not checked: this
 runtime is built without automation`.

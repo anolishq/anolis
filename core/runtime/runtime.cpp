@@ -39,6 +39,7 @@ namespace anolis {
 namespace runtime {
 
 namespace {
+#if ANOLIS_ENABLE_AUTOMATION
 // The tree-against-config refusals as one message (#808).
 std::string join_refusals(const std::vector<std::string> &refusals) {
     std::string joined;
@@ -47,6 +48,7 @@ std::string join_refusals(const std::vector<std::string> &refusals) {
     }
     return joined;
 }
+#endif
 
 // One line for the FAULT-entry hook calls the e-stop latch held, in place of a
 // failure per call (#648).
@@ -93,6 +95,22 @@ bool Runtime::initialize(std::string &error) {
     }
     if (!check_startup_deadline("init_core_services")) {
         return false;
+    }
+
+    // What --check-config refuses about the tree and the config, refused
+    // before any provider is spawned or any startup output applied (#808).
+    if (config_.automation.enabled) {
+        bool tree_checked = false;
+        int unchecked_ports = 0;
+        std::string tree_error;
+        if (!check_behavior_tree(config_, tree_checked, unchecked_ports, tree_error)) {
+            error = "automation.behavior_tree: " + tree_error;
+            return false;
+        }
+        if (unchecked_ports > 0) {
+            LOG_INFO("[Runtime] Behavior tree: " << unchecked_ports
+                                                 << " parameter or device port(s) read the blackboard, not checked");
+        }
     }
 
     if (!init_providers(error)) {
@@ -817,16 +835,6 @@ bool Runtime::init_automation(std::string &error) {
         if (!bt_runtime_->load_tree(config_.automation.behavior_tree)) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;
             return false;
-        }
-        // What --check-config refuses, refused at start too (#808).
-        const auto against = bt_runtime_->check_against_config(declared_provider_ids(config_));
-        if (!against.refusals.empty()) {
-            error = "Behavior tree names what the config does not declare: " + join_refusals(against.refusals);
-            return false;
-        }
-        if (against.unchecked_ports > 0) {
-            LOG_INFO("[Runtime] Behavior tree: " << against.unchecked_ports
-                                                 << " parameter or device port(s) read the blackboard, not checked");
         }
 
         LOG_INFO("[Runtime] Behavior tree loaded: " << config_.automation.behavior_tree);

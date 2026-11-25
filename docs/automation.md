@@ -334,6 +334,7 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
      from `automation.parameters` or of a type the node does not read
      (`GetParameter` reads double or int64, `GetParameterBool` bool,
      `GetParameterInt64` int64), or a provider missing from `providers[]`.
+     A name passed into a `SubTree` through a port is not checked.
      `anolis-runtime --check-config` loads the tree and reports these before
      a start. A relative `automation.behavior_tree` is resolved against the
      config file's directory.

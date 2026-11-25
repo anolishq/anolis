@@ -1243,8 +1243,8 @@ TEST(BTRuntimeUnknownAttributeTest, TheAllowedAttributesLoad) {
 namespace {
 
 // Loads a one-node tree into a runtime that declares a double parameter
-// `setpoint` and a bool parameter `flag`, and checks it against provider ids
-// {sim0} (#808).
+// `setpoint`, a bool parameter `flag` and an int64 parameter `count`, and
+// checks it against provider ids {sim0} (#808).
 anolis::automation::BTRuntime::ConfigCheck check_one_node(const std::string& node) {
     using namespace anolis::automation;
     anolis::registry::DeviceRegistry registry;
@@ -1255,6 +1255,7 @@ anolis::automation::BTRuntime::ConfigCheck check_one_node(const std::string& nod
     ParameterManager parameter_manager;
     EXPECT_TRUE(parameter_manager.define("setpoint", ParameterType::DOUBLE, 25.0));
     EXPECT_TRUE(parameter_manager.define("flag", ParameterType::BOOL, false));
+    EXPECT_TRUE(parameter_manager.define("count", ParameterType::INT64, int64_t{3}));
     BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
     const auto path = write_tree_file("anolis-bt-config-check", R"(<root BTCPP_format="4"><BehaviorTree ID="Main">)" +
                                                                     node + "</BehaviorTree></root>");
@@ -1291,6 +1292,9 @@ TEST(BTRuntimeConfigCheckTest, AParameterOfTheWrongTypeIsRefused) {
 
 TEST(BTRuntimeConfigCheckTest, DeclaredParametersOfTheRightTypePass) {
     EXPECT_TRUE(check_one_node(R"(<GetParameter param="setpoint" value="{v}"/>)").refusals.empty());
+    EXPECT_TRUE(check_one_node(R"(<GetParameter param="count" value="{v}"/>)").refusals.empty())
+        << "GetParameter reads an int64 too";
+    EXPECT_TRUE(check_one_node(R"(<GetParameterInt64 param="count" value="{v}"/>)").refusals.empty());
     EXPECT_TRUE(check_one_node(R"(<GetParameterBool param="flag" value="{v}"/>)").refusals.empty());
 }
 
@@ -1300,7 +1304,11 @@ TEST(BTRuntimeConfigCheckTest, ADeviceOfAnUndeclaredProviderIsRefused) {
                                    R"(<CheckQuality device_handle="ghost0/dev" signal_id="s"/>)"}) {
         EXPECT_TRUE(mentions(check_one_node(node), "ghost0")) << node;
     }
-    EXPECT_TRUE(mentions(check_one_node(R"(<CallDevice device_handle="nodevice" function_name="f"/>)"), "nodevice"));
+    for (const std::string handle : {"nodevice", "/dev", "sim0/"}) {
+        EXPECT_TRUE(mentions(check_one_node(R"(<CallDevice device_handle=")" + handle + R"(" function_name="f"/>)"),
+                             "is not provider_id/device_id"))
+            << handle;
+    }
     EXPECT_TRUE(check_one_node(R"(<CallDevice device_handle="sim0/dev" function_name="f"/>)").refusals.empty());
 }
 

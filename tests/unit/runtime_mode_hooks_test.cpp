@@ -292,5 +292,8 @@ TEST(RuntimeModeHooksTest, ATreeReadingAnUndeclaredParameterFailsInitialization)
     std::string error;
     EXPECT_FALSE(runtime.initialize(error));
     EXPECT_NE(error.find("not_declared"), std::string::npos) << error;
+    // Refused before any provider started: the helper's devices never
+    // registered.
+    EXPECT_EQ(0U, runtime.get_registry().device_count());
     runtime.shutdown();
 }

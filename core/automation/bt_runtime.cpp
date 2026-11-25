@@ -596,7 +596,7 @@ BTRuntime::ConfigCheck BTRuntime::check_against_config(const std::vector<std::st
                     continue;
                 }
                 const auto slash = port->second.find('/');
-                if (slash == std::string::npos || slash == 0) {
+                if (slash == std::string::npos || slash == 0 || slash + 1 == port->second.size()) {
                     check.refusals.push_back(
                         std::format("node '{}' ({}) has device_handle '{}', which is not provider_id/device_id",
                                     node->fullPath(), kind, port->second));
