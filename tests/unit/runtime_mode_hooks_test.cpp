@@ -282,3 +282,15 @@ TEST(RuntimeModeHooksTest, AParameterThatCannotBeDefinedFailsInitialization) {
         runtime.shutdown();
     }
 }
+
+// anolis#808: what --check-config refuses about a tree and its config is
+// refused at start too: a GetParameter reading an undeclared parameter.
+TEST(RuntimeModeHooksTest, ATreeReadingAnUndeclaredParameterFailsInitialization) {
+    const auto rig = fresh_rig("anolis-808-undeclared", R"(<GetParameter param="not_declared" value="{v}"/>)");
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    EXPECT_FALSE(runtime.initialize(error));
+    EXPECT_NE(error.find("not_declared"), std::string::npos) << error;
+    runtime.shutdown();
+}

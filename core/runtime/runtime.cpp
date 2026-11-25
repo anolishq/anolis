@@ -39,6 +39,14 @@ namespace anolis {
 namespace runtime {
 
 namespace {
+// The tree-against-config refusals as one message (#808).
+std::string join_refusals(const std::vector<std::string> &refusals) {
+    std::string joined;
+    for (const auto &refusal : refusals) {
+        joined += joined.empty() ? refusal : "; " + refusal;
+    }
+    return joined;
+}
 
 // One line for the FAULT-entry hook calls the e-stop latch held, in place of a
 // failure per call (#648).
@@ -810,6 +818,16 @@ bool Runtime::init_automation(std::string &error) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;
             return false;
         }
+        // What --check-config refuses, refused at start too (#808).
+        const auto against = bt_runtime_->check_against_config(declared_provider_ids(config_));
+        if (!against.refusals.empty()) {
+            error = "Behavior tree names what the config does not declare: " + join_refusals(against.refusals);
+            return false;
+        }
+        if (against.unchecked_ports > 0) {
+            LOG_INFO("[Runtime] Behavior tree: " << against.unchecked_ports
+                                                 << " parameter or device port(s) read the blackboard, not checked");
+        }
 
         LOG_INFO("[Runtime] Behavior tree loaded: " << config_.automation.behavior_tree);
     } else {
@@ -1514,8 +1532,18 @@ bool Runtime::restart_provider(const std::string &provider_id, const provider::P
     return true;
 }
 
-bool check_behavior_tree(const RuntimeConfig &config, bool &checked, std::string &error) {
+std::vector<std::string> declared_provider_ids(const RuntimeConfig &config) {
+    std::vector<std::string> ids;
+    ids.reserve(config.providers.size());
+    for (const auto &provider : config.providers) {
+        ids.push_back(provider.id);
+    }
+    return ids;
+}
+
+bool check_behavior_tree(const RuntimeConfig &config, bool &checked, int &unchecked_ports, std::string &error) {
     checked = false;
+    unchecked_ports = 0;
     if (!config.automation.enabled) {
         return true;
     }
@@ -1536,6 +1564,12 @@ bool check_behavior_tree(const RuntimeConfig &config, bool &checked, std::string
     const auto outcome = bt_runtime.load(automation::AutomationDefinitionRef{config.automation.behavior_tree});
     if (!outcome.ok) {
         error = outcome.error;
+        return false;
+    }
+    const auto against = bt_runtime.check_against_config(declared_provider_ids(config));
+    unchecked_ports = against.unchecked_ports;
+    if (!against.refusals.empty()) {
+        error = join_refusals(against.refusals);
         return false;
     }
 #endif

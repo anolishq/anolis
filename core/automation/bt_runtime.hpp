@@ -123,6 +123,18 @@ public:
     /// active definition + version.
     LoadOutcome load(const AutomationDefinitionRef& ref) override;
 
+    /// What check_against_config found (#808).
+    struct ConfigCheck {
+        std::vector<std::string> refusals;  // one per node, naming it
+        int unchecked_ports = 0;            // param/device_handle ports read from the blackboard
+    };
+
+    /// Checks the loaded tree against what the config declares, before any
+    /// provider starts: a literal `param` must name a declared parameter of a
+    /// type its node reads, and a literal `device_handle` must name a declared
+    /// provider. Ports that read the blackboard are counted, not checked.
+    ConfigCheck check_against_config(const std::vector<std::string>& provider_ids) const;
+
     /// Start using the engine's configured tick rate (set via the BT-specific
     /// start(int) or the construction default).
     bool start(std::string& error) override;

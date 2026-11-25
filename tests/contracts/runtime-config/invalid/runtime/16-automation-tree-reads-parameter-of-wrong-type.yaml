@@ -1,0 +1,14 @@
+providers:
+  - id: test0
+    command: ./provider-test
+
+automation:
+  enabled: true
+  behavior_tree: ../../behaviors/wrong-type-parameter.xml
+  parameters:
+    - name: temp_setpoint
+      type: double
+      default: 25.0
+
+logging:
+  level: info

@@ -1239,3 +1239,74 @@ TEST(BTRuntimeUnknownAttributeTest, TheAllowedAttributesLoad) {
     const auto outcome = load_tree_xml("anolis-bt-autoremap", autoremap);
     EXPECT_TRUE(outcome.ok) << outcome.error;
 }
+
+namespace {
+
+// Loads a one-node tree into a runtime that declares a double parameter
+// `setpoint` and a bool parameter `flag`, and checks it against provider ids
+// {sim0} (#808).
+anolis::automation::BTRuntime::ConfigCheck check_one_node(const std::string& node) {
+    using namespace anolis::automation;
+    anolis::registry::DeviceRegistry registry;
+    anolis::state::StateCache state_cache(registry, 100);
+    anolis::control::CallRouter call_router(registry, state_cache);
+    anolis::provider::ProviderRegistry provider_registry;
+    ModeManager mode_manager(RuntimeMode::MANUAL);
+    ParameterManager parameter_manager;
+    EXPECT_TRUE(parameter_manager.define("setpoint", ParameterType::DOUBLE, 25.0));
+    EXPECT_TRUE(parameter_manager.define("flag", ParameterType::BOOL, false));
+    BTRuntime runtime(state_cache, call_router, provider_registry, mode_manager, &parameter_manager);
+    const auto path = write_tree_file("anolis-bt-config-check", R"(<root BTCPP_format="4"><BehaviorTree ID="Main">)" +
+                                                                    node + "</BehaviorTree></root>");
+    const auto outcome = runtime.load(AutomationDefinitionRef{path.string()});
+    EXPECT_TRUE(outcome.ok) << outcome.error;
+    auto check = runtime.check_against_config({"sim0"});
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return check;
+}
+
+bool mentions(const anolis::automation::BTRuntime::ConfigCheck& check, const std::string& text) {
+    for (const auto& refusal : check.refusals) {
+        if (refusal.find(text) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(BTRuntimeConfigCheckTest, AnUndeclaredParameterIsRefused) {
+    const auto check = check_one_node(R"(<GetParameter param="not_declared" value="{v}"/>)");
+    ASSERT_EQ(1U, check.refusals.size());
+    EXPECT_TRUE(mentions(check, "not_declared"));
+}
+
+TEST(BTRuntimeConfigCheckTest, AParameterOfTheWrongTypeIsRefused) {
+    EXPECT_TRUE(mentions(check_one_node(R"(<GetParameter param="flag" value="{v}"/>)"), "flag"));
+    EXPECT_TRUE(mentions(check_one_node(R"(<GetParameterBool param="setpoint" value="{v}"/>)"), "setpoint"));
+    EXPECT_TRUE(mentions(check_one_node(R"(<GetParameterInt64 param="setpoint" value="{v}"/>)"), "setpoint"));
+}
+
+TEST(BTRuntimeConfigCheckTest, DeclaredParametersOfTheRightTypePass) {
+    EXPECT_TRUE(check_one_node(R"(<GetParameter param="setpoint" value="{v}"/>)").refusals.empty());
+    EXPECT_TRUE(check_one_node(R"(<GetParameterBool param="flag" value="{v}"/>)").refusals.empty());
+}
+
+TEST(BTRuntimeConfigCheckTest, ADeviceOfAnUndeclaredProviderIsRefused) {
+    for (const std::string node : {R"(<CallDevice device_handle="ghost0/dev" function_name="f"/>)",
+                                   R"(<ReadSignal device_handle="ghost0/dev" signal_id="s" value="{v}"/>)",
+                                   R"(<CheckQuality device_handle="ghost0/dev" signal_id="s"/>)"}) {
+        EXPECT_TRUE(mentions(check_one_node(node), "ghost0")) << node;
+    }
+    EXPECT_TRUE(mentions(check_one_node(R"(<CallDevice device_handle="nodevice" function_name="f"/>)"), "nodevice"));
+    EXPECT_TRUE(check_one_node(R"(<CallDevice device_handle="sim0/dev" function_name="f"/>)").refusals.empty());
+}
+
+TEST(BTRuntimeConfigCheckTest, BlackboardPortsAreCountedNotChecked) {
+    const auto check = check_one_node(R"(<Sequence><GetParameter param="{name}" value="{v}"/>)"
+                                      R"(<CallDevice device_handle="{handle}" function_name="f"/></Sequence>)");
+    EXPECT_TRUE(check.refusals.empty());
+    EXPECT_EQ(2, check.unchecked_ports);
+}
