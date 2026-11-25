@@ -527,6 +527,93 @@ void BTRuntime::populate_blackboard(BT::Tree &tree) {
     blackboard->set(kBTServiceContextKey, services);
 }
 
+BTRuntime::ConfigCheck BTRuntime::check_against_config(const std::vector<std::string> &provider_ids) const {
+    ConfigCheck check;
+    std::shared_ptr<BT::Tree> tree;
+    {
+        std::lock_guard<std::mutex> lock(def_mutex_);
+        tree = tree_;
+    }
+    if (!tree) {
+        return check;
+    }
+    // The parameter types each node reads (GetParameter takes double or int64).
+    const auto reads = [](const std::string &node_kind, ParameterType type) {
+        if (node_kind == "GetParameter") {
+            return type == ParameterType::DOUBLE || type == ParameterType::INT64;
+        }
+        if (node_kind == "GetParameterBool") {
+            return type == ParameterType::BOOL;
+        }
+        return type == ParameterType::INT64;  // GetParameterInt64
+    };
+    const auto type_name = [](ParameterType type) {
+        switch (type) {
+            case ParameterType::DOUBLE:
+                return "double";
+            case ParameterType::INT64:
+                return "int64";
+            case ParameterType::BOOL:
+                return "bool";
+            case ParameterType::STRING:
+                return "string";
+        }
+        return "unknown";
+    };
+    for (const auto &subtree : tree->subtrees) {
+        for (const auto &node : subtree->nodes) {
+            const BT::TreeNode &visited = *node;  // the public, const config()
+            const auto &ports = visited.config().input_ports;
+            const std::string kind = node->registrationName();
+            if (kind == "GetParameter" || kind == "GetParameterBool" || kind == "GetParameterInt64") {
+                const auto port = ports.find("param");
+                if (port == ports.end()) {
+                    continue;
+                }
+                if (BT::TreeNode::isBlackboardPointer(port->second)) {
+                    ++check.unchecked_ports;
+                    continue;
+                }
+                const std::optional<ParameterDef> def =
+                    parameter_manager_ != nullptr ? parameter_manager_->get_definition(port->second) : std::nullopt;
+                if (!def) {
+                    check.refusals.push_back(
+                        std::format("node '{}' ({}) reads parameter '{}', which automation.parameters does not declare",
+                                    node->fullPath(), kind, port->second));
+                } else if (!reads(kind, def->type)) {
+                    check.refusals.push_back(
+                        std::format("node '{}' ({}) reads parameter '{}', declared {}, which {} "
+                                    "does not read",
+                                    node->fullPath(), kind, port->second, type_name(def->type), kind));
+                }
+            } else if (kind == "CallDevice" || kind == "ReadSignal" || kind == "CheckQuality") {
+                const auto port = ports.find("device_handle");
+                if (port == ports.end()) {
+                    continue;
+                }
+                if (BT::TreeNode::isBlackboardPointer(port->second)) {
+                    ++check.unchecked_ports;
+                    continue;
+                }
+                const auto slash = port->second.find('/');
+                if (slash == std::string::npos || slash == 0 || slash + 1 == port->second.size()) {
+                    check.refusals.push_back(
+                        std::format("node '{}' ({}) has device_handle '{}', which is not provider_id/device_id",
+                                    node->fullPath(), kind, port->second));
+                    continue;
+                }
+                const std::string provider = port->second.substr(0, slash);
+                if (std::find(provider_ids.begin(), provider_ids.end(), provider) == provider_ids.end()) {
+                    check.refusals.push_back(
+                        std::format("node '{}' ({}) has device_handle '{}', whose provider '{}' is not in providers[]",
+                                    node->fullPath(), kind, port->second, provider));
+                }
+            }
+        }
+    }
+    return check;
+}
+
 std::string BTRuntime::get_tree_path() const {
     std::lock_guard<std::mutex> lock(def_mutex_);
     return tree_path_;

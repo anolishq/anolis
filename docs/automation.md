@@ -343,9 +343,15 @@ curl -s http://127.0.0.1:8080/v0/automation/tree | jq
 1. `UNAVAILABLE` from automation endpoints:
    - automation disabled in config or compiled out.
 2. BT load failure:
-   - invalid tree path/XML, an unregistered node, a port type mismatch or an
+   - invalid tree path/XML, an unregistered node, a port type mismatch, an
      underscore attribute the runtime does not run (see
-     [Underscore attributes](#underscore-attributes)).
+     [Underscore attributes](#underscore-attributes)), or a literal `param`
+     or `device_handle` the config does not declare: a parameter missing
+     from `automation.parameters` or of a type the node does not read
+     (`GetParameter` reads double or int64, `GetParameterBool` bool,
+     `GetParameterInt64` int64), a provider missing from `providers[]`, or
+     a `device_handle` that is not `provider_id/device_id`.
+     A name passed into a `SubTree` through a port is not checked.
      `anolis-runtime --check-config` loads the tree and reports these before
      a start. A relative `automation.behavior_tree` is resolved against the
      config file's directory.

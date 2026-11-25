@@ -282,3 +282,42 @@ TEST(RuntimeModeHooksTest, AParameterThatCannotBeDefinedFailsInitialization) {
         runtime.shutdown();
     }
 }
+
+// anolis#808: what --check-config refuses about a tree and its config is
+// refused at start too: a GetParameter reading an undeclared parameter.
+TEST(RuntimeModeHooksTest, ATreeReadingAnUndeclaredParameterFailsInitialization) {
+    const auto rig = fresh_rig("anolis-808-undeclared", R"(<GetParameter param="not_declared" value="{v}"/>)");
+    anolis::runtime::Runtime runtime(config_for(rig, kFaultHook));
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    std::string error;
+    EXPECT_FALSE(runtime.initialize(error));
+    EXPECT_NE(error.find("not_declared"), std::string::npos) << error;
+    // Refused before any provider started: the helper's devices never
+    // registered.
+    EXPECT_EQ(0U, runtime.get_registry().device_count());
+    runtime.shutdown();
+}
+
+// The tree is read again once providers have started; a file that changed
+// in between is checked too, not run on the strength of the first check.
+TEST(RuntimeModeHooksTest, ATreeChangedWhileProvidersStartIsCheckedAgain) {
+#ifdef _WIN32
+    GTEST_SKIP() << "the provider swaps the tree through /bin/sh";
+#endif
+    const auto rig = fresh_rig("anolis-808-changed");
+    std::ofstream(rig.root / "bad.xml") << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    "
+                                        << R"(<GetParameter param="not_declared" value="{v}"/>)"
+                                        << "\n  </BehaviorTree>\n</root>\n";
+    auto config = config_for(rig, kFaultHook);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    // The provider swaps the tree in as it starts, then runs the helper.
+    auto &provider = config.providers.at(0);
+    provider.args = {"-c", "cp '" + (rig.root / "bad.xml").string() + "' '" + (rig.root / "tree.xml").string() +
+                               "' && exec '" + provider.command + "' --stop-chain '" + rig.root.string() + "'"};
+    provider.command = "/bin/sh";
+    anolis::runtime::Runtime runtime(config);
+    std::string error;
+    EXPECT_FALSE(runtime.initialize(error));
+    EXPECT_NE(error.find("not_declared"), std::string::npos) << error;
+    runtime.shutdown();
+}

@@ -119,12 +119,20 @@ Upgrade notes:
   pre and post conditions, `_description`, `_uid`, `_fullpath` and
   `_autoremap`, which acts only on a `SubTree`; `docs/automation.md` lists
   them for 4.9.0.
+- A behaviour tree is checked against its config once it loads, by
+  `--check-config` and at start (#808): a literal `param` on
+  `GetParameter`, `GetParameterBool` or `GetParameterInt64` must name a
+  parameter `automation.parameters` declares, of a type the node reads
+  (double or int64, bool, int64); a literal `device_handle` on `CallDevice`,
+  `ReadSignal` or `CheckQuality` must be `provider_id/device_id` and name a
+  provider in `providers[]`.
+  Each failed only at tick, in AUTO. A port read from the blackboard is not
+  checked; `--check-config` says how many were not.
 - A node input given as a blackboard reference fails the node, naming the
   port, when the entry is unwritten or cannot be converted to the port's
   type (#941). The window, check and emit nodes took the port's default
-  instead: a
-  `PeriodicPulseWindow` whose `enabled` entry was never written ran its
-  default schedule, `CheckBool` took an unwritten `expected` as true and
+  instead: a `PeriodicPulseWindow` whose `enabled` entry was never written
+  ran its default schedule, `CheckBool` took an unwritten `expected` as true and
   `CheckQuality` an unwritten `expected_quality` as `OK`, and
   `BuildArgsJson` passed over an unwritten source for another one in the
   same slot. An input left out of the tree still takes its default. When

@@ -72,12 +72,18 @@ int main(int argc, char **argv) {
 
     if (check_config_only) {
         bool tree_checked = false;
-        if (!anolis::runtime::check_behavior_tree(config, tree_checked, error)) {
+        int unchecked_ports = 0;
+        if (!anolis::runtime::check_behavior_tree(config, tree_checked, unchecked_ports, error)) {
             std::cerr << "ERROR: automation.behavior_tree: " << error << "\n";
             return 1;
         }
         if (config.automation.enabled && !tree_checked) {
             std::cout << "Behavior tree not checked: this runtime is built without automation\n";
+        }
+        if (unchecked_ports > 0) {
+            std::cout << "Behavior tree: " << unchecked_ports
+                      << " parameter or device port(s) read the blackboard, so were not checked against the "
+                         "config\n";
         }
         std::cout << "Config valid: " << config.runtime.name << ", " << config.providers.size() << " provider(s)"
                   << ", port " << config.http.port << "\n";

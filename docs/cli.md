@@ -34,9 +34,22 @@ With `automation.enabled: true` it also loads `automation.behavior_tree` with
 the node set the runtime registers, so a missing file, a file that is not XML,
 an unregistered node or malformed `CallDevice` args fail the check with
 BehaviorTree.CPP's reason, and a node carrying an underscore attribute the
-runtime does not run fails it naming the node and the attribute. A runtime
-built without automation prints `Behavior tree not checked: this runtime is
-built without automation`.
+runtime does not run fails it naming the node and the attribute.
+
+The loaded tree is then checked against the config. A `GetParameter`,
+`GetParameterBool` or `GetParameterInt64` whose `param` names a parameter
+`automation.parameters` does not declare, or one of a type the node does not
+read, fails the check, as does a `CallDevice`, `ReadSignal` or
+`CheckQuality` whose `device_handle` names a provider not in `providers[]`,
+or is not `provider_id/device_id`.
+A port that takes its value from the blackboard (`{key}`) is not checked,
+and the output says how many were not. That includes a port inside a
+`SubTree` that a literal on the `SubTree` element feeds: the literal is not
+followed through the port. The runtime refuses to start on the same
+findings, before it starts any provider.
+
+A runtime built without automation prints `Behavior tree not checked: this
+runtime is built without automation`.
 
 It does not start providers, so it cannot catch a provider's own config
 errors; check those with the provider's `--check-config`. Nor does it check
