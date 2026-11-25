@@ -128,12 +128,25 @@ Upgrade notes:
   provider in `providers[]`.
   Each failed only at tick, in AUTO. A port read from the blackboard is not
   checked; `--check-config` says how many were not.
+- A node input given as a blackboard reference fails the node, naming the
+  port, when the entry is unwritten or cannot be converted to the port's
+  type (#941). The window, check and emit nodes took the port's default
+  instead: a `PeriodicPulseWindow` whose `enabled` entry was never written
+  ran its default schedule, `CheckBool` took an unwritten `expected` as true and
+  `CheckQuality` an unwritten `expected_quality` as `OK`, and
+  `BuildArgsJson` passed over an unwritten source for another one in the
+  same slot. An input left out of the tree still takes its default. When
+  they fail, `EmitOnChangeOrInterval` writes `emit=false` and
+  `BuildArgsJson` an empty `json`; both left the last tick's value. A
+  `CallDevice` whose `args` reads an empty value fails as a counted call;
+  it sent the call with no arguments.
 - A tree whose script or condition reads a blackboard name nothing in the
   tree sets is refused when it loads and at `--check-config`, naming the
   node and the name (#809). It loaded, and its first tick in AUTO threw,
   which the runtime turns into FAULT. A name counts as set when an output
-  port writes it or a script creates it with `:=`; the order nodes run in is
-  not followed.
+  port writes it, a literal `SetBlackboard` `output_key` names it, a literal
+  on a `SubTree` port gives it a value, or a script creates it with `:=`;
+  the order nodes run in is not followed.
 
 ### Fixed
 

@@ -277,6 +277,22 @@ still throws at that tick. A name a script creates with `:=`, or a literal
 tick still load: `x := x + 1` where nothing else sets `x`, and `x += 1`
 where a port declares `x` but nothing writes it.
 
+### Inputs from the blackboard
+
+A node input left out of the tree takes its default. An input given as a
+blackboard reference (`enabled="{en}"`) must be readable when the node
+ticks: an entry nothing has written, or one whose value cannot be converted
+to the port's type (the string `soon` for a number), fails the node, naming
+the port, instead of falling back to the default. A
+`PeriodicPulseWindow` whose `enabled` entry was never written would
+otherwise run on its default schedule.
+
+When they fail, `EmitOnChangeOrInterval` writes `emit=false` and
+`BuildArgsJson` writes an empty `json`, so a `Fallback` that catches the
+failure acts on neither the last tick's emit nor its arguments. A
+`CallDevice` whose `args` reads an empty value fails as a counted call
+instead of sending one with no arguments.
+
 ### SubTrees
 
 Anolis nodes work in a `SubTree` at any depth, with or without
