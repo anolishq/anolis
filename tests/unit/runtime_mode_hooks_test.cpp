@@ -297,3 +297,24 @@ TEST(RuntimeModeHooksTest, ATreeReadingAnUndeclaredParameterFailsInitialization)
     EXPECT_EQ(0U, runtime.get_registry().device_count());
     runtime.shutdown();
 }
+
+// The tree is read again once providers have started; a file that changed
+// in between is checked too, not run on the strength of the first check.
+TEST(RuntimeModeHooksTest, ATreeChangedWhileProvidersStartIsCheckedAgain) {
+    const auto rig = fresh_rig("anolis-808-changed");
+    std::ofstream(rig.root / "bad.xml") << "<root BTCPP_format=\"4\">\n  <BehaviorTree ID=\"MainTree\">\n    "
+                                        << R"(<GetParameter param="not_declared" value="{v}"/>)"
+                                        << "\n  </BehaviorTree>\n</root>\n";
+    auto config = config_for(rig, kFaultHook);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "the config did not load";
+    // The provider swaps the tree in as it starts, then runs the helper.
+    auto &provider = config.providers.at(0);
+    provider.args = {"-c", "cp '" + (rig.root / "bad.xml").string() + "' '" + (rig.root / "tree.xml").string() +
+                               "' && exec '" + provider.command + "' --stop-chain '" + rig.root.string() + "'"};
+    provider.command = "/bin/sh";
+    anolis::runtime::Runtime runtime(config);
+    std::string error;
+    EXPECT_FALSE(runtime.initialize(error));
+    EXPECT_NE(error.find("not_declared"), std::string::npos) << error;
+    runtime.shutdown();
+}

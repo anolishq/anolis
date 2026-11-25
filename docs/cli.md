@@ -40,7 +40,8 @@ The loaded tree is then checked against the config. A `GetParameter`,
 `GetParameterBool` or `GetParameterInt64` whose `param` names a parameter
 `automation.parameters` does not declare, or one of a type the node does not
 read, fails the check, as does a `CallDevice`, `ReadSignal` or
-`CheckQuality` whose `device_handle` names a provider not in `providers[]`.
+`CheckQuality` whose `device_handle` names a provider not in `providers[]`,
+or is not `provider_id/device_id`.
 A port that takes its value from the blackboard (`{key}`) is not checked,
 and the output says how many were not. That includes a port inside a
 `SubTree` that a literal on the `SubTree` element feeds: the literal is not

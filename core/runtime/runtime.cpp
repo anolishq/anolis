@@ -836,6 +836,13 @@ bool Runtime::init_automation(std::string &error) {
             error = "Failed to load behavior tree: " + config_.automation.behavior_tree;
             return false;
         }
+        // The file is read again here, after providers have started; check
+        // the tree that runs, not only the one checked before them (#808).
+        const auto against = bt_runtime_->check_against_config(declared_provider_ids(config_));
+        if (!against.refusals.empty()) {
+            error = "automation.behavior_tree: " + join_refusals(against.refusals);
+            return false;
+        }
 
         LOG_INFO("[Runtime] Behavior tree loaded: " << config_.automation.behavior_tree);
     } else {

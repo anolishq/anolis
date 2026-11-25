@@ -124,7 +124,8 @@ Upgrade notes:
   `GetParameter`, `GetParameterBool` or `GetParameterInt64` must name a
   parameter `automation.parameters` declares, of a type the node reads
   (double or int64, bool, int64); a literal `device_handle` on `CallDevice`,
-  `ReadSignal` or `CheckQuality` must name a provider in `providers[]`.
+  `ReadSignal` or `CheckQuality` must be `provider_id/device_id` and name a
+  provider in `providers[]`.
   Each failed only at tick, in AUTO. A port read from the blackboard is not
   checked; `--check-config` says how many were not.
 
