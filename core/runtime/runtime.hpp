@@ -213,10 +213,16 @@ private:
 /**
  * The behaviour-tree part of `--check-config` (#804): when automation is
  * enabled, loads automation.behavior_tree with the node set the runtime
- * registers. Returns false with the reason when it cannot load. Sets
- * `checked` to false when this runtime is built without automation.
+ * registers, then checks its literal parameter names and device handles
+ * against the config (#808). Returns false with the reason when it cannot
+ * load or names something the config does not declare. Sets `checked` to
+ * false when this runtime is built without automation, and
+ * `unchecked_ports` to the ports that read the blackboard instead.
  */
-bool check_behavior_tree(const RuntimeConfig &config, bool &checked, std::string &error);
+bool check_behavior_tree(const RuntimeConfig &config, bool &checked, int &unchecked_ports, std::string &error);
+
+/// The provider ids a config declares, for checking a tree against it (#808).
+std::vector<std::string> declared_provider_ids(const RuntimeConfig &config);
 
 }  // namespace runtime
 }  // namespace anolis

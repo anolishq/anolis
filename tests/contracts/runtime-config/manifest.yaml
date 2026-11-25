@@ -141,3 +141,12 @@ fixtures:
   - file: tests/contracts/runtime-config/invalid/runtime/14-automation-behavior-tree-unknown-underscore-attribute.yaml
     expect: invalid/runtime
     note: a node carries an underscore attribute the runtime does not run, such as a misspelt precondition (#805)
+  - file: tests/contracts/runtime-config/invalid/runtime/15-automation-tree-reads-undeclared-parameter.yaml
+    expect: invalid/runtime
+    note: a GetParameter reads a parameter automation.parameters does not declare (#808)
+  - file: tests/contracts/runtime-config/invalid/runtime/16-automation-tree-reads-parameter-of-wrong-type.yaml
+    expect: invalid/runtime
+    note: a GetParameterBool reads a double parameter (#808)
+  - file: tests/contracts/runtime-config/invalid/runtime/17-automation-tree-names-undeclared-provider.yaml
+    expect: invalid/runtime
+    note: a CallDevice device_handle names a provider not in providers[] (#808)

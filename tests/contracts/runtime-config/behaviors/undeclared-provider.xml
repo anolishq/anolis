@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- A CallDevice naming a provider the config does not declare (#808). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <CallDevice device_handle="ghost0/dev0" function_name="noop"/>
+  </BehaviorTree>
+</root>

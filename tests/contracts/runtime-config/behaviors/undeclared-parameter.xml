@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- A GetParameter reading a parameter the config does not declare (#808). -->
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <GetParameter param="not_declared" value="{v}"/>
+  </BehaviorTree>
+</root>
